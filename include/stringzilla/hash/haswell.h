@@ -10,14 +10,13 @@
 #define STRINGZILLA_HASH_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +24,7 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_haswell_(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -35,7 +34,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t l
     int is_huge = length > 1ull * 1024ull * 1024ull;
 
     // When the buffer is small, there isn't much to innovate.
-    if (length <= 32) { return sz_bytesum_serial(text, length); }
+    if (length <= 32) { return sz_bytesum_serial_(text, length); }
     else if (!is_huge) {
         sz_u256_vec_t text_vec, sums_vec;
         sums_vec.ymm = _mm256_setzero_si256();
@@ -53,7 +52,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t l
         sz_u64_t low = (sz_u64_t)_mm_cvtsi128_si64(sums_u64x2);
         sz_u64_t high = (sz_u64_t)_mm_extract_epi64(sums_u64x2, 1);
         sz_u64_t result = low + high;
-        if (length) result += sz_bytesum_serial(text, length);
+        if (length) result += sz_bytesum_serial_(text, length);
         return result;
     }
     // For gigantic buffers, exceeding typical L1 cache sizes, there are other tricks we can use.
@@ -110,21 +109,21 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t l
  *  rather than shift-bound. */
 
 /** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8,
-                                                            __m256i state_g_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_choice_haswell_(__m256i state_e_u32x8, __m256i state_f_u32x8,
+                                                     __m256i state_g_u32x8) {
     return _mm256_xor_si256(state_g_u32x8,
                             _mm256_and_si256(state_e_u32x8, _mm256_xor_si256(state_f_u32x8, state_g_u32x8)));
 }
 
 /** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8,
-                                                              __m256i state_c_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_majority_haswell_(__m256i state_a_u32x8, __m256i state_b_u32x8,
+                                                       __m256i state_c_u32x8) {
     return _mm256_xor_si256(_mm256_and_si256(_mm256_xor_si256(state_a_u32x8, state_b_u32x8), state_c_u32x8),
                             _mm256_and_si256(state_a_u32x8, state_b_u32x8));
 }
 
 /** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_u32x8) {
     __m256i const rotated_by_2_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 2),
                                                        _mm256_slli_epi32(state_a_u32x8, 30));
     __m256i const rotated_by_13_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_a_u32x8, 13),
@@ -135,7 +134,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_sha256_big_sigma0_haswell_(__m256i state_a_
 }
 
 /** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_u32x8) {
     __m256i const rotated_by_6_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 6),
                                                        _mm256_slli_epi32(state_e_u32x8, 26));
     __m256i const rotated_by_11_u32x8 = _mm256_or_si256(_mm256_srli_epi32(state_e_u32x8, 11),
@@ -146,7 +145,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_sha256_big_sigma1_haswell_(__m256i state_e_
 }
 
 /** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_7_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 7),
                                                        _mm256_slli_epi32(message_word_u32x8, 25));
     __m256i const rotated_by_18_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 18),
@@ -156,7 +155,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_sha256_small_sigma0_haswell_(__m256i messag
 }
 
 /** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 8 lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i message_word_u32x8) {
     __m256i const rotated_by_17_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 17),
                                                         _mm256_slli_epi32(message_word_u32x8, 15));
     __m256i const rotated_by_19_u32x8 = _mm256_or_si256(_mm256_srli_epi32(message_word_u32x8, 19),
@@ -175,7 +174,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_sha256_small_sigma1_haswell_(__m256i messag
  *  final cross-half permute completes the exchange. Transposition is its own inverse, so this also
  *  carries the hash state the other way, from word-major registers back to one 32-byte lane each.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_u32x8[8], __m256i words_u32x8[8]) {
+STRINGZILLA_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const lanes_u32x8[8], __m256i words_u32x8[8]) {
     __m256i const paired0_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[0], lanes_u32x8[1]);
     __m256i const paired1_u32x8 = _mm256_unpackhi_epi32(lanes_u32x8[0], lanes_u32x8[1]);
     __m256i const paired2_u32x8 = _mm256_unpacklo_epi32(lanes_u32x8[2], lanes_u32x8[3]);
@@ -211,8 +210,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_8x8_haswell_(__m256i const la
  *  @param[in] ninth_word_u32x8 The word nine positions ahead.
  *  @param[in] fourteenth_word_u32x8 The word fourteen positions ahead, feeding the high sigma.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_u32x8, __m256i next_word_u32x8,
-                                                            __m256i ninth_word_u32x8, __m256i fourteenth_word_u32x8) {
+STRINGZILLA_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_u32x8, __m256i next_word_u32x8,
+                                                     __m256i ninth_word_u32x8, __m256i fourteenth_word_u32x8) {
     return _mm256_add_epi32(_mm256_add_epi32(oldest_word_u32x8, sz_sha256_small_sigma0_haswell_(next_word_u32x8)),
                             _mm256_add_epi32(ninth_word_u32x8, sz_sha256_small_sigma1_haswell_(fourteenth_word_u32x8)));
 }
@@ -225,7 +224,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_sha256_extend_haswell_(__m256i oldest_word_
  *  @c state_h are written: @c state_d becomes the next round's @c state_e, and @c state_h is dead
  *  on entry so it receives the next round's @c state_a.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_round_haswell_(                                         //
+STRINGZILLA_INLINE void sz_sha256_round_haswell_(                                                //
     __m256i state_a_u32x8, __m256i state_b_u32x8, __m256i state_c_u32x8, __m256i *state_d_u32x8, //
     __m256i state_e_u32x8, __m256i state_f_u32x8, __m256i state_g_u32x8, __m256i *state_h_u32x8, //
     __m256i message_word_u32x8, sz_u32_t round_constant) {
@@ -261,8 +260,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_round_haswell_(                        
  *  independent eight-by-eight transposes. The window lives in a local rather than a parameter so it
  *  is not forced to memory across a call boundary.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8_t const *const *lane_blocks,
-                                                           __m256i active_u32x8) {
+STRINGZILLA_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[8], sz_u8_t const *const *lane_blocks,
+                                                    __m256i active_u32x8) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
 
     __m256i const byte_swap_u8x32 = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12, //
@@ -416,10 +415,9 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_compress_haswell_(__m256i hashes_u32x8[
  *  neither is live across the loop between them.
  *
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states,
-                                                                    sz_size_t active_lanes_count,
-                                                                    sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
-                                                                    sz_size_t const *blocks_per_lane) {
+STRINGZILLA_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                             sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                             sz_size_t const *blocks_per_lane) {
     __m256i hashes_u32x8[8];
     sz_u256_vec_t counts_vec, buffered_vec;
     sz_u8_t const *sources[8];
@@ -474,61 +472,6 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_blocks_haswell_(sz_sha256_st
         cursors[lane_index] += blocks_per_lane[lane_index] * STRINGZILLA_SHA256_BLOCK_LENGTH;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_state_t *states,
-                                                                  sz_sequence_t const *texts) {
-    sz_size_t const lanes_count = texts->count;
-
-    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 8) {
-        sz_size_t const lanes_left = lanes_count - first_lane_index;
-        sz_size_t const active_lanes_count = lanes_left < 8 ? lanes_left : 8;
-        sz_u8_t const *cursors[8];
-        sz_size_t remaining[8], blocks_per_lane[8];
-        sz_u32_t buffered_bitmask = 0;
-
-        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
-        // lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
-        // the head, body and tail below only move bytes.
-        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
-            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
-            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
-
-            // The countdown rides in 32-bit lanes AVX2 compares as signed, so a chunk longer than that many
-            // blocks goes through the single-state kernel over the very same state and sits the group out.
-            if (remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH > 0x7FFFFFFFull) {
-                sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
-                remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
-                continue;
-            }
-
-            state->total_length += remaining[lane_index];
-            if (state->block_length != 0) {
-                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
-                if (remaining[lane_index] >= missing) {
-                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
-                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
-                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
-                    state->block_length = 0;
-                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
-                }
-            }
-            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
-        }
-
-        sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
-                                             blocks_per_lane);
-
-        // Whatever is left cannot fill a block, so it only ever buffers.
-        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
-            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
-            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
-                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
-            state->block_length += tail_length;
-        }
-    }
-}
-
 /**
  *  @brief Finalizes 8 already-gathered lanes into their digests.
  *  @param[in] states The 8 lane states, left untouched.
@@ -538,9 +481,8 @@ STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_haswell(sz_sha256_stat
  *  Same two-pass shape as the Skylake path, except the lane select is a blend vector rather than a
  *  k-mask, since AVX2 has no mask registers.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
-                                                                          sz_size_t active_lanes_count,
-                                                                          sz_u8_t *digests) {
+STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_state_t const *states,
+                                                                   sz_size_t active_lanes_count, sz_u8_t *digests) {
     // A SHA256 block is 64 bytes whatever the vector width, so the staged blocks are 512-bit unions even
     // though the lanes themselves are 256-bit wide.
     sz_u512_vec_t staged_vec[8];
@@ -603,8 +545,75 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha
                             lanes_u32x8[lane_index]);
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states,
-                                                                  sz_size_t states_count, sz_u8_t *digests) {
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_haswell_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                                void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t const lanes_count = texts->count;
+
+    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 8) {
+        sz_size_t const lanes_left = lanes_count - first_lane_index;
+        sz_size_t const active_lanes_count = lanes_left < 8 ? lanes_left : 8;
+        sz_u8_t const *cursors[8];
+        sz_size_t remaining[8], blocks_per_lane[8];
+        sz_u32_t buffered_bitmask = 0;
+
+        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves
+        // as that lane's first block source. Every lane's whole chunk is charged to `total_length`
+        // here, once, so the head, body and tail below only move bytes.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
+            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+
+            // The countdown rides in 32-bit lanes AVX2 compares as signed, so a chunk longer than
+            // that many blocks goes through the single-state kernel over the very same state and
+            // sits the group out.
+            if (remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH > 0x7FFFFFFFull) {
+                sz_sha256_state_update_serial_(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
+                remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
+                continue;
+            }
+
+            state->total_length += remaining[lane_index];
+            if (state->block_length != 0) {
+                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
+                if (remaining[lane_index] >= missing) {
+                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
+                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
+                    state->block_length = 0;
+                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
+                }
+            }
+            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
+        }
+
+        sz_sha256_multistate_blocks_haswell_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
+                                             blocks_per_lane);
+
+        // Whatever is left cannot fill a block, so it only ever buffers.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
+            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
+                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+            state->block_length += tail_length;
+        }
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                                sz_u8_t *digests, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t first_lane_index = 0;
     for (; first_lane_index < states_count; first_lane_index += 8) {
         sz_size_t const remaining = states_count - first_lane_index;
@@ -612,14 +621,17 @@ STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_haswell(sz_sha256_stat
         sz_sha256_multistate_digest_lanes_haswell_(&states[first_lane_index], active_lanes_count,
                                                    &digests[first_lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
     }
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

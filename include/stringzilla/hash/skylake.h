@@ -10,14 +10,14 @@
 #define STRINGZILLA_HASH_SKYLAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
+#include "stringzilla/hash/westmere.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SKYLAKE
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,aes,evex512"))), \
                              apply_to = function)
@@ -28,7 +28,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "aes")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_skylake_(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -128,7 +128,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t l
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_init_skylake_(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_u64x8 = _mm512_set1_epi64(seed);
     // ! In this kernel, assuming it may be called on arbitrarily misaligned `state`,
@@ -147,8 +147,8 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_init_skylake(sz_hash_state_t *state,
     state->ins_length = 0;
 }
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake(sz_cptr_t start, sz_size_t length,
-                                                                                  sz_u64_t seed) {
+STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_cptr_t start, sz_size_t length,
+                                                                             sz_u64_t seed) {
 
     if (length <= 16) {
         // Initialize the AES block with a given seed
@@ -221,44 +221,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylak
     // Skylake has no VAES, so its four-lane AES-NI absorb has no throughput edge over Westmere; in 512-bit form it
     // is in fact slower (per-lane `vextracti128` contends on the shuffle port). Skylake's win is the masked-load
     // short path above, so inputs over one block defer to the full-clock pure-SSE Westmere kernel.
-    return sz_hash_westmere(start, length, seed);
-}
-
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text,
-                                                           sz_size_t length) {
-    // Skylake has AVX-512BW but neither VBMI (no `vpermb` byte slide) nor VAES, so the absorb stays the four-lane
-    // AES-NI Westmere kernel. What Westmere lacks is a masked load: it merges incoming bytes one at a time into
-    // `ins.u8s[...]`, then reads `ins` back as wide lanes - a ~12-cycle store-forwarding stall on every cross-call
-    // merge, the dominant cost for short streamed tokens. AVX-512 removes it without VBMI: a single fault-suppressed
-    // masked load from `text - buffered` lands the incoming bytes directly at their buffer offset. The masked-off
-    // low `buffered` lanes alias the bytes before `text` and are never accessed; the set lanes
-    // [buffered, buffered + to_copy) read exactly [text, text + to_copy). One `vpblendmb` drops them into `ins`;
-    // bit-identical digest to the per-byte copy.
-    sz_hash_state_aligned_t state = sz_hash_state_load_westmere_(state_ptr);
-    sz_size_t buffered = state.ins_length % 64;
-    if (buffered == 0 && state.ins_length) buffered = 64;
-    while (length) {
-        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
-            sz_hash_state_update_westmere_(&state);
-            state.ins.zmm = _mm512_setzero_si512();
-            buffered = 0;
-        }
-        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
-        __mmask64 const place_mask_m64 = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
-        __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(place_mask_m64, (void const *)(text - buffered));
-        state.ins.zmm = _mm512_mask_blend_epi8(place_mask_m64, state.ins.zmm, incoming_u8x64);
-        buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
-    }
-    sz_hash_state_store_westmere_(state_ptr, &state);
-}
-
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_skylake(sz_hash_state_t const *state) {
-    // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_digest_westmere(state);
-}
-
-STRINGZILLA_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_fill_random_westmere(text, length, nonce);
+    return sz_hash_westmere_(start, length, seed);
 }
 
 /*  @c vpternlogd collapses each bitwise primitive of SHA256 to a single instruction: @c choice is
@@ -266,38 +229,38 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_skylake(sz_ptr_t text, sz_size_t le
  *  that both sigma families need is the parity truth table. */
 
 /** Evaluates `(state_e & state_f) ^ (~state_e & state_g)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
-                                                            __m512i state_g_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_choice_skylake_(__m512i state_e_u32x16, __m512i state_f_u32x16,
+                                                     __m512i state_g_u32x16) {
     return _mm512_ternarylogic_epi32(state_e_u32x16, state_f_u32x16, state_g_u32x16, 0xCA);
 }
 
 /** Evaluates `(state_a & state_b) ^ (state_a & state_c) ^ (state_b & state_c)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
-                                                              __m512i state_c_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_majority_skylake_(__m512i state_a_u32x16, __m512i state_b_u32x16,
+                                                       __m512i state_c_u32x16) {
     return _mm512_ternarylogic_epi32(state_a_u32x16, state_b_u32x16, state_c_u32x16, 0xE8);
 }
 
 /** Evaluates `ror(state_a, 2) ^ ror(state_a, 13) ^ ror(state_a, 22)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_big_sigma0_skylake_(__m512i state_a_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_a_u32x16, 2), _mm512_ror_epi32(state_a_u32x16, 13),
                                      _mm512_ror_epi32(state_a_u32x16, 22), 0x96);
 }
 
 /** Evaluates `ror(state_e, 6) ^ ror(state_e, 11) ^ ror(state_e, 25)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_big_sigma1_skylake_(__m512i state_e_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(state_e_u32x16, 6), _mm512_ror_epi32(state_e_u32x16, 11),
                                      _mm512_ror_epi32(state_e_u32x16, 25), 0x96);
 }
 
 /** Evaluates `ror(word, 7) ^ ror(word, 18) ^ (word >> 3)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_small_sigma0_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 7),
                                      _mm512_ror_epi32(message_word_u32x16, 18),
                                      _mm512_srli_epi32(message_word_u32x16, 3), 0x96);
 }
 
 /** Evaluates `ror(word, 17) ^ ror(word, 19) ^ (word >> 10)` across 16 lanes. */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i message_word_u32x16) {
     return _mm512_ternarylogic_epi32(_mm512_ror_epi32(message_word_u32x16, 17),
                                      _mm512_ror_epi32(message_word_u32x16, 19),
                                      _mm512_srli_epi32(message_word_u32x16, 10), 0x96);
@@ -317,7 +280,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_sha256_small_sigma1_skylake_(__m512i messag
  *  there, and no cost model available for AMD parts describes their gather and scatter at all - so
  *  the form built from ordinary shuffles is the one whose cost is knowable everywhere.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
+STRINGZILLA_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u32x16[8]) {
     __m512i const low_halves_u32x16 = _mm512_setr_epi32(0, 1, 2, 3, 16, 17, 18, 19, 8, 9, 10, 11, 24, 25, 26, 27);
     __m512i const high_halves_u32x16 = _mm512_setr_epi32(4, 5, 6, 7, 20, 21, 22, 23, 12, 13, 14, 15, 28, 29, 30, 31);
     // Pair 32-bit neighbours inside every 128-bit sub-lane.
@@ -367,8 +330,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_8x16_skylake_(__m512i words_u
  *  frame past 4 KB, and MSVC then reaches for the CRT's @c __chkstk to probe it, which the
  *  @c STRINGZILLA_WITH_LIBC=0 build has no way to resolve.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
-                                                                  __m512i schedule_u32x16[16]) {
+STRINGZILLA_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const *const *lane_blocks,
+                                                           __m512i schedule_u32x16[16]) {
     __m512i const byte_swap_u8x64 = _mm512_set_epi8(                    //
         60, 61, 62, 63, 56, 57, 58, 59, 52, 53, 54, 55, 48, 49, 50, 51, //
         44, 45, 46, 47, 40, 41, 42, 43, 36, 37, 38, 39, 32, 33, 34, 35, //
@@ -419,8 +382,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_transpose_16x16_skylake_(sz_u8_t const 
  *  @param[in] ninth_word_u32x16 The word nine positions ahead.
  *  @param[in] fourteenth_word_u32x16 The word fourteen positions ahead, feeding the high sigma.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
-                                                            __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
+STRINGZILLA_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_u32x16, __m512i next_word_u32x16,
+                                                     __m512i ninth_word_u32x16, __m512i fourteenth_word_u32x16) {
     return _mm512_add_epi32(
         _mm512_add_epi32(oldest_word_u32x16, sz_sha256_small_sigma0_skylake_(next_word_u32x16)),
         _mm512_add_epi32(ninth_word_u32x16, sz_sha256_small_sigma1_skylake_(fourteenth_word_u32x16)));
@@ -434,7 +397,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_sha256_extend_skylake_(__m512i oldest_word_
  *  @c state_h are written: @c state_d becomes the next round's @c state_e, and @c state_h is dead
  *  on entry so it receives the next round's @c state_a.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_round_skylake_(                                             //
+STRINGZILLA_INLINE void sz_sha256_round_skylake_(                                                    //
     __m512i state_a_u32x16, __m512i state_b_u32x16, __m512i state_c_u32x16, __m512i *state_d_u32x16, //
     __m512i state_e_u32x16, __m512i state_f_u32x16, __m512i state_g_u32x16, __m512i *state_h_u32x16, //
     __m512i message_word_u32x16, sz_u32_t round_constant) {
@@ -480,8 +443,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_round_skylake_(                        
  *  for the CRT's @c __chkstk. One turn of sixteen rounds is far too much work for a call to show up
  *  against, and the window stays local either way.
  */
-STRINGZILLA_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8],
-                                                             sz_u8_t const *const *lane_blocks, __mmask16 active_m16) {
+STRINGZILLA_OUTLINED_ void sz_sha256_compress_skylake_(__m512i hashes_u32x16[8], sz_u8_t const *const *lane_blocks,
+                                                       __mmask16 active_m16) {
     sz_u32_t const *round_constants = (sz_u32_t const *)sz_x86_hide_pointer_origin_(sz_sha256_round_constants_());
     __m512i schedule_u32x16[16];
     sz_sha256_transpose_16x16_skylake_(lane_blocks, schedule_u32x16);
@@ -642,10 +605,9 @@ STRINGZILLA_HELPER_NOINLINE void sz_sha256_compress_skylake_(__m512i hashes_u32x
  *  union, whose store-to-load forwarding was the largest fixed cost of a call and the one short
  *  messages cannot amortize.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states,
-                                                                    sz_size_t active_lanes_count,
-                                                                    sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
-                                                                    sz_size_t const *blocks_per_lane) {
+STRINGZILLA_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                             sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                             sz_size_t const *blocks_per_lane) {
     __m512i hashes_u32x16[8];
     sz_u512_vec_t counts_vec;
     sz_u8_t const *sources[16];
@@ -705,61 +667,6 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_blocks_skylake_(sz_sha256_st
         cursors[lane_index] += blocks_per_lane[lane_index] * STRINGZILLA_SHA256_BLOCK_LENGTH;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_state_t *states,
-                                                                  sz_sequence_t const *texts) {
-    sz_size_t const lanes_count = texts->count;
-
-    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 16) {
-        sz_size_t const lanes_left = lanes_count - first_lane_index;
-        sz_size_t const active_lanes_count = lanes_left < 16 ? lanes_left : 16;
-        sz_u8_t const *cursors[16];
-        sz_size_t remaining[16], blocks_per_lane[16];
-        sz_u32_t buffered_bitmask = 0;
-
-        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves as that
-        // lane's first block source. Every lane's whole chunk is charged to `total_length` here, once, so
-        // the head, body and tail below only move bytes.
-        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
-            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
-            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
-
-            // The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes through the
-            // single-state kernel over the very same state and the lane sits the group out.
-            if (remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH > 0xFFFFFFFFull) {
-                sz_sha256_state_update_serial(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
-                remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
-                continue;
-            }
-
-            state->total_length += remaining[lane_index];
-            if (state->block_length != 0) {
-                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
-                if (remaining[lane_index] >= missing) {
-                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
-                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
-                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
-                    state->block_length = 0;
-                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
-                }
-            }
-            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
-        }
-
-        sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
-                                             blocks_per_lane);
-
-        // Whatever is left cannot fill a block, so it only ever buffers.
-        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
-            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
-            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
-                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
-            state->block_length += tail_length;
-        }
-    }
-}
-
 /**
  *  @brief Finalizes 16 already-gathered lanes into their digests.
  *  @param[in] states The 16 lane states, left untouched.
@@ -771,9 +678,8 @@ STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_skylake(sz_sha256_stat
  *  one block keeps its state bit-for-bit. Inactive lanes borrow lane zero's hash so the gather
  *  stays in bounds.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
-                                                                          sz_size_t active_lanes_count,
-                                                                          sz_u8_t *digests) {
+STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_state_t const *states,
+                                                                   sz_size_t active_lanes_count, sz_u8_t *digests) {
     sz_u512_vec_t staged_vec[16];
     sz_u8_t const *staged_blocks[16];
     __m512i hashes_u32x16[8];
@@ -859,8 +765,132 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states,
-                                                                  sz_size_t states_count, sz_u8_t *digests) {
+#if STRINGZILLA_TARGET_SKYLAKE
+
+STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_skylake_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_skylake_(state, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_skylake(sz_cptr_t start, sz_size_t length,
+                                                                            sz_u64_t seed, sz_u64_t *hash,
+                                                                            void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_skylake_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
+                                                         void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Skylake has AVX-512BW but neither VBMI, the `vpermb` byte slide, nor VAES, so the absorb
+    // stays the four-lane AES-NI Westmere kernel. What Westmere lacks is a masked load: it merges
+    // incoming bytes one at a time into `ins.u8s[...]`, then reads `ins` back as wide lanes, a
+    // ~12-cycle store-forwarding stall on every cross-call merge and the dominant cost for short
+    // streamed tokens. AVX-512 removes it without VBMI: a single fault-suppressed masked load from
+    // `text - buffered` lands the incoming bytes directly at their buffer offset. The masked-off
+    // low `buffered` lanes alias the bytes before `text` and are never accessed; the set lanes
+    // [buffered, buffered + to_copy) read exactly [text, text + to_copy). One `vpblendmb` drops
+    // them into `ins`, producing a digest bit-identical to the per-byte copy.
+    sz_hash_state_aligned_t state = sz_hash_state_load_westmere_(state_ptr);
+    sz_size_t buffered = state.ins_length % 64;
+    if (buffered == 0 && state.ins_length) buffered = 64;
+    while (length) {
+        if (buffered == 64) { // the deferred block is now interior - absorb it (4x AES-NI) and re-zero the buffer
+            sz_hash_state_absorb_westmere_(&state);
+            state.ins.zmm = _mm512_setzero_si512();
+            buffered = 0;
+        }
+        sz_size_t const to_copy = sz_min_of_two(length, (sz_size_t)64 - buffered);
+        __mmask64 const place_mask_m64 = _cvtu64_mask64(sz_u64_mask_until_(to_copy) << buffered);
+        __m512i const incoming_u8x64 = _mm512_maskz_loadu_epi8(place_mask_m64, (void const *)(text - buffered));
+        state.ins.zmm = _mm512_mask_blend_epi8(place_mask_m64, state.ins.zmm, incoming_u8x64);
+        buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
+    }
+    sz_hash_state_store_westmere_(state_ptr, &state);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // ? No better way to fold the state on Skylake is known than the Westmere implementation.
+    *hash = sz_hash_state_digest_westmere_(state);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_random_westmere_(target, length, nonce);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                                void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t const lanes_count = texts->count;
+
+    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 16) {
+        sz_size_t const lanes_left = lanes_count - first_lane_index;
+        sz_size_t const active_lanes_count = lanes_left < 16 ? lanes_left : 16;
+        sz_u8_t const *cursors[16];
+        sz_size_t remaining[16], blocks_per_lane[16];
+        sz_u32_t buffered_bitmask = 0;
+
+        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves
+        // as that lane's first block source. Every lane's whole chunk is charged to `total_length`
+        // here, once, so the head, body and tail below only move bytes.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
+            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+
+            // The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes
+            // through the single-state kernel over the very same state, and its lane sits out.
+            if (remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH > 0xFFFFFFFFull) {
+                sz_sha256_state_update_serial_(state, (sz_cptr_t)cursors[lane_index], remaining[lane_index]);
+                remaining[lane_index] = 0, blocks_per_lane[lane_index] = 0;
+                continue;
+            }
+
+            state->total_length += remaining[lane_index];
+            if (state->block_length != 0) {
+                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
+                if (remaining[lane_index] >= missing) {
+                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
+                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
+                    state->block_length = 0;
+                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
+                }
+            }
+            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
+        }
+
+        sz_sha256_multistate_blocks_skylake_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
+                                             blocks_per_lane);
+
+        // Whatever is left cannot fill a block, so it only ever buffers.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
+            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
+                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+            state->block_length += tail_length;
+        }
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                                sz_u8_t *digests, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t first_lane_index = 0;
     for (; first_lane_index < states_count; first_lane_index += 16) {
         sz_size_t const remaining = states_count - first_lane_index;
@@ -868,14 +898,17 @@ STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_skylake(sz_sha256_stat
         sz_sha256_multistate_digest_lanes_skylake_(&states[first_lane_index], active_lanes_count,
                                                    &digests[first_lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
     }
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SKYLAKE
+#endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 
 #ifdef __cplusplus
 }

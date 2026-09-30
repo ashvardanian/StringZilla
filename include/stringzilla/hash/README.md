@@ -1,20 +1,20 @@
 # Hash: Byte Sum, AES Hash, and SHA-256
 
-This directory holds the digest kernels behind `sz_bytesum`, `sz_hash`, the multi-seed `sz_hash` fan-out, the streaming `sz_sha256_state_init` / `sz_sha256_state_update` / `sz_sha256_state_digest` trio, and the batched `sz_sha256_multistate_update` / `sz_sha256_multistate_digest` pair.
+This directory holds the digest kernels behind `sz_bytesum_best`, `sz_hash_best`, the multi-seed `sz_hash_multiseed_best` fan-out, the streaming `sz_sha256_state_init_best` / `sz_sha256_state_update_best` / `sz_sha256_state_digest_best` trio, and the batched `sz_sha256_multistate_update_best` / `sz_sha256_multistate_digest_best` pair.
 Each operation has a serial baseline plus per-ISA SIMD backends — `westmere`, `haswell`, `skylake`, `icelake` on x86, with a dedicated `goldmont` SHA-NI path for SHA-256.
 SHA-256 has no Ice Lake form: SHA-NI is 128-bit only and has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will be.
-The dispatcher picks the fastest one available on the running CPU.
+Each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
 
 ## Multi-state SHA-256
 
 Hashing one message is a serial dependency chain: every block feeds the next, so no amount of vector width makes a single digest faster, which is why the single-message column tops out at whatever the SHA-NI instructions deliver.
 Independent messages have no such dependency between them.
-`sz_sha256_multistate_update` takes one message per lane and runs the ordinary SHA-256 arithmetic across sixteen of them at once on AVX-512, or eight on AVX2, holding the state word-major so each vector register carries the same hash word from every lane.
+`sz_sha256_multistate_update_best` takes one message per lane and runs the ordinary SHA-256 arithmetic across sixteen of them at once on AVX-512, or eight on AVX2, holding the state word-major so each vector register carries the same hash word from every lane.
 
 Lanes are grouped by vector width, and a group advances one block per turn until its longest member is done.
 Shorter lanes retire as they finish and are simply left out of the remaining turns, so a batch of ragged lengths is correct and stays vectorized throughout — but a group still costs as much as its longest message, and a lane that retires early leaves its slot idle.
 Throughput therefore depends on how evenly lengths are distributed inside a group, which is entirely the caller's to arrange: feeding messages in length order puts similar lengths together and keeps groups full.
-`sz_sequence_argsort` produces that ordering.
+`sz_sequence_argsort_best` produces that ordering.
 
 The two ends of that behaviour are visible in the benchmark, which carries `_one_short` and `_one_long` variants of every multi-state row: trimming one lane of sixteen barely moves the numbers, while stretching one lane to eight times its neighbours drags every backend down to roughly the serial rate, batched or not.
 

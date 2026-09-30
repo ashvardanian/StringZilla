@@ -1,27 +1,26 @@
 /**
- *  @file include/stringzilla/hash/lasx.h
+ *  @file include/stringzilla/hash/loongsonasx.h
  *  @author Ash Vardanian
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for hash.
  *
  *  @sa include/stringzilla/hash.h
  */
-#ifndef STRINGZILLA_HASH_LASX_H_
-#define STRINGZILLA_HASH_LASX_H_
+#ifndef STRINGZILLA_HASH_LOONGSONASX_H_
+#define STRINGZILLA_HASH_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/hash/serial.h"
-#include "stringzilla/compare.h" // `sz_equal`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_LASX
+#if STRINGZILLA_TARGET_LOONGSONASX
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_loongsonasx_(sz_cptr_t text, sz_size_t length) {
     // When the buffer is small, there isn't much to innovate.
-    if (length <= 32) { return sz_bytesum_serial(text, length); }
+    if (length <= 32) { return sz_bytesum_serial_(text, length); }
     else {
         // LASX has no single SAD (`_mm256_sad_epu8`) instruction. Rather than collapse each block
         // all the way down to 64-bit lanes with a 3-stage widening-add chain (4 ops/block), we keep
@@ -38,7 +37,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t leng
             short_sums_u16x16 = __lasx_xvadd_h(short_sums_u16x16,
                                                __lasx_xvhaddw_hu_bu(text_u8x32, text_u8x32)); // 16x u16
             if (++blocks_since_flush == 120) {
-                // Drain the u16 lanes into the u64 lanes: 16x u16 -> 8x u32 -> 4x u64.
+                // Drain the u16 lanes into the u64 lanes: 16× u16 → 8× u32 → 4× u64.
                 __m256i widened_u32x8 = __lasx_xvhaddw_wu_hu(short_sums_u16x16, short_sums_u16x16);
                 long_sums_u64x4 = __lasx_xvadd_d(long_sums_u64x4, __lasx_xvhaddw_du_wu(widened_u32x8, widened_u32x8));
                 short_sums_u16x16 = zero_u8x32;
@@ -51,15 +50,21 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t leng
             long_sums_u64x4 = __lasx_xvadd_d(long_sums_u64x4, __lasx_xvhaddw_du_wu(widened_u32x8, widened_u32x8));
         }
 
-        // Reduce the 4 accumulated 64-bit lanes. `xvhaddw_q_d` folds adjacent doublewords into the two
-        // 128-bit quadword lanes (lane 0 = sums[0]+sums[1], lane 1 = sums[2]+sums[3]), so a single op
-        // replaces two of the four vector->GPR extracts the naive 4-way sum would need.
+        // Reduce the 4 accumulated 64-bit lanes. `xvhaddw_q_d` folds adjacent doublewords into the
+        // two 128-bit quadword lanes, lane 0 = sums[0] + sums[1] and lane 1 = sums[2] + sums[3], so
+        // one op replaces two of the four extracts to a GPR the naive 4-way sum would need.
         __m256i pairwise_sums_u64x4 = __lasx_xvhaddw_q_d(long_sums_u64x4, long_sums_u64x4);
         sz_u64_t result = (sz_u64_t)__lasx_xvpickve2gr_du(pairwise_sums_u64x4, 0) +
                           (sz_u64_t)__lasx_xvpickve2gr_du(pairwise_sums_u64x4, 2);
-        if (length) result += sz_bytesum_serial(text, length);
+        if (length) result += sz_bytesum_serial_(text, length);
         return result;
     }
+}
+
+STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_loongsonasx_(text, length);
+    return sz_success_k;
 }
 
 /*  Vector-permute, tower-field AES round for the LASX backend.
@@ -70,7 +75,8 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t leng
  *  byte-serial S-box, we implement Mike Hamburg's "vector permute" (vpaes) AES round in 128-bit
  *  `__lsx_*` lanes: the AES state is exactly 128 bits, so the 128-bit LSX path is the natural fit.
  *
- *  Pipeline of @c sz_emulate_aesenc_lasx_, matching @c sz_emulate_aesenc_si128_serial_ bit-for-bit:
+ *  Pipeline of @c sz_emulate_aesenc_loongsonasx_, bit-for-bit equal to
+ *  @c sz_emulate_aesenc_si128_serial_:
  *
  *   1. @b ShiftRows is a single @c __lsx_vshuf_b byte permutation applied up-front. The serial
  *      reference folds ShiftRows into its SubBytes indexing; we hoist it so SubBytes can be
@@ -94,7 +100,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_lasx(sz_cptr_t text, sz_size_t leng
  *  @see OpenSSL vpaes-x86_64.pl, the constant-time S-box-equivalent reference: https://github.com/openssl/openssl/blob/master/crypto/aes/asm/vpaes-x86_64.pl */
 
 /** Pre-computed vpaes-style nibble tables for the LASX AES round (see derivation above). */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_aes_lasx_tables_(void) {
+STRINGZILLA_INLINE sz_u8_t const *sz_aes_loongsonasx_tables_(void) {
     // Layout: [iptlo, ipthi, sbolo, sbohi, glog, gexp, ginv, shiftrows] x16 bytes each.
     static sz_align_(64) sz_u8_t const tables[8 * 16] = {
         // k_iptlo
@@ -238,15 +244,15 @@ STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_aes_lasx_tables_(void) {
 }
 
 /** @c _mm_shuffle_epi8-equivalent for indices in 0..15 (top bits clear). */
-STRINGZILLA_HELPER_INLINE __m128i sz_lsx_pshufb_(__m128i table_u8x16, __m128i indices_u8x16) {
+STRINGZILLA_INLINE __m128i sz_lsx_pshufb_(__m128i table_u8x16, __m128i indices_u8x16) {
     // `__lsx_vshuf_b(a, b, c)` masks `c` to 5 bits: 0..15 selects from `b`, 16..31 from `a`.
     // With indices in 0..15 the first operand is irrelevant; we reuse `indices` as a dummy.
     return __lsx_vshuf_b(indices_u8x16, table_u8x16, indices_u8x16);
 }
 
 /** Lane-wise GF(16) multiply (poly 0x13) of two nibble vectors via log/antilog tables. */
-STRINGZILLA_HELPER_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m128i factor_b_u8x16,
-                                                   __m128i gf16_log_u8x16, __m128i gf16_exp_u8x16, __m128i zero_u8x16) {
+STRINGZILLA_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m128i factor_b_u8x16, __m128i gf16_log_u8x16,
+                                            __m128i gf16_exp_u8x16, __m128i zero_u8x16) {
     __m128i log_sum_u8x16 = __lsx_vadd_b(sz_lsx_pshufb_(gf16_log_u8x16, factor_a_u8x16),
                                          sz_lsx_pshufb_(gf16_log_u8x16, factor_b_u8x16)); // 0..28
     __m128i fifteen_u8x16 = __lsx_vreplgr2vr_b(15);
@@ -264,7 +270,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_lsx_gf16_mul_(__m128i factor_a_u8x16, __m12
  *      inversion + affine.
  *  @return The S-box output (with the `^ 0x63` AES affine constant already applied).
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aes_subbytes_lasx_( //
+STRINGZILLA_INLINE __m128i sz_emulate_aes_subbytes_loongsonasx_( //
     __m128i shifted_state_u8x16, __m128i zero_u8x16, __m128i low_nibble_mask_u8x16, __m128i input_transform_low_u8x16,
     __m128i input_transform_high_u8x16, __m128i sbox_output_low_u8x16, __m128i sbox_output_high_u8x16,
     __m128i gf16_log_u8x16, __m128i gf16_exp_u8x16, __m128i gf16_inverse_u8x16) {
@@ -298,7 +304,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aes_subbytes_lasx_( //
  *  @brief AES MixColumns over the four 4-byte columns of the S-box output.
  *  @return `c[j] ^ (col_base^col_rot1^col_rot2^col_rot3) ^ xtime(c[j] ^ c[j+1])` per column.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aes_mixcolumns_lasx_(__m128i sbox_output_u8x16) {
+STRINGZILLA_INLINE __m128i sz_emulate_aes_mixcolumns_loongsonasx_(__m128i sbox_output_u8x16) {
     // Build rotate masks on the fly: add j and (j+1 within group) shuffle indices.
     static sz_align_(16) sz_u8_t const rot1_bytes[16] = {1, 2, 3, 0, 5, 6, 7, 4, 9, 10, 11, 8, 13, 14, 15, 12};
     static sz_align_(16) sz_u8_t const rot2_bytes[16] = {2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13};
@@ -309,7 +315,8 @@ STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aes_mixcolumns_lasx_(__m128i sbox_o
     __m128i col_rot3_u8x16 = sz_lsx_pshufb_(sbox_output_u8x16, __lsx_vld(rot3_bytes, 0));
     __m128i column_rotation_sum_u8x16 = __lsx_vxor_v(__lsx_vxor_v(col_base_u8x16, col_rot1_u8x16),
                                                      __lsx_vxor_v(col_rot2_u8x16, col_rot3_u8x16));
-    // xtime(col_base ^ col_rot1): (x << 1) ^ (0x1b where MSB set). `vslti_b(x, 0)` yields 0xff for MSB-set bytes.
+    // xtime(col_base ^ col_rot1): (x << 1) ^ (0x1b where MSB set), with `vslti_b(x, 0)` yielding
+    // 0xff for the MSB-set bytes.
     __m128i adjacent_column_xor_u8x16 = __lsx_vxor_v(col_base_u8x16, col_rot1_u8x16);
     __m128i column_xtime_u8x16 = __lsx_vxor_v(
         __lsx_vslli_b(adjacent_column_xor_u8x16, 1),
@@ -322,8 +329,8 @@ STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aes_mixcolumns_lasx_(__m128i sbox_o
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, bit-identical to
  *          @c sz_emulate_aesenc_si128_serial_.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aesenc_lasx_(__m128i state_u8x16, __m128i round_key_u8x16) {
-    sz_u8_t const *tables = sz_aes_lasx_tables_();
+STRINGZILLA_INLINE __m128i sz_emulate_aesenc_loongsonasx_(__m128i state_u8x16, __m128i round_key_u8x16) {
+    sz_u8_t const *tables = sz_aes_loongsonasx_tables_();
     __m128i zero_u8x16 = __lsx_vreplgr2vr_b(0);
     __m128i low_nibble_mask_u8x16 = __lsx_vreplgr2vr_b(0x0F);
     __m128i input_transform_low_u8x16 = __lsx_vld(tables + 0, 0),
@@ -336,141 +343,148 @@ STRINGZILLA_HELPER_INLINE __m128i sz_emulate_aesenc_lasx_(__m128i state_u8x16, _
     __m128i shifted_state_u8x16 = sz_lsx_pshufb_(state_u8x16, shift_rows_indices_u8x16);
 
     // (2) SubBytes via tower-field inversion + affine.
-    __m128i sbox_output_u8x16 = sz_emulate_aes_subbytes_lasx_(
+    __m128i sbox_output_u8x16 = sz_emulate_aes_subbytes_loongsonasx_(
         shifted_state_u8x16, zero_u8x16, low_nibble_mask_u8x16, input_transform_low_u8x16, input_transform_high_u8x16,
         sbox_output_low_u8x16, sbox_output_high_u8x16, gf16_log_u8x16, gf16_exp_u8x16, gf16_inverse_u8x16);
 
     // (3) MixColumns.
-    __m128i mixed_u8x16 = sz_emulate_aes_mixcolumns_lasx_(sbox_output_u8x16);
+    __m128i mixed_u8x16 = sz_emulate_aes_mixcolumns_loongsonasx_(sbox_output_u8x16);
 
     // (4) AddRoundKey.
     return __lsx_vxor_v(mixed_u8x16, round_key_u8x16);
 }
 
 /** Load 16 bytes from an @c sz_u128_vec_t-style buffer into an LSX register. */
-STRINGZILLA_HELPER_INLINE __m128i sz_lsx_load128_(void const *pointer) { return __lsx_vld(pointer, 0); }
+STRINGZILLA_INLINE __m128i sz_lsx_load128_(void const *pointer) { return __lsx_vld(pointer, 0); }
 
 /** Store an LSX register into a 16-byte buffer. */
-STRINGZILLA_HELPER_INLINE void sz_lsx_store128_(void *pointer, __m128i value_u8x16) {
-    __lsx_vst(value_u8x16, pointer, 0);
-}
+STRINGZILLA_INLINE void sz_lsx_store128_(void *pointer, __m128i value_u8x16) { __lsx_vst(value_u8x16, pointer, 0); }
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_init_lasx_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_short_init_loongsonasx_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
     state->key.u64s[0] = seed, state->key.u64s[1] = seed;
     sz_u64_t const *pi = sz_hash_pi_constants_();
     state->aes.u64s[0] = seed ^ pi[0], state->aes.u64s[1] = seed ^ pi[1];
     state->sum.u64s[0] = seed ^ pi[8], state->sum.u64s[1] = seed ^ pi[9];
 }
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_lasx_(sz_hash_state_aligned_for_short_t *state,
+STRINGZILLA_INLINE void sz_hash_state_short_update_loongsonasx_(sz_hash_state_aligned_for_short_t *state,
                                                                 sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
-    __m128i aes_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state->aes), sz_lsx_load128_(&block_vec));
+    __m128i aes_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state->aes), sz_lsx_load128_(&block_vec));
     sz_lsx_store128_(&state->aes, aes_u8x16);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_lasx_(sz_hash_state_aligned_for_short_t const *state,
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_loongsonasx_(sz_hash_state_aligned_for_short_t const *state,
                                                                       sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
-    __m128i mixed_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state->sum), sz_lsx_load128_(&state->aes));
-    __m128i mixed_in_register_u8x16 = sz_emulate_aesenc_lasx_(
-        sz_emulate_aesenc_lasx_(mixed_u8x16, sz_lsx_load128_(&key_with_length_vec)), mixed_u8x16);
+    __m128i mixed_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state->sum), sz_lsx_load128_(&state->aes));
+    __m128i mixed_in_register_u8x16 = sz_emulate_aesenc_loongsonasx_(
+        sz_emulate_aesenc_loongsonasx_(mixed_u8x16, sz_lsx_load128_(&key_with_length_vec)), mixed_u8x16);
     sz_u128_vec_t result_vec;
     sz_lsx_store128_(&result_vec, mixed_in_register_u8x16);
     return result_vec.u64s[0];
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_lasx(sz_hash_state_t *state, sz_u64_t seed);
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_t const *packed);
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_lasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state);
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state);
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t state);
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_loongsonasx_(sz_hash_state_t const *packed);
+STRINGZILLA_INLINE void sz_hash_state_store_loongsonasx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state);
+STRINGZILLA_INLINE void sz_hash_state_absorb_loongsonasx_(sz_hash_state_aligned_t *state);
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_loongsonasx_(sz_hash_state_aligned_t state);
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_lasx(sz_cptr_t start, sz_size_t length,
-                                                                               sz_u64_t seed) {
+STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_loongsonasx_(sz_cptr_t start, sz_size_t length,
+                                                                                 sz_u64_t seed) {
     if (length <= 16) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_lasx_(&state, seed);
+        sz_hash_state_short_init_loongsonasx_(&state, seed);
         sz_u128_vec_t data_vec;
         data_vec.u64s[0] = data_vec.u64s[1] = 0;
         for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) data_vec.u8s[byte_index] = start[byte_index];
-        sz_hash_state_short_update_lasx_(&state, data_vec);
-        return sz_hash_state_short_finalize_lasx_(&state, length);
+        sz_hash_state_short_update_loongsonasx_(&state, data_vec);
+        return sz_hash_state_short_finalize_loongsonasx_(&state, length);
     }
     else if (length <= 32) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_lasx_(&state, seed);
+        sz_hash_state_short_init_loongsonasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
         data1_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data1_vec, (int)(32 - length));
-        sz_hash_state_short_update_lasx_(&state, data0_vec);
-        sz_hash_state_short_update_lasx_(&state, data1_vec);
-        return sz_hash_state_short_finalize_lasx_(&state, length);
+        sz_hash_state_short_update_loongsonasx_(&state, data0_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data1_vec);
+        return sz_hash_state_short_finalize_loongsonasx_(&state, length);
     }
     else if (length <= 48) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_lasx_(&state, seed);
+        sz_hash_state_short_init_loongsonasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
         data1_vec.lsx = __lsx_vld(start + 16, 0);
         data2_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data2_vec, (int)(48 - length));
-        sz_hash_state_short_update_lasx_(&state, data0_vec);
-        sz_hash_state_short_update_lasx_(&state, data1_vec);
-        sz_hash_state_short_update_lasx_(&state, data2_vec);
-        return sz_hash_state_short_finalize_lasx_(&state, length);
+        sz_hash_state_short_update_loongsonasx_(&state, data0_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data1_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data2_vec);
+        return sz_hash_state_short_finalize_loongsonasx_(&state, length);
     }
     else if (length <= 64) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_lasx_(&state, seed);
+        sz_hash_state_short_init_loongsonasx_(&state, seed);
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
         data0_vec.lsx = __lsx_vld(start, 0);
         data1_vec.lsx = __lsx_vld(start + 16, 0);
         data2_vec.lsx = __lsx_vld(start + 32, 0);
         data3_vec.lsx = __lsx_vld(start + length - 16, 0);
         sz_hash_shift_in_register_serial_(&data3_vec, (int)(64 - length));
-        sz_hash_state_short_update_lasx_(&state, data0_vec);
-        sz_hash_state_short_update_lasx_(&state, data1_vec);
-        sz_hash_state_short_update_lasx_(&state, data2_vec);
-        sz_hash_state_short_update_lasx_(&state, data3_vec);
-        return sz_hash_state_short_finalize_lasx_(&state, length);
+        sz_hash_state_short_update_loongsonasx_(&state, data0_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data1_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data2_vec);
+        sz_hash_state_short_update_loongsonasx_(&state, data3_vec);
+        return sz_hash_state_short_finalize_loongsonasx_(&state, length);
     }
     else {
-        // The aligned twin lets the kernels use clean aligned lane access; one-shot never touches the packed type
-        // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
+        // The aligned twin gives the kernels aligned lane access; one-shot touches the packed type
+        // only to reuse `init`, layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`.
         sz_align_(64) sz_hash_state_aligned_t state;
-        sz_hash_state_init_lasx((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_serial_((sz_hash_state_t *)&state, seed);
 
-        // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
-        // tail) stays buffered in `ins` for `sz_hash_state_finalize_lasx_` to fold - the same
+        // Absorb every full 64-byte block except the last; the final block, a full 64 or a partial
+        // tail, stays buffered in `ins` for `sz_hash_state_finalize_loongsonasx_` to fold, the same
         // deferral the streaming path uses.
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             __lasx_xvst(__lasx_xvld(start + state.ins_length, 0), state.ins.u8s, 0);
             __lasx_xvst(__lasx_xvld(start + state.ins_length + 32, 0), state.ins.u8s + 32, 0);
-            sz_hash_state_update_lasx_(&state);
+            sz_hash_state_absorb_loongsonasx_(&state);
         }
 
-        // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
+        // Stage the final 1..64 bytes in a zeroed buffer for finalize to fold.
         __m256i const zero_u8x32 = __lasx_xvreplgr2vr_b(0);
         __lasx_xvst(zero_u8x32, state.ins.u8s, 0);
         __lasx_xvst(zero_u8x32, state.ins.u8s + 32, 0);
         for (sz_size_t byte_index = 0; state.ins_length < length; ++byte_index, ++state.ins_length)
             state.ins.u8s[byte_index] = (sz_u8_t)start[state.ins_length];
-        return sz_hash_state_finalize_lasx_(state);
+        return sz_hash_state_finalize_loongsonasx_(state);
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_lasx(sz_hash_state_t *state, sz_u64_t seed) {
-    sz_hash_state_init_serial(state, seed);
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_loongsonasx(sz_cptr_t start, sz_size_t length,
+                                                                                sz_u64_t seed, sz_u64_t *hash,
+                                                                                void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_loongsonasx_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_init_loongsonasx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_serial_(state, seed);
+    return sz_success_k;
 }
 
 /** Loads the packed public state into the aligned internal twin (LASX: 2x @c __lasx_xvld
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_loongsonasx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     __lasx_xvst(__lasx_xvld(packed->aes, 0), state.aes.u8s, 0);
     __lasx_xvst(__lasx_xvld(packed->aes + 32, 0), state.aes.u8s + 32, 0);
@@ -484,7 +498,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_lasx_(sz_ha
 }
 
 /** Stores the aligned internal twin back into the packed public state. */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_lasx_(sz_hash_state_t *packed,
+STRINGZILLA_INLINE void sz_hash_state_store_loongsonasx_(sz_hash_state_t *packed,
                                                          sz_hash_state_aligned_t const *state) {
     __lasx_xvst(__lasx_xvld(state->aes.u8s, 0), packed->aes, 0);
     __lasx_xvst(__lasx_xvld(state->aes.u8s + 32, 0), packed->aes + 32, 0);
@@ -500,13 +514,13 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_lasx_(sz_hash_state_t *packed
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_lasx_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_loongsonasx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_u128_vec_t *aes_vec = &state->aes.u128s[lane_index];
         sz_u128_vec_t *sum_vec = &state->sum.u128s[lane_index];
         sz_u128_vec_t const *ins_vec = &state->ins.u128s[lane_index];
-        sz_lsx_store128_(aes_vec, sz_emulate_aesenc_lasx_(sz_lsx_load128_(aes_vec), sz_lsx_load128_(ins_vec)));
+        sz_lsx_store128_(aes_vec, sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(aes_vec), sz_lsx_load128_(ins_vec)));
         *sum_vec = sz_emulate_shuffle_epi8_serial_(*sum_vec, shuffle);
         sum_vec->u64s[0] += ins_vec->u64s[0], sum_vec->u64s[1] += ins_vec->u64s[1];
     }
@@ -517,23 +531,23 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_update_lasx_(sz_hash_state_aligned_
  *  @param[in] state The hash state, taken by value.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_aligned_t state) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_loongsonasx_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
     key_with_length_vec.u64s[1] = state.key.u64s[1];
 
-    // Fold the deferred final block (still buffered in `ins` - a full 64 bytes or a zero-padded tail) into each
-    // lane. Folding the last block here, rather than in `update`, lets both one-shot `sz_hash` and the streaming
-    // digest defer it and share this single finalization.
-    __m128i aes0_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state.aes.u128s[0]),
-                                                 sz_lsx_load128_(&state.ins.u128s[0]));
-    __m128i aes1_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state.aes.u128s[1]),
-                                                 sz_lsx_load128_(&state.ins.u128s[1]));
-    __m128i aes2_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state.aes.u128s[2]),
-                                                 sz_lsx_load128_(&state.ins.u128s[2]));
-    __m128i aes3_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&state.aes.u128s[3]),
-                                                 sz_lsx_load128_(&state.ins.u128s[3]));
+    // Fold the deferred final block, still buffered in `ins` as a full 64 bytes or a zero-padded
+    // tail, into each lane. Folding the last block here, rather than in `update`, lets both the
+    // one-shot hash and the streaming digest defer it and share this single finalization.
+    __m128i aes0_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state.aes.u128s[0]),
+                                                        sz_lsx_load128_(&state.ins.u128s[0]));
+    __m128i aes1_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state.aes.u128s[1]),
+                                                        sz_lsx_load128_(&state.ins.u128s[1]));
+    __m128i aes2_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state.aes.u128s[2]),
+                                                        sz_lsx_load128_(&state.ins.u128s[2]));
+    __m128i aes3_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&state.aes.u128s[3]),
+                                                        sz_lsx_load128_(&state.ins.u128s[3]));
     sz_u128_vec_t sum0_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[0], shuffle);
     sz_u128_vec_t sum1_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[1], shuffle);
     sz_u128_vec_t sum2_vec = sz_emulate_shuffle_epi8_serial_(state.sum.u128s[2], shuffle);
@@ -543,23 +557,26 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_lasx_(sz_hash_state_al
     sum2_vec.u64s[0] += state.ins.u128s[2].u64s[0], sum2_vec.u64s[1] += state.ins.u128s[2].u64s[1];
     sum3_vec.u64s[0] += state.ins.u128s[3].u64s[0], sum3_vec.u64s[1] += state.ins.u128s[3].u64s[1];
 
-    __m128i mixed0_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum0_vec), aes0_u8x16);
-    __m128i mixed1_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum1_vec), aes1_u8x16);
-    __m128i mixed2_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum2_vec), aes2_u8x16);
-    __m128i mixed3_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&sum3_vec), aes3_u8x16);
-    __m128i mixed01_u8x16 = sz_emulate_aesenc_lasx_(mixed0_u8x16, mixed1_u8x16);
-    __m128i mixed23_u8x16 = sz_emulate_aesenc_lasx_(mixed2_u8x16, mixed3_u8x16);
-    __m128i mixed_u8x16 = sz_emulate_aesenc_lasx_(mixed01_u8x16, mixed23_u8x16);
-    __m128i mixed_in_register_u8x16 = sz_emulate_aesenc_lasx_(
-        sz_emulate_aesenc_lasx_(mixed_u8x16, sz_lsx_load128_(&key_with_length_vec)), mixed_u8x16);
+    __m128i mixed0_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&sum0_vec), aes0_u8x16);
+    __m128i mixed1_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&sum1_vec), aes1_u8x16);
+    __m128i mixed2_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&sum2_vec), aes2_u8x16);
+    __m128i mixed3_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&sum3_vec), aes3_u8x16);
+    __m128i mixed01_u8x16 = sz_emulate_aesenc_loongsonasx_(mixed0_u8x16, mixed1_u8x16);
+    __m128i mixed23_u8x16 = sz_emulate_aesenc_loongsonasx_(mixed2_u8x16, mixed3_u8x16);
+    __m128i mixed_u8x16 = sz_emulate_aesenc_loongsonasx_(mixed01_u8x16, mixed23_u8x16);
+    __m128i mixed_in_register_u8x16 = sz_emulate_aesenc_loongsonasx_(
+        sz_emulate_aesenc_loongsonasx_(mixed_u8x16, sz_lsx_load128_(&key_with_length_vec)), mixed_u8x16);
     sz_u128_vec_t result_vec;
     sz_lsx_store128_(&result_vec, mixed_in_register_u8x16);
     return result_vec.u64s[0];
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_lasx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
-    // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
-    sz_hash_state_aligned_t state = sz_hash_state_load_lasx_(packed);
+STRINGZILLA_API sz_status_t sz_hash_state_update_loongsonasx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
+                                                             void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Load the packed public state, at any alignment, into an aligned twin once, buffer and absorb
+    // on it, then store it back.
+    sz_hash_state_aligned_t state = sz_hash_state_load_loongsonasx_(packed);
     __m256i const zero_u8x32 = __lasx_xvreplgr2vr_b(0);
     while (length) {
         sz_size_t progress_in_block = state.ins_length % 64;
@@ -568,68 +585,81 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_lasx(sz_hash_state_t *packed,
         // would, keyed on the total length. Now that more bytes have arrived, that block is
         // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
-            sz_hash_state_update_lasx_(&state);
+            sz_hash_state_absorb_loongsonasx_(&state);
             __lasx_xvst(zero_u8x32, state.ins.u8s, 0);
             __lasx_xvst(zero_u8x32, state.ins.u8s + 32, 0);
         }
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
         state.ins_length += to_copy;
         length -= to_copy;
-        // Append to the internal buffer; the block that exactly fills it stays deferred (see above).
+        // Append to the internal buffer; the block that exactly fills it stays deferred, as above.
         while (to_copy--) state.ins.u8s[progress_in_block++] = (sz_u8_t)*text++;
     }
-    sz_hash_state_store_lasx_(packed, &state);
+    sz_hash_state_store_loongsonasx_(packed, &state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_lasx(sz_hash_state_t const *packed) {
-    sz_hash_state_aligned_t state = sz_hash_state_load_lasx_(packed);
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_loongsonasx_(sz_hash_state_t const *packed) {
+    sz_hash_state_aligned_t state = sz_hash_state_load_loongsonasx_(packed);
     sz_size_t length = state.ins_length;
-    // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
-    // buffered in `ins`, and `sz_hash_state_finalize_lasx_` folds it - reproducing one-shot `sz_hash` exactly.
-    if (length > 64) return sz_hash_state_finalize_lasx_(state);
+    // Inputs longer than one block fold through the full four-lane state. The deferred final block
+    // is still buffered in `ins`, and `sz_hash_state_finalize_loongsonasx_` folds it, reproducing
+    // the one-shot hash exactly.
+    if (length > 64) return sz_hash_state_finalize_loongsonasx_(state);
 
-    // Switch back to a smaller "short" state for small inputs; the aligned twin lanes are read directly.
+    // Switch back to a smaller "short" state for small inputs, reading the aligned twin's lanes.
     sz_hash_state_aligned_for_short_t minimal_state;
     minimal_state.key = state.key;
     minimal_state.aes = state.aes.u128s[0];
     minimal_state.sum = state.sum.u128s[0];
     if (length <= 16) {
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[0]);
-        return sz_hash_state_short_finalize_lasx_(&minimal_state, length);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[0]);
+        return sz_hash_state_short_finalize_loongsonasx_(&minimal_state, length);
     }
     else if (length <= 32) {
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[0]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[1]);
-        return sz_hash_state_short_finalize_lasx_(&minimal_state, length);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[1]);
+        return sz_hash_state_short_finalize_loongsonasx_(&minimal_state, length);
     }
     else if (length <= 48) {
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[0]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[1]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[2]);
-        return sz_hash_state_short_finalize_lasx_(&minimal_state, length);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[1]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[2]);
+        return sz_hash_state_short_finalize_loongsonasx_(&minimal_state, length);
     }
     else {
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[0]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[1]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[2]);
-        sz_hash_state_short_update_lasx_(&minimal_state, state.ins.u128s[3]);
-        return sz_hash_state_short_finalize_lasx_(&minimal_state, length);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[0]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[1]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[2]);
+        sz_hash_state_short_update_loongsonasx_(&minimal_state, state.ins.u128s[3]);
+        return sz_hash_state_short_finalize_loongsonasx_(&minimal_state, length);
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_random_lasx(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_loongsonasx(sz_hash_state_t const *packed, sz_u64_t *hash,
+                                                             void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_loongsonasx_(packed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                       void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
         input_vec.u64s[0] = input_vec.u64s[1] = nonce + lane_index;
-        pi_vec = ((sz_u128_vec_t const *)pi_constants)[lane_index % 4];
+        pi_vec.u64s[0] = pi_constants[(lane_index % 4) * 2];
+        pi_vec.u64s[1] = pi_constants[(lane_index % 4) * 2 + 1];
         key_vec.u64s[0] = nonce ^ pi_vec.u64s[0];
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
-        __m128i gen_u8x16 = sz_emulate_aesenc_lasx_(sz_lsx_load128_(&input_vec), sz_lsx_load128_(&key_vec));
+        __m128i gen_u8x16 = sz_emulate_aesenc_loongsonasx_(sz_lsx_load128_(&input_vec), sz_lsx_load128_(&key_vec));
         sz_lsx_store128_(&generated_vec, gen_u8x16);
         for (sz_size_t byte_index = 0; byte_index < 16 && length; ++byte_index, --length)
-            *text++ = generated_vec.u8s[byte_index];
+            *target++ = generated_vec.u8s[byte_index];
     }
+    return sz_success_k;
 }
 
 /*  SHA-256 with a SIMD-vectorized message schedule.
@@ -649,23 +679,23 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_lasx(sz_ptr_t text, sz_size_t lengt
  *  @c sz_sha256_process_block_serial_ in `hash/serial.h`. */
 
 /** Lane-wise SHA-256 lowercase-sigma0: `ROTR(x,7) ^ ROTR(x,18) ^ SHR(x,3)` over 4x u32. */
-STRINGZILLA_HELPER_INLINE __m128i sz_sha256_sigma0_lower_lasx_(__m128i words_u32x4) {
+STRINGZILLA_INLINE __m128i sz_sha256_sigma0_lower_loongsonasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 7), __lsx_vrotri_w(words_u32x4, 18)),
                         __lsx_vsrli_w(words_u32x4, 3));
 }
 
 /** Lane-wise SHA-256 lowercase-sigma1: `ROTR(x,17) ^ ROTR(x,19) ^ SHR(x,10)` over 4x u32. */
-STRINGZILLA_HELPER_INLINE __m128i sz_sha256_sigma1_lower_lasx_(__m128i words_u32x4) {
+STRINGZILLA_INLINE __m128i sz_sha256_sigma1_lower_loongsonasx_(__m128i words_u32x4) {
     return __lsx_vxor_v(__lsx_vxor_v(__lsx_vrotri_w(words_u32x4, 17), __lsx_vrotri_w(words_u32x4, 19)),
                         __lsx_vsrli_w(words_u32x4, 10));
 }
 
-STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_lasx_(
+STRINGZILLA_INLINE void sz_sha256_process_block_loongsonasx_(
     sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(STRINGZILLA_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_align_(16) sz_u32_t message_schedule[64];
 
-    // Load W[0..15]: byte-reverse each 4-byte group (big-endian) with one `vshuf_b` per 16-byte chunk.
+    // Load W[0..15], byte-reversing each big-endian 4-byte group with one `vshuf_b` per 16 bytes.
     static
         sz_align_(16) sz_u8_t const byte_reverse_indices[16] = {3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12};
     __m128i byte_reverse_u8x16 = __lsx_vld(byte_reverse_indices, 0);
@@ -674,21 +704,21 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_lasx_(
         __lsx_vst(__lsx_vshuf_b(raw_u8x16, raw_u8x16, byte_reverse_u8x16), &message_schedule[group_index * 4], 0);
     }
 
-    // Expand W[16..63] four lanes at a time. `low_pair_mask` keeps lanes 0,1 and zeroes lanes 2,3 so that
-    // `sigma1` of the not-yet-computed high pair contributes nothing in step one.
+    // Expand W[16..63] four lanes at a time. `low_pair_mask` keeps lanes 0,1 and zeroes lanes 2,3,
+    // so `sigma1` of the not-yet-computed high pair contributes nothing in step one.
     __m128i const low_pair_mask_u32x4 = __lsx_vinsgr2vr_d(__lsx_vreplgr2vr_d(-1), 0, 1); // [~0, ~0, 0, 0]
     for (sz_size_t word_index = 16; word_index < 64; word_index += 4) {
         __m128i window_16_u32x4 = __lsx_vld(&message_schedule[word_index - 16], 0); // W[t-16 .. t-13]
         __m128i window_15_u32x4 = __lsx_vld(&message_schedule[word_index - 15], 0); // W[t-15 .. t-12]
         __m128i window_7_u32x4 = __lsx_vld(&message_schedule[word_index - 7], 0);   // W[t-7  .. t-4]
-        __m128i base_u32x4 = __lsx_vadd_w(__lsx_vadd_w(window_16_u32x4, sz_sha256_sigma0_lower_lasx_(window_15_u32x4)),
-                                          window_7_u32x4);
+        __m128i base_u32x4 = __lsx_vadd_w(
+            __lsx_vadd_w(window_16_u32x4, sz_sha256_sigma0_lower_loongsonasx_(window_15_u32x4)), window_7_u32x4);
         // Step 1: sigma1 of [W[t-2], W[t-1], 0, 0] finalizes lanes 0,1 (W[t], W[t+1]).
         __m128i prev_pair_u32x4 = __lsx_vand_v(__lsx_vld(&message_schedule[word_index - 2], 0), low_pair_mask_u32x4);
-        __m128i schedule_u32x4 = __lsx_vadd_w(base_u32x4, sz_sha256_sigma1_lower_lasx_(prev_pair_u32x4));
-        // Step 2: shift the fresh low pair into lanes 2,3 and add its sigma1 to finalize W[t+2], W[t+3].
+        __m128i schedule_u32x4 = __lsx_vadd_w(base_u32x4, sz_sha256_sigma1_lower_loongsonasx_(prev_pair_u32x4));
+        // Step 2: shift the fresh low pair into lanes 2,3, adding its sigma1 to finish W[t+2..t+3].
         __m128i new_pair_u32x4 = __lsx_vbsll_v(schedule_u32x4, 8); // [0, 0, W[t], W[t+1]]
-        schedule_u32x4 = __lsx_vadd_w(schedule_u32x4, sz_sha256_sigma1_lower_lasx_(new_pair_u32x4));
+        schedule_u32x4 = __lsx_vadd_w(schedule_u32x4, sz_sha256_sigma1_lower_loongsonasx_(new_pair_u32x4));
         __lsx_vst(schedule_u32x4, &message_schedule[word_index], 0);
     }
 
@@ -708,13 +738,16 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_lasx_(
     hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_init_lasx(sz_sha256_state_t *state) {
-    sz_sha256_state_init_serial(state);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_loongsonasx(sz_sha256_state_t *state, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_init_serial_(state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_update_lasx(sz_sha256_state_t *state_ptr, sz_cptr_t data,
-                                                          sz_size_t length) {
-    sz_u8_t const *input = (sz_u8_t const *)data;
+STRINGZILLA_API sz_status_t sz_sha256_state_update_loongsonasx(sz_sha256_state_t *state_ptr, sz_cptr_t text,
+                                                               sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_u8_t const *input = (sz_u8_t const *)text;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
@@ -725,7 +758,7 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_lasx(sz_sha256_state_t *sta
     // Fast path: stays in the same block and doesn't fill it.
     if (stays_in_the_block && !fills_the_block) {
         for (; length; --length, ++state_ptr->block_length, ++input) state_ptr->block[state_ptr->block_length] = *input;
-        return;
+        return sz_success_k;
     }
 
     sz_size_t const head_length = (STRINGZILLA_SHA256_BLOCK_LENGTH - state_ptr->block_length) %
@@ -742,13 +775,13 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_lasx(sz_sha256_state_t *sta
     if (head_length) {
         for (sz_size_t byte_index = 0; byte_index < head_length; ++byte_index)
             state_ptr->block[state_ptr->block_length++] = input[byte_index];
-        sz_sha256_process_block_lasx_(hash, state_ptr->block);
+        sz_sha256_process_block_loongsonasx_(hash, state_ptr->block);
         state_ptr->block_length = 0;
         input += head_length;
     }
     for (sz_size_t processed = 0; processed < body_length;
          processed += STRINGZILLA_SHA256_BLOCK_LENGTH, input += STRINGZILLA_SHA256_BLOCK_LENGTH)
-        sz_sha256_process_block_lasx_(hash, input);
+        sz_sha256_process_block_loongsonasx_(hash, input);
     for (sz_size_t byte_index = 0; byte_index < tail_length; ++byte_index)
         state_ptr->block[byte_index] = input[byte_index];
     state_ptr->block_length = tail_length;
@@ -756,24 +789,26 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_lasx(sz_sha256_state_t *sta
     state_ptr->hash[0] = hash[0], state_ptr->hash[1] = hash[1], state_ptr->hash[2] = hash[2],
     state_ptr->hash[3] = hash[3], state_ptr->hash[4] = hash[4], state_ptr->hash[5] = hash[5],
     state_ptr->hash[6] = hash[6], state_ptr->hash[7] = hash[7];
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_lasx(
-    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
+STRINGZILLA_API sz_status_t sz_sha256_state_digest_loongsonasx(
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_t state = *state_ptr;
 
-    // Append the '1' bit (0x80), then pad with zeros, processing an extra block if the length doesn't fit.
+    // Append the '1' bit, 0x80, then zeros, processing an extra block if the length won't fit.
     state.block[state.block_length++] = 0x80;
     if (state.block_length > 56) {
         for (sz_size_t byte_index = state.block_length; byte_index < STRINGZILLA_SHA256_BLOCK_LENGTH; ++byte_index)
             state.block[byte_index] = 0;
-        sz_sha256_process_block_lasx_(state.hash, state.block);
+        sz_sha256_process_block_loongsonasx_(state.hash, state.block);
         state.block_length = 0;
     }
     for (sz_size_t byte_index = state.block_length; byte_index < 56; ++byte_index) state.block[byte_index] = 0;
     state.block_length = 56;
 
-    // Append the message length in bits as a 64-bit big-endian integer, then process the final block.
+    // Append the message length in bits as a big-endian 64-bit integer and process the final block.
     sz_u64_t bit_length = state.total_length * 8;
     state.block[56] = (sz_u8_t)(bit_length >> 56);
     state.block[57] = (sz_u8_t)(bit_length >> 48);
@@ -783,7 +818,7 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_lasx(
     state.block[61] = (sz_u8_t)(bit_length >> 16);
     state.block[62] = (sz_u8_t)(bit_length >> 8);
     state.block[63] = (sz_u8_t)(bit_length >> 0);
-    sz_sha256_process_block_lasx_(state.hash, state.block);
+    sz_sha256_process_block_loongsonasx_(state.hash, state.block);
 
     // Emit the digest big-endian.
     for (sz_size_t word_index = 0; word_index < 8; ++word_index) {
@@ -792,12 +827,13 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_lasx(
         digest[word_index * 4 + 2] = (sz_u8_t)(state.hash[word_index] >> 8);
         digest[word_index * 4 + 3] = (sz_u8_t)(state.hash[word_index] >> 0);
     }
+    return sz_success_k;
 }
 
-#endif // STRINGZILLA_TARGET_LASX
+#endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // STRINGZILLA_HASH_LASX_H_
+#endif // STRINGZILLA_HASH_LOONGSONASX_H_

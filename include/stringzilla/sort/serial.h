@@ -10,8 +10,7 @@
 #define STRINGZILLA_SORT_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h"                  // `sz_compare`
-#include "stringzilla/memory.h"                   // `sz_copy`
+#include "stringzilla/compare/serial.h"           // `sz_order_serial_`
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`
 
 #ifdef __cplusplus
@@ -22,8 +21,7 @@ extern "C" {
 
 /** Quadratic complexity @b stable insertion sort adjust for our @b argsort usecase. Needs no extra
  *  memory and is used as a fallback for small inputs. */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence,
-                                                                 sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE void sz_sequence_argsort_with_insertion(sz_sequence_t const *sequence, sz_sorted_idx_t *order) {
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t element_index = 1; element_index < sequence->count; ++element_index) {
         sz_sorted_idx_t current_idx = order[element_index];
@@ -36,8 +34,7 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t c
             sz_size_t previous_length = sequence->get_length(sequence->handle, previous_idx);
             sz_size_t current_length = sequence->get_length(sequence->handle, current_idx);
 
-            // Use the provided sz_order to compare.
-            sz_ordering_t ordering = sz_order(previous_start, previous_length, current_start, current_length);
+            sz_ordering_t ordering = sz_order_serial_(previous_start, previous_length, current_start, current_length);
 
             // If the previous string is not greater than current_idx, we're done.
             if (ordering != sz_greater_k) break;
@@ -52,8 +49,7 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_with_insertion(sz_sequence_t c
 
 /** Quadratic complexity @b stable insertion sort adjust for our @b pgram-sorting usecase. Needs no
  *  extra memory and is used as a fallback for small inputs. */
-STRINGZILLA_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count,
-                                                            sz_sorted_idx_t *order) {
+STRINGZILLA_CONSTEXPR void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, sz_size_t count, sz_sorted_idx_t *order) {
 
     // Assume `order` is already initialized with 0, 1, 2, ... N.
     for (sz_size_t element_index = 1; element_index < count; ++element_index) {
@@ -100,7 +96,7 @@ STRINGZILLA_API_COMPTIME void sz_pgrams_sort_with_insertion(sz_pgram_t *pgrams, 
     } while (0)
 
 /** Sorting network for 2 elements is just a single compare-swap. */
-STRINGZILLA_HELPER_INLINE void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+STRINGZILLA_INLINE void sz_sequence_sorting_network_2x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
     sz_sequence_sorting_network_conditional_swap_(0, 1);
 }
 
@@ -113,7 +109,7 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_sorting_network_2x_(sz_pgram_t *pgram
  *      Stage 2: (0, 2)
  *      Stage 3: (1, 2)
  */
-STRINGZILLA_HELPER_INLINE void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+STRINGZILLA_INLINE void sz_sequence_sorting_network_3x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     sz_sequence_sorting_network_conditional_swap_(0, 1);
     sz_sequence_sorting_network_conditional_swap_(0, 2);
@@ -137,7 +133,7 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_sorting_network_3x_(sz_pgram_t *pgram
  *  Stage 4: (1, 2)
  *  @endverbatim
  */
-STRINGZILLA_HELPER_AUTO void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+STRINGZILLA_CONSTEXPR void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
@@ -173,7 +169,7 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_sorting_network_4x_(sz_pgram_t *pgrams,
  *  Stage 6: (1,2), (3,4), (5,6)
  *  @endverbatim
  */
-STRINGZILLA_HELPER_AUTO void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
+STRINGZILLA_CONSTEXPR void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams, sz_sorted_idx_t *offsets) {
 
     // Stage 1: Compare-swap adjacent pairs.
     sz_sequence_sorting_network_conditional_swap_(0, 1);
@@ -226,7 +222,7 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_sorting_network_8x_(sz_pgram_t *pgrams,
  *  common word), so the indices - which are distinct integers - get the same log-linear treatment
  *  as the pgrams.
  */
-STRINGZILLA_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
+STRINGZILLA_CONSTEXPR void sz_order_indices_ascending_(sz_sorted_idx_t *order, sz_size_t count) {
     // A small explicit stack of deferred half-open ranges; always recursing into the smaller side and
     // looping on the larger keeps the depth below `log2(count)`, so 2*64 slots cover any 64-bit count.
     sz_size_t stack[2 * 64];
@@ -297,7 +293,7 @@ STRINGZILLA_HELPER_AUTO void sz_order_indices_ascending_(sz_sorted_idx_t *order,
  *      ascending integer sort of the complemented keys yields a descending lexicographic order
  *      of the strings.
  */
-STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(    //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_export_byte_window_(      //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -371,7 +367,7 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(    
             sz_size_t const previous_length = sequence->get_length(sequence->handle, sequence_index - 1);
             sz_cptr_t const current_str = sequence->get_start(sequence->handle, sequence_index);
             sz_size_t const current_length = sequence->get_length(sequence->handle, sequence_index);
-            sz_ordering_t const ordering = sz_order(                                               //
+            sz_ordering_t const ordering = sz_order_serial_(                                       //
                 previous_str, previous_length > pgram_capacity ? pgram_capacity : previous_length, //
                 current_str, current_length > pgram_capacity ? pgram_capacity : current_length);
             sz_assert_(                                                        //
@@ -389,7 +385,7 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_export_byte_window_(    
  *  @param[in] count Number of pgrams in the array.
  *  @return Pointer to the chosen pivot pgram within the array.
  */
-STRINGZILLA_HELPER_AUTO sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
+STRINGZILLA_CONSTEXPR sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram_t const *pgrams, sz_size_t count) {
     sz_size_t const middle_offset = count / 2;
     sz_pgram_t const *first_pgram = &pgrams[0];
     sz_pgram_t const *middle_pgram = &pgrams[middle_offset];
@@ -422,7 +418,7 @@ STRINGZILLA_HELPER_AUTO sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgr
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
-STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(  //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_3way_partition_(    //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
@@ -471,8 +467,8 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(  //
 }
 
 /**
- *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort and
- *      @c sz_pgrams_sort, and using the @c sz_sequence_argsort_serial_3way_partition_
+ *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_best and
+ *      @c sz_pgrams_sort_serial_, and using the @c sz_sequence_argsort_serial_3way_partition_
  *      under the hood.
  *
  *  @param[inout] global_pgrams Pgram array to sort in place.
@@ -485,8 +481,8 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_3way_partition_(  //
  *  With the complement trick the wanted elements, the smallest or the largest under reverse, always
  *  fall in `[0, top_count)`, so one cut-off serves both directions.
  */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_quicksort_pgrams_( //
-    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,   //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_quicksort_pgrams_(  //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
 
     // Partition the collection around some pivot or 2 pivots in a 3-way partitioning
@@ -522,10 +518,10 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_quicksort_pgrams_( //
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_sort_byte_windows_( //
-    sz_sequence_t const *const sequence,                                     //
-    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,    //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,      //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_byte_windows_( //
+    sz_sequence_t const *const sequence,                                  //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
 
     // Prepare the new range of pgrams
@@ -577,55 +573,23 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_sort_byte_windows_( //
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence,
-                                                                sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
-                                                                sz_size_t top_count, sz_bool_t reverse) {
-
-    // First, initialize the `order` with `std::iota`-like behavior.
-    for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
-        order[sequence_index] = sequence_index;
-
-    // On very small ascending collections - just use the quadratic-complexity @b stable insertion sort
-    // without any smart optimizations or memory allocations. Fully ordering up to 32 elements trivially
-    // satisfies any `top_count`. Descending small inputs fall through to the complementing pgram path.
-    if (sequence->count <= 32 && !reverse) {
-        sz_sequence_argsort_with_insertion(sequence, order);
-        return sz_success_k;
-    }
-
-    // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    sz_memory_allocator_t global_alloc;
-    if (!alloc) {
-        sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
-    }
-
-    // One of the reasons for slow string operations is the significant overhead of branching when performing
-    // individual string comparisons.
-    //
-    // The core idea of our algorithm is to minimize character-level loops in string comparisons and
-    // instead operate on larger integer words - 4 or 8 bytes at once, on 32-bit or 64-bit architectures, respectively.
-    // Let's say we have N strings and the pointer size is P.
-    //
-    // Our recursive algorithm will take the first P bytes of each string and sort them as integers.
-    // Assuming that some strings may contain or even end with NULL bytes, we need to make sure, that their length
-    // is included in those P-long words. So, in reality, we will be taking (P-1) bytes from each string on every
-    // iteration of a recursive algorithm.
-    sz_size_t memory_usage = sequence->count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
-    if (!pgrams) return sz_bad_alloc_k;
-
-    // Recursively sort the whole sequence.
-    sz_sequence_argsort_serial_sort_byte_windows_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
-
-    // Free temporary storage.
-    alloc->free(pgrams, memory_usage, alloc->handle);
-    return sz_success_k;
-}
-
-STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, sz_size_t count,
-                                                           sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
-    sz_unused_(alloc);
+/**
+ *  @brief Internal @b inplace QuickSort for a continuous @b unsigned-integer sequence, backing
+ *      the arg-sorts of strings.
+ *
+ *  Overwrites the input @p pgrams with the sorted sequence and exports the @p order permutation.
+ *  Not part of the stable, public ordering contract and not dispatched - the per-backend variants
+ *  exist for direct benchmarking of the integer-sort core.
+ *
+ *  @param[inout] pgrams Continuous buffer of unsigned integers to sort in place.
+ *  @param[in] count Number of elements in the sequence.
+ *  @param[in] allocator Optional memory allocator for temporary storage.
+ *  @param[out] order Output permutation that sorts the elements.
+ *  @return @c sz_success_k on success, or @c sz_bad_alloc_k if memory allocation failed.
+ */
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_size_t count,
+                                                      sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
+    sz_unused_(allocator);
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
     // Reuse the string sorting algorithm for sorting the "pgrams" - a plain full ascending sort.
@@ -666,10 +630,10 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_serial(sz_pgram_t *pgrams, s
  *      times the fields per pgram.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_export_casefold_window_( //
-    sz_sequence_t const *const sequence,                                         //
-    sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order,  //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,          //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_export_casefold_window_(  //
+    sz_sequence_t const *const sequence,                                        //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
     sz_size_t const folded_skip_count, sz_bool_t const reverse) {
 
     sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
@@ -737,10 +701,10 @@ STRINGZILLA_HELPER_AUTO void sz_sequence_argsort_serial_export_casefold_window_(
  *  its folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups
  *  one window deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly
  *  like @c start_character. */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_sort_casefold_windows_( //
-    sz_sequence_t const *const sequence,                                         //
-    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,        //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,          //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_casefold_windows_( //
+    sz_sequence_t const *const sequence,                                      //
+    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,     //
+    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,       //
     sz_size_t const folded_skip_count, sz_size_t const top_count, sz_bool_t const reverse) {
 
     sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
@@ -776,32 +740,6 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_serial_sort_casefold_windows_(
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,         //
-    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
-
-    sz_size_t const count = sequence->count;
-    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
-        order[sequence_index] = sequence_index;
-    if (count < 2) return sz_success_k;
-
-    sz_memory_allocator_t global_alloc;
-    if (!alloc) {
-        sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
-    }
-
-    // Just a pgram buffer: the sort is stateless across windows, re-folding each string's prefix on demand.
-    sz_size_t const memory_usage = count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
-    if (!pgrams) return sz_bad_alloc_k;
-
-    sz_sequence_argsort_serial_sort_casefold_windows_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
-
-    alloc->free(pgrams, memory_usage, alloc->handle);
-    return sz_success_k;
-}
-
 #pragma endregion Case Insensitive
 
 /**
@@ -821,7 +759,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_serial( //
  *      `first_count + second_count` entries.
  *  @see https://en.cppreference.com/w/cpp/algorithm/set_union
  */
-STRINGZILLA_HELPER_AUTO void sz_pgrams_union_serial_(                                               //
+STRINGZILLA_CONSTEXPR void sz_pgrams_union_serial_(                                                 //
     sz_pgram_t const *first_pgrams, sz_sorted_idx_t const *first_indices, sz_size_t first_count,    //
     sz_pgram_t const *second_pgrams, sz_sorted_idx_t const *second_indices, sz_size_t second_count, //
     sz_pgram_t *result_pgrams, sz_sorted_idx_t *result_indices) {
@@ -868,6 +806,86 @@ STRINGZILLA_HELPER_AUTO void sz_pgrams_union_serial_(                           
             sz_assert_(merged_begin[pgram_index - 1] <= merged_begin[pgram_index] &&
                        "The merged pgrams must be in ascending order.");
 }
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_size_t top_count,
+                                                       sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                       sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+
+    // First, initialize the `order` with `std::iota`-like behavior.
+    for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
+        order[sequence_index] = sequence_index;
+    if (sequence->count < 2) return sz_success_k;
+
+    // On very small ascending collections, just use the quadratic-complexity @b stable insertion
+    // sort without any smart optimizations or memory allocations. Fully ordering up to 32
+    // elements trivially satisfies any `top_count`. Descending small inputs fall through to the
+    // complementing pgram path.
+    if (sequence->count <= 32 && !reverse) {
+        sz_sequence_argsort_with_insertion(sequence, order);
+        return sz_success_k;
+    }
+
+    // Default the allocator, as higher-level libraries may find wrapping custom ones troublesome.
+    sz_memory_allocator_t global_alloc;
+    if (!allocator) {
+        sz_memory_allocator_init_default(&global_alloc);
+        allocator = &global_alloc;
+    }
+
+    // One of the reasons for slow string operations is the significant overhead of branching when
+    // performing individual string comparisons.
+    //
+    // The core idea of our algorithm is to minimize character-level loops in string comparisons
+    // and instead operate on larger integer words, 4 or 8 bytes at once on 32-bit or 64-bit
+    // architectures respectively. Let's say we have N strings and the pointer size is P.
+    //
+    // Our recursive algorithm will take the first P bytes of each string and sort them as
+    // integers. As some strings may contain or even end with NULL bytes, their length must be
+    // included in those P-long words, so in reality every iteration of the recursive algorithm
+    // takes (P-1) bytes from each string.
+    sz_size_t memory_usage = sequence->count * sizeof(sz_pgram_t);
+    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    if (!pgrams) return sz_bad_alloc_k;
+
+    // Recursively sort the whole sequence.
+    sz_sequence_argsort_serial_sort_byte_windows_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
+
+    // Free temporary storage.
+    allocator->free(pgrams, memory_usage, allocator->handle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(            //
+    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
+    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+
+    sz_size_t const count = sequence->count;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
+
+    sz_memory_allocator_t global_alloc;
+    if (!allocator) {
+        sz_memory_allocator_init_default(&global_alloc);
+        allocator = &global_alloc;
+    }
+
+    // Just a pgram buffer: the sort is stateless across windows, re-folding each prefix on demand.
+    sz_size_t const memory_usage = count * sizeof(sz_pgram_t);
+    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    if (!pgrams) return sz_bad_alloc_k;
+
+    sz_sequence_argsort_serial_sort_casefold_windows_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
+
+    allocator->free(pgrams, memory_usage, allocator->handle);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

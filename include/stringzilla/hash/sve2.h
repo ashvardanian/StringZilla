@@ -10,14 +10,13 @@
 #define STRINGZILLA_HASH_SVE2_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +24,7 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_sve2_(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();
@@ -50,12 +49,22 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t leng
     return sum;
 }
 
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_sve2_(text, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE2
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

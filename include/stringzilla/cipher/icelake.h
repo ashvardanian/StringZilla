@@ -14,6 +14,7 @@
 #define STRINGZILLA_CIPHER_ICELAKE_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -24,7 +25,12 @@ extern "C" {
  *  it, and `hash/icelake.h` and `utf8_graphemes/icelake.h` both name it; this string was
  *  short, not narrower. */
 #if STRINGZILLA_TARGET_ICELAKE
-#if defined(__clang__)
+#if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
+#pragma clang attribute push(                                                                                      \
+    __attribute__((                                                                                                \
+        target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2,aes,vaes,pclmul,vpclmulqdq,evex512"))), \
+    apply_to = function)
+#elif defined(__clang__)
 #pragma clang attribute push(                                                                                         \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,bmi,bmi2,aes,vaes,pclmul,vpclmulqdq"))), \
     apply_to = function)
@@ -58,14 +64,14 @@ extern "C" {
  *  quadruple, which is the cumulative exclusive-or that three byte-wise doublings of
  *  @c _mm_slli_si128 produce.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_aes256_key_fold_icelake_(__m128i previous_u8x16, __m128i assisted_u8x16) {
+STRINGZILLA_INLINE __m128i sz_aes256_key_fold_icelake_(__m128i previous_u8x16, __m128i assisted_u8x16) {
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     previous_u8x16 = _mm_xor_si128(previous_u8x16, _mm_slli_si128(previous_u8x16, 4));
     return _mm_xor_si128(previous_u8x16, assisted_u8x16);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_INLINE void sz_aes256_key_init_icelake_(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     __m128i secret_low_words_u8x16 = _mm_loadu_epi8(secret);
     __m128i secret_high_words_u8x16 = _mm_loadu_epi8(secret + 16);
 
@@ -114,6 +120,13 @@ STRINGZILLA_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, s
     _mm_storeu_epi32(key->round_keys + 56, secret_low_words_u8x16);
 }
 
+STRINGZILLA_API sz_status_t sz_aes256_key_init_icelake(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
+                                                       void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_key_init_icelake_(key, secret);
+    return sz_success_k;
+}
+
 #pragma endregion Key Schedule
 
 #pragma region Counter Mode
@@ -124,7 +137,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_key_init_icelake(sz_aes256_key_t *key, s
  *  @param[in] block_u8x16 The plaintext block.
  *  @return The ciphertext block.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const *key, __m128i block_u8x16) {
+STRINGZILLA_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key_t const *key, __m128i block_u8x16) {
     block_u8x16 = _mm_xor_si128(block_u8x16, _mm_loadu_epi32(key->round_keys + 0));
     block_u8x16 = _mm_aesenc_si128(block_u8x16, _mm_loadu_epi32(key->round_keys + 4));
     block_u8x16 = _mm_aesenc_si128(block_u8x16, _mm_loadu_epi32(key->round_keys + 8));
@@ -147,8 +160,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_aes256_block_encrypt_icelake_(sz_aes256_key
  *  @param[in] key The expanded schedule.
  *  @param[out] wide_keys_vec Receives fifteen registers, one per round.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_round_keys_wide_icelake_(sz_aes256_key_t const *key,
-                                                                  sz_u512_vec_t *wide_keys_vec) {
+STRINGZILLA_INLINE void sz_aes256_round_keys_wide_icelake_(sz_aes256_key_t const *key, sz_u512_vec_t *wide_keys_vec) {
     wide_keys_vec[0].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 0));
     wide_keys_vec[1].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 4));
     wide_keys_vec[2].zmm = _mm512_broadcast_i32x4(_mm_loadu_epi32(key->round_keys + 8));
@@ -171,8 +183,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_round_keys_wide_icelake_(sz_aes256_key_
  *
  *  The rounds are written out rather than looped.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_u8x64,
-                                                                 sz_u512_vec_t const *wide_keys_vec) {
+STRINGZILLA_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_u8x64, sz_u512_vec_t const *wide_keys_vec) {
     block_u8x64 = _mm512_aesenc_epi128(block_u8x64, wide_keys_vec[1].zmm);
     block_u8x64 = _mm512_aesenc_epi128(block_u8x64, wide_keys_vec[2].zmm);
     block_u8x64 = _mm512_aesenc_epi128(block_u8x64, wide_keys_vec[3].zmm);
@@ -190,12 +201,12 @@ STRINGZILLA_HELPER_INLINE __m512i sz_aes256_rounds_wide_icelake_(__m512i block_u
 }
 
 /** Lane identity `{0, 1, ..., 15}`, the base a byte-offset permutation is built from. */
-STRINGZILLA_HELPER_INLINE __m128i sz_aes256_lane_iota_icelake_(void) {
+STRINGZILLA_INLINE __m128i sz_aes256_lane_iota_icelake_(void) {
     return _mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
 
 /** Reverses the trailing four bytes of each 128-bit lane, its own inverse. */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
+STRINGZILLA_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
     static sz_align_(64) sz_u8_t const swap[64] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 14, 13, 12, //
                                                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 14, 13, 12, //
                                                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 14, 13, 12, //
@@ -209,7 +220,7 @@ STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_aes256_counter_swap_icelake_(void) {
  *  @param[in] block_index Index of the first of the four blocks.
  *  @return Counters for blocks @p block_index through `block_index + 3`.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *nonce, sz_u32_t block_index) {
+STRINGZILLA_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *nonce, sz_u32_t block_index) {
     // Only twelve bytes are readable, and a masked load suppresses the fault on the rest while zeroing
     // them, which is the trailing index word this wants anyway.
     __m128i const nonce_u8x16 = _mm_maskz_loadu_epi8((__mmask16)0x0FFFu, nonce);
@@ -225,7 +236,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_aes256_counters_icelake_(sz_u8_t const *non
  *  @param[in] counter_swap_u8x64 The trailing-field reversal pattern.
  *  @return The block NIST's counter mode feeds to the cipher.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_aes256_counter_block_icelake_(__m512i counters_u8x64, __m512i counter_swap_u8x64) {
+STRINGZILLA_INLINE __m128i sz_aes256_counter_block_icelake_(__m512i counters_u8x64, __m512i counter_swap_u8x64) {
     return _mm512_castsi512_si128(_mm512_shuffle_epi8(counters_u8x64, counter_swap_u8x64));
 }
 
@@ -242,9 +253,8 @@ STRINGZILLA_HELPER_INLINE __m128i sz_aes256_counter_block_icelake_(__m512i count
  *  below it exist only to land the tail, and a caller reaching them has already run out of work to
  *  hide latency in.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters_u8x64,
-                                                                sz_u512_vec_t const *wide_keys_vec, sz_u8_t const *text,
-                                                                sz_u8_t *output, sz_size_t length) {
+STRINGZILLA_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters_u8x64, sz_u512_vec_t const *wide_keys_vec,
+                                                         sz_u8_t const *text, sz_u8_t *output, sz_size_t length) {
     __m512i const counter_swap_u8x64 = _mm512_load_si512(sz_aes256_counter_swap_icelake_());
     __m512i const step_four_u8x64 = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 4);
     __m512i const step_sixteen_u8x64 = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 16);
@@ -302,25 +312,24 @@ STRINGZILLA_HELPER_INLINE __m512i sz_aes256_ctr_stride_icelake_(__m512i counters
         keystream_u8x64 = sz_aes256_rounds_wide_icelake_(keystream_u8x64, wide_keys_vec);
         _mm512_mask_storeu_epi8(output + produced, tail_m64,
                                 _mm512_xor_si512(keystream_u8x64, _mm512_maskz_loadu_epi8(tail_m64, text + produced)));
-        counters_u8x64 = _mm512_add_epi32(
-            counters_u8x64, _mm512_maskz_set1_epi32(
-                                (__mmask16)0x8888u,
-                                (int)((remaining + STRINGZILLA_AES_BLOCK_LENGTH - 1) / STRINGZILLA_AES_BLOCK_LENGTH)));
+        int const tail_blocks = (int)sz_size_divide_round_up(remaining, STRINGZILLA_AES_BLOCK_LENGTH);
+        counters_u8x64 = _mm512_add_epi32(counters_u8x64, _mm512_maskz_set1_epi32((__mmask16)0x8888u, tail_blocks));
     }
     return counters_u8x64;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *key,
-                                                        sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
-                                                        sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
+                                                      sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
+                                                      sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
-    sz_u8_t *output_bytes = (sz_u8_t *)output;
+    sz_u8_t *output_bytes = (sz_u8_t *)target;
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
-    sz_assert_no_overlap_(output, length, text, length);
+    sz_assert_no_overlap_(target, length, text, length);
 
-    if (length == 0) return;
+    if (length == 0) return sz_success_k;
 
     //  A seek that lands mid-block spends the leading bytes of one keystream block and nothing else.
     if (within_block != 0) {
@@ -346,6 +355,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *k
         sz_aes256_ctr_stride_icelake_(sz_aes256_counters_icelake_(nonce, block_index), wide_keys_vec,
                                       input_bytes + produced, output_bytes + produced, length - produced);
     }
+    return sz_success_k;
 }
 
 #pragma endregion Counter Mode
@@ -353,7 +363,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_icelake(sz_aes256_key_t const *k
 #pragma region Galois Hashing
 
 /** Reverses all sixteen bytes of each 128-bit lane, its own inverse. */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_ghash_byte_reverse_icelake_(void) {
+STRINGZILLA_INLINE sz_u8_t const *sz_ghash_byte_reverse_icelake_(void) {
     static sz_align_(64) sz_u8_t const reversal[64] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, //
                                                        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, //
                                                        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, //
@@ -371,8 +381,8 @@ STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_ghash_byte_reverse_icelake_(void) {
  *  Galois/counter mode numbers the bits of a block backwards relative to the way @c pclmulqdq reads
  *  them, which leaves the 256-bit product one position low; the shift by one puts it back.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_ghash_reduce_icelake_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
-                                                           __m128i product_high_u8x16) {
+STRINGZILLA_INLINE __m128i sz_ghash_reduce_icelake_(__m128i product_low_u8x16, __m128i product_middle_u8x16,
+                                                    __m128i product_high_u8x16) {
     __m128i const polynomial_u8x16 = _mm_set_epi64x((sz_i64_t)0xC200000000000000ull, 0);
     __m128i low_u8x16 = _mm_xor_si128(product_low_u8x16, _mm_slli_si128(product_middle_u8x16, 8));
     __m128i high_u8x16 = _mm_xor_si128(product_high_u8x16, _mm_srli_si128(product_middle_u8x16, 8));
@@ -397,8 +407,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_ghash_reduce_icelake_(__m128i product_low_u
  *  @param[in] second_operand_u8x16 The other operand, byte reversed.
  *  @return Their product, byte reversed.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_ghash_multiply_icelake_(__m128i first_operand_u8x16,
-                                                             __m128i second_operand_u8x16) {
+STRINGZILLA_INLINE __m128i sz_ghash_multiply_icelake_(__m128i first_operand_u8x16, __m128i second_operand_u8x16) {
     __m128i const product_low_u8x16 = _mm_clmulepi64_si128(first_operand_u8x16, second_operand_u8x16, 0x00);
     __m128i const product_high_u8x16 = _mm_clmulepi64_si128(first_operand_u8x16, second_operand_u8x16, 0x11);
     __m128i const product_middle_u8x16 = _mm_xor_si128(
@@ -407,13 +416,14 @@ STRINGZILLA_HELPER_INLINE __m128i sz_ghash_multiply_icelake_(__m128i first_opera
     return sz_ghash_reduce_icelake_(product_low_u8x16, product_middle_u8x16, product_high_u8x16);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_icelake(sz_aes256_gcm_key_t *key,
-                                                             sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_icelake(sz_aes256_gcm_key_t *key,
+                                                           sz_u8_t const secret[sz_at_least_(32)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
     __m128i subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
-    sz_aes256_key_init_icelake(&key->block, secret);
+    sz_aes256_key_init_icelake_(&key->block, secret);
     subkey_u8x16 = _mm_shuffle_epi8(sz_aes256_block_encrypt_icelake_(&key->block, _mm_setzero_si128()), reverse_u8x16);
     power_u8x16 = subkey_u8x16;
     for (power_index = 0; power_index != 8; ++power_index) {
@@ -421,10 +431,11 @@ STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_icelake(sz_aes256_gcm_key_t
                              _mm_shuffle_epi8(power_u8x16, reverse_u8x16));
         power_u8x16 = sz_ghash_multiply_icelake_(power_u8x16, subkey_u8x16);
     }
+    return sz_success_k;
 }
 
 /** Exclusive-ors the four 128-bit lanes of a register into one, which the reduction then closes. */
-STRINGZILLA_HELPER_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x64) {
+STRINGZILLA_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x64) {
     __m512i folded_u8x64 = _mm512_xor_si512(value_u8x64, _mm512_shuffle_i64x2(value_u8x64, value_u8x64, 0x4E));
     folded_u8x64 = _mm512_xor_si512(folded_u8x64, _mm512_shuffle_i64x2(folded_u8x64, folded_u8x64, 0xB1));
     return _mm512_castsi512_si128(folded_u8x64);
@@ -443,9 +454,9 @@ STRINGZILLA_HELPER_INLINE __m128i sz_ghash_fold_lanes_icelake_(__m512i value_u8x
  *  The hash is a chain, `Y = (Y ^ X) * H`, and a chain of reductions would run at the latency of
  *  one multiply per block.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8x16, __m512i blocks_low_u8x64,
-                                                          __m512i blocks_high_u8x64, __m512i powers_high_u8x64,
-                                                          __m512i powers_low_u8x64, __m128i eighth_power_u8x16) {
+STRINGZILLA_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8x16, __m512i blocks_low_u8x64,
+                                                   __m512i blocks_high_u8x64, __m512i powers_high_u8x64,
+                                                   __m512i powers_low_u8x64, __m128i eighth_power_u8x16) {
     __m512i const product_low_u8x64 = _mm512_xor_si512(
         _mm512_clmulepi64_epi128(blocks_low_u8x64, powers_high_u8x64, 0x00),
         _mm512_clmulepi64_epi128(blocks_high_u8x64, powers_low_u8x64, 0x00));
@@ -474,8 +485,8 @@ STRINGZILLA_HELPER_INLINE __m128i sz_ghash_stage_icelake_(__m128i accumulator_u8
  *  @param[out] powers_high_u8x64 Receives H⁸, H⁷, H⁶, H⁵.
  *  @param[out] powers_low_u8x64 Receives H⁴, H³, H², H¹.
  */
-STRINGZILLA_HELPER_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t const *key, __m512i *powers_high_u8x64,
-                                                        __m512i *powers_low_u8x64) {
+STRINGZILLA_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t const *key, __m512i *powers_high_u8x64,
+                                                 __m512i *powers_low_u8x64) {
     __m512i const reverse_u8x64 = _mm512_load_si512(sz_ghash_byte_reverse_icelake_());
     __m512i const ascending_low_u8x64 = _mm512_loadu_si512(key->powers);
     __m512i const ascending_high_u8x64 = _mm512_loadu_si512(key->powers + 4 * STRINGZILLA_AES_BLOCK_LENGTH);
@@ -494,9 +505,9 @@ STRINGZILLA_HELPER_INLINE void sz_ghash_powers_icelake_(sz_aes256_gcm_key_t cons
  *  @param[in] powers_low_u8x64 H⁴ through H¹, byte reversed, one per lane.
  *  @return The running hash after every block, byte reversed.
  */
-STRINGZILLA_HELPER_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumulator_u8x16, sz_u8_t const *blocks,
-                                                                  sz_size_t count, __m512i powers_high_u8x64,
-                                                                  __m512i powers_low_u8x64) {
+STRINGZILLA_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumulator_u8x16, sz_u8_t const *blocks,
+                                                           sz_size_t count, __m512i powers_high_u8x64,
+                                                           __m512i powers_low_u8x64) {
     __m512i const reverse_u8x64 = _mm512_load_si512(sz_ghash_byte_reverse_icelake_());
     __m128i const eighth_power_u8x16 = _mm512_castsi512_si128(powers_high_u8x64);
     __m128i const subkey_u8x16 = _mm512_extracti64x2_epi64(powers_low_u8x64, 3);
@@ -528,7 +539,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_ghash_absorb_blocks_icelake_(__m128i accumu
  *  The size is known at compile time, so this is seven full-width stores and one masked tail rather
  *  than a length-driven loop.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_icelake_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_INLINE void sz_aes256_gcm_state_scrub_icelake_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
     __m512i const zeros_u8x64 = _mm512_setzero_si512();
     sz_size_t offset = 0;
@@ -538,7 +549,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_icelake_(sz_aes256_gcm_
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_icelake_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_INLINE sz_bool_t sz_aes256_tag_equal_icelake_(sz_u8_t const *first, sz_u8_t const *second) {
     __m128i const first_u8x16 = _mm_loadu_si128((__m128i const *)first);
     __m128i const second_u8x16 = _mm_loadu_si128((__m128i const *)second);
     __mmask16 const differing_m16 = _mm_cmpneq_epi8_mask(first_u8x16, second_u8x16);
@@ -546,9 +557,8 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_icelake_(sz_u8_t const *
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_t *state,
-                                                            sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
+                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     sz_u128_vec_t initial_vec;
     sz_size_t byte_index;
 
@@ -572,8 +582,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_icelake_(sz_aes256_gcm_state_
 }
 
 /** Absorbs associated data into the payload both directions share. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                sz_size_t length) {
+STRINGZILLA_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
     __m512i powers_high_u8x64, powers_low_u8x64;
@@ -619,7 +629,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_icelake_(sz_aes256_gcm_st
 }
 
 /** Absorbs whatever @c partial holds, zero padded to a full block, and empties it. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gcm_state_t *state) {
     __m128i reverse_u8x16, subkey_u8x16, padded_u8x16, accumulator_u8x16;
     if (state->buffered == 0) return;
     reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
@@ -646,10 +656,10 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_flush_partial_icelake_(sz_aes256_gc
  *  Serves the two edges of a chunk: the keystream block a previous call left half spent, and the
  *  trailing bytes of this one that do not fill a block.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_t *state, __m128i *accumulator_u8x16,
-                                                            __m128i subkey_u8x16, __m128i reverse_u8x16,
-                                                            sz_u8_t const *text, sz_size_t length, sz_u8_t *output,
-                                                            sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_t *state, __m128i *accumulator_u8x16,
+                                                     __m128i subkey_u8x16, __m128i reverse_u8x16, sz_u8_t const *text,
+                                                     sz_size_t length, sz_u8_t *output,
+                                                     sz_aes256_gcm_direction_t direction) {
     __m128i const lane_iota_u8x16 = sz_aes256_lane_iota_icelake_();
     sz_size_t produced = 0;
     while (produced != length) {
@@ -719,11 +729,10 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_bytes_icelake_(sz_aes256_gcm_state_
  *  the carry-less multiplies then sit in the shadow of the next stage's substitution rounds, which
  *  occupy a different port and would otherwise stall on the reduction's latency.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out_u8x64, __m128i *accumulator_u8x16,
-                                                             sz_u512_vec_t const *wide_keys_vec,
-                                                             __m512i powers_high_u8x64, __m512i powers_low_u8x64,
-                                                             __mmask8 cipher_m8, sz_u8_t const *text, sz_u8_t *output,
-                                                             sz_size_t blocks) {
+STRINGZILLA_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_out_u8x64, __m128i *accumulator_u8x16,
+                                                      sz_u512_vec_t const *wide_keys_vec, __m512i powers_high_u8x64,
+                                                      __m512i powers_low_u8x64, __mmask8 cipher_m8, sz_u8_t const *text,
+                                                      sz_u8_t *output, sz_size_t blocks) {
     __m512i const counter_swap_u8x64 = _mm512_load_si512(sz_aes256_counter_swap_icelake_());
     __m512i const reverse_u8x64 = _mm512_load_si512(sz_ghash_byte_reverse_icelake_());
     __m512i const step_four_u8x64 = _mm512_maskz_set1_epi32((__mmask16)0x8888u, 4);
@@ -814,9 +823,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_stride_icelake_(__m512i *counters_o
  *  restart at a chunk boundary, so the wide path is entered only once both stand at a block
  *  boundary and left with the same property.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                sz_size_t length, sz_ptr_t output,
-                                                                sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
+                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     __m512i const counter_swap_u8x64 = _mm512_load_si512(sz_aes256_counter_swap_icelake_());
@@ -872,8 +880,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_icelake_(sz_aes256_gcm_st
  *  @param[in] state The state, left untouched.
  *  @param[out] tag Receives the sixteen tag bytes.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *state,
-                                                             sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state_t const *state,
+                                                      sz_u8_t tag[sz_at_least_(16)]) {
     __m128i const reverse_u8x16 = _mm512_castsi512_si128(_mm512_load_si512(sz_ghash_byte_reverse_icelake_()));
     __m128i const subkey_u8x16 = _mm_shuffle_epi8(_mm_maskz_loadu_epi8((__mmask16)0xFFFFu, state->key.powers),
                                                   reverse_u8x16);
@@ -897,84 +905,109 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_icelake_(sz_aes256_gcm_state
                                        _mm_maskz_loadu_epi8((__mmask16)0xFFFFu, state->tag_mask)));
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_icelake(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                   sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_icelake(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                 sz_aes256_gcm_key_t const *key,
+                                                                 sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_icelake_(&encryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_icelake(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                        sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_icelake(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                      sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_icelake_(&encryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_icelake(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                     sz_cptr_t text, sz_size_t length,
-                                                                     sz_ptr_t output) {
-    sz_aes256_gcm_transform_icelake_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_icelake(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
+                                                                   sz_size_t length, sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_icelake_(&encryptor->state, text, length, target, sz_aes256_gcm_encrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_icelake(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                                     sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_icelake(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                   sz_u8_t tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_digest_icelake_(&encryptor->state, tag);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_icelake(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                   sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_icelake(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                 sz_aes256_gcm_key_t const *key,
+                                                                 sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_icelake_(&decryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_icelake(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                        sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_icelake(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                      sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_icelake_(&decryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_icelake(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                                sz_cptr_t text, sz_size_t length,
-                                                                                sz_ptr_t output) {
-    sz_aes256_gcm_transform_icelake_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_icelake(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                              sz_cptr_t text, sz_size_t length,
+                                                                              sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_icelake_(&decryptor->state, text, length, target, sz_aes256_gcm_decrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_icelake(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                            sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE sz_status_t sz_aes256_gcm_decryptor_verify_icelake_(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                       sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u8_t expected[STRINGZILLA_AES_BLOCK_LENGTH];
     sz_aes256_gcm_digest_icelake_(&decryptor->state, expected);
     return sz_aes256_tag_equal_icelake_(expected, tag) == sz_true_k ? sz_success_k : sz_authentication_failed_k;
+}
+
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_icelake(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                   sz_u8_t const tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    return sz_aes256_gcm_decryptor_verify_icelake_(decryptor, tag);
 }
 
 #pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_icelake(sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                            sz_size_t associated_length, sz_cptr_t text,
-                                                            sz_size_t length, sz_ptr_t output,
-                                                            sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_icelake(sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                          sz_ptr_t target, sz_u8_t tag[sz_at_least_(16)],
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_encryptor_t encryptor;
-    sz_aes256_gcm_encryptor_init_icelake(&encryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_encryptor_associate_icelake(&encryptor, associated, associated_length);
-    sz_aes256_gcm_encryptor_update_icelake(&encryptor, text, length, output);
-    sz_aes256_gcm_encryptor_digest_icelake(&encryptor, tag);
+    sz_aes256_gcm_begin_icelake_(&encryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_icelake_(&encryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_icelake_(&encryptor.state, text, length, target, sz_aes256_gcm_encrypting_k);
+    sz_aes256_gcm_digest_icelake_(&encryptor.state, tag);
     sz_aes256_gcm_state_scrub_icelake_(&encryptor.state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)],
-                                                                   sz_cptr_t associated, sz_size_t associated_length,
-                                                                   sz_cptr_t text, sz_size_t length, sz_ptr_t output,
-                                                                   sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                          sz_ptr_t target, sz_u8_t const tag[sz_at_least_(16)],
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
-    sz_aes256_gcm_decryptor_init_icelake(&decryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_decryptor_associate_icelake(&decryptor, associated, associated_length);
-    sz_aes256_gcm_decryptor_update_unverified_icelake(&decryptor, text, length, output);
-    verdict = sz_aes256_gcm_decryptor_verify_icelake(&decryptor, tag);
+    sz_aes256_gcm_begin_icelake_(&decryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_icelake_(&decryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_icelake_(&decryptor.state, text, length, target, sz_aes256_gcm_decrypting_k);
+    verdict = sz_aes256_gcm_decryptor_verify_icelake_(&decryptor, tag);
     sz_aes256_gcm_state_scrub_icelake_(&decryptor.state);
 
     //  A caller who drops the status must still be unable to act on forged plaintext.
-    if (verdict != sz_success_k) sz_fill(output, length, 0);
+    if (verdict != sz_success_k) {
+        sz_fill_serial_(target, length, 0);
+        sz_keep_alive_(target);
+    }
     return verdict;
 }
 

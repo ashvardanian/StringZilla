@@ -19,8 +19,7 @@
 #define STRINGZILLA_SORT_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_compare`
-#include "stringzilla/memory.h"  // `sz_copy_neon`
+#include "stringzilla/memory/neon.h" // `sz_copy_neon_`
 
 #include "stringzilla/sort/serial.h"
 
@@ -28,7 +27,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -37,7 +36,7 @@ extern "C" {
 #endif
 
 /** Collapses two @c uint64x2_t compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
+STRINGZILLA_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
     static sz_u16_t const lane_weights[4] = {1, 2, 4, 8};
     uint16x4_t flags_u16x4 = vmovn_u32(vcombine_u32(vmovn_u64(lower_u64x2), vmovn_u64(upper_u64x2)));
     return (sz_u32_t)vaddv_u16(vand_u16(flags_u16x4, vld1_u16(lane_weights)));
@@ -49,7 +48,7 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64
  *  by the surviving count, so the unwritten tail is overwritten by the next call or lands in the
  *  region slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
  *  "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_sort_neon_compact4_(            //
+STRINGZILLA_INLINE sz_size_t sz_sort_neon_compact4_(                   //
     uint8x16x2_t const keys_u8x16x2, uint8x16x2_t const order_u8x16x2, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
@@ -102,7 +101,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_sort_neon_compact4_(            //
  *  spill; the three regions are then copied back contiguously. A single block-major pass left-packs
  *  all three comparison kinds together, so each block is loaded once and the equal mask is free.
  */
-STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_neon_3way_partition_(            //
+STRINGZILLA_INLINE void sz_sequence_argsort_neon_3way_partition_(                   //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -204,27 +203,27 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_neon_3way_partition_(        
     // Copy the three slack-separated regions back into one contiguous run.
     sz_pgram_t *const destination_pgrams = initial_pgrams + start_in_sequence;
     sz_sorted_idx_t *const destination_order = initial_order + start_in_sequence;
-    sz_copy_neon((sz_ptr_t)(destination_pgrams), (sz_cptr_t)(partitioned_pgrams + start_in_sequence),
-                 count_smaller * sizeof(sz_pgram_t));
-    sz_copy_neon((sz_ptr_t)(destination_pgrams + count_smaller),
-                 (sz_cptr_t)(partitioned_pgrams + start_in_sequence + equal_region), count_equal * sizeof(sz_pgram_t));
-    sz_copy_neon((sz_ptr_t)(destination_pgrams + count_smaller + count_equal),
-                 (sz_cptr_t)(partitioned_pgrams + start_in_sequence + greater_region),
-                 count_greater * sizeof(sz_pgram_t));
-    sz_copy_neon((sz_ptr_t)(destination_order), (sz_cptr_t)(partitioned_order + start_in_sequence),
-                 count_smaller * sizeof(sz_sorted_idx_t));
-    sz_copy_neon((sz_ptr_t)(destination_order + count_smaller),
-                 (sz_cptr_t)(partitioned_order + start_in_sequence + equal_region),
-                 count_equal * sizeof(sz_sorted_idx_t));
-    sz_copy_neon((sz_ptr_t)(destination_order + count_smaller + count_equal),
-                 (sz_cptr_t)(partitioned_order + start_in_sequence + greater_region),
-                 count_greater * sizeof(sz_sorted_idx_t));
+    sz_copy_neon_((sz_ptr_t)(destination_pgrams), (sz_cptr_t)(partitioned_pgrams + start_in_sequence),
+                  count_smaller * sizeof(sz_pgram_t));
+    sz_copy_neon_((sz_ptr_t)(destination_pgrams + count_smaller),
+                  (sz_cptr_t)(partitioned_pgrams + start_in_sequence + equal_region), count_equal * sizeof(sz_pgram_t));
+    sz_copy_neon_((sz_ptr_t)(destination_pgrams + count_smaller + count_equal),
+                  (sz_cptr_t)(partitioned_pgrams + start_in_sequence + greater_region),
+                  count_greater * sizeof(sz_pgram_t));
+    sz_copy_neon_((sz_ptr_t)(destination_order), (sz_cptr_t)(partitioned_order + start_in_sequence),
+                  count_smaller * sizeof(sz_sorted_idx_t));
+    sz_copy_neon_((sz_ptr_t)(destination_order + count_smaller),
+                  (sz_cptr_t)(partitioned_order + start_in_sequence + equal_region),
+                  count_equal * sizeof(sz_sorted_idx_t));
+    sz_copy_neon_((sz_ptr_t)(destination_order + count_smaller + count_equal),
+                  (sz_cptr_t)(partitioned_order + start_in_sequence + greater_region),
+                  count_greater * sizeof(sz_sorted_idx_t));
 
     *first_pivot_offset = start_in_sequence + count_smaller;
     *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_quicksort_pgrams_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_quicksort_pgrams_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
     sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t const top_count) {
@@ -246,29 +245,29 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_quicksort_pgrams_(
                                                    last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t count,
-                                                         sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_neon_(sz_pgram_t *pgrams, sz_size_t count,
+                                                    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
 
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // `+ 24` of slack absorbs the two inter-region gaps (8 each) plus the final compaction spill past `count`.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_neon_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
-    alloc->free(temporary_pgrams, memory_usage, alloc->handle);
+    allocator->free(temporary_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_sort_byte_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
@@ -308,9 +307,9 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_sort_byte_windows_(
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence,
-                                                              sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
-                                                              sz_size_t top_count, sz_bool_t reverse) {
+STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_neon_(sz_sequence_t const *sequence,
+                                                         sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,
+                                                         sz_size_t top_count, sz_bool_t reverse) {
     sz_size_t count = sequence->count;
     for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
         order[sequence_index] = sequence_index;
@@ -321,14 +320,14 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t cons
     }
 
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // `global_pgrams` (count) + two scratch buffers (count + 24 slack each: two inter-region gaps + spill).
     sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!global_pgrams) return sz_bad_alloc_k;
@@ -336,14 +335,14 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t cons
     sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                 count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc->handle);
+    allocator->free(global_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
 
 /** Uncased twin of @c sz_sequence_argsort_neon_sort_byte_windows_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the NEON partition - which is where NEON beats the fully-serial uncased path. */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_sort_casefold_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -379,8 +378,8 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_neon_sort_casefold_windows_(
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,       //
+STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_uncased_neon_(    //
+    sz_sequence_t const *sequence, sz_memory_allocator_t *allocator, //
     sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
 
     sz_size_t const count = sequence->count;
@@ -389,16 +388,16 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon( //
     if (count < 2) return sz_success_k;
 
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // Same layout as the byte arg-sort - `global_pgrams` (count) + two scratch buffers (count + 24 slack each:
     // two inter-region gaps + spill, since the NEON table compaction overruns). The folded export is stateless
     // (re-folds the prefix on demand), so unlike the earlier design there is no per-string cursor array.
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
@@ -406,16 +405,34 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon( //
     sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
                                                     0, count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc->handle);
+    allocator->free(global_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
+
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_size_t top_count,
+                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                     sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    return sz_sequence_argsort_neon_(sequence, allocator, order, top_count, reverse);
+}
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_neon(              //
+    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
+    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    return sz_sequence_argsort_uncased_neon_(sequence, allocator, order, top_count, reverse);
+}
+
+#endif // STRINGZILLA_TARGET_NEON
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

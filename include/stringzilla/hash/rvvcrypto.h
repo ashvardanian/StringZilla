@@ -17,7 +17,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/hash/serial.h"
-#include "stringzilla/compare.h" // `sz_equal`
 
 #ifdef __cplusplus
 extern "C" {
@@ -46,8 +45,7 @@ extern "C" {
  *  128-bit AES block is one element group, EGW = 128, so the operation runs with a vector length of
  *  four 32-bit lanes.
  */
-STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_vec,
-                                                                     sz_u128_vec_t round_key_vec) {
+STRINGZILLA_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e32m1(4); // one 128-bit AES block = 4x u32 lanes
     vuint32m1_t state_u32m1 = __riscv_vle32_v_u32m1((sz_u32_t const *)state_vec.u32s, vector_length);
     vuint32m1_t key_u32m1 = __riscv_vle32_v_u32m1((sz_u32_t const *)round_key_vec.u32s, vector_length);
@@ -64,16 +62,16 @@ STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_rvvcrypto_(sz_u128_vec
  *  helpers, so the digests are guaranteed value-identical to @c sz_hash_serial. */
 #pragma region RVV Crypto Hash Drivers
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
-                                                                     sz_u128_vec_t block_vec) {
+STRINGZILLA_INLINE void sz_hash_state_short_update_rvvcrypto_(sz_hash_state_aligned_for_short_t *state,
+                                                              sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_rvvcrypto_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(
-    sz_hash_state_aligned_for_short_t const *state, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(sz_hash_state_aligned_for_short_t const *state,
+                                                                    sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_emulate_aesenc_rvvcrypto_(state->sum, state->aes);
@@ -82,7 +80,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_rvvcrypto_(
     return mixed_in_register_vec.u64s[0];
 }
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_rvvcrypto_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_rvvcrypto_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_emulate_aesenc_rvvcrypto_(state->aes.u128s[lane_index],
@@ -93,7 +91,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_update_rvvcrypto_(sz_hash_state_ali
     }
 }
 
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t state) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -132,7 +130,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_rvvcrypto_(sz_hash_sta
 /** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source into
  *  `target_vec->u8s`, replacing a scalar byte loop. @p source must have a full block
  *  of readable bytes. */
-STRINGZILLA_HELPER_INLINE void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
+STRINGZILLA_INLINE void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *target_vec, sz_cptr_t source) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(target_vec->u8s));
     __riscv_vse8_v_u8m1(target_vec->u8s, __riscv_vle8_v_u8m1((sz_u8_t const *)source, vector_length), vector_length);
 }
@@ -140,14 +138,14 @@ STRINGZILLA_HELPER_INLINE void sz_hash_load_block_rvvcrypto_(sz_u128_vec_t *targ
 /** Vector-copy a single AES block (`sizeof(sz_u128_vec_t)` bytes) from @p source_vec to
  *  @p target, the store counterpart of @c sz_hash_load_block_rvvcrypto_. @p target must have a
  *  full block of writable bytes. */
-STRINGZILLA_HELPER_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_vec_t source_vec) {
+STRINGZILLA_INLINE void sz_hash_store_block_rvvcrypto_(sz_ptr_t target, sz_u128_vec_t source_vec) {
     sz_size_t vector_length = __riscv_vsetvl_e8m1(sizeof(source_vec.u8s));
     __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(source_vec.u8s, vector_length), vector_length);
 }
 
 /** Loads the packed public state into the aligned internal twin (one @c vle8 block
  *  per 16-byte lane). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -162,8 +160,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_rvvcrypto_(
 
 /** Stores the aligned internal twin back into the packed public state (one @c vse8 block
  *  per 16-byte lane). */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed,
-                                                              sz_hash_state_aligned_t const *state) {
+STRINGZILLA_INLINE void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         sz_hash_store_block_rvvcrypto_((sz_ptr_t)(packed->aes + offset), state->aes.u128s[lane_index]);
@@ -174,8 +171,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_rvvcrypto_(sz_hash_state_t *p
     packed->ins_length = state->ins_length;
 }
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcrypto(sz_cptr_t start, sz_size_t length,
-                                                                                    sz_u64_t seed) {
+STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcrypto_(sz_cptr_t start, sz_size_t length,
+                                                                               sz_u64_t seed) {
     sz_size_t const block = sizeof(sz_u128_vec_t); // one AES block
     if (length <= block) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
@@ -232,7 +229,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcry
         // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
         sz_align_(64) sz_hash_state_aligned_t state;
         sz_size_t const window = sizeof(state.ins.u8s); // the 64-byte hashing window
-        sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_serial_((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte window except the last; the final block (a full 64 or a partial
         // tail) stays buffered in `ins` for `sz_hash_state_finalize_rvvcrypto_` to fold - the same
@@ -242,7 +239,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcry
             __riscv_vse8_v_u8m8(state.ins.u8s,
                                 __riscv_vle8_v_u8m8((sz_u8_t const *)start + state.ins_length, vector_length),
                                 vector_length);
-            sz_hash_state_update_rvvcrypto_(&state);
+            sz_hash_state_absorb_rvvcrypto_(&state);
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zeroed window; finalize folds them.
@@ -256,12 +253,23 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcry
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed) {
-    sz_hash_state_init_serial(state, seed);
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvvcrypto(sz_cptr_t start, sz_size_t length,
+                                                                              sz_u64_t seed, sz_u64_t *hash,
+                                                                              void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_rvvcrypto_(start, length, seed);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_rvvcrypto(sz_hash_state_t *packed, sz_cptr_t text,
-                                                             sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_serial_(state, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_update_rvvcrypto(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
+                                                           void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is exactly one 64-byte window. Track how many bytes it holds and absorb it only once it becomes
     // interior (more bytes arrive - the deferral `digest` needs to choose minimal/full by total length). The
@@ -273,7 +281,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_rvvcrypto(sz_hash_state_t *pa
     if (buffered == 0 && state.ins_length) buffered = 64;
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
-            sz_hash_state_update_rvvcrypto_(&state);
+            sz_hash_state_absorb_rvvcrypto_(&state);
             sz_size_t const clear_vl = __riscv_vsetvl_e8m8(sizeof(state.ins.u8s));
             __riscv_vse8_v_u8m8(state.ins.u8s, __riscv_vmv_v_x_u8m8(0, clear_vl), clear_vl);
             buffered = 0;
@@ -284,9 +292,10 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_rvvcrypto(sz_hash_state_t *pa
         buffered += take, text += take, length -= take, state.ins_length += take;
     }
     sz_hash_state_store_rvvcrypto_(packed, &state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_rvvcrypto_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state = sz_hash_state_load_rvvcrypto_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state, where the deferred final block buffered
@@ -323,7 +332,15 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *packed, sz_u64_t *hash,
+                                                           void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_rvvcrypto_(packed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
@@ -335,9 +352,10 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t 
         // VL deletes both the per-byte loop and the `&& length` tail guard: it clamps to the bytes left,
         // capped at the block we just generated.
         sz_size_t out_vl = __riscv_vsetvl_e8m1(sz_min_of_two(length, sizeof(generated_vec.u8s)));
-        __riscv_vse8_v_u8m1((sz_u8_t *)text, __riscv_vle8_v_u8m1(generated_vec.u8s, out_vl), out_vl);
-        text += out_vl, length -= out_vl;
+        __riscv_vse8_v_u8m1((sz_u8_t *)target, __riscv_vle8_v_u8m1(generated_vec.u8s, out_vl), out_vl);
+        target += out_vl, length -= out_vl;
     }
+    return sz_success_k;
 }
 
 #pragma endregion RVV Crypto Hash Drivers
@@ -362,7 +380,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_rvvcrypto(sz_ptr_t text, sz_size_t 
  *  schedule forward. SHA-256 words are big-endian; we load them with a scalar byte-swap so this
  *  path needs only the @c Zvknhb extension, not the @c vrev8 of @c Zvbb or @c Zvkb.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_rvvcrypto_(
+STRINGZILLA_INLINE void sz_sha256_process_block_rvvcrypto_(
     sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(STRINGZILLA_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_size_t const vector_length = __riscv_vsetvl_e32m1(4);
@@ -429,7 +447,8 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_rvvcrypto_(
     hash[7] = cdgh_out[0], hash[6] = cdgh_out[1], hash[3] = cdgh_out[2], hash[2] = cdgh_out[3];
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state_ptr) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state_ptr, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     // Copy all 8 initial words in halves of 4: `vsetvl_e32m1(8)` would clamp to 4 lanes at VLEN=128,
     // silently leaving the upper four words uninitialized, so the half-width copy is VLEN-independent.
@@ -437,11 +456,13 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *
     __riscv_vse32_v_u32m1(state_ptr->hash + 0, __riscv_vle32_v_u32m1(initial_hash + 0, vector_length), vector_length);
     __riscv_vse32_v_u32m1(state_ptr->hash + 4, __riscv_vle32_v_u32m1(initial_hash + 4, vector_length), vector_length);
     state_ptr->block_length = 0, state_ptr->total_length = 0;
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *state_ptr, sz_cptr_t data,
-                                                               sz_size_t length) {
-    sz_u8_t const *input = (sz_u8_t const *)data;
+STRINGZILLA_API sz_status_t sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *state_ptr, sz_cptr_t text,
+                                                             sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_u8_t const *input = (sz_u8_t const *)text;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
     int const stays_in_the_block = current_block_index == final_block_index;
@@ -452,7 +473,7 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_rvvcrypto(sz_sha256_state_t
     // Fast path: stays in same block and doesn't fill it
     if (stays_in_the_block && !fills_the_block) {
         for (; length; --length, ++state_ptr->block_length, ++input) state_ptr->block[state_ptr->block_length] = *input;
-        return;
+        return sz_success_k;
     }
 
     // Calculate head, body, and tail lengths
@@ -491,10 +512,12 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_rvvcrypto(sz_sha256_state_t
     state_ptr->hash[3] = hash[3];
     state_ptr->hash[4] = hash[4], state_ptr->hash[5] = hash[5], state_ptr->hash[6] = hash[6],
     state_ptr->hash[7] = hash[7];
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_rvvcrypto(
-    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
+STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvvcrypto(
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
 
@@ -537,6 +560,7 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_rvvcrypto(
         digest[lane_index * 4 + 2] = (sz_u8_t)(state.hash[lane_index] >> 8);
         digest[lane_index * 4 + 3] = (sz_u8_t)(state.hash[lane_index] >> 0);
     }
+    return sz_success_k;
 }
 
 #pragma endregion RVV Crypto SHA 256 via Zvknhb

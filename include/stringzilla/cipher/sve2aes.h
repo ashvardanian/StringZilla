@@ -14,6 +14,7 @@
 #define STRINGZILLA_CIPHER_SVE2AES_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -39,14 +40,14 @@ extern "C" {
  *  @c AESE applies @c AddRoundKey, @c SubBytes and @c ShiftRows in that order, so a zero round key
  *  leaves a substitution followed by a row shift.
  */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_word_substitute_sve2aes_(sz_u32_t word) {
+STRINGZILLA_INLINE sz_u32_t sz_aes256_word_substitute_sve2aes_(sz_u32_t word) {
     sz_u128_vec_t substituted_vec;
     svuint8_t const broadcast_u8x = svreinterpret_u8_u32(svdup_n_u32(word));
     svst1_u8(svptrue_pat_b8(SV_VL16), &substituted_vec.u8s[0], svaese_u8(broadcast_u8x, svdup_n_u8(0)));
     return substituted_vec.u32s[0];
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_INLINE void sz_aes256_key_init_sve2aes_(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     static sz_u8_t const round_constants[7] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
     sz_size_t word_index = 0;
     for (; word_index != 8; ++word_index)
@@ -60,6 +61,13 @@ STRINGZILLA_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, s
         else if ((word_index & 7) == 4) { carried = sz_aes256_word_substitute_sve2aes_(carried); }
         key->round_keys[word_index] = key->round_keys[word_index - 8] ^ carried;
     }
+}
+
+STRINGZILLA_API sz_status_t sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
+                                                       void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_key_init_sve2aes_(key, secret);
+    return sz_success_k;
 }
 
 #pragma endregion Key Schedule
@@ -76,8 +84,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_key_init_sve2aes(sz_aes256_key_t *key, s
  *  so the schedule is consumed one round early and the fifteenth round key is
  *  exclusive-ored on afterwards.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t const *key,
-                                                                      svuint8_t blocks_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_key_t const *key, svuint8_t blocks_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     sz_u8_t const *schedule = (sz_u8_t const *)&key->round_keys[0];
     // The thirteen fused rounds are written out rather than looped, because a loop leaves the
@@ -105,7 +112,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_blocks_encrypt_sve2aes_(sz_aes256_
  *  @param[in] segment_index Which segment to bring forward.
  *  @return A vector whose leading segment holds that one, with the rest left undefined.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz_size_t segment_index) {
+STRINGZILLA_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t value_u8x, sz_size_t segment_index) {
     svbool_t const all_b64x = svptrue_b64();
     svuint64_t const source_u64x = svadd_n_u64_x(all_b64x, svindex_u64(0, 1), (sz_u64_t)(segment_index * 2));
     return svreinterpret_u8_u64(svtbl_u64(svreinterpret_u64_u8(value_u8x), source_u64x));
@@ -121,7 +128,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_segment_at_sve2aes_(svuint8_t valu
  *  @param[in] block_index The block index the whole vector starts from.
  *  @return The same counter block in every segment.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t const *nonce, sz_u32_t block_index) {
+STRINGZILLA_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t const *nonce, sz_u32_t block_index) {
     // Assembled in the leading segment, then broadcast. A predicated load alone would fill only the
     // first twelve lanes of the register and leave every segment above the first holding a zero counter
     // block - correct at a 128-bit vector length, wrong at every width above it.
@@ -139,7 +146,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_counter_broadcast_sve2aes_(sz_u8_t
  *  @param[in] step The number of blocks to advance by.
  *  @return An increment word per lane, zero everywhere but the trailing lane of each segment.
  */
-STRINGZILLA_HELPER_INLINE svuint32_t sz_aes256_counter_step_sve2aes_(sz_u32_t step) {
+STRINGZILLA_INLINE svuint32_t sz_aes256_counter_step_sve2aes_(sz_u32_t step) {
     svbool_t const all_b32x = svptrue_b32();
     svuint32_t const lane_u32x = svindex_u32(0, 1);
     svbool_t const trailing_b32x = svcmpeq_n_u32(all_b32x, svand_n_u32_x(all_b32x, lane_u32x, 3), 3);
@@ -151,7 +158,7 @@ STRINGZILLA_HELPER_INLINE svuint32_t sz_aes256_counter_step_sve2aes_(sz_u32_t st
  *  @return An increment word per lane, the segment's own ordinal in its trailing lane
  *      and zero elsewhere.
  */
-STRINGZILLA_HELPER_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
+STRINGZILLA_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
     svbool_t const all_b32x = svptrue_b32();
     svuint32_t const lane_u32x = svindex_u32(0, 1);
     svbool_t const trailing_b32x = svcmpeq_n_u32(all_b32x, svand_n_u32_x(all_b32x, lane_u32x, 3), 3);
@@ -168,18 +175,18 @@ STRINGZILLA_HELPER_INLINE svuint32_t sz_aes256_counter_spread_sve2aes_(void) {
  *  The index is stored big-endian while the addition is not, so the words are byte reversed, added
  *  and reversed back.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_counter_advance_sve2aes_(svuint8_t counter_u8x,
-                                                                       svuint32_t increment_u32x) {
+STRINGZILLA_INLINE svuint8_t sz_aes256_counter_advance_sve2aes_(svuint8_t counter_u8x, svuint32_t increment_u32x) {
     svbool_t const all_b32x = svptrue_b32();
     svuint32_t const native_u32x = svrevb_u32_x(all_b32x, svreinterpret_u32_u8(counter_u8x));
     return svreinterpret_u8_u32(svrevb_u32_x(all_b32x, svadd_u32_x(all_b32x, native_u32x, increment_u32x)));
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key,
-                                                        sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
-                                                        sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *key, sz_u8_t const nonce[sz_at_least_(12)],
+                                                      sz_u64_t byte_offset, sz_cptr_t text, sz_size_t length,
+                                                      sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
-    sz_u8_t *output_bytes = (sz_u8_t *)output;
+    sz_u8_t *output_bytes = (sz_u8_t *)target;
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const vector_length = svcntb();
     sz_size_t const blocks_per_vector = vector_length / STRINGZILLA_AES_BLOCK_LENGTH;
@@ -188,9 +195,9 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *k
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
     svuint8_t counter_u8x;
-    sz_assert_no_overlap_(output, length, text, length);
+    sz_assert_no_overlap_(target, length, text, length);
 
-    if (length == 0) return;
+    if (length == 0) return sz_success_k;
     counter_u8x = sz_aes256_counter_advance_sve2aes_(sz_aes256_counter_broadcast_sve2aes_(nonce, block_index),
                                                      sz_aes256_counter_spread_sve2aes_());
 
@@ -217,6 +224,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *k
         counter_u8x = sz_aes256_counter_advance_sve2aes_(counter_u8x, stride_u32x);
         produced += vector_length;
     }
+    return sz_success_k;
 }
 
 #pragma endregion Counter Mode
@@ -231,12 +239,12 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_sve2aes(sz_aes256_key_t const *k
  *  The tag reads a field element's lowest coefficient from the leading bit of the leading byte,
  *  while a carry-less multiply reads it from the lowest bit of the lowest byte.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_reflect_sve2aes_(svuint8_t block_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_reflect_sve2aes_(svuint8_t block_u8x) {
     return svrbit_u8_x(svptrue_b8(), block_u8x);
 }
 
 /** Loads one hash block from the tag's bit order into the multiplier's, leaving the rest zero. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svptrue_pat_b8(SV_VL16), block));
 }
 
@@ -246,30 +254,30 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_load_sve2aes_(sz_u8_t const *block)
  *  SVE loads are zeroing, so a predicated load makes the padding implicit: no byte loop, no staging
  *  buffer, and nothing written back into the caller's state.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_load_padded_sve2aes_(sz_u8_t const *block, sz_size_t buffered) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_load_padded_sve2aes_(sz_u8_t const *block, sz_size_t buffered) {
     return sz_ghash_reflect_sve2aes_(svld1_u8(svwhilelt_b8_u64(0, buffered), block));
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_sve2aes_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_INLINE sz_bool_t sz_aes256_tag_equal_sve2aes_(sz_u8_t const *first, sz_u8_t const *second) {
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svbool_t const differing_b8x = svcmpne_u8(first_b8x, svld1_u8(first_b8x, first), svld1_u8(first_b8x, second));
     return svptest_any(first_b8x, differing_b8x) ? sz_false_k : sz_true_k;
 }
 
 /** Stores the leading segment of a reflected value back in the tag's bit order. */
-STRINGZILLA_HELPER_INLINE void sz_ghash_store_sve2aes_(svuint8_t value_u8x, sz_u8_t *block) {
+STRINGZILLA_INLINE void sz_ghash_store_sve2aes_(svuint8_t value_u8x, sz_u8_t *block) {
     svst1_u8(svptrue_pat_b8(SV_VL16), block, sz_ghash_reflect_sve2aes_(value_u8x));
 }
 
 /** Exchanges the two halves of every 128-bit segment. */
-STRINGZILLA_HELPER_INLINE svuint64_t sz_ghash_swap_halves_sve2aes_(svuint64_t value_u64x) {
+STRINGZILLA_INLINE svuint64_t sz_ghash_swap_halves_sve2aes_(svuint64_t value_u64x) {
     svbool_t const all_b64x = svptrue_b64();
     return svtbl_u64(value_u64x, sveor_n_u64_x(all_b64x, svindex_u64(0, 1), 1));
 }
 
 /** The predicate selecting the low half of every 128-bit segment. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
+STRINGZILLA_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
     svbool_t const all_b64x = svptrue_b64();
     return svcmpeq_n_u64(all_b64x, svand_n_u64_x(all_b64x, svindex_u64(0, 1), 1), 0);
 }
@@ -283,7 +291,7 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_ghash_low_halves_sve2aes_(void) {
  *  A table lookup rather than an extract, because the distance halves each round and the vector
  *  length is not a compile-time constant.
  */
-STRINGZILLA_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64x, sz_size_t lane_count) {
+STRINGZILLA_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t value_u64x, sz_size_t lane_count) {
     svbool_t const all_b64x = svptrue_b64();
     svuint64_t const lane_u64x = svindex_u64(0, 1);
     sz_size_t lane_distance;
@@ -306,9 +314,9 @@ STRINGZILLA_HELPER_INLINE svuint64_t sz_ghash_fold_segments_sve2aes_(svuint64_t 
  *  Karatsuba's identity recovers the cross terms from a third product of the two folded operands,
  *  so three multiplies cover a schoolbook four.
  */
-STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint64_t second_u64x,
-                                                            svuint64_t *low_u64x, svuint64_t *middle_u64x,
-                                                            svuint64_t *high_u64x) {
+STRINGZILLA_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64x, svuint64_t second_u64x,
+                                                     svuint64_t *low_u64x, svuint64_t *middle_u64x,
+                                                     svuint64_t *high_u64x) {
     svbool_t const all_b64x = svptrue_b64();
     svuint64_t const first_folded_u64x = sveor_u64_x(all_b64x, first_u64x, sz_ghash_swap_halves_sve2aes_(first_u64x));
     svuint64_t const second_folded_u64x = sveor_u64_x(all_b64x, second_u64x,
@@ -334,8 +342,8 @@ STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_sve2aes_(svuint64_t first_u64
  *  The cross products straddle the halves, so they are split and merged into the two
  *  128-bit words first.
  */
-STRINGZILLA_HELPER_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64x, svuint64_t middle_u64x,
-                                                              svuint64_t high_u64x, sz_size_t lane_count) {
+STRINGZILLA_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64x, svuint64_t middle_u64x,
+                                                       svuint64_t high_u64x, sz_size_t lane_count) {
     svbool_t const all_b64x = svptrue_b64();
     svbool_t const low_halves_b64x = sz_ghash_low_halves_sve2aes_();
     svuint64_t const zeros_u64x = svdup_n_u64(0);
@@ -362,7 +370,7 @@ STRINGZILLA_HELPER_INLINE svuint64_t sz_ghash_reduce_sve2aes_(svuint64_t low_u64
  *  @param[in] subkey_u8x The reflected subkey in the leading segment, zero elsewhere.
  *  @return The reduced product in the leading segment, zero elsewhere.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_multiply_sve2aes_(svuint8_t accumulator_u8x, svuint8_t subkey_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_multiply_sve2aes_(svuint8_t accumulator_u8x, svuint8_t subkey_u8x) {
     svuint64_t low_u64x = svdup_n_u64(0), middle_u64x = svdup_n_u64(0), high_u64x = svdup_n_u64(0);
     sz_ghash_accumulate_sve2aes_(svreinterpret_u64_u8(accumulator_u8x), svreinterpret_u64_u8(subkey_u8x), &low_u64x,
                                  &middle_u64x, &high_u64x);
@@ -370,18 +378,19 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_multiply_sve2aes_(svuint8_t accumul
 }
 
 /** Absorbs one reflected block into the running hash. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_absorb_sve2aes_(svuint8_t accumulator_u8x, svuint8_t block_u8x,
-                                                             svuint8_t subkey_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_absorb_sve2aes_(svuint8_t accumulator_u8x, svuint8_t block_u8x,
+                                                      svuint8_t subkey_u8x) {
     return sz_ghash_multiply_sve2aes_(sveor_u8_x(svptrue_b8(), accumulator_u8x, block_u8x), subkey_u8x);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_sve2aes(sz_aes256_gcm_key_t *key,
-                                                             sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_sve2aes(sz_aes256_gcm_key_t *key,
+                                                           sz_u8_t const secret[sz_at_least_(32)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u128_vec_t subkey_vec;
     svuint8_t subkey_u8x, power_u8x;
     sz_size_t power_index;
 
-    sz_aes256_key_init_sve2aes(&key->block, secret);
+    sz_aes256_key_init_sve2aes_(&key->block, secret);
     svst1_u8(svptrue_pat_b8(SV_VL16), &subkey_vec.u8s[0],
              sz_aes256_blocks_encrypt_sve2aes_(&key->block, svdup_n_u8(0)));
 
@@ -392,6 +401,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_sve2aes(sz_aes256_gcm_key_t
         power_u8x = sz_ghash_multiply_sve2aes_(power_u8x, subkey_u8x);
         sz_ghash_store_sve2aes_(power_u8x, &key->powers[power_index * STRINGZILLA_AES_BLOCK_LENGTH]);
     }
+    return sz_success_k;
 }
 
 /*  A hash group spans one block per segment, so a wider vector retires more blocks between
@@ -400,7 +410,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_sve2aes(sz_aes256_gcm_key_t
  *  segments idle in the hash while counter mode still uses all of them. */
 
 /** Blocks one hash group covers: one per segment, capped by the eight precomputed subkey powers. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_ghash_group_blocks_sve2aes_(void) {
+STRINGZILLA_INLINE sz_size_t sz_ghash_group_blocks_sve2aes_(void) {
     sz_size_t const segment_count = svcntb() / STRINGZILLA_AES_BLOCK_LENGTH;
     return segment_count < 8 ? segment_count : 8;
 }
@@ -415,7 +425,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_ghash_group_blocks_sve2aes_(void) {
  *  The powers ascend in memory and a group wants them descending, so the segments are mirrored by
  *  a table lookup.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *powers, sz_size_t group_blocks) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t const *powers, sz_size_t group_blocks) {
     svbool_t const all_b64x = svptrue_b64();
     svbool_t const group_b8x = svwhilelt_b8_u64(0, (sz_u64_t)(group_blocks * STRINGZILLA_AES_BLOCK_LENGTH));
     svuint64_t const lane_u64x = svindex_u64(0, 1);
@@ -438,8 +448,8 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_descending_powers_sve2aes_(sz_u8_t 
  *
  *  A group of @c n absorbed blocks expands to (Y ⊕ X₁) Hⁿ ⊕ X₂ Hⁿ⁻¹ ⊕ … ⊕ Xₙ H.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_u8x, svuint8_t blocks_u8x,
-                                                                   svuint8_t powers_u8x, sz_size_t lane_count) {
+STRINGZILLA_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t accumulator_u8x, svuint8_t blocks_u8x,
+                                                            svuint8_t powers_u8x, sz_size_t lane_count) {
     svbool_t const all_b8x = svptrue_b8();
     svuint64_t low_u64x = svdup_n_u64(0), middle_u64x = svdup_n_u64(0), high_u64x = svdup_n_u64(0);
     svuint8_t reduced_u8x;
@@ -459,7 +469,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_ghash_absorb_group_sve2aes_(svuint8_t acc
  *  The size is known at compile time but the vector length is not, so the fill runs one predicated
  *  store per vector and the trailing predicate covers a size that is a multiple of no vector width.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_state_t *state) {
     sz_u8_t *const bytes = (sz_u8_t *)state;
     svuint8_t const zeros_u8x = svdup_n_u8(0);
     sz_size_t const vector_length = svcntb();
@@ -470,9 +480,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_sve2aes_(sz_aes256_gcm_
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state,
-                                                            sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
+                                                     sz_u8_t const nonce[sz_at_least_(12)]) {
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     sz_u128_vec_t initial_vec;
     sz_size_t byte_index;
@@ -497,8 +506,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_sve2aes_(sz_aes256_gcm_state_
 }
 
 /** Absorbs associated data into the payload both directions share. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                sz_size_t length) {
+STRINGZILLA_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                         sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_size_t const lane_count = svcntb() / 8;
     sz_size_t const group_blocks = sz_ghash_group_blocks_sve2aes_();
@@ -563,10 +572,9 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_sve2aes_(sz_aes256_gcm_st
  *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
  *  this resumes both.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
-                                                                 sz_u8_t *output, sz_size_t count,
-                                                                 svuint8_t accumulator_u8x, svuint8_t subkey_u8x,
-                                                                 sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_state_t *state, sz_u8_t const *input,
+                                                          sz_u8_t *output, sz_size_t count, svuint8_t accumulator_u8x,
+                                                          svuint8_t subkey_u8x, sz_aes256_gcm_direction_t direction) {
     svbool_t const block_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const lane_ids_u8x = svindex_u8(0, 1);
     sz_size_t consumed = 0;
@@ -619,9 +627,8 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_aes256_gcm_spend_sve2aes_(sz_aes256_gcm_s
  *  keystream block, then whole blocks a group at a time, then a trailing block that the next
  *  chunk will resume.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                sz_size_t length, sz_ptr_t output,
-                                                                sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_state_t *state, sz_cptr_t text, sz_size_t length,
+                                                         sz_ptr_t output, sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     svbool_t const all_b8x = svptrue_b8();
@@ -715,8 +722,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_sve2aes_(sz_aes256_gcm_st
  *  @param[in] state The state, left untouched, so a caller may digest and keep streaming.
  *  @param[out] tag Receives the sixteen tag bytes.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state,
-                                                             sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state_t const *state,
+                                                      sz_u8_t tag[sz_at_least_(16)]) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const first_b8x = svptrue_pat_b8(SV_VL16);
     svuint8_t const subkey_u8x = sz_ghash_load_sve2aes_(state->key.powers);
@@ -738,85 +745,110 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_sve2aes_(sz_aes256_gcm_state
              sveor_u8_x(all_b8x, sz_ghash_reflect_sve2aes_(accumulator_u8x), svld1_u8(first_b8x, state->tag_mask)));
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_sve2aes(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                   sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_sve2aes(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                 sz_aes256_gcm_key_t const *key,
+                                                                 sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_sve2aes_(&encryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_sve2aes(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                        sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_sve2aes(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                      sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_sve2aes_(&encryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_sve2aes(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                     sz_cptr_t text, sz_size_t length,
-                                                                     sz_ptr_t output) {
-    sz_aes256_gcm_transform_sve2aes_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_sve2aes(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
+                                                                   sz_size_t length, sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_sve2aes_(&encryptor->state, text, length, target, sz_aes256_gcm_encrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_sve2aes(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                                     sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_sve2aes(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                   sz_u8_t tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_digest_sve2aes_(&encryptor->state, tag);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                   sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                 sz_aes256_gcm_key_t const *key,
+                                                                 sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_sve2aes_(&decryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                        sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                      sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_sve2aes_(&decryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                                sz_cptr_t text, sz_size_t length,
-                                                                                sz_ptr_t output) {
-    sz_aes256_gcm_transform_sve2aes_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_sve2aes(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                              sz_cptr_t text, sz_size_t length,
+                                                                              sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_sve2aes_(&decryptor->state, text, length, target, sz_aes256_gcm_decrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                            sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes_(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                       sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_sve2aes_(&decryptor->state, &expected_vec.u8s[0]);
     return sz_aes256_tag_equal_sve2aes_(&expected_vec.u8s[0], tag) == sz_true_k ? sz_success_k
                                                                                 : sz_authentication_failed_k;
 }
 
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_sve2aes(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                   sz_u8_t const tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    return sz_aes256_gcm_decryptor_verify_sve2aes_(decryptor, tag);
+}
+
 #pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_sve2aes(sz_aes256_gcm_key_t const *key,
-                                                            sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
-                                                            sz_size_t associated_length, sz_cptr_t text,
-                                                            sz_size_t length, sz_ptr_t output,
-                                                            sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_sve2aes(sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                          sz_ptr_t target, sz_u8_t tag[sz_at_least_(16)],
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_encryptor_t encryptor;
-    sz_aes256_gcm_encryptor_init_sve2aes(&encryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_encryptor_associate_sve2aes(&encryptor, associated, associated_length);
-    sz_aes256_gcm_encryptor_update_sve2aes(&encryptor, text, length, output);
-    sz_aes256_gcm_encryptor_digest_sve2aes(&encryptor, tag);
+    sz_aes256_gcm_begin_sve2aes_(&encryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_sve2aes_(&encryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_sve2aes_(&encryptor.state, text, length, target, sz_aes256_gcm_encrypting_k);
+    sz_aes256_gcm_digest_sve2aes_(&encryptor.state, tag);
     sz_aes256_gcm_state_scrub_sve2aes_(&encryptor.state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t const *key,
-                                                                   sz_u8_t const nonce[sz_at_least_(12)],
-                                                                   sz_cptr_t associated, sz_size_t associated_length,
-                                                                   sz_cptr_t text, sz_size_t length, sz_ptr_t output,
-                                                                   sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t const *key,
+                                                          sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                          sz_size_t associated_length, sz_cptr_t text, sz_size_t length,
+                                                          sz_ptr_t target, sz_u8_t const tag[sz_at_least_(16)],
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
-    sz_aes256_gcm_decryptor_init_sve2aes(&decryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_decryptor_associate_sve2aes(&decryptor, associated, associated_length);
-    sz_aes256_gcm_decryptor_update_unverified_sve2aes(&decryptor, text, length, output);
-    verdict = sz_aes256_gcm_decryptor_verify_sve2aes(&decryptor, tag);
+    sz_aes256_gcm_begin_sve2aes_(&decryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_sve2aes_(&decryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_sve2aes_(&decryptor.state, text, length, target, sz_aes256_gcm_decrypting_k);
+    verdict = sz_aes256_gcm_decryptor_verify_sve2aes_(&decryptor, tag);
     sz_aes256_gcm_state_scrub_sve2aes_(&decryptor.state);
 
     //  A caller who drops the status must still be unable to act on forged plaintext.
-    if (verdict != sz_success_k) sz_fill(output, length, 0);
+    if (verdict != sz_success_k) {
+        sz_fill_serial_(target, length, 0);
+        sz_keep_alive_(target);
+    }
     return verdict;
 }
 

@@ -10,12 +10,80 @@
 #define STRINGZILLA_HASH_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h"       // `sz_equal`
 #include "stringzilla/cipher/tables.h" // `sz_aes_sbox_`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ *  @brief The state for incremental construction of a hash.
+ *  @sa sz_hash_state_init_best, sz_hash_state_update_best, sz_hash_state_digest_best
+ *
+ *  @note Uses the @c packed attribute to allow placement at arbitrary addresses without UBSAN
+ *      warnings, and plain byte arrays to avoid implicit alignment requirements from SIMD types.
+ *      The layout matches @c sz_hash_state_aligned_t for safe casting between them.
+ */
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+typedef struct sz_hash_state_t {
+    sz_u8_t aes[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t sum[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t ins[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t key[16]; // 16 bytes, equivalent to sz_u128_vec_t
+    sz_size_t ins_length;
+} sz_hash_state_t;
+#pragma pack(pop)
+#else
+typedef struct __attribute__((packed)) sz_hash_state_t {
+    sz_u8_t aes[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t sum[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t ins[64]; // 64 bytes, equivalent to sz_u512_vec_t
+    sz_u8_t key[16]; // 16 bytes, equivalent to sz_u128_vec_t
+    sz_size_t ins_length;
+} sz_hash_state_t;
+#endif
+
+/** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
+#define STRINGZILLA_SHA256_DIGEST_LENGTH (32)
+
+/**
+ *  @brief Bytes in a SHA256 message block, fixed by FIPS 180-4.
+ *  @note Coincides with @c STRINGZILLA_CACHE_LINE_BYTES and the ZMM width, which are unrelated
+ *      reasons for the same 64.
+ */
+#define STRINGZILLA_SHA256_BLOCK_LENGTH (64)
+
+/**
+ *  @brief The state for incremental construction of a SHA256 hash.
+ *  @sa sz_sha256_state_init_best, sz_sha256_state_update_best, sz_sha256_state_digest_best
+ */
+typedef struct sz_sha256_state_t {
+
+    /** Message block buffer. */
+    sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
+
+    /** Current hash state: 8x 32-bit values. */
+    sz_u32_t hash[8];
+
+    /** Total message length in bytes. */
+    sz_u64_t total_length;
+
+    /** Current bytes in block (0-63). */
+    sz_u8_t block_length;
+
+    /** Rounds the state to 128 bytes. */
+    sz_u8_t padding_[23];
+} sz_sha256_state_t;
+
+/*  The batched kernels walk an array of these, so the layout is load-bearing rather than
+ *  incidental. A power-of-two stride turns lane indexing into a shift, and putting @c block first
+ *  gives every lane the same cache-line phase as the array itself — at 112 bytes the phase
+ *  rotated per lane, splitting the 64-byte block read across two lines for most of them.
+ *  @c block_length is a byte because it never exceeds 63, which also makes the struct identical on
+ *  32- and 64-bit builds. Alignment stays natural on purpose: @c malloc only promises 16 bytes, so
+ *  demanding 64 would under-align every heap-allocated batch. */
+sz_static_assert_(sizeof(sz_sha256_state_t) == 128, sha256_state_is_two_cache_lines);
 
 /*  Optimize this tier for size. It emulates the AES round in scalar code and runs only where no
  *  AES instruction exists, so what the unrolled form buys is footprint rather than throughput - 78
@@ -62,7 +130,7 @@ sz_static_assert_(offsetof(sz_hash_state_aligned_t, ins_length) == offsetof(sz_h
                   hash_aligned_ins_length_offset);
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_serial_(sz_cptr_t text, sz_size_t length) {
     sz_u64_t bytesum = 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_u8_t const *text_end = text_u8 + length;
@@ -76,8 +144,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_serial(sz_cptr_t text, sz_size_t le
  *  @return Result of `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`.
  *  @see Jean-Philippe Aumasson's reference implementation, which this is based on: https://github.com/veorq/aesenc-noNI
  */
-STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_vec,
-                                                                        sz_u128_vec_t round_key_vec) {
+STRINGZILLA_INLINE sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     sz_u8_t const *sbox = sz_aes_sbox_();
 
     // Combine `ShiftRows` and `SubBytes`
@@ -152,8 +219,8 @@ STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_emulate_aesenc_si128_serial_(sz_u128_
  *  @param[in] order Permutation table: order[i] gives the source byte index for output byte i.
  *  @return Shuffled 128-bit vector.
  */
-STRINGZILLA_HELPER_AUTO sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
-                                                                      sz_u8_t const order[sz_at_least_(16)]) {
+STRINGZILLA_CONSTEXPR sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_vec_t state_vec,
+                                                                    sz_u8_t const order[sz_at_least_(16)]) {
     sz_u128_vec_t result_vec;
     // Unroll the loop for 16 bytes
     result_vec.u8s[0] = state_vec.u8s[order[0]];
@@ -201,7 +268,7 @@ STRINGZILLA_HELPER_AUTO sz_u128_vec_t sz_emulate_shuffle_epi8_serial_(sz_u128_ve
  *
  *  @see Bailey-Borwein-Plouffe (BBP) formula explanation by Mosè Giordano: https://giordano.github.io/blog/2017-11-21-hexadecimal-pi/
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t const *sz_hash_pi_constants_(void) {
+STRINGZILLA_INLINE sz_u64_t const *sz_hash_pi_constants_(void) {
     static sz_align_(64) sz_u64_t const pi[16] = {
         0x243F6A8885A308D3ull, 0x13198A2E03707344ull, 0xA4093822299F31D0ull, 0x082EFA98EC4E6C89ull,
         0x452821E638D01377ull, 0xBE5466CF34E90C6Cull, 0xC0AC29B7C97C50DDull, 0x3F84D5B5B5470917ull,
@@ -215,7 +282,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t const *sz_hash_pi_constants_(void) {
  *  @brief Provides a shuffle mask for the additive part, identical to "aHash" in a single lane.
  *  @return Pointer aligned to 64 bytes on SIMD-capable platforms.
  */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
+STRINGZILLA_INLINE sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
     static sz_align_(64) sz_u8_t const shuffle[64] = {
         0x04, 0x0b, 0x09, 0x06, 0x08, 0x0d, 0x0f, 0x05, //
         0x0e, 0x03, 0x01, 0x0c, 0x00, 0x07, 0x0a, 0x02, //
@@ -234,7 +301,7 @@ STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_hash_u8x16x4_shuffle_(void) {
  *      parts of square roots of first 8 primes.
  *  @return Pointer to 8x 32-bit constants, aligned to 64 bytes.
  */
-STRINGZILLA_HELPER_INLINE sz_u32_t const *sz_sha256_initial_hash_(void) {
+STRINGZILLA_INLINE sz_u32_t const *sz_sha256_initial_hash_(void) {
     static sz_align_(64) sz_u32_t const h[8] = {
         0x6a09e667ul, 0xbb67ae85ul, 0x3c6ef372ul, 0xa54ff53aul, //
         0x510e527ful, 0x9b05688cul, 0x1f83d9abul, 0x5be0cd19ul, //
@@ -247,7 +314,7 @@ STRINGZILLA_HELPER_INLINE sz_u32_t const *sz_sha256_initial_hash_(void) {
  *      of cube roots of first 64 primes.
  *  @return Pointer to 64x 32-bit constants, aligned to 64 bytes.
  */
-STRINGZILLA_HELPER_INLINE sz_u32_t const *sz_sha256_round_constants_(void) {
+STRINGZILLA_INLINE sz_u32_t const *sz_sha256_round_constants_(void) {
     static sz_align_(64) sz_u32_t const k[64] = {
         0x428a2f98ul, 0x71374491ul, 0xb5c0fbcful, 0xe9b5dba5ul, //
         0x3956c25bul, 0x59f111f1ul, 0x923f82a4ul, 0xab1c5ed5ul, //
@@ -274,8 +341,7 @@ STRINGZILLA_HELPER_INLINE sz_u32_t const *sz_sha256_round_constants_(void) {
  *  @param[out] state Pointer to the minimal hash state to initialize.
  *  @param[in] seed 64-bit seed value mixed with Pi constants to form the initial state.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_init_serial_(sz_hash_state_aligned_for_short_t *state,
-                                                                sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_short_init_serial_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     state->key.u64s[1] = seed;
@@ -294,8 +360,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_short_init_serial_(sz_hash_state_al
  *  @param[inout] state Pointer to the minimal hash state.
  *  @param[in] block_vec 128-bit data block to absorb.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_short_t *state,
-                                                                  sz_u128_vec_t block_vec) {
+STRINGZILLA_INLINE void sz_hash_state_short_update_serial_(sz_hash_state_aligned_for_short_t *state,
+                                                           sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_emulate_aesenc_si128_serial_(state->aes, block_vec);
     state->sum = sz_emulate_shuffle_epi8_serial_(state->sum, shuffle);
@@ -309,8 +375,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_serial_(sz_hash_state_
  *  @param[in] length Total number of bytes hashed, mixed into the key for length sensitivity.
  *  @return 64-bit hash value.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_aligned_for_short_t const *state,
-                                                                        sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_state_aligned_for_short_t const *state,
+                                                                 sz_size_t length) {
     // Mix the length into the key
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
@@ -330,7 +396,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_serial_(sz_hash_
  *  @param[inout] vec Pointer to the 128-bit vector to shift in place.
  *  @param[in] shift_bytes Number of bytes to shift right (0–15); shifting by 0 is a no-op.
  */
-STRINGZILLA_HELPER_AUTO void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
+STRINGZILLA_CONSTEXPR void sz_hash_shift_in_register_serial_(sz_u128_vec_t *vec, int shift_bytes) {
     // One of the ridiculous things about x86, the `bsrli` instruction requires its operand to be an
     // immediate. On GCC and Clang, we could use the provided `__int128` type, but MSVC doesn't
     // support it. So we need to emulate it with 2x 64-bit shifts. The contract is a byte-array
@@ -358,7 +424,7 @@ STRINGZILLA_HELPER_AUTO void sz_hash_shift_in_register_serial_(sz_u128_vec_t *ve
 #endif
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_init_serial_(sz_hash_state_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     sz_u64_t *key_u64s = (sz_u64_t *)state->key;
@@ -379,7 +445,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_init_serial(sz_hash_state_t *state, 
 
 /** Loads the packed public state into the aligned internal twin (serial: 8x @c sz_u64_load
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_serial_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_serial_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     sz_cptr_t const aes = (sz_cptr_t)packed->aes, sum = (sz_cptr_t)packed->sum, ins = (sz_cptr_t)packed->ins;
     for (int word = 0; word < 8; ++word) {
@@ -394,8 +460,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_serial_(sz_
 }
 
 /** Stores the aligned internal twin back into the packed public state. */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_serial_(sz_hash_state_t *packed,
-                                                           sz_hash_state_aligned_t const *state) {
+STRINGZILLA_INLINE void sz_hash_state_store_serial_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     sz_ptr_t const aes = (sz_ptr_t)packed->aes, sum = (sz_ptr_t)packed->sum, ins = (sz_ptr_t)packed->ins;
     for (int word = 0; word < 8; ++word) {
         sz_u64_store(aes + word * 8, state->aes.u64s[word]);
@@ -411,7 +476,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_serial_(sz_hash_state_t *pack
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_serial_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_serial_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
     // First 128-bit block
@@ -444,7 +509,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_update_serial_(sz_hash_state_aligne
  *  @param[in] state Pointer to the (const) hash state.
  *  @return 64-bit hash value derived by folding the four AES lanes together with the key.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned_t state) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
 
     // Mix the length into the key
@@ -488,8 +553,8 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_serial_(sz_hash_state_
     return mixed_in_register_vec.u64s[0];
 }
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial(sz_cptr_t text, sz_size_t length,
-                                                                                 sz_u64_t seed) {
+STRINGZILLA_OUTLINED_ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(sz_cptr_t text, sz_size_t length,
+                                                                               sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
@@ -583,7 +648,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial
         // The aligned twin lets the kernels use clean aligned lane access; one-shot never touches the packed type
         // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
         sz_align_(64) sz_hash_state_aligned_t state;
-        sz_hash_state_init_serial((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_serial_((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
         // tail) stays buffered in `ins` for `sz_hash_state_finalize_serial_` to fold - the same
@@ -591,7 +656,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial
         for (; state.ins_length + 64 < length; state.ins_length += 64) {
             for (int word = 0; word < 8; ++word)
                 state.ins.u64s[word] = sz_u64_load((sz_cptr_t)(text + state.ins_length + word * 8)).u64;
-            sz_hash_state_update_serial_(&state);
+            sz_hash_state_absorb_serial_(&state);
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
@@ -602,7 +667,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE void sz_hash_state_update_serial_(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t state = sz_hash_state_load_serial_(packed);
     while (length) {
@@ -612,7 +677,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *packe
         // would, keyed on the total length. Now that more bytes have arrived, that block is
         // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
-            sz_hash_state_update_serial_(&state);
+            sz_hash_state_absorb_serial_(&state);
             for (int byte_index = 0; byte_index < 64; ++byte_index) state.ins.u8s[byte_index] = 0;
         }
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -624,7 +689,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_serial(sz_hash_state_t *packe
     sz_hash_state_store_serial_(packed, &state);
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_serial_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state = sz_hash_state_load_serial_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
@@ -672,18 +737,18 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_serial(sz_hash_state_t co
  *  @return The number of populated text-lanes (1..4).
  *
  *  The branchy, length-dependent work of loading and de-interleaving the input depends only on
- *  @b (text,length), never on the seed - so @c sz_hash_multiseed does it exactly once and replays
- *  the cheap per-seed AES rounds over these text-lanes. That amortizes both the input loads and the
- *  branch-heavy tail handling that dominate the cost of hashing short, variable-length strings, on
- *  top of any per-backend AES parallelism across seeds.
+ *  @b (text,length), never on the seed - so @c sz_hash_multiseed_best does it exactly once and
+ *  replays the cheap per-seed AES rounds over these text-lanes. That amortizes both the input loads
+ *  and the branch-heavy tail handling that dominate the cost of hashing short, variable-length
+ *  strings, on top of any per-backend AES parallelism across seeds.
  *
- *  @note The text-lane contents are bit-identical to the `length <= 64` ladder of @c sz_hash on
- *      every backend (both the serial in-register shift and the masked-load variants), so replaying
- *      them yields exactly `sz_hash(text, length, seed)` for each seed.
- *  @sa sz_hash_multiseed, sz_hash_multiseed_replay_serial_
+ *  @note The text-lane contents are bit-identical to the `length <= 64` ladder of @c sz_hash_best
+ *      on every backend (both the serial in-register shift and the masked-load variants), so
+ *      replaying them yields exactly the @c sz_hash_best digest under each seed.
+ *  @sa sz_hash_multiseed_best, sz_hash_multiseed_replay_serial_
  */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_t length,
-                                                                    sz_u512_vec_t *text_lanes_vec) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t text, sz_size_t length,
+                                                                  sz_u512_vec_t *text_lanes_vec) {
     sz_assert_(length <= 64 && "The text-lane form only covers the minimal (<= 64 byte) path");
 
     // Zero the whole 64-byte register first, so trailing bytes of the last partial lane are defined.
@@ -706,11 +771,11 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_hash_multiseed_prepare_serial_(sz_cptr_t te
  *  @param[in] text_lanes_count Number of populated text-lanes.
  *  @param[in] length Original byte length, folded into the digest.
  *  @param[in] seed 64-bit seed for this output.
- *  @return 64-bit hash, identical to `sz_hash_serial(text, length, seed)`.
+ *  @return 64-bit hash, identical to what @c sz_hash_serial writes for the same input and seed.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_lanes_vec,
-                                                                    sz_size_t text_lanes_count, sz_size_t length,
-                                                                    sz_u64_t seed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_t const *text_lanes_vec,
+                                                             sz_size_t text_lanes_count, sz_size_t length,
+                                                             sz_u64_t seed) {
     sz_hash_state_aligned_for_short_t state;
     sz_hash_state_short_init_serial_(&state, seed);
     for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
@@ -718,63 +783,38 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_multiseed_replay_serial_(sz_u512_vec_
     return sz_hash_state_short_finalize_serial_(&state, length);
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,             //
-                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                       sz_u64_t *hashes) {
-    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
-    if (seeds_count == 0) return;
-    if (seeds_count == 1) {
-        hashes[0] = sz_hash_serial(text, length, seeds[0]);
-        return;
-    }
-    // Short strings share one normalization pass; long strings have no de-interleaving to amortize.
-    if (length <= 64) {
-        sz_u512_vec_t text_lanes_vec;
-        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes_vec);
-        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_multiseed_replay_serial_(&text_lanes_vec, text_lanes_count, length,
-                                                                  seeds[seed_index]);
-    }
-    else {
-        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_serial(text, length, seeds[seed_index]);
-    }
-}
-
 #pragma endregion Multi Seed Hashing
 
 #pragma region Serial SHA256 Implementation
 
 /** SHA256 rotate right operation. */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_rotr_(sz_u32_t value, sz_u32_t count) {
+STRINGZILLA_INLINE sz_u32_t sz_sha256_rotr_(sz_u32_t value, sz_u32_t count) {
     return (value >> count) | (value << (32 - count));
 }
 
 /** SHA256 Ch (choose) function: (x AND y) XOR (NOT x AND z). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_ch_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (~x & z); }
+STRINGZILLA_INLINE sz_u32_t sz_sha256_ch_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (~x & z); }
 
 /** SHA256 Maj (majority) function: (x AND y) XOR (x AND z) XOR (y AND z). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_maj_(sz_u32_t x, sz_u32_t y, sz_u32_t z) {
-    return (x & y) ^ (x & z) ^ (y & z);
-}
+STRINGZILLA_INLINE sz_u32_t sz_sha256_maj_(sz_u32_t x, sz_u32_t y, sz_u32_t z) { return (x & y) ^ (x & z) ^ (y & z); }
 
 /** SHA256 Sigma0 function: ROTR(x,2) XOR ROTR(x,13) XOR ROTR(x,22). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_sigma0_(sz_u32_t x) {
+STRINGZILLA_INLINE sz_u32_t sz_sha256_sigma0_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 2) ^ sz_sha256_rotr_(x, 13) ^ sz_sha256_rotr_(x, 22);
 }
 
 /** SHA256 Sigma1 function: ROTR(x,6) XOR ROTR(x,11) XOR ROTR(x,25). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_sigma1_(sz_u32_t x) {
+STRINGZILLA_INLINE sz_u32_t sz_sha256_sigma1_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 6) ^ sz_sha256_rotr_(x, 11) ^ sz_sha256_rotr_(x, 25);
 }
 
 /** SHA256 sigma0 function: ROTR(x,7) XOR ROTR(x,18) XOR SHR(x,3). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_sigma0_lower_(sz_u32_t x) {
+STRINGZILLA_INLINE sz_u32_t sz_sha256_sigma0_lower_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 7) ^ sz_sha256_rotr_(x, 18) ^ (x >> 3);
 }
 
 /** SHA256 sigma1 function: ROTR(x,17) XOR ROTR(x,19) XOR SHR(x,10). */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
+STRINGZILLA_INLINE sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
     return sz_sha256_rotr_(x, 17) ^ sz_sha256_rotr_(x, 19) ^ (x >> 10);
 }
 
@@ -783,7 +823,7 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_sha256_sigma1_lower_(sz_u32_t x) {
  *  @param[inout] hash Pointer to 8x 32-bit hash values, modified in place.
  *  @param[in] block Pointer to 64-byte message block.
  */
-STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_serial_(
+STRINGZILLA_INLINE void sz_sha256_process_block_serial_(
     sz_u32_t hash[sz_at_least_(8)], sz_u8_t const block[sz_at_least_(STRINGZILLA_SHA256_BLOCK_LENGTH)]) {
     sz_u32_t const *round_constants = sz_sha256_round_constants_();
     sz_u32_t message_schedule[16];
@@ -829,7 +869,7 @@ STRINGZILLA_HELPER_INLINE void sz_sha256_process_block_serial_(
     hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr) {
+STRINGZILLA_INLINE void sz_sha256_state_init_serial_(sz_sha256_state_t *state_ptr) {
     // Copy at the width the state is declared with. Widening the store to `sz_u64_t` lets a strict-aliasing
     // compiler assume these writes are not the ones `update` and `digest` read back through `sz_u32_t`, and
     // GCC says so outright: "dereferencing type-punned pointer will break strict-aliasing rules". Both
@@ -840,8 +880,8 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_init_serial(sz_sha256_state_t *sta
     state_ptr->block_length = 0, state_ptr->total_length = 0;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t data,
-                                                            sz_size_t length) {
+STRINGZILLA_OUTLINED_ void sz_sha256_state_update_serial_(sz_sha256_state_t *state_ptr, sz_cptr_t data,
+                                                          sz_size_t length) {
     sz_u8_t const *input = (sz_u8_t const *)data;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
     sz_size_t const final_block_index = (state_ptr->block_length + length) / STRINGZILLA_SHA256_BLOCK_LENGTH;
@@ -894,7 +934,7 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_update_serial(sz_sha256_state_t *s
     state_ptr->hash[7] = hash[7];
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_serial(
+STRINGZILLA_OUTLINED_ void sz_sha256_state_digest_serial_(
     sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;
@@ -949,23 +989,9 @@ STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_serial(
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states,
-                                                                 sz_size_t states_count, sz_u8_t *digests) {
-    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
-        sz_sha256_state_digest_serial(&states[lane_index], &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
-}
-
-STRINGZILLA_API_COMPTIME void sz_sha256_multistate_update_serial(sz_sha256_state_t *states,
-                                                                 sz_sequence_t const *texts) {
-    sz_size_t const lanes_count = texts->count;
-    for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
-        sz_sha256_state_update_serial(&states[lane_index], texts->get_start(texts->handle, lane_index),
-                                      texts->get_length(texts->handle, lane_index));
-}
-
 #pragma endregion Serial SHA256 Implementation
 
-STRINGZILLA_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_INLINE void sz_fill_random_serial_(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_ptr = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
@@ -981,6 +1007,112 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_serial(sz_ptr_t text, sz_size_t len
             *text++ = generated_vec.u8s[byte_index];
     }
 }
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_serial_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_serial_(state, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_serial(sz_cptr_t text, sz_size_t length,
+                                                                           sz_u64_t seed, sz_u64_t *hash,
+                                                                           void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_serial_(text, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
+                                                        void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_update_serial_(packed, text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_digest_serial(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_serial_(packed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length,             //
+                                                     sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                     sz_u64_t *hashes, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Trivial counts gain nothing from a shared normalization pass and take the one-shot path.
+    if (seeds_count == 0) return sz_success_k;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_serial_(text, length, seeds[0]);
+        return sz_success_k;
+    }
+    // Short strings share one normalization pass; long strings have no de-interleaving to amortize.
+    if (length <= 64) {
+        sz_u512_vec_t text_lanes_vec;
+        sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_serial_(text, length, &text_lanes_vec);
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_multiseed_replay_serial_(&text_lanes_vec, text_lanes_count, length,
+                                                                  seeds[seed_index]);
+    }
+    else {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_serial_(text, length, seeds[seed_index]);
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_state_init_serial(sz_sha256_state_t *state_ptr, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_init_serial_(state_ptr);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_state_update_serial(sz_sha256_state_t *state_ptr, sz_cptr_t text,
+                                                          sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_update_serial_(state_ptr, text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_state_digest_serial(
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_digest_serial_(state_ptr, digest);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                               sz_u8_t *digests, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
+        sz_sha256_state_digest_serial_(&states[lane_index], &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                               void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t const lanes_count = texts->count;
+    for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
+        sz_sha256_state_update_serial_(&states[lane_index], texts->get_start(texts->handle, lane_index),
+                                       texts->get_length(texts->handle, lane_index));
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_serial(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_random_serial_(target, length, nonce);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #if defined(__clang__)
 #pragma clang attribute pop

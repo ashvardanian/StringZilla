@@ -6,7 +6,7 @@
  *
  *  Includes core APIs for @c sz_sequence_t string collections with hardware-specific backends:
  *
- *  - @c sz_sequence_intersect - to compute the strict, distinct-set intersection of two string
+ *  - @c sz_sequence_intersect_best - to compute the strict, distinct-set intersection of two string
  *    collections, tolerating duplicates within either side and emitting each shared value once.
  *  - TODO: @c sz_sequence_join - to compute the full join, all matching pairs, of two collections.
  */
@@ -14,25 +14,11 @@
 #define STRINGZILLA_INTERSECT_H_
 
 #include "stringzilla/types.h"
-
-#include "stringzilla/compare.h" // `sz_compare`
-#include "stringzilla/memory.h"  // `sz_fill`
-#include "stringzilla/hash.h"    // `sz_hash`
+#include "stringzilla/capabilities.h"     // `sz_capability_t`
+#include "stringzilla/intersect/serial.h" // `STRINGZILLA_SEQUENCE_INTERSECT_BUDGET`
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-/**
- *  @brief The @b power-of-two memory-usage budget @b multiple for the hash table.
- *
- *  The behaviour of hashing-based approaches can often be tuned with different "hyper-parameter"
- *  values. For "unordered set intersections" implemented here, the budget controls the balance
- *  between throughput and memory usage. The higher the budget, the more memory is used, but the
- *  fewer collisions will be observed.
- */
-#if !defined(STRINGZILLA_SEQUENCE_INTERSECT_BUDGET)
-#define STRINGZILLA_SEQUENCE_INTERSECT_BUDGET (1)
 #endif
 
 #pragma region Core API
@@ -43,49 +29,54 @@ extern "C" {
  *  Outputs the @p first_positions from the @p first_sequence and @p second_positions from the
  *  @p second_sequence, that contain matched strings. Missing matches are represented as
  *  @c STRINGZILLA_SIZE_MAX. Tolerates duplicate strings within either sequence: each distinct
- *  shared value is emitted exactly once, a distinct-set intersection, so @p intersection_size never
- *  exceeds the smaller of the two sequence counts and can't overflow the output arrays.
+ *  shared value is emitted exactly once, a distinct-set intersection, so @p intersection_count
+ *  never exceeds the smaller of the two sequence counts and can't overflow the output arrays.
  *
  *  @param[in] first_sequence First immutable sequence of strings to intersect.
  *  @param[in] second_sequence Second immutable sequence of strings to intersect.
- *  @param[in] alloc Optional memory allocator for temporary storage.
+ *  @param[in] allocator Optional memory allocator for temporary storage.
  *  @param[in] seed Optional seed for the hash table to avoid attacks.
- *  @param[out] intersection_size Number of matching strings in both sequences.
+ *  @param[out] intersection_count Number of matching strings in both sequences.
  *  @param[out] first_positions Offset positions of the matching strings from the @p first_sequence.
  *  @param[out] second_positions Offset positions of the matching strings from @p second_sequence.
- *  @return @c sz_success_k on success, or @c sz_bad_alloc_k if memory allocation failed.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k on success, @c sz_bad_alloc_k if memory allocation failed, or
+ *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @pre The @p first_positions array must fit as many items as the smaller sequence holds.
  *  @pre The @p second_positions array must fit as many items as the smaller sequence holds.
  *
  *  For example, intersecting two small collections of fruit names:
  *
  *  @code{.c}
- *      #include <stringzilla/intersect.h>
+ *      #include <stringzilla/stringzilla.h>
  *      int main() {
  *          char const *first[] = {"banana", "apple", "cherry"};
  *          char const *second[] = {"cherry", "orange", "pineapple", "banana"};
  *          sz_sequence_t first_sequence, second_sequence;
  *          sz_sequence_from_null_terminated_strings(first, 3, &first_sequence);
  *          sz_sequence_from_null_terminated_strings(second, 4, &second_sequence);
- *          sz_size_t intersection_size;
+ *          sz_capability_t capabilities;
+ *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_size_t intersection_count;
  *          sz_sorted_idx_t first_positions[3], second_positions[3]; //? 3 is the size of the smaller sequence
- *          sz_status_t status = sz_sequence_intersect(&first_sequence, &second_sequence,
- *              sz_join_inner_strict_k, NULL, 0,
- *              &intersection_size, first_positions, second_positions);
- *          return status == sz_success_k && intersection_size == 2 ? 0 : 1;
+ *          sz_status_t status = sz_sequence_intersect_best(&first_sequence, &second_sequence, NULL, 0,
+ *              &intersection_count, first_positions, second_positions, capabilities, NULL);
+ *          return status == sz_success_k && intersection_count == 2 ? 0 : 1;
  *      }
  *  @endcode
  *
  *  @note The algorithm has linear memory complexity and linear time complexity.
  *  @see SQL joins: https://en.wikipedia.org/wiki/Join_(SQL)
  *
- *  @note Picks the fastest implementation at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH.
- *  @sa sz_sequence_intersect_serial, sz_sequence_intersect_icelake, sz_sequence_intersect_sve
+ *  @sa sz_sequence_intersect_serial, sz_sequence_intersect_westmere, sz_sequence_intersect_icelake,
+ *      sz_sequence_intersect_neonaes
  */
-STRINGZILLA_API_RUNTIME sz_status_t sz_sequence_intersect(
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
-    sz_u64_t seed, sz_size_t *intersection_size, sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                             //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,            //
+    sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Defines various JOIN semantics for string sequences, including handling of duplicates.
@@ -246,66 +237,83 @@ typedef enum {
     sz_join_cross_k = 5,
 } sz_sequence_join_semantics_t;
 
-/** @copydoc sz_sequence_intersect */
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_serial(             //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+/** @copydoc sz_sequence_intersect_best */
+STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                           //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+
+#if STRINGZILLA_TARGET_WESTMERE
+
+/** @copydoc sz_sequence_intersect_best */
+STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                         //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+
+#endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 
-/** @copydoc sz_sequence_intersect */
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(            //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+/** @copydoc sz_sequence_intersect_best */
+STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                          //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #endif
 
-#if STRINGZILLA_TARGET_SVE
+#if STRINGZILLA_TARGET_NEONAES
 
-/** @copydoc sz_sequence_intersect */
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_sve(                //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+/** @copydoc sz_sequence_intersect_best */
+STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                          //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #endif
+
+/**
+ *  @brief Finds the intersection kernel of @p kind, from the best of @p capabilities.
+ *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
+ *  @param[out] capability The capability the kernel belongs to, or zero.
+ *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ */
+STRINGZILLA_API sz_status_t sz_intersect_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                     sz_kernel_punned_t *kernel, sz_capability_t *capability);
 
 #pragma endregion
 
-#include "stringzilla/intersect/serial.h"
+#if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/intersect/westmere.h"
 #include "stringzilla/intersect/icelake.h"
-#include "stringzilla/intersect/sve.h"
+#include "stringzilla/intersect/neonaes.h"
+#endif // STRINGZILLA_HEADER_ONLY
 
-/*  Pick the right implementation for the string search algorithms. To override this behavior and
- *  precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
-#pragma region Compile Time Dispatching
-#if !STRINGZILLA_RUNTIME_DISPATCH
+#pragma region Dispatch
 
-STRINGZILLA_API_RUNTIME sz_status_t sz_sequence_intersect(
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, sz_memory_allocator_t *alloc,
-    sz_u64_t seed, sz_size_t *intersection_size, sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
-#if STRINGZILLA_TARGET_ICELAKE
-    return sz_sequence_intersect_icelake( //
-        first_sequence, second_sequence,  //
-        alloc, seed, intersection_size,   //
-        first_positions, second_positions);
-#elif STRINGZILLA_TARGET_SVE
-    return sz_sequence_intersect_sve(    //
-        first_sequence, second_sequence, //
-        alloc, seed, intersection_size,  //
-        first_positions, second_positions);
-#else
-    return sz_sequence_intersect_serial( //
-        first_sequence, second_sequence, //
-        alloc, seed, intersection_size,  //
-        first_positions, second_positions);
-#endif
+#if STRINGZILLA_HEADER_ONLY
+
+STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                             //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,            //
+    sz_capability_t capabilities, void *stream) {
+    sz_unused_(first_sequence), sz_unused_(second_sequence), sz_unused_(allocator), sz_unused_(seed),
+        sz_unused_(intersection_count), sz_unused_(first_positions), sz_unused_(second_positions),
+        sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-#endif // !STRINGZILLA_RUNTIME_DISPATCH
-#pragma endregion Compile Time Dispatching
+STRINGZILLA_API sz_status_t sz_intersect_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                     sz_kernel_punned_t *kernel, sz_capability_t *capability) {
+    sz_unused_(kind), sz_unused_(capabilities);
+    *kernel = STRINGZILLA_NULL, *capability = 0;
+    return sz_missing_library_k;
+}
+
+#endif // STRINGZILLA_HEADER_ONLY
+#pragma endregion Dispatch
 
 #ifdef __cplusplus
 }

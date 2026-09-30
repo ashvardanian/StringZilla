@@ -11,7 +11,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/hash/serial.h"
-#include "stringzilla/compare.h" // `sz_equal`
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,7 +24,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_powervsx_(sz_cptr_t text, sz_size_t length) {
     sz_u64_t sum = 0;
     __vector unsigned char const ones_u8x16 = vec_splats((unsigned char)1);
 
@@ -54,6 +53,12 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t 
     return sum;
 }
 
+STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_powervsx_(text, length);
+    return sz_success_k;
+}
+
 /*  StringZilla guarantees that every backend produces @b bit-identical hashes for a given input and
  *  seed. The reference is @c sz_hash_serial, built around two primitives:
  *
@@ -80,7 +85,7 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t 
 #if !STRINGZILLA_ARCH_BIG_ENDIAN_
 
 /** Byte-reverse permutation selector for a 16-byte VSX register. */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powervsx_(void) {
     __vector unsigned char const mask_u8x16 = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0};
     return mask_u8x16;
 }
@@ -89,7 +94,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes_byte_reverse_mask_powerv
  *  @brief Bit-exact VSX equivalent of @c sz_emulate_aesenc_si128_serial_ using hardware AES.
  *  @return `MixColumns(SubBytes(ShiftRows(state))) ^ round_key`, identical to the serial reference.
  */
-STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
+STRINGZILLA_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_vec, sz_u128_vec_t round_key_vec) {
     __vector unsigned char const rev_u8x16 = sz_aes_byte_reverse_mask_powervsx_();
     __vector unsigned char state_u8x16 = state_vec.vsx_u8;
     __vector unsigned char reversed_u8x16 = vec_perm(state_u8x16, state_u8x16, rev_u8x16);
@@ -114,8 +119,8 @@ STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_aesenc_powervsx_(sz_u128_vec_t state_
 }
 
 /** Bit-exact VSX equivalent of @c sz_emulate_shuffle_epi8_serial_ via @c vec_perm. */
-STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t state_vec,
-                                                                  sz_u8_t const order[sz_at_least_(16)]) {
+STRINGZILLA_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t state_vec,
+                                                           sz_u8_t const order[sz_at_least_(16)]) {
     __vector unsigned char order_u8x16 = vec_xl(0, (unsigned char const *)order);
     sz_u128_vec_t result_vec;
     result_vec.vsx_u8 = vec_perm(state_vec.vsx_u8, state_vec.vsx_u8, order_u8x16);
@@ -124,16 +129,16 @@ STRINGZILLA_HELPER_INLINE sz_u128_vec_t sz_shuffle_epi8_powervsx_(sz_u128_vec_t 
 
 #pragma region Minimal state for short inputs
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_powervsx_(sz_hash_state_aligned_for_short_t *state,
-                                                                    sz_u128_vec_t block_vec) {
+STRINGZILLA_INLINE void sz_hash_state_short_update_powervsx_(sz_hash_state_aligned_for_short_t *state,
+                                                             sz_u128_vec_t block_vec) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     state->aes = sz_aesenc_powervsx_(state->aes, block_vec);
     state->sum = sz_shuffle_epi8_powervsx_(state->sum, shuffle);
     state->sum.u64s[0] += block_vec.u64s[0], state->sum.u64s[1] += block_vec.u64s[1];
 }
 
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_powervsx_(
-    sz_hash_state_aligned_for_short_t const *state, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_powervsx_(sz_hash_state_aligned_for_short_t const *state,
+                                                                   sz_size_t length) {
     sz_u128_vec_t key_with_length_vec = state->key;
     key_with_length_vec.u64s[0] += length;
     sz_u128_vec_t mixed_vec = sz_aesenc_powervsx_(state->sum, state->aes);
@@ -146,7 +151,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_powervsx_(
 
 #pragma region Full state for long inputs
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_init_powervsx_(sz_hash_state_t *state, sz_u64_t seed) {
     sz_u64_t *key_u64s = (sz_u64_t *)state->key;
     key_u64s[0] = seed;
     key_u64s[1] = seed;
@@ -162,9 +167,15 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state
     state->ins_length = 0;
 }
 
+STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_powervsx_(state, seed);
+    return sz_success_k;
+}
+
 /** Loads the packed public state into the aligned internal twin (4x @c vec_xl
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
@@ -179,8 +190,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_powervsx_(s
 
 /** Stores the aligned internal twin back into the packed public state (4x @c vec_xst
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_powervsx_(sz_hash_state_t *packed,
-                                                             sz_hash_state_aligned_t const *state) {
+STRINGZILLA_INLINE void sz_hash_state_store_powervsx_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         sz_size_t const offset = lane_index * 16;
         vec_xst(state->aes.u128s[lane_index].vsx_u8, 0, (unsigned char *)(packed->aes + offset));
@@ -191,7 +201,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_powervsx_(sz_hash_state_t *pa
     packed->ins_length = state->ins_length;
 }
 
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_powervsx_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_powervsx_(sz_hash_state_aligned_t *state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index) {
         state->aes.u128s[lane_index] = sz_aesenc_powervsx_(state->aes.u128s[lane_index], state->ins.u128s[lane_index]);
@@ -201,7 +211,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_update_powervsx_(sz_hash_state_alig
     }
 }
 
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_aligned_t state) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_state_aligned_t state) {
     sz_u8_t const *shuffle = sz_hash_u8x16x4_shuffle_();
     sz_u128_vec_t key_with_length_vec;
     key_with_length_vec.u64s[0] = state.key.u64s[0] + state.ins_length;
@@ -239,8 +249,8 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_powervsx_(sz_hash_stat
 
 #pragma endregion
 
-STRINGZILLA_API_COMPTIME
-STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
+STRINGZILLA_INLINE
+STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx_(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
     if (length <= 16) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
         sz_hash_state_short_init_serial_(&state, seed);
@@ -308,7 +318,7 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_si
         // The aligned twin lets the kernels use clean aligned lane access; one-shot never touches the packed type
         // except to reuse `init` (layout-locked by the `static_assert`s on `sz_hash_state_aligned_t`).
         sz_align_(64) sz_hash_state_aligned_t state;
-        sz_hash_state_init_powervsx((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_powervsx_((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
         // tail) stays buffered in `ins` for `sz_hash_state_finalize_powervsx_` to fold - the same
@@ -317,7 +327,7 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_si
             for (sz_size_t lane_index = 0; lane_index < 4; ++lane_index)
                 state.ins.u128s[lane_index].vsx_u8 = vec_xl(
                     0, (unsigned char const *)(start + state.ins_length + lane_index * 16));
-            sz_hash_state_update_powervsx_(&state);
+            sz_hash_state_absorb_powervsx_(&state);
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
@@ -328,7 +338,17 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_si
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length,
+                                                                             sz_u64_t seed, sz_u64_t *hash,
+                                                                             void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_powervsx_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t state = sz_hash_state_load_powervsx_(packed);
     while (length) {
@@ -338,7 +358,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *pac
         // would, keyed on the total length. Now that more bytes have arrived, that block is
         // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
-            sz_hash_state_update_powervsx_(&state);
+            sz_hash_state_absorb_powervsx_(&state);
             for (sz_size_t byte_index = 0; byte_index < 64; ++byte_index) state.ins.u8s[byte_index] = 0;
         }
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -348,9 +368,10 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *pac
         while (to_copy--) state.ins.u8s[progress_in_block++] = (sz_u8_t)*text++;
     }
     sz_hash_state_store_powervsx_(packed, &state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_powervsx(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_powervsx_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state = sz_hash_state_load_powervsx_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
@@ -386,7 +407,14 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_powervsx(sz_hash_state_t 
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_powervsx_(packed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
     for (sz_size_t lane_index = 0; length; ++lane_index) {
@@ -396,8 +424,9 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t l
         key_vec.u64s[1] = nonce ^ pi_vec.u64s[1];
         generated_vec = sz_aesenc_powervsx_(input_vec, key_vec);
         for (sz_size_t byte_index = 0; byte_index < 16 && length; ++byte_index, --length)
-            *text++ = generated_vec.u8s[byte_index];
+            *target++ = generated_vec.u8s[byte_index];
     }
+    return sz_success_k;
 }
 
 #else // STRINGZILLA_ARCH_BIG_ENDIAN_
@@ -406,28 +435,40 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t l
  *  diverge from the x86 layout of the serial reference, so we delegate to keep hashes bit-exact. */
 
 /** Big-endian Power stub: delegates to @c sz_hash_serial to preserve bit-exact digests. */
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, sz_u64_t seed) {
-    return sz_hash_serial(start, length, seed);
+STRINGZILLA_API sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
+                                             void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_serial_(start, length, seed);
+    return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_init_serial. */
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed) {
-    sz_hash_state_init_serial(state, seed);
+STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_serial_(state, seed);
+    return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_update_serial. */
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length) {
-    sz_hash_state_update_serial(state, text, length);
+STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_update_serial_(state, text, length);
+    return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_digest_serial. */
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state) {
-    return sz_hash_state_digest_serial(state);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_serial_(state);
+    return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_fill_random_serial. */
-STRINGZILLA_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
-    sz_fill_random_serial(text, length, nonce);
+STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_random_serial_(target, length, nonce);
+    return sz_success_k;
 }
 
 #endif // STRINGZILLA_ARCH_BIG_ENDIAN_
@@ -437,18 +478,24 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_powervsx(sz_ptr_t text, sz_size_t l
 /*  No VSX SHA extension is targeted, so the SHA-256 family delegates to the serial reference. */
 #pragma region SHA256
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_init_powervsx(sz_sha256_state_t *state) {
-    sz_sha256_state_init_serial(state);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_init_serial_(state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_update_powervsx(sz_sha256_state_t *state, sz_cptr_t data,
-                                                              sz_size_t length) {
-    sz_sha256_state_update_serial(state, data, length);
+STRINGZILLA_API sz_status_t sz_sha256_state_update_powervsx(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
+                                                            void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_update_serial_(state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_sha256_state_digest_powervsx(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
-    sz_sha256_state_digest_serial(state, digest);
+STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_digest_serial_(state, digest);
+    return sz_success_k;
 }
 
 #pragma endregion SHA256

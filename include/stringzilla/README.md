@@ -512,36 +512,43 @@ Hashing comes in three flavors: a byte checksum, a seeded single-shot hash, and 
 All produce identical output across every backend and platform, in both single-shot and incremental modes.
 
 ```c
-sz_u64_t sz_bytesum(sz_cptr_t text, sz_size_t length);
-sz_u64_t sz_hash(sz_cptr_t text, sz_size_t length, sz_u64_t seed);
-void sz_hash_multiseed(sz_cptr_t text, sz_size_t length,
-                       sz_u64_t const *seeds, sz_size_t seeds_count, sz_u64_t *hashes);
+sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, //
+                            sz_capability_t capabilities, void *stream);
+sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash, //
+                         sz_capability_t capabilities, void *stream);
+sz_status_t sz_hash_multiseed_best(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
+                                   sz_u64_t *hashes, sz_capability_t capabilities, void *stream);
 ```
 
-`sz_hash` is non-cryptographic, fast for both short and long inputs, passes the SMHasher `--extra` suite, and uses the AES extensions where present.
-`sz_hash_multiseed` hashes one input under many seeds at once — for feature hashing, Count-Min sketches, Bloom filters, and MinHash/LSH — by normalizing the input into AES blocks once and replaying cheap per-seed rounds.
+`sz_hash_best` is non-cryptographic, fast for both short and long inputs, passes the SMHasher `--extra` suite, and uses the AES extensions where present.
+`sz_hash_multiseed_best` hashes one input under many seeds at once — for feature hashing, Count-Min sketches, Bloom filters, and MinHash/LSH — by normalizing the input into AES blocks once and replaying cheap per-seed rounds.
 
-Incremental hashing uses an opaque `sz_hash_state_t`:
+Incremental hashing uses an opaque `sz_hash_state_t`, whose layout every capability shares, so each call may pass its own mask:
 
 ```c
-void sz_hash_state_init(sz_hash_state_t *state, sz_u64_t seed);
-void sz_hash_state_update(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length);
-sz_u64_t sz_hash_state_digest(sz_hash_state_t const *state);
+sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities, void *stream);
+sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length, //
+                                      sz_capability_t capabilities, void *stream);
+sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash, //
+                                      sz_capability_t capabilities, void *stream);
 sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs);
 ```
 
 A streaming SHA-256 is also provided, producing a 32-byte digest, with hardware backends on x86 SHA-NI, ARM NEON-SHA, and others:
 
 ```c
-void sz_sha256_state_init(sz_sha256_state_t *state);
-void sz_sha256_state_update(sz_sha256_state_t *state, sz_cptr_t data, sz_size_t length);
-void sz_sha256_state_digest(sz_sha256_state_t const *state, sz_u8_t digest[32]);
+sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities, void *stream);
+sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length, //
+                                        sz_capability_t capabilities, void *stream);
+sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state, sz_u8_t digest[32], //
+                                        sz_capability_t capabilities, void *stream);
 ```
 
-The same AES primitives back a reproducible pseudo-random fill, useful with `sz_lookup` for generating random strings over a chosen alphabet:
+The same AES primitives back a reproducible pseudo-random fill, useful with `sz_lookup_best` for generating random strings over a chosen alphabet:
 
 ```c
-void sz_fill_random(sz_ptr_t text, sz_size_t length, sz_u64_t nonce);
+sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, //
+                                sz_capability_t capabilities, void *stream);
 ```
 
 Example combining a single-shot hash, a streamed hash, and a checksum:
@@ -550,16 +557,22 @@ Example combining a single-shot hash, a streamed hash, and a checksum:
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
-    sz_u64_t single = sz_hash("hello world", 11, 42);
+    sz_capability_t capabilities = sz_cap_serial_k;
+    sz_cpu_capabilities_enabled(&capabilities);
+
+    sz_u64_t single = 0;
+    sz_hash_best("hello world", 11, 42, &single, capabilities, NULL);
 
     sz_hash_state_t state;
-    sz_hash_state_init(&state, 42);
-    sz_hash_state_update(&state, "hello ", 6);
-    sz_hash_state_update(&state, "world", 5);
-    sz_u64_t streamed = sz_hash_state_digest(&state);
+    sz_u64_t streamed = 0;
+    sz_hash_state_init_best(&state, 42, capabilities, NULL);
+    sz_hash_state_update_best(&state, "hello ", 6, capabilities, NULL);
+    sz_hash_state_update_best(&state, "world", 5, capabilities, NULL);
+    sz_hash_state_digest_best(&state, &streamed, capabilities, NULL);
     assert(streamed == single);
 
-    sz_u64_t sum = sz_bytesum("hi", 2);
+    sz_u64_t sum = 0;
+    sz_bytesum_best("hi", 2, &sum, capabilities, NULL);
     assert(sum == 209);
     return 0;
 }
@@ -606,29 +619,34 @@ Every allocation these kernels need is routed through the `sz_memory_allocator_t
 The C API fills a caller-owned `order` array and reports success through a `sz_status_t`:
 
 ```c
-sz_status_t sz_sequence_argsort(
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+sz_status_t sz_sequence_argsort_best(
+    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
+    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,
+    sz_capability_t capabilities, void *stream);
 
-sz_status_t sz_sequence_argsort_uncased(
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
-    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse);
+sz_status_t sz_sequence_argsort_uncased_best(
+    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
+    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,
+    sz_capability_t capabilities, void *stream);
 ```
 
-`sz_sequence_argsort` orders byte-lexicographically; `sz_sequence_argsort_uncased` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
-The `alloc` argument may be `NULL` to use the default allocator.
-The integer-sort core that backs these — `sz_pgrams_sort_serial` and its per-ISA variants — is exposed for benchmarking but is not part of the stable, runtime-dispatched contract.
+`sz_sequence_argsort_best` orders byte-lexicographically; `sz_sequence_argsort_uncased_best` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
+The `allocator` argument may be `NULL` to use the default allocator.
 
 ```c
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
+    sz_capability_t capabilities = sz_cap_serial_k;
+    sz_cpu_capabilities_enabled(&capabilities);
+
     char const *strings[] = {"banana", "apple", "cherry"};
     sz_sequence_t sequence;
     sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
 
     sz_sorted_idx_t order[3];
-    sz_status_t status = sz_sequence_argsort(&sequence, NULL, order, /*top_count*/ 0, sz_false_k);
+    sz_status_t status =
+        sz_sequence_argsort_best(&sequence, /*top_count*/ 0, sz_false_k, NULL, order, capabilities, NULL);
     assert(status == sz_success_k);
     assert(order[0] == 1 && order[1] == 0 && order[2] == 2); // apple, banana, cherry
     return 0;
@@ -637,13 +655,14 @@ int main(void) {
 
 ### Set Intersection
 
-`sz_sequence_intersect` computes the intersection of two __deduplicated__ binary string sequences using a hash table, writing matched positions from each side and leaving unmatched slots as `STRINGZILLA_SIZE_MAX`:
+`sz_sequence_intersect_best` computes the intersection of two __deduplicated__ binary string sequences using a hash table, writing matched positions from each side and leaving unmatched slots as `STRINGZILLA_SIZE_MAX`:
 
 ```c
-sz_status_t sz_sequence_intersect(
+sz_status_t sz_sequence_intersect_best(
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_size,
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions);
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,
+    sz_capability_t capabilities, void *stream);
 ```
 
 The `seed` randomizes the hash table to resist adversarial inputs; the position arrays must each fit at least `min(first->count, second->count)` entries.
@@ -656,11 +675,11 @@ sz_sequence_t a, b;
 sz_sequence_from_null_terminated_strings(first, 3, &a);
 sz_sequence_from_null_terminated_strings(second, 4, &b);
 
-sz_size_t intersection_size;
+sz_size_t intersection_count;
 sz_sorted_idx_t a_pos[3], b_pos[3];  // sized to the smaller sequence
-sz_status_t status = sz_sequence_intersect(&a, &b, NULL, /*seed*/ 0,
-                                           &intersection_size, a_pos, b_pos);
-assert(intersection_size == 2); // "banana" and "cherry"
+sz_status_t status = sz_sequence_intersect_best(&a, &b, NULL, /*seed*/ 0, &intersection_count, a_pos, b_pos,
+                                                capabilities, NULL);
+assert(intersection_count == 2); // "banana" and "cherry"
 ```
 
 ### C++

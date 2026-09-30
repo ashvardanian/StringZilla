@@ -10,8 +10,9 @@
 #define STRINGZILLA_HASH_ICELAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
+#include "stringzilla/hash/westmere.h"
+#include "stringzilla/hash/skylake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,7 +33,7 @@ extern "C" {
                    "aes", "vaes")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_icelake_(sz_cptr_t text, sz_size_t length) {
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "loads".
     //
@@ -159,8 +160,14 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t l
     }
 }
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelake(sz_cptr_t start, sz_size_t length,
-                                                                                  sz_u64_t seed) {
+STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_icelake_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelake_(sz_cptr_t start, sz_size_t length,
+                                                                             sz_u64_t seed) {
 
     // For short strings the "masked loads" are identical to Skylake-X and
     // the "logic" is identical to Haswell.
@@ -235,7 +242,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelak
     // This is where the logic differs from Skylake-X and other pre-Ice Lake CPUs:
     else {
         sz_align_(64) sz_hash_state_aligned_t state;
-        sz_hash_state_init_skylake((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_skylake_((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
         // tail) stays buffered in `ins` for `sz_hash_state_finalize_westmere_` to fold - the same
@@ -254,13 +261,23 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelak
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed) {
-    sz_hash_state_init_skylake(state, seed);
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_icelake(sz_cptr_t start, sz_size_t length,
+                                                                            sz_u64_t seed, sz_u64_t *hash,
+                                                                            void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_icelake_(start, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_skylake_(state, seed);
+    return sz_success_k;
 }
 
 /** Loads the packed public state into the aligned twin (one @c _mm512_loadu_si512
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_icelake_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_icelake_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     state.aes.zmm = _mm512_loadu_si512((__m512i const *)packed->aes);
     state.sum.zmm = _mm512_loadu_si512((__m512i const *)packed->sum);
@@ -272,8 +289,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_icelake_(sz
 
 /** Stores the aligned twin back into the packed public state (one
  *  @c _mm512_storeu_si512 per field). */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_icelake_(sz_hash_state_t *packed,
-                                                            sz_hash_state_aligned_t const *state) {
+STRINGZILLA_INLINE void sz_hash_state_store_icelake_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     _mm512_storeu_si512((__m512i *)packed->aes, state->aes.zmm);
     _mm512_storeu_si512((__m512i *)packed->sum, state->sum.zmm);
     _mm512_storeu_si512((__m512i *)packed->ins, state->ins.zmm);
@@ -283,14 +299,15 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_icelake_(sz_hash_state_t *pac
 
 /** Absorbs the buffered 64-byte block into the aligned state with a single VAES @c VAESENC
  *  over four lanes. */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_icelake_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_icelake_(sz_hash_state_aligned_t *state) {
     __m512i const order_u8x64 = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
     state->aes.zmm = _mm512_aesenc_epi128(state->aes.zmm, state->ins.zmm);
     state->sum.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum.zmm, order_u8x64), state->ins.zmm);
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_t text,
-                                                           sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
+                                                         void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
 
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is exactly one 64-byte block (one ZMM), so buffering is just: track how many bytes it holds, absorb
@@ -309,7 +326,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *stat
     __m512i const lane_iota_u8x64 = _mm512_load_si512((__m512i const *)lane_iota);
     while (length) {
         if (buffered == 64) { // the deferred block is now interior - absorb it and re-zero the buffer
-            sz_hash_state_update_icelake_(&state);
+            sz_hash_state_absorb_icelake_(&state);
             state.ins.zmm = _mm512_setzero_si512();
             buffered = 0;
         }
@@ -328,21 +345,25 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_icelake(sz_hash_state_t *stat
         buffered += to_copy, text += to_copy, length -= to_copy, state.ins_length += to_copy;
     }
     sz_hash_state_store_icelake_(state_ptr, &state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_icelake(sz_hash_state_t const *state) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_icelake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
-    return sz_hash_state_digest_westmere(state);
+    *hash = sz_hash_state_digest_westmere_(state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t output, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_API sz_status_t sz_fill_random_icelake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     if (length <= 16) {
         __m128i input_u8x16 = _mm_set1_epi64x(nonce);
         __m128i pi_u8x16 = _mm_load_si128((__m128i const *)sz_hash_pi_constants_());
         __m128i key_u8x16 = _mm_xor_si128(_mm_set1_epi64x(nonce), pi_u8x16);
         __m128i generated_u8x16 = _mm_aesenc_si128(input_u8x16, key_u8x16);
         __mmask16 store_mask_m16 = sz_u16_mask_until_(length);
-        _mm_mask_storeu_epi8((void *)output, store_mask_m16, generated_u8x16);
+        _mm_mask_storeu_epi8((void *)target, store_mask_m16, generated_u8x16);
     }
     // Assuming the YMM register contains two 128-bit blocks, the input to the generator
     // will be more complex, containing the sum of the nonce and the block number.
@@ -352,7 +373,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t output, sz_size_t 
         __m256i key_u8x32 = _mm256_xor_si256(_mm256_set1_epi64x(nonce), pi_u8x32);
         __m256i generated_u8x32 = _mm256_aesenc_epi128(input_u8x32, key_u8x32);
         __mmask32 store_mask_m32 = sz_u32_mask_until_(length);
-        _mm256_mask_storeu_epi8((void *)output, store_mask_m32, generated_u8x32);
+        _mm256_mask_storeu_epi8((void *)target, store_mask_m32, generated_u8x32);
     }
     // The last special case we handle outside of the primary loop is for buffers up to 64 bytes long.
     else if (length <= 64) {
@@ -363,7 +384,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t output, sz_size_t 
         __m512i key_u8x64 = _mm512_xor_si512(_mm512_set1_epi64(nonce), pi_u8x64);
         __m512i generated_u8x64 = _mm512_aesenc_epi128(input_u8x64, key_u8x64);
         __mmask64 store_mask_m64 = sz_u64_mask_until_(length);
-        _mm512_mask_storeu_epi8((void *)output, store_mask_m64, generated_u8x64);
+        _mm512_mask_storeu_epi8((void *)target, store_mask_m64, generated_u8x64);
     }
     // The final part of the function is the primary loop, which processes the buffer in 64-byte chunks.
     else {
@@ -378,15 +399,16 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_icelake(sz_ptr_t output, sz_size_t 
         sz_size_t byte_index = 0;
         for (; byte_index + 64 <= length; byte_index += 64) {
             __m512i generated_u8x64 = _mm512_aesenc_epi128(input_u8x64, key_u8x64);
-            _mm512_storeu_epi8((void *)(output + byte_index), generated_u8x64);
+            _mm512_storeu_epi8((void *)(target + byte_index), generated_u8x64);
             input_u8x64 = _mm512_add_epi64(input_u8x64, increment_u64x8);
         }
 
         // Handle the tail of the buffer.
         __m512i generated_u8x64 = _mm512_aesenc_epi128(input_u8x64, key_u8x64);
         __mmask64 store_mask_m64 = sz_u64_mask_until_(length - byte_index);
-        _mm512_mask_storeu_epi8((void *)(output + byte_index), store_mask_m64, generated_u8x64);
+        _mm512_mask_storeu_epi8((void *)(target + byte_index), store_mask_m64, generated_u8x64);
     }
+    return sz_success_k;
 }
 
 /** A wider parallel analog of @c sz_hash_state_aligned_for_short_t, which is not used for computing
@@ -403,8 +425,8 @@ typedef struct sz_hash_state_aligned_for_short_x4_t {
  *  @param[out] state Pointer to the 4-wide minimal hash state to initialize.
  *  @param[in] seed 64-bit seed XOR-ed with Pi constants replicated across all four 128-bit lanes.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
-                                                                    sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_short_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
+                                                             sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     __m512i seed_u64x8 = _mm512_set1_epi64(seed);
@@ -437,7 +459,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_short_x4_init_icelake_(sz_hash_stat
  *  @param[in] length3 Total byte count for the fourth 128-bit lane.
  *  @return 256-bit vector containing four 64-bit hash values (one per lane).
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(
+STRINGZILLA_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(
     sz_hash_state_aligned_for_short_x4_t const *state, //
     sz_size_t length0, sz_size_t length1, sz_size_t length2, sz_size_t length3) {
     __m512i const padded_lengths_u64x8 = _mm512_set_epi64(0, length3, 0, length2, 0, length1, 0, length0);
@@ -460,8 +482,8 @@ STRINGZILLA_HELPER_INLINE __m256i sz_hash_state_short_x4_finalize_icelake_(
  *  @param[inout] state Pointer to the 4-wide minimal hash state.
  *  @param[in] blocks_u8x64 512-bit register containing four 128-bit data blocks, one per lane.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
-                                                                      __m512i blocks_u8x64) {
+STRINGZILLA_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
+                                                               __m512i blocks_u8x64) {
     __m512i const order_u8x64 = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
     state->aes_vec.zmm = _mm512_aesenc_epi128(state->aes_vec.zmm, blocks_u8x64);
     state->sum_vec.zmm = _mm512_add_epi64(_mm512_shuffle_epi8(state->sum_vec.zmm, order_u8x64), blocks_u8x64);
@@ -476,8 +498,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_short_x4_update_icelake_(sz_hash_st
  *  @param[out] state Pointer to the 4-wide minimal hash state to initialize.
  *  @param[in] seeds_u64x8 Four seeds spread as `[s0,s0,s1,s1,s2,s2,s3,s3]` across the register.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
-                                                                  __m512i seeds_u64x8) {
+STRINGZILLA_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_aligned_for_short_x4_t *state,
+                                                           __m512i seeds_u64x8) {
     state->key_vec.zmm = seeds_u64x8;
     // Replicate the first 128 bits of each Pi half across all four lanes, then XOR the per-lane seeds.
     sz_u64_t const *pi = sz_hash_pi_constants_();
@@ -497,8 +519,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_multiseed_x4_init_icelake_(sz_hash_state_
  *      once and reuses it across all seed groups.
  *  @return 256-bit vector with four 64-bit hashes, one per lane.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(
-    sz_hash_state_aligned_for_short_x4_t const *state, __m512i lengths_u64x8) {
+STRINGZILLA_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_state_aligned_for_short_x4_t const *state,
+                                                                  __m512i lengths_u64x8) {
     __m512i key_with_length_u64x8 = _mm512_add_epi64(state->key_vec.zmm, lengths_u64x8);
     __m512i mixed_u8x64 = _mm512_aesenc_epi128(state->sum_vec.zmm, state->aes_vec.zmm);
     __m512i mixed_in_register_u8x64 = _mm512_aesenc_epi128(_mm512_aesenc_epi128(mixed_u8x64, key_with_length_u64x8),
@@ -507,20 +529,21 @@ STRINGZILLA_HELPER_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(
         _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_in_register_u8x64));
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,             //
-                                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                        sz_u64_t *hashes) {
+STRINGZILLA_API sz_status_t sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,             //
+                                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                      sz_u64_t *hashes, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
-    if (seeds_count == 0) return;
+    if (seeds_count == 0) return sz_success_k;
     if (seeds_count == 1) {
-        hashes[0] = sz_hash_icelake(text, length, seeds[0]);
-        return;
+        hashes[0] = sz_hash_icelake_(text, length, seeds[0]);
+        return sz_success_k;
     }
     // Long strings gain nothing from seed-packing - the AES work scales with the byte count regardless.
     if (length > 64) {
         for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_icelake(text, length, seeds[seed_index]);
-        return;
+            hashes[seed_index] = sz_hash_icelake_(text, length, seeds[seed_index]);
+        return sz_success_k;
     }
 
     // One branchless masked load pulls the whole <= 64 byte input into a single ZMM; its four
@@ -567,6 +590,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_
         _mm256_mask_storeu_epi64(hashes + seed_index, seed_mask_m8,
                                  sz_hash_multiseed_x4_finalize_icelake_(&state, lengths_u64x8));
     }
+    return sz_success_k;
 }
 
 #if defined(__clang__)

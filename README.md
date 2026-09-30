@@ -545,16 +545,16 @@ Also, unlike some alternatives, with "masked" AVX-512 and "predicated" SVE loads
 In addition to the fast AES-based hash, StringZilla implements hardware-accelerated SHA-256 cryptographic checksums, following the [FIPS 180-4 specification](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf).
 Where the AES hash leans on the AES round instructions, SHA-256 leans on the dedicated SHA extensions: `SHA256RNDS2` and `SHA256MSG1`/`SHA256MSG2` on x86 from Goldmont onward, and the `SHA256H`/`SHA256SU0` family on Arm, with SWAR, LASX, RVV, and WebAssembly fallbacks rounding out the set.
 
-The API is a three-call streaming state — `sz_sha256_state_init`, `sz_sha256_state_update`, `sz_sha256_state_digest` — so arbitrarily long inputs can be absorbed in chunks without buffering the whole message.
+The API is a three-call streaming state — `sz_sha256_state_init_best`, `sz_sha256_state_update_best`, `sz_sha256_state_digest_best` — so arbitrarily long inputs can be absorbed in chunks without buffering the whole message.
 Each backend is also exposed under its own suffix, like `sz_sha256_state_update_neonsha`, for the same manual-dispatch reasons as the rest of the library.
 
 Digesting one message is a serial dependency chain — 32 dependent `SHA256RNDS2` at 4 cycles each — so no wider instruction set can accelerate it, and the SHA-NI path already sits within 15% of that hardware floor.
 That is also why there is no Ice Lake tier for it: SHA-NI has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will ever be.
 
-Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update` exposes.
+Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update_best` exposes.
 That lane-parallel form nearly triples the hash rate of dedicated SHA-NI silicon on token-sized inputs, and still leads by half again on line-sized ones.
 Lanes retire independently, so a batch of mixed lengths stays vectorized to each lane's own last block rather than dropping to scalar when one lane runs short.
-A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sequence_argsort` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
+A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sequence_argsort_best` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
 
 ### AES-256 Encryption
 
@@ -563,7 +563,7 @@ Columnar and block-storage formats are not sockets.
 They seek — a reader wants row group four hundred out of a million-row file and has no interest in the preceding gigabyte, so a cipher that can only start from byte zero forces the whole file through the AES units to answer a question about the middle of it.
 
 StringZilla implements AES-256 in two modes, following [FIPS 197][faq-fips197] for the cipher and [NIST SP 800-38D][faq-gcm] for authentication, and treats seeking as the first-class case.
-Counter mode is __seekable__: `sz_aes256_ctr_xor` takes an absolute `byte_offset`, so decryption starts wherever the reader is, at the cost of authentication.
+Counter mode is __seekable__: `sz_aes256_ctr_xor_best` takes an absolute `byte_offset`, so decryption starts wherever the reader is, at the cost of authentication.
 Galois/counter mode adds a tag over the ciphertext and any associated data, and gives up seeking to get it.
 Which trade a format wants is the format's decision, so both are exposed rather than one being wrapped in the other.
 
@@ -575,7 +575,7 @@ Streaming splits by __type__ rather than by a flag: `sz_aes256_gcm_encryptor_t` 
 The Galois hash absorbs ciphertext in both directions, so a shared state that could be pointed the wrong way would make that a runtime question; separate types make it a compile error instead.
 
 Authenticated decryption returns `sz_authentication_failed_k` on a forged tag and zero-fills its output, so a caller who ignores the status finds nothing usable rather than forged plaintext.
-The streaming decrypt is called `sz_aes256_gcm_decryptor_update_unverified` because it structurally emits bytes before anything is authenticated, and the name is the warning.
+The streaming decrypt is called `sz_aes256_gcm_decryptor_update_unverified_best` because it structurally emits bytes before anything is authenticated, and the name is the warning.
 
 Backends cover AES-NI and PCLMUL, VAES and VPCLMULQDQ, Arm crypto extensions and SVE2-AES, RISC-V `Zvkned` with `Zvkg`, Power `vcipher` with `vpmsumd`, and a WebAssembly path that has no cipher instructions at all and emulates the round function through a constant-time tower-field substitution — where the 256-byte lookup table a serial implementation reaches for is itself the side channel.
 

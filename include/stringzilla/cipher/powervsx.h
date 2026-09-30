@@ -13,6 +13,7 @@
 #define STRINGZILLA_CIPHER_POWERVSX_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/memory/powervsx.h" // `sz_fill_powervsx_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -57,7 +58,7 @@ extern "C" {
  *  @param[in] bytes The sixteen bytes, in the order the cipher defines them.
  *  @return The block, with byte zero in the most significant register byte.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_block_load_powervsx_(sz_u8_t const *bytes) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_block_load_powervsx_(sz_u8_t const *bytes) {
     return vec_xl_be(0, (unsigned char const *)bytes);
 }
 
@@ -66,12 +67,12 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_block_load_powervsx_(
  *  @param[in] block_u8x16 The block.
  *  @param[out] bytes Receives the sixteen bytes in the order the cipher defines them.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_block_store_powervsx_(__vector unsigned char block_u8x16, sz_u8_t *bytes) {
+STRINGZILLA_INLINE void sz_aes256_block_store_powervsx_(__vector unsigned char block_u8x16, sz_u8_t *bytes) {
     vec_xst_be(block_u8x16, 0, (unsigned char *)bytes);
 }
 
 /** An all-zero block, the second operand of every @c vec_sld used as a shift. */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_zero_powervsx_(void) { return vec_splats((unsigned char)0); }
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_zero_powervsx_(void) { return vec_splats((unsigned char)0); }
 
 #pragma endregion Byte Order
 
@@ -86,8 +87,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_zero_powervsx_(void) 
  *  A schedule word packs its first byte into the least significant position, so on a little-endian
  *  target the word array's byte image already is the round key's byte sequence.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_round_key_powervsx_(sz_aes256_key_t const *key,
-                                                                               sz_size_t round_index) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_round_key_powervsx_(sz_aes256_key_t const *key,
+                                                                        sz_size_t round_index) {
     __vector unsigned char const packed_u8x16 = sz_aes256_block_load_powervsx_(
         (sz_u8_t const *)&key->round_keys[round_index * 4]);
 #if STRINGZILLA_ARCH_BIG_ENDIAN_
@@ -103,8 +104,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_round_key_powervsx_(s
  *  @param[in] round_key_u8x16 The round key in big-endian register order.
  *  @param[out] words The four schedule words that receive it.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_round_key_store_powervsx_(__vector unsigned char round_key_u8x16,
-                                                                   sz_u32_t *words) {
+STRINGZILLA_INLINE void sz_aes256_round_key_store_powervsx_(__vector unsigned char round_key_u8x16, sz_u32_t *words) {
 #if STRINGZILLA_ARCH_BIG_ENDIAN_
     sz_aes256_block_store_powervsx_((__vector unsigned char)vec_revb((__vector unsigned int)round_key_u8x16),
                                     (sz_u8_t *)words);
@@ -122,8 +122,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_round_key_store_powervsx_(__vector unsi
  *  intrinsics the compiler renumbers for little-endian, so the lane that holds the most
  *  significant word moves.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_broadcast_powervsx_(
-    __vector unsigned char round_key_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_key_broadcast_powervsx_(__vector unsigned char round_key_u8x16) {
     return (__vector unsigned char)vec_splat((__vector unsigned int)round_key_u8x16,
                                              STRINGZILLA_ARCH_BIG_ENDIAN_ ? 3 : 0);
 }
@@ -133,8 +132,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_broadcast_powervs
  *  @param[in] round_key_u8x16 The round key in big-endian register order.
  *  @return The substituted word in every lane.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_substitute_powervsx_(
-    __vector unsigned char round_key_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_key_substitute_powervsx_(__vector unsigned char round_key_u8x16) {
     return vec_sbox_be(sz_aes256_key_broadcast_powervsx_(round_key_u8x16));
 }
 
@@ -149,7 +147,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_substitute_powerv
  *  words hold the same value, sliding the whole register one byte leaves every word holding its own
  *  bytes rotated, the last word borrowing the byte that wraps around.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_rotate_substitute_powervsx_(
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_key_rotate_substitute_powervsx_(
     __vector unsigned char round_key_u8x16, sz_u32_t round_constant) {
     __vector unsigned char const broadcast_u8x16 = sz_aes256_key_broadcast_powervsx_(round_key_u8x16);
     __vector unsigned char const rotated_u8x16 = vec_sld(broadcast_u8x16, broadcast_u8x16, 1);
@@ -166,8 +164,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_rotate_substitute
  *
  *  FIPS 197 defines the schedule one word at a time, each word depending on the one before it.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_fold_powervsx_(
-    __vector unsigned char previous_u8x16, __vector unsigned char substituted_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_key_fold_powervsx_(__vector unsigned char previous_u8x16,
+                                                                       __vector unsigned char substituted_u8x16) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
     previous_u8x16 = vec_xor(previous_u8x16, vec_sld(zero_u8x16, previous_u8x16, 12));
     previous_u8x16 = vec_xor(previous_u8x16, vec_sld(zero_u8x16, previous_u8x16, 12));
@@ -175,8 +173,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_key_fold_powervsx_(
     return vec_xor(previous_u8x16, substituted_u8x16);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key,
-                                                          sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_INLINE void sz_aes256_key_init_powervsx_(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)]) {
     sz_u32_t *schedule = &key->round_keys[0];
     __vector unsigned char even_round_key_u8x16 = sz_aes256_block_load_powervsx_(secret);
     __vector unsigned char odd_round_key_u8x16 = sz_aes256_block_load_powervsx_(secret + 16);
@@ -227,13 +224,20 @@ STRINGZILLA_API_COMPTIME void sz_aes256_key_init_powervsx(sz_aes256_key_t *key,
     sz_aes256_round_key_store_powervsx_(even_round_key_u8x16, schedule + 14 * 4);
 }
 
+STRINGZILLA_API sz_status_t sz_aes256_key_init_powervsx(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
+                                                        void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_key_init_powervsx_(key, secret);
+    return sz_success_k;
+}
+
 #pragma endregion Key Schedule
 
 #pragma region Block Encryption
 
 /** Applies one middle round to all eight chains, so the eight issue back to back. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigned char *blocks_u8x16,
-                                                                __vector unsigned char round_key_u8x16) {
+STRINGZILLA_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigned char *blocks_u8x16,
+                                                         __vector unsigned char round_key_u8x16) {
     blocks_u8x16[0] = vec_cipher_be(blocks_u8x16[0], round_key_u8x16);
     blocks_u8x16[1] = vec_cipher_be(blocks_u8x16[1], round_key_u8x16);
     blocks_u8x16[2] = vec_cipher_be(blocks_u8x16[2], round_key_u8x16);
@@ -250,8 +254,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_round_powervsx_(__vector unsigne
  *  @param[in] block_u8x16 The plaintext block in big-endian register order.
  *  @return The ciphertext block in big-endian register order.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes256_key_t const *key,
-                                                                                   __vector unsigned char block_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_block_encrypt_powervsx_(sz_aes256_key_t const *key,
+                                                                            __vector unsigned char block_u8x16) {
     block_u8x16 = vec_xor(block_u8x16, sz_aes256_round_key_powervsx_(key, 0));
     block_u8x16 = vec_cipher_be(block_u8x16, sz_aes256_round_key_powervsx_(key, 1));
     block_u8x16 = vec_cipher_be(block_u8x16, sz_aes256_round_key_powervsx_(key, 2));
@@ -277,8 +281,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_block_encrypt_powervs
  *  One round instruction has several cycles of latency and issues every cycle, so a single chain of
  *  fourteen dependent rounds leaves most of that throughput idle.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *key,
-                                                                  __vector unsigned char *blocks_u8x16) {
+STRINGZILLA_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_t const *key,
+                                                           __vector unsigned char *blocks_u8x16) {
     __vector unsigned char round_key_u8x16 = sz_aes256_round_key_powervsx_(key, 0);
 
     blocks_u8x16[0] = vec_xor(blocks_u8x16[0], round_key_u8x16);
@@ -322,7 +326,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_blocks_encrypt_powervsx_(sz_aes256_key_
  *  @param[in] nonce The twelve nonce bytes.
  *  @return The counter block for index zero, in big-endian register order.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_counter_base_powervsx_(sz_u8_t const *nonce) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_counter_base_powervsx_(sz_u8_t const *nonce) {
     // Only twelve bytes are readable, and Power9's length-limited load reads exactly that many and
     // zeroes the rest. It loads in memory order, so the little-endian build reverses into register order.
     __vector unsigned char const loaded_u8x16 = vec_xl_len((unsigned char *)nonce, 12);
@@ -341,8 +345,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_counter_base_powervsx
  *
  *  A broadcast index lands in every word, and the selection mask keeps only the last of them.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_counter_block_powervsx_(__vector unsigned char base_u8x16,
-                                                                                   sz_u32_t block_index) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_counter_block_powervsx_(__vector unsigned char base_u8x16,
+                                                                            sz_u32_t block_index) {
     __vector unsigned char const trailing_mask_u8x16 = vec_sld(sz_aes256_zero_powervsx_(),
                                                                vec_splats((unsigned char)0xFF), 4);
     __vector unsigned char const index_u8x16 = (__vector unsigned char)vec_splats((unsigned int)block_index);
@@ -354,7 +358,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_counter_block_powervs
  *  @param[in] counter The counter block, in the order the cipher defines it.
  *  @return The block index.
  */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_counter_index_powervsx_(sz_u8_t const *counter) {
+STRINGZILLA_INLINE sz_u32_t sz_aes256_counter_index_powervsx_(sz_u8_t const *counter) {
     return ((sz_u32_t)counter[12] << 24) | ((sz_u32_t)counter[13] << 16) | ((sz_u32_t)counter[14] << 8) |
            (sz_u32_t)counter[15];
 }
@@ -365,21 +369,23 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_aes256_counter_index_powervsx_(sz_u8_t con
  *  @param[out] output Receives the sixteen output bytes; may alias @p input.
  *  @param[in] keystream_u8x16 The keystream block.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_ctr_lane_powervsx_(sz_u8_t const *input, sz_u8_t *output,
-                                                            __vector unsigned char keystream_u8x16) {
+STRINGZILLA_INLINE void sz_aes256_ctr_lane_powervsx_(sz_u8_t const *input, sz_u8_t *output,
+                                                     __vector unsigned char keystream_u8x16) {
     sz_aes256_block_store_powervsx_(vec_xor(sz_aes256_block_load_powervsx_(input), keystream_u8x16), output);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *key,
-                                                         sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
-                                                         sz_cptr_t text, sz_size_t length, sz_ptr_t output) {
+STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *key,
+                                                       sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
+                                                       sz_cptr_t text, sz_size_t length, sz_ptr_t target,
+                                                       void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
-    sz_u8_t *output_bytes = (sz_u8_t *)output;
+    sz_u8_t *output_bytes = (sz_u8_t *)target;
     __vector unsigned char const counter_base_u8x16 = sz_aes256_counter_base_powervsx_(nonce);
     sz_u32_t block_index = (sz_u32_t)(byte_offset / STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t within_block = (sz_size_t)(byte_offset % STRINGZILLA_AES_BLOCK_LENGTH);
     sz_size_t produced = 0;
-    sz_assert_no_overlap_(output, length, text, length);
+    sz_assert_no_overlap_(target, length, text, length);
 
     //  A start that is not block aligned generates its first block whole and discards the leading bytes.
     if (within_block != 0 && length != 0) {
@@ -437,6 +443,7 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *
         for (within_block = 0; produced != length; ++within_block, ++produced)
             output_bytes[produced] = (sz_u8_t)(input_bytes[produced] ^ keystream_vec.u8s[within_block]);
     }
+    return sz_success_k;
 }
 
 #pragma endregion Counter Mode
@@ -454,11 +461,11 @@ STRINGZILLA_API_COMPTIME void sz_aes256_ctr_xor_powervsx(sz_aes256_key_t const *
  *  The polynomial multiplier here sums two doubleword products rather than producing one, which is
  *  a different shape from the single-product multipliers the other backends use.
  */
-STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_powervsx_(__vector unsigned char block_u8x16,
-                                                             __vector unsigned char subkey_u8x16,
-                                                             __vector unsigned char *low_u8x16,
-                                                             __vector unsigned char *middle_u8x16,
-                                                             __vector unsigned char *high_u8x16) {
+STRINGZILLA_INLINE void sz_ghash_accumulate_powervsx_(__vector unsigned char block_u8x16,
+                                                      __vector unsigned char subkey_u8x16,
+                                                      __vector unsigned char *low_u8x16,
+                                                      __vector unsigned char *middle_u8x16,
+                                                      __vector unsigned char *high_u8x16) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
     __vector unsigned char const exchanged_u8x16 = vec_sld(block_u8x16, block_u8x16, 8);
     __vector unsigned char const high_only_u8x16 = vec_sld(exchanged_u8x16, zero_u8x16, 8);
@@ -483,9 +490,9 @@ STRINGZILLA_HELPER_INLINE void sz_ghash_accumulate_powervsx_(__vector unsigned c
  *
  *  The cross products straddle the halves, so they are split and merged first.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_reduce_powervsx_(__vector unsigned char low_u8x16,
-                                                                           __vector unsigned char middle_u8x16,
-                                                                           __vector unsigned char high_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_ghash_reduce_powervsx_(__vector unsigned char low_u8x16,
+                                                                    __vector unsigned char middle_u8x16,
+                                                                    __vector unsigned char high_u8x16) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
     __vector unsigned int const one_u32x4 = vec_splats((unsigned int)1);
     __vector unsigned int const two_u32x4 = vec_splats((unsigned int)2);
@@ -531,8 +538,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_reduce_powervsx_(__vec
  *  @param[in] subkey_u8x16 One of the subkey powers.
  *  @return The reduced product, in big-endian register order.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_multiply_powervsx_(__vector unsigned char accumulator_u8x16,
-                                                                             __vector unsigned char subkey_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_ghash_multiply_powervsx_(__vector unsigned char accumulator_u8x16,
+                                                                      __vector unsigned char subkey_u8x16) {
     __vector unsigned char low_u8x16 = sz_aes256_zero_powervsx_();
     __vector unsigned char middle_u8x16 = low_u8x16;
     __vector unsigned char high_u8x16 = low_u8x16;
@@ -540,12 +547,13 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_multiply_powervsx_(__v
     return sz_ghash_reduce_powervsx_(low_u8x16, middle_u8x16, high_u8x16);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_powervsx(sz_aes256_gcm_key_t *key,
-                                                              sz_u8_t const secret[sz_at_least_(32)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_powervsx(sz_aes256_gcm_key_t *key,
+                                                            sz_u8_t const secret[sz_at_least_(32)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     __vector unsigned char subkey_u8x16, power_u8x16;
     sz_size_t power_index;
 
-    sz_aes256_key_init_powervsx(&key->block, secret);
+    sz_aes256_key_init_powervsx_(&key->block, secret);
     subkey_u8x16 = sz_aes256_block_encrypt_powervsx_(&key->block, sz_aes256_zero_powervsx_());
     power_u8x16 = subkey_u8x16;
     sz_aes256_block_store_powervsx_(power_u8x16, &key->powers[0]);
@@ -553,10 +561,11 @@ STRINGZILLA_API_COMPTIME void sz_aes256_gcm_key_init_powervsx(sz_aes256_gcm_key_
         power_u8x16 = sz_ghash_multiply_powervsx_(power_u8x16, subkey_u8x16);
         sz_aes256_block_store_powervsx_(power_u8x16, &key->powers[power_index * STRINGZILLA_AES_BLOCK_LENGTH]);
     }
+    return sz_success_k;
 }
 
 /** Compares two tags in constant time; @c sz_true_k when all sixteen bytes match. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_powervsx_(sz_u8_t const *first, sz_u8_t const *second) {
+STRINGZILLA_INLINE sz_bool_t sz_aes256_tag_equal_powervsx_(sz_u8_t const *first, sz_u8_t const *second) {
     __vector unsigned char const first_u8x16 = vec_xl(0, (unsigned char const *)first);
     __vector unsigned char const second_u8x16 = vec_xl(0, (unsigned char const *)second);
     return vec_all_eq(first_u8x16, second_u8x16) ? sz_true_k : sz_false_k;
@@ -569,9 +578,9 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_aes256_tag_equal_powervsx_(sz_u8_t const 
  *  @param[in] subkey_u8x16 The hash subkey.
  *  @return The updated running hash.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_absorb_powervsx_(__vector unsigned char accumulator_u8x16,
-                                                                           __vector unsigned char block_u8x16,
-                                                                           __vector unsigned char subkey_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_ghash_absorb_powervsx_(__vector unsigned char accumulator_u8x16,
+                                                                    __vector unsigned char block_u8x16,
+                                                                    __vector unsigned char subkey_u8x16) {
     return sz_ghash_multiply_powervsx_(vec_xor(accumulator_u8x16, block_u8x16), subkey_u8x16);
 }
 
@@ -581,8 +590,8 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_absorb_powervsx_(__vec
  *  @param[in] powers The eight subkey powers, ascending.
  *  @param[out] powers_u8x16 Receives H⁸ down to H¹.
  */
-STRINGZILLA_HELPER_INLINE void sz_ghash_descending_powers_powervsx_(sz_u8_t const *powers,
-                                                                    __vector unsigned char *powers_u8x16) {
+STRINGZILLA_INLINE void sz_ghash_descending_powers_powervsx_(sz_u8_t const *powers,
+                                                             __vector unsigned char *powers_u8x16) {
     powers_u8x16[0] = sz_aes256_block_load_powervsx_(powers + 7 * STRINGZILLA_AES_BLOCK_LENGTH);
     powers_u8x16[1] = sz_aes256_block_load_powervsx_(powers + 6 * STRINGZILLA_AES_BLOCK_LENGTH);
     powers_u8x16[2] = sz_aes256_block_load_powervsx_(powers + 5 * STRINGZILLA_AES_BLOCK_LENGTH);
@@ -602,9 +611,9 @@ STRINGZILLA_HELPER_INLINE void sz_ghash_descending_powers_powervsx_(sz_u8_t cons
  *
  *  Eight absorbed blocks expand to (Y ⊕ X₁) H⁸ ⊕ X₂ H⁷ ⊕ … ⊕ X₈ H.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_(
-    __vector unsigned char accumulator_u8x16, __vector unsigned char const *blocks_u8x16,
-    __vector unsigned char const *powers_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_(__vector unsigned char accumulator_u8x16,
+                                                                          __vector unsigned char const *blocks_u8x16,
+                                                                          __vector unsigned char const *powers_u8x16) {
     __vector unsigned char low_u8x16 = sz_aes256_zero_powervsx_();
     __vector unsigned char middle_u8x16 = low_u8x16;
     __vector unsigned char high_u8x16 = low_u8x16;
@@ -631,7 +640,7 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_ghash_absorb_eight_powervsx_
  *  The size is known at compile time, so this is a straight-line fill rather than
  *  a length-driven loop.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_powervsx_(sz_aes256_gcm_state_t *state) {
+STRINGZILLA_INLINE void sz_aes256_gcm_state_scrub_powervsx_(sz_aes256_gcm_state_t *state) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
     unsigned char *const bytes = (unsigned char *)state;
     sz_size_t byte_index;
@@ -671,9 +680,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_state_scrub_powervsx_(sz_aes256_gcm
 }
 
 /** Prepares the payload both directions share: counter block, tag mask and empty carries. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state,
-                                                             sz_aes256_gcm_key_t const *key,
-                                                             sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state_t *state, sz_aes256_gcm_key_t const *key,
+                                                      sz_u8_t const nonce[sz_at_least_(12)]) {
     __vector unsigned char const zero_u8x16 = sz_aes256_zero_powervsx_();
     __vector unsigned char initial_u8x16;
 
@@ -696,8 +704,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_begin_powervsx_(sz_aes256_gcm_state
 }
 
 /** Absorbs associated data into the payload both directions share. */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                 sz_size_t length) {
+STRINGZILLA_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                          sz_size_t length) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char powers_u8x16[8];
@@ -756,7 +764,7 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_associate_powervsx_(sz_aes256_gcm_s
  *  Emptying the block is left to the caller, because the digest reads a state it may not modify
  *  while the transform owns one it must.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_powervsx_(
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_powervsx_(
     sz_u8_t const *partial, sz_size_t buffered, __vector unsigned char accumulator_u8x16,
     __vector unsigned char subkey_u8x16) {
     // A length-limited load reads the live bytes and zeroes the rest, replacing sixteen per-byte
@@ -785,12 +793,12 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_flush_partial_pow
  *  every byte spends one of each, so a chunk that ends mid block leaves both mid block and
  *  this resumes both.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_spend_powervsx_(sz_aes256_gcm_state_t *state,
-                                                                               sz_u8_t const *input, sz_u8_t *output,
-                                                                               sz_size_t count,
-                                                                               __vector unsigned char accumulator_u8x16,
-                                                                               __vector unsigned char subkey_u8x16,
-                                                                               sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_gcm_spend_powervsx_(sz_aes256_gcm_state_t *state,
+                                                                        sz_u8_t const *input, sz_u8_t *output,
+                                                                        sz_size_t count,
+                                                                        __vector unsigned char accumulator_u8x16,
+                                                                        __vector unsigned char subkey_u8x16,
+                                                                        sz_aes256_gcm_direction_t direction) {
     sz_size_t consumed = 0;
 
     //  The hash always eats ciphertext, which is the output when encrypting and the input when
@@ -837,9 +845,9 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_spend_powervsx_(s
  *  The ciphertext leaves in a register rather than being read back from @p output, because a caller
  *  may pass one pointer for both and the tag would then be built over plaintext.
  */
-STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(
-    sz_u8_t const *input, sz_u8_t *output, __vector unsigned char keystream_u8x16,
-    __vector unsigned char cipher_mask_u8x16) {
+STRINGZILLA_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(sz_u8_t const *input, sz_u8_t *output,
+                                                                       __vector unsigned char keystream_u8x16,
+                                                                       __vector unsigned char cipher_mask_u8x16) {
     __vector unsigned char const original_u8x16 = sz_aes256_block_load_powervsx_(input);
     __vector unsigned char const transformed_u8x16 = vec_xor(original_u8x16, keystream_u8x16);
     sz_aes256_block_store_powervsx_(transformed_u8x16, output);
@@ -858,9 +866,9 @@ STRINGZILLA_HELPER_INLINE __vector unsigned char sz_aes256_gcm_lane_powervsx_(
  *  and neither may restart at a chunk boundary: whatever the previous chunk left of its keystream
  *  block, then whole blocks eight at a time, then a trailing block that the next chunk will resume.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
-                                                                 sz_size_t length, sz_ptr_t output,
-                                                                 sz_aes256_gcm_direction_t direction) {
+STRINGZILLA_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_state_t *state, sz_cptr_t text,
+                                                          sz_size_t length, sz_ptr_t output,
+                                                          sz_aes256_gcm_direction_t direction) {
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)output;
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
@@ -968,8 +976,8 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_transform_powervsx_(sz_aes256_gcm_s
  *  @param[in] state The state, left unmodified so a caller may keep appending.
  *  @param[out] tag Receives the sixteen tag bytes.
  */
-STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state,
-                                                              sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_state_t const *state,
+                                                       sz_u8_t tag[sz_at_least_(16)]) {
     __vector unsigned char const subkey_u8x16 = sz_aes256_block_load_powervsx_(state->key.powers);
     __vector unsigned char accumulator_u8x16 = sz_aes256_block_load_powervsx_(state->accumulator);
     sz_u128_vec_t lengths_vec;
@@ -987,85 +995,111 @@ STRINGZILLA_HELPER_INLINE void sz_aes256_gcm_digest_powervsx_(sz_aes256_gcm_stat
     sz_aes256_block_store_powervsx_(vec_xor(accumulator_u8x16, sz_aes256_block_load_powervsx_(state->tag_mask)), tag);
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_init_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                    sz_aes256_gcm_key_t const *key,
-                                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                  sz_aes256_gcm_key_t const *key,
+                                                                  sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_powervsx_(&encryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_associate_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                         sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                       sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_powervsx_(&encryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_update_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
-                                                                      sz_cptr_t text, sz_size_t length,
-                                                                      sz_ptr_t output) {
-    sz_aes256_gcm_transform_powervsx_(&encryptor->state, text, length, output, sz_aes256_gcm_encrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_powervsx(sz_aes256_gcm_encryptor_t *encryptor,
+                                                                    sz_cptr_t text, sz_size_t length, sz_ptr_t target,
+                                                                    void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_powervsx_(&encryptor->state, text, length, target, sz_aes256_gcm_encrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encryptor_digest_powervsx(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                                      sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_powervsx(sz_aes256_gcm_encryptor_t const *encryptor,
+                                                                    sz_u8_t tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_digest_powervsx_(&encryptor->state, tag);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_init_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                    sz_aes256_gcm_key_t const *key,
-                                                                    sz_u8_t const nonce[sz_at_least_(12)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                  sz_aes256_gcm_key_t const *key,
+                                                                  sz_u8_t const nonce[sz_at_least_(12)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_powervsx_(&decryptor->state, key, nonce);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_associate_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                         sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                       sz_cptr_t text, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_powervsx_(&decryptor->state, text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_decryptor_update_unverified_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
-                                                                                 sz_cptr_t text, sz_size_t length,
-                                                                                 sz_ptr_t output) {
-    sz_aes256_gcm_transform_powervsx_(&decryptor->state, text, length, output, sz_aes256_gcm_decrypting_k);
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_powervsx(sz_aes256_gcm_decryptor_t *decryptor,
+                                                                               sz_cptr_t text, sz_size_t length,
+                                                                               sz_ptr_t target, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_aes256_gcm_transform_powervsx_(&decryptor->state, text, length, target, sz_aes256_gcm_decrypting_k);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gcm_decryptor_t const *decryptor,
-                                                                             sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_INLINE sz_status_t sz_aes256_gcm_decryptor_verify_powervsx_(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                        sz_u8_t const tag[sz_at_least_(16)]) {
     sz_u128_vec_t expected_vec;
     sz_aes256_gcm_digest_powervsx_(&decryptor->state, expected_vec.u8s);
     return sz_aes256_tag_equal_powervsx_(expected_vec.u8s, tag) == sz_true_k ? sz_success_k
                                                                              : sz_authentication_failed_k;
 }
 
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_powervsx(sz_aes256_gcm_decryptor_t const *decryptor,
+                                                                    sz_u8_t const tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    return sz_aes256_gcm_decryptor_verify_powervsx_(decryptor, tag);
+}
+
 #pragma endregion Streaming Interface
 
 #pragma region One Shot Interface
 
-STRINGZILLA_API_COMPTIME void sz_aes256_gcm_encrypt_powervsx(sz_aes256_gcm_key_t const *key,
-                                                             sz_u8_t const nonce[sz_at_least_(12)],
-                                                             sz_cptr_t associated, sz_size_t associated_length,
-                                                             sz_cptr_t text, sz_size_t length, sz_ptr_t output,
-                                                             sz_u8_t tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_powervsx(sz_aes256_gcm_key_t const *key,
+                                                           sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                           sz_size_t associated_length, sz_cptr_t text,
+                                                           sz_size_t length, sz_ptr_t target,
+                                                           sz_u8_t tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_encryptor_t encryptor;
-    sz_aes256_gcm_encryptor_init_powervsx(&encryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_encryptor_associate_powervsx(&encryptor, associated, associated_length);
-    sz_aes256_gcm_encryptor_update_powervsx(&encryptor, text, length, output);
-    sz_aes256_gcm_encryptor_digest_powervsx(&encryptor, tag);
+    sz_aes256_gcm_begin_powervsx_(&encryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_powervsx_(&encryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_powervsx_(&encryptor.state, text, length, target, sz_aes256_gcm_encrypting_k);
+    sz_aes256_gcm_digest_powervsx_(&encryptor.state, tag);
     sz_aes256_gcm_state_scrub_powervsx_(&encryptor.state);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t const *key,
-                                                                    sz_u8_t const nonce[sz_at_least_(12)],
-                                                                    sz_cptr_t associated, sz_size_t associated_length,
-                                                                    sz_cptr_t text, sz_size_t length, sz_ptr_t output,
-                                                                    sz_u8_t const tag[sz_at_least_(16)]) {
+STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t const *key,
+                                                           sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
+                                                           sz_size_t associated_length, sz_cptr_t text,
+                                                           sz_size_t length, sz_ptr_t target,
+                                                           sz_u8_t const tag[sz_at_least_(16)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;
-    sz_aes256_gcm_decryptor_init_powervsx(&decryptor, key, nonce);
-    if (associated_length) sz_aes256_gcm_decryptor_associate_powervsx(&decryptor, associated, associated_length);
-    sz_aes256_gcm_decryptor_update_unverified_powervsx(&decryptor, text, length, output);
-    verdict = sz_aes256_gcm_decryptor_verify_powervsx(&decryptor, tag);
+    sz_aes256_gcm_begin_powervsx_(&decryptor.state, key, nonce);
+    if (associated_length) sz_aes256_gcm_associate_powervsx_(&decryptor.state, associated, associated_length);
+    sz_aes256_gcm_transform_powervsx_(&decryptor.state, text, length, target, sz_aes256_gcm_decrypting_k);
+    verdict = sz_aes256_gcm_decryptor_verify_powervsx_(&decryptor, tag);
     sz_aes256_gcm_state_scrub_powervsx_(&decryptor.state);
 
     //  A caller who drops the status must still be unable to act on forged plaintext.
-    if (verdict != sz_success_k) sz_fill(output, length, 0);
+    if (verdict != sz_success_k) {
+        sz_fill_powervsx_(target, length, 0);
+        sz_keep_alive_(target);
+    }
     return verdict;
 }
 

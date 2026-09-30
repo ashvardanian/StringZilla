@@ -1,8 +1,8 @@
 # Cipher: AES-256 in Counter and Galois/Counter Modes
 
-This directory holds the encryption kernels behind `sz_aes256_ctr_xor`, `sz_aes256_gcm_encrypt`, `sz_aes256_gcm_decrypt`, and the streaming `sz_aes256_gcm_encryptor` and `sz_aes256_gcm_decryptor` families.
+This directory holds the encryption kernels behind `sz_aes256_ctr_xor_best`, `sz_aes256_gcm_encrypt_best`, `sz_aes256_gcm_decrypt_best`, and the streaming `sz_aes256_gcm_encryptor_*_best` and `sz_aes256_gcm_decryptor_*_best` families.
 Each operation has a serial baseline plus per-ISA SIMD backends — `westmere` and `icelake` on x86, `neonaes` and `sve2aes` on Arm, `rvvcrypto` on RISC-V, `powervsx` on Power, and `v128` with `v128relaxed` on WebAssembly.
-The dispatcher picks the fastest one available on the running CPU.
+Each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
 
 ## Methodology
 

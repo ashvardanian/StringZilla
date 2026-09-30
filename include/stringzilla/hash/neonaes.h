@@ -10,14 +10,13 @@
 #define STRINGZILLA_HASH_NEONAES_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEONAES
+#if STRINGZILLA_ARCH_ARM64_NEONAES_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -29,7 +28,7 @@ extern "C" {
  *  @brief Emulates the Intel's AES-NI @c AESENC instruction on Arm NEON.
  *  @see Emulating x86 AES Intrinsics on ARMv8-A by Michael Brase: https://blog.michaelbrase.com/2018/05/08/emulating-x86-aes-intrinsics-on-armv8-a/
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t state_u8x16, uint8x16_t round_key_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t state_u8x16, uint8x16_t round_key_u8x16) {
     return veorq_u8(vaesmcq_u8(vaeseq_u8(state_u8x16, vdupq_n_u8(0))), round_key_u8x16);
 }
 
@@ -41,7 +40,7 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_emulate_aesenc_u8x16_neon_(uint8x16_t st
  *  @param[in] round_key_u64x2 128-bit round key represented as two 64-bit lanes.
  *  @return AES-encrypted 128-bit result as two 64-bit lanes.
  */
-STRINGZILLA_HELPER_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t state_u64x2, uint64x2_t round_key_u64x2) {
+STRINGZILLA_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t state_u64x2, uint64x2_t round_key_u64x2) {
     return vreinterpretq_u64_u8(               //
         sz_emulate_aesenc_u8x16_neon_(         //
             vreinterpretq_u8_u64(state_u64x2), //
@@ -54,7 +53,7 @@ STRINGZILLA_HELPER_INLINE uint64x2_t sz_emulate_aesenc_u64x2_neon_(uint64x2_t st
  *  @param[out] state Pointer to the minimal hash state to initialize.
  *  @param[in] seed 64-bit seed value for the hash.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_aligned_for_short_t *state, sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
     uint64x2_t seed_u64x2 = vdupq_n_u64(seed);
@@ -79,8 +78,8 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_short_init_neon_(sz_hash_state_alig
  *  @param[in] length Total number of bytes that were hashed.
  *  @return 64-bit hash digest.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned_for_short_t const *state,
-                                                                      sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_state_aligned_for_short_t const *state,
+                                                               sz_size_t length) {
     // Mix the length into the key
     uint64x2_t key_with_length_u64x2 = vaddq_u64(state->key.u64x2, vsetq_lane_u64(length, vdupq_n_u64(0), 0));
     // Combine the "sum" and the "AES" blocks
@@ -99,15 +98,15 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_short_finalize_neon_(sz_hash_st
  *  @param[inout] state Pointer to the minimal hash state to update.
  *  @param[in] block_u8x16 16-byte input block as a NEON register.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state,
-                                                                uint8x16_t block_u8x16) {
+STRINGZILLA_INLINE void sz_hash_state_short_update_neon_(sz_hash_state_aligned_for_short_t *state,
+                                                         uint8x16_t block_u8x16) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
     state->aes.u8x16 = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16, block_u8x16);
     uint8x16_t sum_shuffled_u8x16 = vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2), order_u8x16);
     state->sum.u64x2 = vaddq_u64(vreinterpretq_u64_u8(sum_shuffled_u8x16), vreinterpretq_u64_u8(block_u8x16));
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed) {
+STRINGZILLA_INLINE void sz_hash_state_init_neonaes_(sz_hash_state_t *state, sz_u64_t seed) {
     // The key is made from the seed and half of it will be mixed with the length in the end
     uint64x2_t seed_u64x2 = vdupq_n_u64(seed);
     vst1q_u64((sz_u64_t *)state->key, seed_u64x2);
@@ -129,7 +128,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_init_neonaes(sz_hash_state_t *state,
 
 /** Loads the packed public state into the aligned internal twin (NEON: 4x @c vld1q_u8
  *  per 64-byte field). */
-STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state;
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         state.aes.u8x16s[lane_index] = vld1q_u8(packed->aes + lane_index * 16);
@@ -143,8 +142,7 @@ STRINGZILLA_HELPER_INLINE sz_hash_state_aligned_t sz_hash_state_load_neonaes_(sz
 
 /** Stores the aligned internal twin back into the packed public state (NEON: 4x
  *  @c vst1q_u8 per field). */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed,
-                                                            sz_hash_state_aligned_t const *state) {
+STRINGZILLA_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *packed, sz_hash_state_aligned_t const *state) {
     for (int lane_index = 0; lane_index < 4; ++lane_index) {
         vst1q_u8(packed->aes + lane_index * 16, state->aes.u8x16s[lane_index]);
         vst1q_u8(packed->sum + lane_index * 16, state->sum.u8x16s[lane_index]);
@@ -158,7 +156,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_store_neonaes_(sz_hash_state_t *pac
  *  @brief Absorbs the buffered 64-byte block into the aligned state (four 128-bit lanes), in place.
  *  @param[inout] state Pointer to the aligned hash state whose @c ins lanes are consumed.
  */
-STRINGZILLA_HELPER_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_aligned_t *state) {
+STRINGZILLA_INLINE void sz_hash_state_absorb_neonaes_(sz_hash_state_aligned_t *state) {
     uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
     state->aes.u8x16s[0] = sz_emulate_aesenc_u8x16_neon_(state->aes.u8x16s[0], state->ins.u8x16s[0]);
     uint8x16_t sum_shuffled_0_u8x16 = vqtbl1q_u8(vreinterpretq_u8_u64(state->sum.u64x2s[0]), order_u8x16);
@@ -180,7 +178,7 @@ STRINGZILLA_HELPER_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_align
  *  @param[in] state The internal hash state to finalize.
  *  @return 64-bit hash digest.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state_aligned_t state) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state_aligned_t state) {
     // Mix the length into the key
     uint64x2_t key_with_length_u64x2 = vaddq_u64(state.key.u64x2, vsetq_lane_u64(state.ins_length, vdupq_n_u64(0), 0));
 
@@ -218,7 +216,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_hash_state_finalize_neonaes_(sz_hash_state
     return vgetq_lane_u64(vreinterpretq_u64_u8(final_mixed_u8x16), 0);
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE void sz_hash_state_update_neonaes_(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length) {
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t state = sz_hash_state_load_neonaes_(packed);
     uint8x16_t const zeros_u8x16 = vdupq_n_u8(0);
@@ -229,7 +227,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *pack
         // would, keyed on the total length. Now that more bytes have arrived, that block is
         // interior - flush it and clear the buffer.
         if (progress_in_block == 0 && state.ins_length != 0) {
-            sz_hash_state_update_neonaes_(&state);
+            sz_hash_state_absorb_neonaes_(&state);
             for (int lane_index = 0; lane_index < 4; ++lane_index) state.ins.u8x16s[lane_index] = zeros_u8x16;
         }
         sz_size_t to_copy = sz_min_of_two(length, 64 - progress_in_block);
@@ -241,7 +239,7 @@ STRINGZILLA_API_COMPTIME void sz_hash_state_update_neonaes(sz_hash_state_t *pack
     sz_hash_state_store_neonaes_(packed, &state);
 }
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t const *packed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_neonaes_(sz_hash_state_t const *packed) {
     sz_hash_state_aligned_t state = sz_hash_state_load_neonaes_(packed);
     sz_size_t length = state.ins_length;
     // Inputs longer than one block fold through the full four-lane state. The deferred final block is still
@@ -277,8 +275,8 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_hash_state_digest_neonaes(sz_hash_state_t c
     }
 }
 
-STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length,
-                                                                                  sz_u64_t seed) {
+STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonaes_(sz_cptr_t text, sz_size_t length,
+                                                                             sz_u64_t seed) {
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
@@ -344,7 +342,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonae
     }
     else {
         sz_align_(64) sz_hash_state_aligned_t state;
-        sz_hash_state_init_neonaes((sz_hash_state_t *)&state, seed);
+        sz_hash_state_init_neonaes_((sz_hash_state_t *)&state, seed);
 
         // Absorb every full 64-byte block except the last; the final block (a full 64 or a partial
         // tail) stays buffered in `ins` for `sz_hash_state_finalize_neonaes_` to fold - the same
@@ -354,7 +352,7 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonae
             state.ins.u8x16s[1] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 16));
             state.ins.u8x16s[2] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 32));
             state.ins.u8x16s[3] = vld1q_u8((sz_u8_t const *)(text + state.ins_length + 48));
-            sz_hash_state_update_neonaes_(&state);
+            sz_hash_state_absorb_neonaes_(&state);
         }
 
         // Stage the final [ins_length, length) bytes (1..64) into a zeroed buffer; finalize folds them.
@@ -378,8 +376,8 @@ STRINGZILLA_API_COMPTIME STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_neonae
  *
  *  @return The number of populated text-lanes (1..4).
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
-                                                                    sz_u512_vec_t *text_lanes_vec) {
+STRINGZILLA_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t text, sz_size_t length,
+                                                             sz_u512_vec_t *text_lanes_vec) {
     if (length <= 16) {
         sz_u128_vec_t lane_vec;
         if (length == 16) { lane_vec.u8x16 = vld1q_u8((sz_u8_t const *)text); }
@@ -405,48 +403,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_hash_multiseed_prepare_neon_(sz_cptr_t te
     return text_lanes_count;
 }
 
-STRINGZILLA_API_COMPTIME void sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,             //
-                                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                        sz_u64_t *hashes) {
-    // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
-    if (seeds_count == 0) return;
-    if (seeds_count == 1) {
-        hashes[0] = sz_hash_neonaes(text, length, seeds[0]);
-        return;
-    }
-    // NEON `AESE` is per-128-bit register, so there is no cross-lane packing; the win is the shared
-    // normalization pass plus interleaving two independent AES chains to hide the AES latency.
-    if (length > 64) {
-        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
-            hashes[seed_index] = sz_hash_neonaes(text, length, seeds[seed_index]);
-        return;
-    }
-
-    sz_u512_vec_t text_lanes_vec;
-    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_neon_(text, length, &text_lanes_vec);
-
-    sz_size_t seed_index = 0;
-    for (; seed_index + 2 <= seeds_count; seed_index += 2) {
-        sz_hash_state_aligned_for_short_t state0, state1;
-        sz_hash_state_short_init_neon_(&state0, seeds[seed_index + 0]);
-        sz_hash_state_short_init_neon_(&state1, seeds[seed_index + 1]);
-        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
-            sz_hash_state_short_update_neon_(&state0, text_lanes_vec.u128s[lane_index].u8x16);
-            sz_hash_state_short_update_neon_(&state1, text_lanes_vec.u128s[lane_index].u8x16);
-        }
-        hashes[seed_index + 0] = sz_hash_state_short_finalize_neon_(&state0, length);
-        hashes[seed_index + 1] = sz_hash_state_short_finalize_neon_(&state1, length);
-    }
-    if (seed_index < seeds_count) {
-        sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_neon_(&state, seeds[seed_index]);
-        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_state_short_update_neon_(&state, text_lanes_vec.u128s[lane_index].u8x16);
-        hashes[seed_index] = sz_hash_state_short_finalize_neon_(&state, length);
-    }
-}
-
-STRINGZILLA_API_COMPTIME void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
+STRINGZILLA_INLINE void sz_fill_random_neonaes_(sz_ptr_t text, sz_size_t length, sz_u64_t nonce) {
     sz_u64_t const *pi_pointer = sz_hash_pi_constants_();
     if (length <= 16) {
         uint64x2_t input_u64x2 = vdupq_n_u64(nonce);
@@ -561,12 +518,92 @@ STRINGZILLA_API_COMPTIME void sz_fill_random_neonaes(sz_ptr_t text, sz_size_t le
     }
 }
 
+#if STRINGZILLA_TARGET_NEONAES
+
+STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_init_neonaes_(state, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_update_neonaes(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
+                                                         void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_hash_state_update_neonaes_(packed, text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_state_digest_neonaes_(packed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length,
+                                                                            sz_u64_t seed, sz_u64_t *hash,
+                                                                            void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *hash = sz_hash_neonaes_(text, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,             //
+                                                      sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                      sz_u64_t *hashes, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Trivial counts gain nothing from a shared normalization pass and take the one-shot path.
+    if (seeds_count == 0) return sz_success_k;
+    if (seeds_count == 1) {
+        hashes[0] = sz_hash_neonaes_(text, length, seeds[0]);
+        return sz_success_k;
+    }
+    // NEON `AESE` is per-128-bit register, so there is no cross-lane packing; the win is the shared
+    // normalization pass plus interleaving two independent AES chains to hide the AES latency.
+    if (length > 64) {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_neonaes_(text, length, seeds[seed_index]);
+        return sz_success_k;
+    }
+
+    sz_u512_vec_t text_lanes_vec;
+    sz_size_t const text_lanes_count = sz_hash_multiseed_prepare_neon_(text, length, &text_lanes_vec);
+
+    sz_size_t seed_index = 0;
+    for (; seed_index + 2 <= seeds_count; seed_index += 2) {
+        sz_hash_state_aligned_for_short_t state0, state1;
+        sz_hash_state_short_init_neon_(&state0, seeds[seed_index + 0]);
+        sz_hash_state_short_init_neon_(&state1, seeds[seed_index + 1]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
+            sz_hash_state_short_update_neon_(&state0, text_lanes_vec.u128s[lane_index].u8x16);
+            sz_hash_state_short_update_neon_(&state1, text_lanes_vec.u128s[lane_index].u8x16);
+        }
+        hashes[seed_index + 0] = sz_hash_state_short_finalize_neon_(&state0, length);
+        hashes[seed_index + 1] = sz_hash_state_short_finalize_neon_(&state1, length);
+    }
+    if (seed_index < seeds_count) {
+        sz_hash_state_aligned_for_short_t state;
+        sz_hash_state_short_init_neon_(&state, seeds[seed_index]);
+        for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
+            sz_hash_state_short_update_neon_(&state, text_lanes_vec.u128s[lane_index].u8x16);
+        hashes[seed_index] = sz_hash_state_short_finalize_neon_(&state, length);
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_random_neonaes_(target, length, nonce);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEONAES
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEONAES
+#endif // STRINGZILLA_ARCH_ARM64_NEONAES_
 
 #ifdef __cplusplus
 }

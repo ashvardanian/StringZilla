@@ -10,14 +10,13 @@
 #define STRINGZILLA_HASH_SVE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE
+#if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +24,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_sve_(sz_cptr_t text, sz_size_t length) {
     sz_size_t progress = 0;
     sz_size_t const vector_length = svcntb();
     // Base SVE lacks the `svaddwb`/`svaddwt` widening accumulators that the SVE2 sibling uses, but `UDOT`
@@ -44,12 +43,22 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_sve(sz_cptr_t text, sz_size_t lengt
     return svaddv_u32(svptrue_b32(), sum_u32x);
 }
 
+#if STRINGZILLA_TARGET_SVE
+
+STRINGZILLA_API sz_status_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_sve_(text, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE
+#endif // STRINGZILLA_ARCH_ARM64_SVE_
 
 #ifdef __cplusplus
 }

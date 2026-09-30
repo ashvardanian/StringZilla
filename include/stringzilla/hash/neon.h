@@ -10,14 +10,13 @@
 #define STRINGZILLA_HASH_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/hash/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +24,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_u64_t sz_bytesum_neon_(sz_cptr_t text, sz_size_t length) {
     uint64x2_t sum_u64x2 = vdupq_n_u64(0);
 
     // Process 16 bytes (128 bits) at a time
@@ -43,12 +42,22 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_bytesum_neon(sz_cptr_t text, sz_size_t leng
     return sum;
 }
 
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *checksum = sz_bytesum_neon_(text, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

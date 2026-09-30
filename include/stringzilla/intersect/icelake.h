@@ -10,10 +10,10 @@
 #define STRINGZILLA_INTERSECT_ICELAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_compare`
-#include "stringzilla/memory.h"  // `sz_fill`
-#include "stringzilla/hash.h"    // `sz_hash`
-#include "stringzilla/intersect/serial.h"
+#include "stringzilla/compare/serial.h"   // `sz_equal_serial_`
+#include "stringzilla/memory/serial.h"    // `sz_fill_serial_`
+#include "stringzilla/intersect/serial.h" // `STRINGZILLA_SEQUENCE_INTERSECT_BUDGET`
+#include "stringzilla/hash/icelake.h"     // `sz_hash_icelake_`, `sz_hash_state_short_x4_*_icelake_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,7 +50,7 @@ extern "C" {
  *  @param[in] values_u64x4 A 256-bit vector holding four 64-bit values [a, b, c, d].
  *  @return Non-zero if at least two of the four values are identical, zero otherwise.
  */
-STRINGZILLA_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
+STRINGZILLA_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x4) {
     // Assume `values_u64x4` stores: [a, b, c, d].
     // 0xB1 produces [b, a, d, c], 0x4E produces [c, d, a, b], 0x1B produces [d, c, b, a].
     __m256i cmp1_u64x4 = _mm256_cmpeq_epi64(values_u64x4, _mm256_permute4x64_epi64(values_u64x4, 0xB1));
@@ -65,10 +65,11 @@ STRINGZILLA_HELPER_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i valu
     return matches_mask;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(                 //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *alloc, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions) {
+STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                              //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,          //
+    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
 
     // To join to unordered sets of strings, the simplest approach would be to hash them into a dynamically
     // allocated hash table and then iterate over the second set, checking for the presence of each element in the
@@ -92,9 +93,9 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // Allocate memory for the hash table and initialize it with 0xFF.
@@ -104,10 +105,11 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
                                        (1u << STRINGZILLA_SEQUENCE_INTERSECT_BUDGET);
     sz_assert_(hash_table_slots > small_sequence->count && "A full table leaves a missing key probing forever");
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
-    sz_size_t *table_positions = (sz_size_t *)alloc->allocate(hash_table_slots * bytes_per_entry, alloc->handle);
+    sz_size_t *table_positions = (sz_size_t *)allocator->allocate(hash_table_slots * bytes_per_entry,
+                                                                  allocator->handle);
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
-    sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
+    sz_fill_serial_((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
 
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
     // It must be a 64-bit constant, not `STRINGZILLA_SIZE_MAX` - on 32-bit targets `sz_size_t` is
@@ -154,7 +156,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
             for (sz_size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
                 sz_cptr_t const str = batch[batch_index].start;
                 sz_size_t const length = batch[batch_index].length;
-                sz_u64_t const hash = sz_hash(str, length, seed);
+                sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to find the first free slot.
                 // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
@@ -182,10 +184,10 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
             sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes_vec.zmm);
             batch_hashes_vec.ymm = sz_hash_state_short_x4_finalize_icelake_(
                 &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);
-            sz_assert_(batch_hashes_vec.u64s[0] == sz_hash_serial(batch[0].start, batch[0].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[1] == sz_hash_serial(batch[1].start, batch[1].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[2] == sz_hash_serial(batch[2].start, batch[2].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[3] == sz_hash_serial(batch[3].start, batch[3].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[0] == sz_hash_serial_(batch[0].start, batch[0].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[1] == sz_hash_serial_(batch[1].start, batch[1].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[2] == sz_hash_serial_(batch[2].start, batch[2].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[3] == sz_hash_serial_(batch[3].start, batch[3].length, seed));
 
             // Now let's perform an optimistic hash-table lookup using vectorized gathers
             sz_u256_vec_t batch_slots_vec, existing_hashes_vec;
@@ -245,7 +247,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
             for (sz_size_t batch_index = 0; batch_index < batch_size; ++batch_index) {
                 sz_cptr_t const str = batch[batch_index].start;
                 sz_size_t const length = batch[batch_index].length;
-                sz_u64_t const hash = sz_hash(str, length, seed);
+                sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
                 sz_size_t hash_slot = hash & (hash_table_slots - 1);
                 // Implement linear probing to resolve collisions.
                 for (; table_hashes[hash_slot] != empty_slot; hash_slot = (hash_slot + 1) & (hash_table_slots - 1)) {
@@ -260,7 +262,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
 
                     // Same hash may still imply different strings, so we need to compare them.
                     sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                    sz_bool_t const same = sz_equal(str, small_str, length);
+                    sz_bool_t const same = sz_equal_serial_(str, small_str, length);
                     if (same != sz_true_k) continue;
 
                     // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
@@ -294,10 +296,10 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
             sz_hash_state_short_x4_update_icelake_(&batch_hashes_states, batch_prefixes_vec.zmm);
             batch_hashes_vec.ymm = sz_hash_state_short_x4_finalize_icelake_(
                 &batch_hashes_states, batch[0].length, batch[1].length, batch[2].length, batch[3].length);
-            sz_assert_(batch_hashes_vec.u64s[0] == sz_hash_serial(batch[0].start, batch[0].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[1] == sz_hash_serial(batch[1].start, batch[1].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[2] == sz_hash_serial(batch[2].start, batch[2].length, seed));
-            sz_assert_(batch_hashes_vec.u64s[3] == sz_hash_serial(batch[3].start, batch[3].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[0] == sz_hash_serial_(batch[0].start, batch[0].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[1] == sz_hash_serial_(batch[1].start, batch[1].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[2] == sz_hash_serial_(batch[2].start, batch[2].length, seed));
+            sz_assert_(batch_hashes_vec.u64s[3] == sz_hash_serial_(batch[3].start, batch[3].length, seed));
 
             // Now let's perform an optimistic hash-table lookup using vectorized gathers.
             sz_u256_vec_t batch_slots_vec, existing_hashes_vec;
@@ -343,7 +345,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
                     if (length == small_length) {
                         // Same hash may still imply different strings, so we need to compare them.
                         sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                        sz_bool_t const same = sz_equal(str, small_str, length);
+                        sz_bool_t const same = sz_equal_serial_(str, small_str, length);
                         if (same == sz_true_k) {
                             // This distinct value already produced a pair, so skip the duplicate key.
                             if (stored & consumed_flag) continue;
@@ -373,7 +375,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
 
                     // Same hash may still imply different strings, so we need to compare them.
                     sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                    sz_bool_t const same = sz_equal(str, small_str, length);
+                    sz_bool_t const same = sz_equal_serial_(str, small_str, length);
                     if (same != sz_true_k) continue;
 
                     // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
@@ -394,14 +396,14 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
     if (count_longer) {
         // At this point only large values are remaining, let's process them with the code identical to our
         // serial solution, but dispatching the right Ice Lake kernel under the hood.
-        sz_fill((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
+        sz_fill_serial_((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
 
         // Hash the smaller set into the hash table using the default available backend.
         for (sz_size_t small_position = 0; small_position < small_sequence->count; ++small_position) {
             sz_size_t const length = small_sequence->get_length(small_sequence->handle, small_position);
             if (length <= 16) continue; //! This is the only difference from the serial solution
             sz_cptr_t const str = small_sequence->get_start(small_sequence->handle, small_position);
-            sz_u64_t const hash = sz_hash(str, length, seed);
+            sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
             // Implement linear probing to find the first free slot.
             // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
@@ -415,7 +417,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
             sz_size_t const length = large_sequence->get_length(large_sequence->handle, large_position);
             if (length <= 16) continue; //! This is the only difference from the serial solution
             sz_cptr_t const str = large_sequence->get_start(large_sequence->handle, large_position);
-            sz_u64_t const hash = sz_hash(str, length, seed);
+            sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
 
             // Implement linear probing to resolve collisions.
@@ -431,7 +433,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
 
                 // Same hash may still imply different strings, so we need to compare them.
                 sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                sz_bool_t const same = sz_equal(str, small_str, length);
+                sz_bool_t const same = sz_equal_serial_(str, small_str, length);
                 if (same != sz_true_k) continue;
 
                 // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
@@ -448,7 +450,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_intersect_icelake(             
     }
 
     // Finalize
-    alloc->free(table_positions, hash_table_slots * bytes_per_entry, alloc->handle);
+    allocator->free(table_positions, hash_table_slots * bytes_per_entry, allocator->handle);
     *intersection_count_ptr = intersection_count;
     return sz_success_k;
 }

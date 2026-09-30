@@ -1,8 +1,8 @@
 # Sort: Argsort, Uncased Argsort, and Pgram Sort
 
-This directory holds the sorting kernels behind `sz_sequence_argsort`, `sz_sequence_argsort_uncased`, and `sz_pgrams_sort`.
-Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86.
-The dispatcher picks the fastest one available on the running CPU.
+This directory holds the sorting kernels behind `sz_sequence_argsort_best` and `sz_sequence_argsort_uncased_best`, and the integer pgram sort they build on, which is internal and has no dispatch point.
+Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, `neon` and `sve` on Arm, and `rvv` on RISC-V.
+Each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
 
 ## Methodology
 
@@ -15,26 +15,26 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so the dispat
 
 ## Short Words
 
-| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
-| :--------------- | --------------------: | ----------------------------: |
-| Standard @ Xeon4 |             22 Mcmp/s |                     27 Mcmp/s |
-| Serial @ Xeon4   |             96 Mcmp/s |                     28 Mcmp/s |
-| Haswell @ Xeon4  |            140 Mcmp/s |                     57 Mcmp/s |
-| Skylake @ Xeon4  |            114 Mcmp/s |                     64 Mcmp/s |
-| NEON @ Graviton4 |                     … |                             … |
-| SVE @ Graviton3  |                     … |                             … |
+| Backend          | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
+| :--------------- | -------------------------: | ---------------------------------: |
+| Standard @ Xeon4 |                  22 Mcmp/s |                          27 Mcmp/s |
+| Serial @ Xeon4   |                  96 Mcmp/s |                          28 Mcmp/s |
+| Haswell @ Xeon4  |                 140 Mcmp/s |                          57 Mcmp/s |
+| Skylake @ Xeon4  |                 114 Mcmp/s |                          64 Mcmp/s |
+| NEON @ Graviton4 |                          … |                                  … |
+| SVE @ Graviton3  |                          … |                                  … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
-| Backend          | `sz_sequence_argsort` | `sz_sequence_argsort_uncased` |
-| :--------------- | --------------------: | ----------------------------: |
-| Standard @ Xeon4 |             64 Mcmp/s |                     70 Mcmp/s |
-| Serial @ Xeon4   |            148 Mcmp/s |                     30 Mcmp/s |
-| Haswell @ Xeon4  |            169 Mcmp/s |                     30 Mcmp/s |
-| Skylake @ Xeon4  |            165 Mcmp/s |                     34 Mcmp/s |
-| NEON @ Graviton4 |                     … |                             … |
-| SVE @ Graviton3  |                     … |                             … |
+| Backend          | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
+| :--------------- | -------------------------: | ---------------------------------: |
+| Standard @ Xeon4 |                  64 Mcmp/s |                          70 Mcmp/s |
+| Serial @ Xeon4   |                 148 Mcmp/s |                          30 Mcmp/s |
+| Haswell @ Xeon4  |                 169 Mcmp/s |                          30 Mcmp/s |
+| Skylake @ Xeon4  |                 165 Mcmp/s |                          34 Mcmp/s |
+| NEON @ Graviton4 |                          … |                                  … |
+| SVE @ Graviton3  |                          … |                                  … |
 
 > Measured June 26th, 2026.

@@ -22,8 +22,7 @@
 #define STRINGZILLA_SORT_RVV_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_compare`
-#include "stringzilla/memory.h"  // `sz_copy_rvv`
+#include "stringzilla/memory/rvv.h" // `sz_copy_rvv_`
 
 #include "stringzilla/sort/serial.h"
 
@@ -31,7 +30,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -56,7 +55,7 @@ extern "C" {
  *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
+STRINGZILLA_INLINE void sz_sequence_argsort_rvv_3way_partition_(
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order, sz_pgram_t *const partitioned_pgrams,
     sz_sorted_idx_t *const partitioned_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {
@@ -134,12 +133,12 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
     }
 
     // Copy back.
-    sz_copy_rvv((sz_ptr_t)(initial_pgrams + start_in_sequence),      //
-                (sz_cptr_t)(partitioned_pgrams + start_in_sequence), //
-                count * sizeof(sz_pgram_t));
-    sz_copy_rvv((sz_ptr_t)(initial_order + start_in_sequence),      //
-                (sz_cptr_t)(partitioned_order + start_in_sequence), //
-                count * sizeof(sz_sorted_idx_t));
+    sz_copy_rvv_((sz_ptr_t)(initial_pgrams + start_in_sequence),      //
+                 (sz_cptr_t)(partitioned_pgrams + start_in_sequence), //
+                 count * sizeof(sz_pgram_t));
+    sz_copy_rvv_((sz_ptr_t)(initial_order + start_in_sequence),      //
+                 (sz_cptr_t)(partitioned_order + start_in_sequence), //
+                 count * sizeof(sz_sorted_idx_t));
 
     // Return the offsets of the equal elements.
     *first_pivot_offset = start_in_sequence + count_smaller;
@@ -148,7 +147,7 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
 
 /**
  *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_rvv
- *      and @c sz_pgrams_sort_rvv, and using the @c sz_sequence_argsort_rvv_3way_partition_
+ *      and @c sz_pgrams_sort_rvv_, and using the @c sz_sequence_argsort_rvv_3way_partition_
  *      under the hood.
  *  @sa Identical in shape to the @b SVE implementation, but uses variable-length RVV
  *      @c vsetvl strips.
@@ -163,7 +162,7 @@ STRINGZILLA_HELPER_INLINE void sz_sequence_argsort_rvv_3way_partition_(
  *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_quicksort_pgrams_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_rvv_quicksort_pgrams_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
     sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t const top_count) {
@@ -186,26 +185,27 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_quicksort_pgrams_(
                                                   last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_size_t count,
-                                                        sz_memory_allocator_t *alloc, sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_rvv_(sz_pgram_t *pgrams, sz_size_t count,
+                                                   sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
     // Initialize the order with 0,1,2,...
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
+    if (count < 2) return sz_success_k;
 
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // Allocate temporary memory for partitioning. The RVV compress-store is exact, so no slack is needed.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_rvv_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
-    alloc->free(temporary_pgrams, memory_usage, alloc->handle);
+    allocator->free(temporary_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
 
@@ -228,7 +228,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_pgrams_sort_rvv(sz_pgram_t *pgrams, sz_s
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_sort_byte_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_rvv_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
@@ -276,41 +276,10 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_sort_byte_windows_(
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence,
-                                                             sz_memory_allocator_t *alloc, sz_sorted_idx_t *order,
-                                                             sz_size_t top_count, sz_bool_t reverse) {
-    sz_size_t count = sequence->count;
-    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
-        order[sequence_index] = sequence_index;
-
-    if (count <= 32 && !reverse) {
-        sz_sequence_argsort_with_insertion(sequence, order);
-        return sz_success_k;
-    }
-
-    sz_memory_allocator_t global_alloc;
-    if (!alloc) {
-        sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
-    }
-
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
-    sz_pgram_t *temporary_pgrams = global_pgrams + count;
-    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
-    if (!global_pgrams) return sz_bad_alloc_k;
-
-    sz_sequence_argsort_rvv_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
-                                               count, 0, top_count, reverse);
-
-    alloc->free(global_pgrams, memory_usage, alloc->handle);
-    return sz_success_k;
-}
-
 /** Uncased twin of @c sz_sequence_argsort_rvv_sort_byte_windows_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the RVV partition - which is where RVV beats the fully-serial uncased path. */
-STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_sort_casefold_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_rvv_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
@@ -346,9 +315,45 @@ STRINGZILLA_API_COMPTIME void sz_sequence_argsort_rvv_sort_casefold_windows_(
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_rvv( //
-    sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,      //
-    sz_sorted_idx_t *order, sz_size_t top_count, sz_bool_t reverse) {
+#if STRINGZILLA_TARGET_RVV
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_size_t top_count,
+                                                    sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                    sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t count = sequence->count;
+    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
+        order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
+
+    if (count <= 32 && !reverse) {
+        sz_sequence_argsort_with_insertion(sequence, order);
+        return sz_success_k;
+    }
+
+    sz_memory_allocator_t global_alloc;
+    if (!allocator) {
+        sz_memory_allocator_init_default(&global_alloc);
+        allocator = &global_alloc;
+    }
+
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *temporary_pgrams = global_pgrams + count;
+    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    if (!global_pgrams) return sz_bad_alloc_k;
+
+    sz_sequence_argsort_rvv_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
+                                               count, 0, top_count, reverse);
+
+    allocator->free(global_pgrams, memory_usage, allocator->handle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_rvv(               //
+    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
+    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
 
     sz_size_t const count = sequence->count;
     for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
@@ -356,16 +361,16 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_rvv( //
     if (count < 2) return sz_success_k;
 
     sz_memory_allocator_t global_alloc;
-    if (!alloc) {
+    if (!allocator) {
         sz_memory_allocator_init_default(&global_alloc);
-        alloc = &global_alloc;
+        allocator = &global_alloc;
     }
 
     // Same layout as the byte arg-sort - working pgrams (count) + the partition's two scratch regions. The
     // RVV compress-store is exact, so no slack is needed. The folded export is stateless (re-folds the prefix
     // on demand), so unlike the earlier design there is no per-string cursor array.
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc->handle);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
@@ -373,16 +378,18 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_rvv( //
     sz_sequence_argsort_rvv_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                    count, 0, top_count, reverse);
 
-    alloc->free(global_pgrams, memory_usage, alloc->handle);
+    allocator->free(global_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_RVV
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVV
+#endif // STRINGZILLA_ARCH_RISCV64_RVV_
 
 #ifdef __cplusplus
 }
