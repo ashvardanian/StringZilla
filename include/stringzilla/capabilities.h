@@ -89,31 +89,6 @@
 #include "stringzilla/metal.h" // `sz_metal_list_devices_`, `sz_metal_device_`
 #endif
 
-/**
- *  @brief Whether @c sz_cpu_capabilities_detected_ performs real hardware introspection on this
- *      platform, or merely mirrors the compile-time mask because no portable probe exists.
- *
- *  This is the header-owned source of truth the build systems infer from - the run probe,
- *  @c probes/run_capabilities.c, reports "no answer" when it is 0, and a compile probe,
- *  @c probes/runtime_detection.c, lets cross builds ask the same question without executing
- *  anything - so neither CMake nor @c build.rs hard-codes platform lists that could drift from the
- *  detectors here. WebAssembly stays 0 by nature: a module carrying unsupported SIMD opcodes fails
- *  validation at instantiation, so not even load-time masking is possible there.
- */
-#if STRINGZILLA_ARCH_X8664_ || STRINGZILLA_ARCH_ARM64_
-#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
-#elif defined(__riscv) && (__riscv_xlen == 64) && (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && \
-    STRINGZILLA_WITH_LIBC
-#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
-#elif defined(__loongarch__) && STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
-#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
-#elif (defined(__powerpc64__) || defined(__powerpc__)) && (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && \
-    STRINGZILLA_WITH_LIBC
-#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (1)
-#else
-#define STRINGZILLA_HAS_RUNTIME_DETECTION_ (0)
-#endif
-
 /** Buffer size @c sz_capabilities_name never overruns, including its null terminator. */
 #define STRINGZILLA_CAPABILITIES_NAME_CAPACITY 256
 
@@ -807,14 +782,55 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_compiled_(void) {
         (sz_cap_serial_k));
 }
 
+/** Returns the capabilities the compiler's own flags guarantee, for the platforms whose OS cannot
+ *  be asked. An engine validates a WebAssembly module whole, so there they are what it holds. */
+STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_implied_(void) {
+    sz_capability_t capabilities = sz_cap_serial_k;
+#if defined(__ARM_NEON)
+    capabilities |= sz_cap_neon_k;
+#endif
+#if defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO)
+    capabilities |= sz_cap_neonaes_k;
+#endif
+#if defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO)
+    capabilities |= sz_cap_neonsha_k;
+#endif
+#if defined(__ARM_FEATURE_SVE)
+    capabilities |= sz_cap_sve_k;
+#endif
+#if defined(__ARM_FEATURE_SVE2)
+    capabilities |= sz_cap_sve2_k;
+#endif
+#if defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES)
+    capabilities |= sz_cap_sve2aes_k;
+#endif
+#if defined(__riscv_vector)
+    capabilities |= sz_cap_rvv_k;
+#endif
+#if defined(__riscv_vector) && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
+    capabilities |= sz_cap_rvvcrypto_k;
+#endif
+#if defined(__loongarch_asx)
+    capabilities |= sz_cap_loongsonasx_k;
+#endif
+#if defined(__POWER9_VECTOR__)
+    capabilities |= sz_cap_powervsx_k;
+#endif
+#if defined(__wasm_simd128__)
+    capabilities |= sz_cap_v128_k;
+#endif
+#if defined(__wasm_relaxed_simd__)
+    capabilities |= sz_cap_v128relaxed_k;
+#endif
+    return capabilities;
+}
+
 /*  The detectors below report the full hardware capability set, independent of which
  *  `STRINGZILLA_TARGET_*` kits this build compiled in: @c sz_cpu_capabilities_enabled ANDs their
  *  result with the compile-time mask anyway, and the instructions involved are unconditionally
  *  safe. @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs
- *  reads run only once the kernel says it emulates them. Keeping detection unconditional lets
- *  build-system probes, like @c probes/run_capabilities.c, compile a serial-only translation unit
- *  and still learn what this machine runs, so the build can intersect it with what the toolchain
- *  compiles before any kernel is built. */
+ *  reads run only once the kernel says it emulates them. Keeping detection unconditional lets even
+ *  a serial-only build report what this machine runs. */
 
 #if STRINGZILLA_ARCH_ARM64_
 
@@ -887,11 +903,8 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_arm64_(void) {
         (sz_cap_neonsha_k * (supports_crypto)) | //
         (sz_cap_serial_k));
 
-#else // Unknown platform
-
-    // Conservative fallback for unknown platforms: NEON is mandatory in ARMv8-A (ARM64)
-    return (sz_capability_t)(sz_cap_neon_k | sz_cap_serial_k);
-
+#else
+    return sz_cpu_capabilities_implied_();
 #endif
 }
 
@@ -1027,8 +1040,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_riscv64_(void) {
     return caps;
 
 #else
-    // Without a portable runtime probe, mirror the compile-time capabilities.
-    return sz_cpu_capabilities_compiled_();
+    return sz_cpu_capabilities_implied_();
 #endif
 }
 
@@ -1047,8 +1059,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_loongarch64_(voi
     return (sz_capability_t)((sz_cap_loongsonasx_k * ((hwcap & (1UL << 5)) != 0)) | sz_cap_serial_k);
 
 #else
-    // Without a portable runtime probe, mirror the compile-time capabilities.
-    return sz_cpu_capabilities_compiled_();
+    return sz_cpu_capabilities_implied_();
 #endif
 }
 
@@ -1060,7 +1071,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_loongarch64_(voi
 STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_power64_(void) {
 #if (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
 
-    // The `powervsx` kernels target POWER9 (`-mcpu=power9 -mvsx`), so both facts are required,
+    // The `powervsx` kernels target POWER9 (`-mcpu=power9`), so both facts are required,
     // matching the constants in `arch/powerpc/include/uapi/asm/cputable.h`:
     //   PPC_FEATURE_HAS_VSX     == 0x00000080 // in AT_HWCAP
     //   PPC_FEATURE2_ARCH_3_00  == 0x00800000 // in AT_HWCAP2, the POWER9 ISA level
@@ -1076,8 +1087,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_power64_(void) {
     return (sz_capability_t)((sz_cap_powervsx_k * supports_powervsx) | sz_cap_serial_k);
 
 #else
-    // Without a portable runtime probe, mirror the compile-time capabilities.
-    return sz_cpu_capabilities_compiled_();
+    return sz_cpu_capabilities_implied_();
 #endif
 }
 
@@ -1091,11 +1101,7 @@ STRINGZILLA_INLINE sz_status_t sz_cpu_configure_thread_(sz_capability_t capabili
 
 /** The capabilities of the current CPU, whatever this binary compiled in. */
 STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_(void) {
-#if !STRINGZILLA_HAS_RUNTIME_DETECTION_
-    // WebAssembly and OS-less exotic targets expose their SIMD support at compile time only,
-    // so runtime capabilities mirror compile-time ones.
-    return sz_cpu_capabilities_compiled_();
-#elif STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_
     return sz_cpu_capabilities_detected_x8664_();
 #elif STRINGZILLA_ARCH_ARM64_
     return sz_cpu_capabilities_detected_arm64_();
@@ -1106,13 +1112,14 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_(void) {
 #elif defined(__powerpc64__) || defined(__powerpc__)
     return sz_cpu_capabilities_detected_power64_();
 #else
-    return sz_cpu_capabilities_compiled_();
+    return sz_cpu_capabilities_implied_();
 #endif
 }
 
 /*  CPU capabilities, reported along two independent axes and the mask dispatch uses by default:
  *
- *  - @b sz_cpu_capabilities_detected() — what this CPU can execute, from CPUID or HWCAP.
+ *  - @b sz_cpu_capabilities_detected() — what this CPU can execute, from CPUID or HWCAP, or where
+ *    the OS cannot be asked, what the compiler's own flags guarantee.
  *  - @b sz_cpu_capabilities_compiled() — what this binary contains, as the build set the
  *    `STRINGZILLA_TARGET_*` macros.
  *  - @b sz_cpu_capabilities_enabled() — both axes at once: the mask to dispatch on the CPU with.

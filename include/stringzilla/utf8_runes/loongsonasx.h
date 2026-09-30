@@ -15,6 +15,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 /** Recombine the two per-128-bit-lane 16-bit @c __lasx_xvmskltz_b sign-bit masks into one 32-bit
  *  mask, matching AVX2's @c _mm256_movemask_epi8 (word 0 = low lane, word 4 = high lane). */
@@ -1285,6 +1291,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_forward_loongsonasx_( //
 
 #pragma endregion Word boundaries windowed substrate
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

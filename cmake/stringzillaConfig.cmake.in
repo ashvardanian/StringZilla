@@ -1,31 +1,19 @@
 @PACKAGE_INIT@
 
-include("${CMAKE_CURRENT_LIST_DIR}/stringzillaTargets.cmake")
-
-# The export defines `stringzilla::header`, plus `shared` and `bare` where those were built. Add the longer and plain
-# spellings, so `stringzilla::stringzilla_header` and `stringzilla_header` resolve too; `add_subdirectory` consumers get
-# the same set from the `ALIAS` targets in `CMakeLists.txt`.
-#
-# Aliasing a non-GLOBAL imported target - what `install(EXPORT)` writes - needs CMake 3.18, and this file runs under the
-# *consumer's* CMake. Below that the namespaced spelling still works, which beats failing the `find_package`. Testing
-# `stringzilla_header` also makes a second `find_package` elsewhere a no-op, since these are created together.
-if (NOT CMAKE_VERSION VERSION_LESS 3.18 AND NOT TARGET stringzilla_header)
-    add_library(stringzilla::stringzilla_header ALIAS stringzilla::header)
-    add_library(stringzilla_header ALIAS stringzilla::header)
-
-    if (TARGET stringzilla::shared)
-        add_library(stringzilla::stringzilla_shared ALIAS stringzilla::shared)
-        add_library(stringzilla_shared ALIAS stringzilla::shared)
-    endif ()
-
-    if (TARGET stringzilla::bare)
-        add_library(stringzilla::stringzilla_bare ALIAS stringzilla::bare)
-        add_library(stringzilla_bare ALIAS stringzilla::bare)
-    endif ()
+# The libraries link the runtimes of the GPU units they carry.
+include(CMakeFindDependencyMacro)
+if (@STRINGZILLA_BUILD_CUDA@)
+    find_dependency(CUDAToolkit)
 endif ()
+if (@STRINGZILLA_BUILD_ROCM@)
+    find_dependency(hip)
+endif ()
+
+include("${CMAKE_CURRENT_LIST_DIR}/stringzillaTargets.cmake")
 
 # Flavors as components, so `check_required_components` accepts `COMPONENTS shared` and rejects only what is absent.
 set(stringzilla_header_FOUND TRUE)
+set(stringzilla_static_FOUND TRUE)
 if (TARGET stringzilla::shared)
     set(stringzilla_shared_FOUND TRUE)
 endif ()

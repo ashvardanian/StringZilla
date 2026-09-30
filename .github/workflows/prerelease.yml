@@ -499,7 +499,6 @@ jobs:
             target: aarch64-linux-gnu
             target_processor: arm64
             cross_package: crossbuild-essential-arm64
-            cflags: ""
             file_id: aarch64 # substring `file` prints for this ELF
           - os: ubuntu-26.04-arm
             arch: aarch64
@@ -507,7 +506,6 @@ jobs:
             target: x86_64-linux-gnu
             target_processor: amd64
             cross_package: crossbuild-essential-amd64
-            cflags: ""
             file_id: x86-64
           - os: ubuntu-26.04
             arch: x86-64
@@ -515,7 +513,6 @@ jobs:
             target: riscv64-linux-gnu
             target_processor: riscv64
             cross_package: crossbuild-essential-riscv64
-            cflags: "-march=rv64gcv"
             file_id: RISC-V # `file` prints "UCB RISC-V", not "riscv64"
           - os: ubuntu-26.04
             arch: x86-64
@@ -523,7 +520,6 @@ jobs:
             target: loongarch64-linux-gnu
             target_processor: loong64
             cross_package: g++-13-loongarch64-linux-gnu
-            cflags: "-mlasx"
             file_id: LoongArch
           - os: ubuntu-26.04
             arch: x86-64
@@ -531,15 +527,14 @@ jobs:
             target: powerpc64le-linux-gnu
             target_processor: ppc64el
             cross_package: crossbuild-essential-ppc64el
-            cflags: "-mcpu=power9"
             file_id: PowerPC
 
     env:
-      CC: clang-20
-      CXX: clang++-20
-      AR: llvm-ar-20
-      NM: llvm-nm-20
-      RANLIB: llvm-ranlib-20
+      CC: clang-21
+      CXX: clang++-21
+      AR: llvm-ar-21
+      NM: llvm-nm-21
+      RANLIB: llvm-ranlib-21
 
     steps:
       - name: Checkout
@@ -556,7 +551,7 @@ jobs:
       - name: Install cross-compilation toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang-20 lld-20 llvm-20 ${{ matrix.cross_package }}
+          sudo apt-get install -y build-essential clang-21 lld-21 llvm-21 ${{ matrix.cross_package }}
 
       - name: Build C/C++ for ${{ matrix.target_arch }}
         run: |
@@ -569,8 +564,6 @@ jobs:
             -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
             -D CMAKE_SYSTEM_NAME=Linux \
             -D CMAKE_SYSTEM_PROCESSOR=${{ matrix.target_processor }} \
-            -D CMAKE_C_FLAGS="${{ matrix.cflags }}" \
-            -D CMAKE_CXX_FLAGS="${{ matrix.cflags }}" \
             -D CMAKE_EXE_LINKER_FLAGS="-static -L${gcc_libdir} -lstdc++ -lm"
 
           cmake --build --preset release
@@ -1037,12 +1030,12 @@ jobs:
           }
           EOF
 
-        # Every registry recipe depends on the header-only prefix configuring and installing cleanly.
+        # Every registry recipe depends on the smallest prefix, the headers and the archive, installing cleanly.
       - name: Install the header-only package
         run: |
-          cmake -B build_header -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_TEST=OFF \
-            -DSTRINGZILLA_BUILD_BENCH=OFF -DSTRINGZILLA_BUILD_SHARED=OFF \
-            -DSTRINGZILLA_BUILD_CUDA=OFF -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
+          cmake -B build_header -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=OFF \
+            -DCMAKE_INSTALL_PREFIX="$HEADER_PREFIX"
+          cmake --build build_header --parallel
           cmake --install build_header
 
       - name: Consume the header-only package
@@ -1052,7 +1045,7 @@ jobs:
           project(consumer C)
           find_package(stringzilla REQUIRED)
           add_executable(consumer main.c)
-          target_link_libraries(consumer PRIVATE stringzilla::header stringzilla::stringzilla_header stringzilla_header)
+          target_link_libraries(consumer PRIVATE stringzilla::header)
           EOF
           cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$HEADER_PREFIX"
           cmake --build consumer/build
@@ -1060,28 +1053,28 @@ jobs:
 
       - name: Install the compiled libraries
         run: |
-          cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON \
-            -DSTRINGZILLA_BUILD_TEST=OFF -DSTRINGZILLA_BUILD_BENCH=OFF \
-            -DSTRINGZILLA_BUILD_SHARED=ON -DSTRINGZILLA_BUILD_CUDA=OFF \
+          cmake -B build_full -DCMAKE_BUILD_TYPE=Release -DSTRINGZILLA_INSTALL=ON -DSTRINGZILLA_BUILD_SHARED=ON \
             -DCMAKE_INSTALL_PREFIX="$FULL_PREFIX"
           cmake --build build_full --parallel
           cmake --install build_full
 
-        # The installed prefix must resolve the shared library's own exported targets.
+        # The installed prefix must resolve the libraries' own exported targets.
       - name: Consume the compiled package
         run: |
           cat > consumer/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.21)
           project(consumer C)
           find_package(stringzilla REQUIRED)
-          add_executable(consumer main.c)
-          target_link_libraries(consumer PRIVATE
-              stringzilla::header stringzilla::shared stringzilla::stringzilla_shared stringzilla_shared)
+          add_executable(consumer_shared main.c)
+          target_link_libraries(consumer_shared PRIVATE stringzilla::shared)
+          add_executable(consumer_static main.c)
+          target_link_libraries(consumer_static PRIVATE stringzilla::static)
           EOF
           rm -rf consumer/build
           cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$FULL_PREFIX"
           cmake --build consumer/build
-          LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/build/consumer
+          LD_LIBRARY_PATH="$FULL_PREFIX/lib" ./consumer/build/consumer_shared
+          ./consumer/build/consumer_static
 
         # The `.pc` exists for build systems CMake never reaches, so it is checked without CMake.
       - name: Consume via pkg-config

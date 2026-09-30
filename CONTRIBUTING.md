@@ -6,24 +6,31 @@ Depending on the type of contribution, you may need to follow different steps.
 
 ---
 
-## Project Structure
+## Directory Tree
 
-The project is split into the following parts:
-
-- `include/stringzilla/stringzilla.h` - umbrella C header over the per-family hubs beside it.
-- `include/stringzilla/stringzilla.hpp` - single-header C++ wrapper.
-- `include/stringzilla/<family>/*` - per-ISA kernels behind each hub, including the `cuda.cuh` device backends.
-- `c/*` - [C and CUDA](#c-and-c) sources for dynamic dispatch, one translation unit per kernel family.
-- `rust/*` - [Rust](#rust) crate sources; `rust/stringzilla/*` holds one module per kernel domain, re-exported through `rust/stringzilla.rs`.
-- `python/*` - [Python](#python) bindings; one translation unit per kernel domain, with `python/stringzilla/stringzilla.h` as the extension's private header.
-- `swift/*` - [Swift](#swift) package sources and tests.
-- `javascript/*` - [JavaScript](#javascript) bindings.
-- `golang/*` - [Go](#golang) bindings.
-- `java/*` - Java bindings.
-- `csharp/*` - C# bindings.
-- `probes/*` - single-TU ISA probes used by CMake to detect compiler and platform support.
-- `cmake/*` - CMake toolchain files and package config templates.
-- `test/*` and `bench/*` - per-kernel test and benchmark sources.
+```
+include/stringzilla/      C and C++ headers — one .h per kernel family declaring its dispatch points, kernels and finder, stringzilla.hpp for C++
+include/stringzilla/*/    Kernels, one file per CPU capability — serial, haswell, neon, rvv, etc. — plus the engines' GPU simt.* sources
+c/stringzilla.c           Library exports shared by every family — versions, statuses, capability queries, the kernel finder, LibC overrides
+c/cpu/                    Library units, one per CPU capability, each defining that capability's kernels once
+c/dispatch/               Library units, one per kernel family, with its capability lists, dispatch points and finder
+c/dispatch.h              The capability lists' shape and the kernel pick the dispatch units share, internal to the library
+c/nvidia/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_BUILD_CUDA
+c/amd/rocm.hip            The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_BUILD_ROCM
+c/apple/metal.c           The engines' metal kernels and the Metal device exports, under STRINGZILLA_BUILD_METAL
+c/parallel.h, .c          Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
+probes/                   ISA probe sources, one per kit mirroring c/cpu/, each calling one of its kernels as the library compiles it
+test/                     C++ and Python tests — see test/README.md
+bench/                    C++ benchmarks — see bench/README.md
+python/                   CPython extension, one unit per kernel family, with python/stringzilla/stringzilla.h as its private header
+rust/                     Rust crate, one module per kernel family under rust/stringzilla/, re-exported by rust/stringzilla.rs
+javascript/               Node.js native addon
+swift/                    Swift package sources and tests
+golang/                   Go cgo bindings
+java/                     Java bindings
+csharp/                   C# bindings
+cmake/                    ISA probe modules, package config templates, and cross-compilation toolchain files
+```
 
 For minimal test coverage, check the following scripts:
 
@@ -148,8 +155,22 @@ cmake --build --preset release --target stringzilla_test_cpp20
 ctest --preset release
 ```
 
-`cmake --list-presets` shows the rest - `debug`, `cuda`, the `linux_<arch>` cross builds, and WASI.
+`cmake --list-presets` shows the rest - `debug`, `cuda`, `swift`, the `linux_<arch>` cross builds, and WASI.
 Machine-specific settings, like a CUDA host compiler, belong in an untracked `CMakeUserPresets.json`.
+Without a preset, a configure builds the libraries alone, as every binding's build does: `-D STRINGZILLA_BUILD_TEST=1` and `-D STRINGZILLA_BUILD_BENCH=1` add the suites, and `-D STRINGZILLA_BUILD_CUDA=1`, `_ROCM` or `_METAL` the GPUs.
+
+Every binding builds the libraries through `CMakeLists.txt`, so CMake is the one place that probes which kits the toolchain builds.
+Each kit's probe, `probes/<kit>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
+Every tier header scopes its kernels to their kit with `#pragma clang attribute` or `#pragma GCC target`, on every platform.
+LASX and POWER9 also need `-mlasx` and `-mcpu=power9` file-wide, as `lasxintrin.h` and `altivec.h` hide their contents without them, so that flag reaches the kit's probe, its `c/cpu/` unit and, in the header-only suites, the `cross_<arch>.cpp` checks of its architecture, and nothing else.
+The libraries compile every kit the toolchain builds and dispatch by runtime detection, so one artifact runs on any CPU of its architecture.
+`-D STRINGZILLA_TARGET_<KIT>=0` drops a kit, and `=1` keeps one only where its probe compiles.
+
+The baseline is each architecture's floor: `-march=x86-64`, `-march=armv8-a`, `-march=rv64gc`, `-mcpu=power8`, and `-march=loongarch64`.
+WebAssembly is the exception, as an engine validates a module whole, so its one kit, `STRINGZILLA_TARGET_ARCH`, reaches every unit.
+The RVV kernels need Clang 21 or newer; an older compiler probes those kits as 0.
+The `linux_arm64`, `linux_riscv64`, `linux_ppc64le` and `linux_loongarch64` presets cross-compile with Clang, through `cmake/toolchain-<arch>-llvm.cmake`, and run the tests under QEMU.
+Each toolchain emulates the richest CPU by default, so the tests reach every kit, and its `<ARCH>_QEMU_CPU` variable, like `-D PPC_QEMU_CPU=power8`, runs them on the floor instead.
 
 On macOS it's recommended to use Homebrew and install Clang, as opposed to "Apple Clang".
 Replacing the default compiler is not recommended, as it may break the system, but you can pass it as an environment variable:
@@ -592,20 +613,20 @@ cmake --build build_artifacts --config Release --parallel
 ### WebAssembly
 
 Two toolchain files under `cmake/` cover WebAssembly, and both need the [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) and [Wasmtime](https://wasmtime.dev).
-`toolchain-wasm32.cmake` builds `wasm32-wasip1` modules, single-threaded, for the single-string core.
-`toolchain-wasm32-threads.cmake` builds `wasm32-wasip1-threads` modules over one shared memory, for a caller that shards work across threads itself; nothing in the library needs them, and the CI wasm jobs use the single-threaded file above.
+`toolchain-wasm32-wasi.cmake` builds `wasm32-wasip1` modules, single-threaded, for the single-string core.
+`toolchain-wasm32-wasi-threads.cmake` builds `wasm32-wasip1-threads` modules over one shared memory, for a caller that shards work across threads itself; nothing in the library needs them, and the CI wasm jobs use the single-threaded file above.
 Point either file at the SDK with `-DWASI_SDK_PREFIX=...` or the `WASI_SDK_PATH` environment variable.
 
 ```sh
 export WASI_SDK_PATH=~/wasi-sdk
-cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32.cmake \
+cmake -B build_wasm -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-wasm32-wasi.cmake \
     -DSTRINGZILLA_BUILD_TEST=1 -DSTRINGZILLA_BUILD_SHARED=0 -DCMAKE_BUILD_TYPE=Release
-cmake --build build_wasm --target stringzilla_test_cpp20
+cmake --build build_wasm --target stringzilla_cpu_test
 ctest --test-dir build_wasm # runs each .wasm under Wasmtime
 ```
 
-A module carries one SIMD tier, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one.
-Pass `-DSTRINGZILLA_TARGET_V128RELAXED=0` for the strict module; the override zeroes the macro and drops `-mrelaxed-simd` at once, so no relaxed opcode reaches the binary.
+A module carries one SIMD kit, `STRINGZILLA_TARGET_ARCH`, so the relaxed-SIMD `v128relaxed` build above is a separate artifact from the strict `v128` one and the SIMD-free `serial` one.
+Pass `-DSTRINGZILLA_TARGET_ARCH=v128` or `=serial`, or set the environment variable, for the others; CMake turns the kit into `-msimd128` and `-mrelaxed-simd` for every unit, so no other opcode reaches the binary.
 Shared libraries stay off in both configurations, since WASI has no dynamic loader.
 
 ## CUDA

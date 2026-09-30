@@ -182,12 +182,13 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 
     # On macOS, when using non-AppleClang compilers (e.g., Homebrew LLVM), explicitly link against libc++. AppleClang
-    # automatically links the system libc++, but Homebrew LLVM requires explicit configuration.
+    # automatically links the system libc++, but Homebrew LLVM requires explicit configuration. Only the C++ executables
+    # link it: the libraries are C, and an archive would hand `c++abi` to its consumers without the path to find it.
     if (CMAKE_SYSTEM_NAME MATCHES "Darwin"
         AND compiler_id STREQUAL "Clang"
         AND NOT compiler_id STREQUAL "AppleClang"
     )
-        if (NOT target_type STREQUAL "SHARED_LIBRARY")
+        if (target_type STREQUAL "EXECUTABLE")
             target_compile_options(${target} PRIVATE "-stdlib=libc++")
             target_link_options(${target} PRIVATE "-stdlib=libc++")
             # Find and link the C++ standard library from the compiler's installation Homebrew LLVM stores libc++ in
@@ -203,11 +204,12 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
         endif ()
     endif ()
 
-    # Check for ${target_arch} and set it or use the current system if not defined
+    # Check for ${target_arch} and set it, or tune an executable for the current system if not defined. A library without
+    # one keeps the toolchain's default, as it may ship to any CPU of its architecture.
     if ("${target_arch}" STREQUAL "")
         # Only use the current system if we are not cross compiling
-        if (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING)) OR (CMAKE_SYSTEM_PROCESSOR MATCHES
-                                                            ${CMAKE_HOST_SYSTEM_PROCESSOR})
+        if (target_type STREQUAL "EXECUTABLE" AND (((NOT MSVC) AND (NOT CMAKE_CROSSCOMPILING))
+                                                   OR (CMAKE_SYSTEM_PROCESSOR MATCHES ${CMAKE_HOST_SYSTEM_PROCESSOR}))
         )
             if (compiler_id STREQUAL "NVIDIA")
                 # For NVCC, pass architecture flag to host compiler
@@ -234,7 +236,7 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
                 endif ()
             endif ()
         endif ()
-    else ()
+    elseif (NOT STRINGZILLA_ARCH_WASM_) # There it names the module's SIMD kit, which a directory-wide flag carries
         if (compiler_id MATCHES "MSVC")
             target_compile_options(${target} PRIVATE "/arch:${target_arch}")
         elseif (compiler_id STREQUAL "NVIDIA")
@@ -279,35 +281,30 @@ function (set_compiler_flags target cpp_standard target_arch compiler_id)
     endif ()
 endfunction ()
 
-# Stamps the architecture id and the `STRINGZILLA_TARGET_*` verdicts onto a target: `COMPILE` for runtime-dispatched libraries,
-# `RUN` for comptime-dispatched executables whose picked tier must also run on this machine.
-function (set_architecture_simd_definitions target mode)
-    if (STRINGZILLA_ARCH_X86_64_)
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=1" "STRINGZILLA_ARCH_ARM64_=0")
+# Stamps the architecture id and the `STRINGZILLA_TARGET_*` verdicts of the ISA probes onto a target.
+function (set_architecture_simd_definitions target)
+    if (STRINGZILLA_ARCH_X8664_)
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=1" "STRINGZILLA_ARCH_ARM64_=0")
     elseif (STRINGZILLA_ARCH_ARM64_)
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=0" "STRINGZILLA_ARCH_ARM64_=1")
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=0" "STRINGZILLA_ARCH_ARM64_=1")
     else ()
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X86_64_=0" "STRINGZILLA_ARCH_ARM64_=0")
+        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=0" "STRINGZILLA_ARCH_ARM64_=0")
     endif ()
-    if (mode STREQUAL "COMPILE")
-        target_compile_definitions(${target} PRIVATE ${sz_compile_definitions_})
-    elseif (mode STREQUAL "RUN")
-        target_compile_definitions(${target} PRIVATE ${sz_run_definitions_})
-    else ()
-        message(FATAL_ERROR "set_architecture_simd_definitions: mode must be COMPILE or RUN, got `${mode}`")
-    endif ()
+    target_compile_definitions(${target} PRIVATE ${sz_compile_definitions_})
 endfunction ()
 
-# Apply the conservative baseline architecture (`-march`/`-mcpu`) that lets one shared/OBJECT compilation host every
-# per-ISA SIMD capability: the per-function target attributes inside the kernels pick the actual instruction set, so
-# the baseline only has to be old enough for every capability's intrinsics headers to parse. Cross-compiled targets (RISC-V,
-# LoongArch, POWER) get their arch from the toolchain file's `CMAKE_<LANG>_FLAGS_INIT`, so they pass an empty arch.
+# Apply the ABI floor (`-march`/`-mcpu`/`/arch`) that lets one compilation host every SIMD
+# capability: each tier header scopes its kernels to their kit with a target pragma, and LASX and
+# POWER9 raise only their own units, so the serial code runs on every CPU of the architecture.
+# `STRINGZILLA_TARGET_ARCH` swaps the floor for a host-tuned build.
 function (set_baseline_architecture_flags target compiler_id)
-    if (STRINGZILLA_ARCH_X86_64_)
+    if (STRINGZILLA_TARGET_ARCH)
+        set_compiler_flags(${target} "" "${STRINGZILLA_TARGET_ARCH}" "${compiler_id}")
+    elseif (STRINGZILLA_ARCH_X8664_)
         if (MSVC)
             set_compiler_flags(${target} "" "SSE2" "${compiler_id}")
         else ()
-            set_compiler_flags(${target} "" "ivybridge" "${compiler_id}")
+            set_compiler_flags(${target} "" "x86-64" "${compiler_id}")
         endif ()
     elseif (STRINGZILLA_ARCH_ARM64_)
         if (MSVC)
@@ -315,6 +312,13 @@ function (set_baseline_architecture_flags target compiler_id)
         else ()
             set_compiler_flags(${target} "" "armv8-a" "${compiler_id}")
         endif ()
+    elseif (STRINGZILLA_ARCH_RISCV64_)
+        set_compiler_flags(${target} "" "rv64gc" "${compiler_id}")
+    elseif (STRINGZILLA_ARCH_LOONGARCH64_)
+        set_compiler_flags(${target} "" "loongarch64" "${compiler_id}")
+    elseif (STRINGZILLA_ARCH_PPC64_)
+        set_compiler_flags(${target} "" "" "${compiler_id}")
+        target_compile_options(${target} PRIVATE "-mcpu=power8")
     else ()
         set_compiler_flags(${target} "" "" "${compiler_id}")
     endif ()

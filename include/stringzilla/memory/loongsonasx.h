@@ -17,6 +17,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 /**
  *  @brief Broadcast a 16-byte slice of the 256-entry lookup table into both 128-bit lanes of a YMM.
@@ -275,6 +281,11 @@ STRINGZILLA_API sz_status_t sz_lookup_loongsonasx(sz_ptr_t target, sz_cptr_t sou
     return sz_success_k;
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

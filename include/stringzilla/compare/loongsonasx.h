@@ -22,6 +22,13 @@ extern "C" {
  *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
  *  identically to the Haswell backend. */
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
+
 STRINGZILLA_INLINE sz_u32_t sz_xvmovemask_b_compare_loongsonasx_(__m256i sign_extended) {
     __m256i collected_u8x32 = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u8x32, 0);
@@ -112,6 +119,11 @@ STRINGZILLA_API sz_status_t sz_equal_loongsonasx(sz_cptr_t a, sz_cptr_t b, sz_si
     return sz_success_k;
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

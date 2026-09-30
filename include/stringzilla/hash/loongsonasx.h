@@ -17,6 +17,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 STRINGZILLA_INLINE sz_u64_t sz_bytesum_loongsonasx_(sz_cptr_t text, sz_size_t length) {
     // When the buffer is small, there isn't much to innovate.
@@ -830,6 +836,11 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_loongsonasx(
     return sz_success_k;
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

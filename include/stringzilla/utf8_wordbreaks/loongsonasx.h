@@ -18,8 +18,7 @@
  *  cross-window bridge shadow / RI parity / left-context carry / WB3c next1/2/3 neighbour coupling)
  *  run once in portable @c sz_u64_t bit algebra. Malformed input is handled in-vector: ill-formed
  *  leads and strays become @c forced_other in the portable partition resolver, truncated-edge leads
- *  are reclassified in the frame builder - no well-formedness prepass, no serial routing. The file
- *  carries no clang target pragma; it relies on the `-mlasx` compile flag.
+ *  are reclassified in the frame builder - no well-formedness prepass, no serial routing.
  */
 #ifndef STRINGZILLA_UTF8_WORDBREAKS_LOONGSONASX_H_
 #define STRINGZILLA_UTF8_WORDBREAKS_LOONGSONASX_H_
@@ -34,6 +33,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 #pragma region UAX 29 Word Boundaries forward kernel
 
@@ -658,6 +663,11 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(                    /
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

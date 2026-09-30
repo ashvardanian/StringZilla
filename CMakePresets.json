@@ -20,6 +20,12 @@
       "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++" }
     },
     {
+      "name": "darwin",
+      "hidden": true,
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    { "name": "linux", "hidden": true, "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" } },
+    {
       "name": "cross",
       "hidden": true,
       "description": "Static binaries run under the toolchain file's QEMU emulator; the benchmarks stay host-only.",
@@ -51,13 +57,26 @@
     {
       "name": "release_shared",
       "inherits": "base",
-      "displayName": "Release, the shared libraries alone, for the Go, C# and Java bindings and packaging",
+      "displayName": "Release, the libraries alone: static for the Go binding, shared for C#, Java and packaging",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "STRINGZILLA_BUILD_TEST": "OFF",
         "STRINGZILLA_BUILD_BENCH": "OFF",
         "STRINGZILLA_BUILD_SHARED": "ON",
         "STRINGZILLA_BUILD_CUDA": "OFF"
+      }
+    },
+    {
+      "name": "swift",
+      "inherits": "base",
+      "displayName": "Release, the XCFramework or artifact bundle SwiftPM links",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_TEST": "OFF",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_SHARED": "OFF",
+        "STRINGZILLA_BUILD_SWIFT": "ON",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
       }
     },
     {
@@ -74,25 +93,55 @@
       "description": "NVCC over Clang, and Clang for the C and C++ sources too - the three must agree. Clang mangles a C++20 requires-clause into the symbol name and GCC does not, so a build that compiled .cpp with GCC and .cu with NVCC-over-Clang would give the tree's constrained engine entry points two different symbols and fail to link. GCC also miscompiles the engines' return-by-value in the large benchmark translation units, handing the caller the kernel timing where the status belongs, which is why measured numbers come from here. Each toolkit supports a range of Clang versions and parses that Clang's own headers, so the version that fits belongs in CMakeUserPresets.json; Clang additionally reads its standard library from the newest GCC installed, which -Xcompiler=--gcc-install-dir=<path> redirects when that one is ahead of the toolkit too.",
       "cacheVariables": { "CMAKE_CUDA_HOST_COMPILER": "clang++" }
     },
+    {
+      "name": "rocm",
+      "inherits": ["base", "linux"],
+      "displayName": "Release with ROCm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_CUDA": "OFF",
+        "STRINGZILLA_BUILD_ROCM": "ON"
+      }
+    },
+    {
+      "name": "metal",
+      "inherits": ["base", "darwin"],
+      "displayName": "Release with Metal",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STRINGZILLA_BUILD_BENCH": "OFF",
+        "STRINGZILLA_BUILD_CUDA": "OFF",
+        "STRINGZILLA_BUILD_METAL": "ON"
+      }
+    },
 
-    { "name": "linux_aarch64", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-aarch64.cmake" },
-    { "name": "linux_riscv64", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-riscv64.cmake" },
+    { "name": "linux_arm64", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-aarch64-llvm.cmake" },
+    {
+      "name": "linux_riscv64",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-riscv64-llvm.cmake"
+    },
     {
       "name": "linux_loongarch64",
       "inherits": "cross",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64-llvm.cmake"
     },
-    { "name": "linux_ppc64le", "inherits": "cross", "toolchainFile": "${sourceDir}/cmake/toolchain-ppc64le.cmake" },
+    {
+      "name": "linux_ppc64le",
+      "inherits": "cross",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-ppc64le-llvm.cmake"
+    },
     {
       "name": "wasm32_wasi",
       "inherits": "cross",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32.cmake",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-wasi.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
     },
     {
       "name": "wasm32_wasi_threads",
       "inherits": "cross",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-threads.cmake",
+      "toolchainFile": "${sourceDir}/cmake/toolchain-wasm32-wasi-threads.cmake",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "STRINGZILLA_BUILD_SHARED": "OFF" }
     }
   ],
@@ -100,14 +149,17 @@
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "release_shared", "configurePreset": "release_shared" },
+    { "name": "swift", "configurePreset": "swift", "configuration": "Release" },
     { "name": "cuda", "configurePreset": "cuda" },
     { "name": "cuda_clang", "configurePreset": "cuda_clang" },
-    { "name": "linux_aarch64", "configurePreset": "linux_aarch64" },
+    { "name": "rocm", "configurePreset": "rocm", "targets": ["stringzilla_rocm_test"] },
+    { "name": "metal", "configurePreset": "metal", "targets": ["stringzilla_metal_test", "stringzilla_shared"] },
+    { "name": "linux_arm64", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "configurePreset": "linux_riscv64" },
     { "name": "linux_loongarch64", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "configurePreset": "linux_ppc64le" },
-    { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_test_cpp20"] },
-    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_test_cpp20"] }
+    { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_cpu_test"] },
+    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_cpu_test"] }
   ],
   "testPresets": [
     {
@@ -116,7 +168,7 @@
       "description": "The benchmarks register as tests too, but need the StringWars datasets; only the test suites run here.",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" },
-      "filter": { "include": { "name": "^stringzilla_test_" } }
+      "filter": { "include": { "name": "^stringzilla_.*test" } }
     },
     {
       "name": "emulated",
@@ -128,7 +180,19 @@
     { "name": "release", "inherits": "base", "configurePreset": "release" },
     { "name": "cuda", "inherits": "base", "configurePreset": "cuda" },
     { "name": "cuda_clang", "inherits": "base", "configurePreset": "cuda_clang" },
-    { "name": "linux_aarch64", "inherits": "emulated", "configurePreset": "linux_aarch64" },
+    {
+      "name": "rocm",
+      "inherits": "base",
+      "configurePreset": "rocm",
+      "filter": { "include": { "name": "^stringzilla_rocm_test$" } }
+    },
+    {
+      "name": "metal",
+      "inherits": "base",
+      "configurePreset": "metal",
+      "filter": { "include": { "name": "^stringzilla_metal_test$" } }
+    },
+    { "name": "linux_arm64", "inherits": "emulated", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "inherits": "emulated", "configurePreset": "linux_riscv64" },
     { "name": "linux_loongarch64", "inherits": "emulated", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "inherits": "emulated", "configurePreset": "linux_ppc64le" },
@@ -136,14 +200,14 @@
       "name": "wasm32_wasi",
       "inherits": "emulated",
       "configurePreset": "wasm32_wasi",
-      "filter": { "include": { "name": "^stringzilla_test_cpp20$" } },
+      "filter": { "include": { "name": "^stringzilla_cpu_test$" } },
       "environment": { "STRINGZILLA_FILTER": "utf8" }
     },
     {
       "name": "wasm32_wasi_threads",
       "inherits": "emulated",
       "configurePreset": "wasm32_wasi_threads",
-      "filter": { "include": { "name": "^stringzilla_test_cpp20$" } },
+      "filter": { "include": { "name": "^stringzilla_cpu_test$" } },
       "environment": { "STRINGZILLA_FILTER": "utf8" }
     }
   ],
@@ -153,6 +217,22 @@
       "steps": [
         { "type": "configure", "name": "cuda" },
         { "type": "build", "name": "cuda" }
+      ]
+    },
+    {
+      "name": "rocm",
+      "steps": [
+        { "type": "configure", "name": "rocm" },
+        { "type": "build", "name": "rocm" },
+        { "type": "test", "name": "rocm" }
+      ]
+    },
+    {
+      "name": "metal",
+      "steps": [
+        { "type": "configure", "name": "metal" },
+        { "type": "build", "name": "metal" },
+        { "type": "test", "name": "metal" }
       ]
     },
     {

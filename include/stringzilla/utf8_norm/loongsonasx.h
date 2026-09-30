@@ -32,6 +32,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 /**
  *  @brief Packs each byte's sign bit into a 32-bit mask, matching AVX2's @c _mm256_movemask_epi8.
@@ -149,6 +155,11 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_loongsonasx(sz_cptr_t sour
     return sz_success_k;
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

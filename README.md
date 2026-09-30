@@ -198,7 +198,7 @@ The Python package upgrades `str` and `bytes` with SIMD search, sorting, hashing
 
 ### C and C++
 
-Header-only, or pull it in with CMake `FetchContent`, or `find_package(stringzilla)` an installed build &centerdot; guide: [`include/stringzilla/README.md`](include/stringzilla/README.md)
+Link `stringzilla::static` through CMake `FetchContent`, or `find_package(stringzilla)` an installed build, or go header-only in C &centerdot; guide: [`include/stringzilla/README.md`](include/stringzilla/README.md)
 
 ```c
 #include <stringzilla/stringzilla.h>
@@ -684,6 +684,7 @@ The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, comp
 
 Due to the high-level of fragmentation of SIMD support in different CPUs, StringZilla names its backends after select CPU generations and instruction-set extensions.
 The full v5 set spans the serial SWAR fallback, x86 (Westmere, Goldmont, Haswell, Skylake, Ice Lake), Arm (NEON, NEON-AES, NEON-SHA, SVE, SVE2, SVE2-AES), RISC-V (RVV, RVV-crypto), LoongArch (LASX), IBM Power (PowerVSX), and WebAssembly (v128 and relaxed v128).
+The libraries compile every one of them the toolchain builds, as one probe per kit under `probes/` finds, at the architecture's baseline flags, so one binary runs on any CPU of its architecture and picks among them at runtime.
 GPUs add one capability per vendor, `cuda`, `rocm` and `metal`, which `sz_cuda_capabilities_enabled` and its ROCm and Metal twins report for one device, named by that runtime's ordinal.
 In C, `sz_cpu_capabilities_detected` reports what the CPU runs as a bitmask, `sz_cpu_capabilities_compiled` what the binary holds kernels for, and `sz_cpu_capabilities_enabled` both at once, while `sz_capabilities_name` spells any mask into a buffer of `STRINGZILLA_CAPABILITIES_NAME_CAPACITY` bytes.
 Every verb has a dispatch point, like `sz_find_best`, which takes such a mask and a stream, and runs the best capability the mask shares with the verb's list, `serial` first on the CPU.

@@ -18,6 +18,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 /**
  *  @brief Produce an AVX2-style 32-bit movemask from a LASX 256-bit comparison result.
@@ -469,6 +475,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_loongsonasx(sz_cptr_t haystack, sz_
     return sz_success_k;
 }
 
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

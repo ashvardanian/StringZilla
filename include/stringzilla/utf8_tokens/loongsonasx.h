@@ -16,6 +16,12 @@ extern "C" {
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__clang__)
+#pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 
 /** Peels the tile's first @p emit_count matches with a @c __lasx_xvperm_w left-pack, 4 lanes per
  *  sub-block. Each sub-block gathers its set `(position + lane, length)` pairs to the front, with
@@ -252,6 +258,12 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_loongsonasx(                    
 }
 
 #pragma endregion Multistep newline and whitespace iteration
+
+#if defined(__clang__)
+#pragma clang attribute pop
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus

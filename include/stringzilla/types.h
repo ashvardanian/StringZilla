@@ -337,7 +337,10 @@
 #include <stdlib.h> // `abort`
 #endif
 
-/*  Compile-time hardware features detection. All of those can be controlled by the user. */
+/*  Which kits' kernels a unit defines, by default those the compiler's own flags enable. Each tier
+ *  header scopes its kernels to their kit with a target pragma, so a unit at the baseline flags may
+ *  define any kit the toolchain builds, as the CMake build does from its probes, except LASX and
+ *  POWER9, as `lasxintrin.h` and `altivec.h` hide without `-mlasx` and `-mcpu=power9`. */
 #if !defined(STRINGZILLA_TARGET_WESTMERE)
 #if STRINGZILLA_ARCH_X8664_ && defined(__SSE4_2__) && defined(__AES__)
 #define STRINGZILLA_TARGET_WESTMERE (1)
@@ -450,9 +453,8 @@
  *  AVX10 transition; ZMM codegen in a per-function @c target attribute needs it named. LLVM 17 and
  *  older never knew the token, LLVM 22 retired it again, and Clang drops the whole attribute over
  *  one unknown feature - @c -Wignored-attributes, silently costing every AVX-512 kernel - so the
- *  fork is a closed version window, not a floor. Apple Clang 17 is LLVM-19-based and sits inside
- *  it. The same window is spelled out in `probes/x86_skylake.c` and `probes/x86_icelake.c`, which
- *  stay freestanding for Cargo. */
+ *  fork is a closed version window, not a floor. Apple Clang 17 is built on LLVM 19, so it falls
+ *  inside that window too. */
 #if defined(__clang__) && __clang_major__ < 22 && \
     (__clang_major__ >= 18 || (defined(__apple_build_version__) && __clang_major__ >= 17))
 #define STRINGZILLA_HAS_CLANG_EVEX512_ (1)
@@ -569,9 +571,9 @@
 #endif
 #endif
 
-/*  IBM Power Vector-Scalar eXtension (VSX, Power8+) — `-mvsx`. */
+/*  IBM Power Vector-Scalar eXtension at the POWER9 level, ISA 3.0 — `-mcpu=power9`. */
 #if !defined(STRINGZILLA_TARGET_POWERVSX)
-#if (defined(__powerpc__) || defined(__powerpc64__)) && defined(__VSX__)
+#if (defined(__powerpc__) || defined(__powerpc64__)) && defined(__VSX__) && defined(__POWER9_VECTOR__)
 #define STRINGZILLA_TARGET_POWERVSX (1)
 #else
 #define STRINGZILLA_TARGET_POWERVSX (0)
@@ -600,13 +602,13 @@
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #include <riscv_vector.h>
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
-#if STRINGZILLA_TARGET_LOONGSONASX
-#include <lasxintrin.h> // 256-bit `__lasx_*` intrinsics and the `__m256i` register type
+#if defined(__loongarch_asx)
 #include <lsxintrin.h>  // 128-bit `__lsx_*` intrinsics and the `__m128i` register type, for sub-32-byte inputs
-#endif                  // STRINGZILLA_TARGET_LOONGSONASX
-#if STRINGZILLA_TARGET_POWERVSX
+#include <lasxintrin.h> // 256-bit `__lasx_*` intrinsics and the `__m256i` register type
+#endif
+#if defined(__POWER9_VECTOR__)
 #include <altivec.h>
-#endif // STRINGZILLA_TARGET_POWERVSX
+#endif
 #if STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
 #include <immintrin.h>
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
@@ -1176,13 +1178,13 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u128_vec_t {
     float64x2_t f64x2;
     float32x4_t f32x4;
 #endif
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__loongarch_asx)
     __m128i lsx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_
     v128_t v128;
 #endif
-#if STRINGZILLA_TARGET_POWERVSX
+#if defined(__POWER9_VECTOR__)
     __vector unsigned char vsx_u8;
     __vector unsigned short vsx_u16;
     __vector unsigned int vsx_u32;
@@ -1217,7 +1219,7 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
-#if STRINGZILLA_TARGET_LOONGSONASX
+#if defined(__loongarch_asx)
     __m256i lasx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_

@@ -19,11 +19,10 @@ PenaltyBreakAssignment: 50
 # StringZilla-specific macros
 # Visibility/linkage macros that act like storage class specifiers
 StatementAttributeLikeMacros:
-  - STRINGZILLA_API_COMPTIME
-  - STRINGZILLA_API_RUNTIME
-  - STRINGZILLA_HELPER_AUTO
-  - STRINGZILLA_HELPER_INLINE
-  - STRINGZILLA_HELPER_NOINLINE
+  - STRINGZILLA_API
+  - STRINGZILLA_CONSTEXPR
+  - STRINGZILLA_INLINE
+  - STRINGZILLA_OUTLINED_
 
 # Attribute-like macros (clang-format 12+)
 AttributeMacros:

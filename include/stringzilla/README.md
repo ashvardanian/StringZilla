@@ -76,15 +76,12 @@ FetchContent_Declare(
     GIT_TAG main)
 FetchContent_MakeAvailable(stringzilla)
 
-target_link_libraries(your_app PRIVATE stringzilla::header)
+target_link_libraries(your_app PRIVATE stringzilla::static)
 ```
 
 `add_subdirectory(stringzilla)` works the same way.
-Pulled in as a subproject, `STRINGZILLA_BUILD_SHARED` defaults to off, so only the header target is configured and nothing is compiled.
-
-### CMake, Precompiled Library
-
-For a single binary that resolves the best backend at __runtime__, turn on `STRINGZILLA_BUILD_SHARED` and link the shared target `stringzilla::shared`.
+Pulled in as a subproject, the static library is compiled only once something links it, and `STRINGZILLA_BUILD_SHARED` defaults to off.
+Turn that on for the shared target `stringzilla::shared`:
 
 ```cmake
 set(STRINGZILLA_BUILD_SHARED ON)
@@ -93,21 +90,32 @@ FetchContent_MakeAvailable(stringzilla)
 target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
-`stringzilla_shared` compiles every backend and initializes the dispatch table once at load, so one artifact runs optimally on any CPU.
-On Linux a libc-free variant `stringzilla::bare` is built alongside it with `STRINGZILLA_WITH_LIBC=0`.
+Either library's dispatch points pick a capability by the mask each call passes, so one artifact runs optimally on any CPU.
+On Linux a libc-free variant `stringzilla::bare` is built alongside the shared one with `STRINGZILLA_WITH_LIBC=0`.
+
+### CMake, Header Only
+
+C code that wants no compiled dependency links the interface target `stringzilla::header`, which adds `include/` to your search path and defines `STRINGZILLA_HEADER_ONLY=1`:
+
+```cmake
+target_link_libraries(your_app PRIVATE stringzilla::header)
+```
+
+The kernels your compiler flags enable then compile into your translation units, and you call them by name, like `sz_find_haswell`.
+Every dispatch point and finder reports `sz_missing_library_k` there, so the C++ layer, which calls the dispatch points, requires one of the libraries.
 
 ### CMake, Installed Package
 
-Configure with `-DSTRINGZILLA_INSTALL=ON` to install the headers and libraries system-wide, then find them from an unrelated project.
-The header-only path needs no submodules and compiles nothing, so it works straight out of a release tarball:
+Configure with `-DSTRINGZILLA_INSTALL=ON` to install the headers and libraries system-wide, then find them from an unrelated project:
 
 ```cmake
 find_package(stringzilla REQUIRED)
 
-target_link_libraries(your_app PRIVATE stringzilla::header)
+target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
 `stringzilla::shared` and `stringzilla::bare` join the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
+`stringzilla::header` always does, as it needs no submodules and compiles nothing, so it works straight out of a release tarball.
 
 A shared-library install also writes `lib/pkgconfig/stringzilla.pc`, for build systems that read pkg-config rather than CMake:
 
@@ -151,6 +159,7 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 | NVCC      | CUDA 12+             |
 
 GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
+The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector types from a unit compiled without `v`, and an older compiler builds the libraries without them.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
 NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_cuda_capabilities_enabled` reports for a device.
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_rocm_capabilities_enabled`.
@@ -898,6 +907,7 @@ The library probes the CPU once per process and caches the answer, while header-
 The GPU queries ask the vendor's runtime every time, by that runtime's own device ordinal, and report no devices where the vendor isn't built.
 The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
 Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_cpu_capabilities_enabled()` intersects it with the compile-time mask.
+Where the OS cannot be asked, detection reports only the kits the compiler's own flags guarantee, never the compiled ones, which the CPU may lack.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
 Nothing is process-wide: narrowing the mask a call passes narrows the choice, so `capabilities & ~sz_cap_sve_k` skips SVE and `sz_cap_serial_k` alone runs the reference kernel.
 A host-only process never starts a GPU driver, as only the GPU queries and the engines built for a GPU reach one.
@@ -907,8 +917,10 @@ On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: a
 So each such SVE kernel measures the register width on the running CPU (`svcntb`) and hands the 128-bit case to its NEON twin, and the dispatch point needs no special case.
 To force a specific backend regardless, narrow the mask or call its kernel directly.
 
-The same machinery drives the build through the checked-in `probes/` programs, which CMake compiles for every binding: it try-compiles `probes/<arch>_<kit>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which kits the toolchain can __compile__, and compiles each again for this machine alone to learn which it can __run__.
-Libraries enable everything compilable and leave the rest to the mask each call passes; header-only builds bake the intersection of the two sets.
+CMake, which every binding builds through, probes which kits the toolchain can __compile__: each kit's probe, `probes/<kit>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
+Every tier header scopes its kernels to their kit with a target pragma, on every platform, and LASX and POWER9 also take `-mlasx` and `-mcpu=power9` file-wide, only in their own units, as `lasxintrin.h` and `altivec.h` hide their contents without them.
+Libraries compile every kit the toolchain builds and leave the rest to the mask each call passes; header-only builds enable the kits their own flags name.
+`-D STRINGZILLA_TARGET_<KIT>=0` drops a kit from the libraries, and `=1` keeps one only where its probe compiles.
 
 ```c
 #include <stdio.h>
@@ -1150,9 +1162,9 @@ __`STRINGZILLA_DEBUG`__:
 __`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TARGET_HASWELL`, `STRINGZILLA_TARGET_SKYLAKE`, `STRINGZILLA_TARGET_ICELAKE`, `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, `STRINGZILLA_TARGET_SVE2AES`, `STRINGZILLA_TARGET_V128`, `STRINGZILLA_TARGET_V128RELAXED`, `STRINGZILLA_TARGET_RVV`, `STRINGZILLA_TARGET_LOONGSONASX`, `STRINGZILLA_TARGET_POWERVSX`__:
 
 > One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
-> In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags.
-> The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each kit's probe to learn what the toolchain can emit, and again for this machine alone to learn what it can run — so the libraries carry every compilable kit while header-only builds bake the intersection.
-> The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` overrides the machine gate but never a failed compile probe.
+> In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags; LASX and POWER9 need your `-mlasx` and `-mcpu=power9`, as their intrinsics headers hide without them.
+> The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each kit's probe, which calls one of its kernels, to learn whether the toolchain builds them — so the libraries carry every compilable kit.
+> The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` keeps a kit only where its probe compiles.
 
 __`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_ROCM`, `STRINGZILLA_TARGET_METAL`__:
 
