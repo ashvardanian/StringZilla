@@ -94,17 +94,20 @@ Every all-caps name starts with the full project name, `STRINGZILLA_`.
 A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
 A name without it is a public contract, either a switch you may set or a value you may read.
 
-| Family                       | Form                           | Example                              |
-| :--------------------------- | :----------------------------- | :----------------------------------- |
-| ISA tier, backend, GPU layer | `STRINGZILLA_TARGET_<TIER>`    | `STRINGZILLA_TARGET_HASWELL`         |
-| Dispatch mode                | `STRINGZILLA_RUNTIME_DISPATCH` |                                      |
-| Optional feature             | `STRINGZILLA_WITH_<FEATURE>`   | `STRINGZILLA_WITH_LIBC`              |
-| Permission for a liberty     | `STRINGZILLA_ALLOW_<LIBERTY>`  | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
-| Architecture fact            | `STRINGZILLA_ARCH_<ARCH>_`     | `STRINGZILLA_ARCH_X86_64_`           |
-| Operating-system fact        | `STRINGZILLA_OS_<OS>_`         | `STRINGZILLA_OS_LINUX_`              |
-| Toolchain fact               | `STRINGZILLA_HAS_<FEATURE>_`   | `STRINGZILLA_HAS_POSIX_EXTENSIONS_`  |
+| Family                            | Form                           | Example                              |
+| :-------------------------------- | :----------------------------- | :----------------------------------- |
+| ISA tier, backend, GPU generation | `STRINGZILLA_TARGET_<TIER>`    | `STRINGZILLA_TARGET_HASWELL`         |
+| Build mode                        | `STRINGZILLA_HEADER_ONLY`      |                                      |
+| Optional feature                  | `STRINGZILLA_WITH_<FEATURE>`   | `STRINGZILLA_WITH_LIBC`              |
+| GPU runtime the build links       | `STRINGZILLA_WITH_<RUNTIME>`   | `STRINGZILLA_WITH_METAL`             |
+| Permission for a liberty          | `STRINGZILLA_ALLOW_<LIBERTY>`  | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
+| Architecture fact                 | `STRINGZILLA_ARCH_<ARCH>_`     | `STRINGZILLA_ARCH_X8664_`            |
+| Operating-system fact             | `STRINGZILLA_OS_<OS>_`         | `STRINGZILLA_OS_LINUX_`              |
+| Toolchain fact                    | `STRINGZILLA_HAS_<FEATURE>_`   | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
 
-Architectures are spelled `X86_64`, `X86_32`, `ARM64`, `RISCV64`, `PPC64`, `LOONGARCH64`, `S390X` and `WASM`.
+Architectures are spelled as one token each, `X8664`, `X8632`, `ARM64`, `RISCV64`, `PPC64`, `LOONGARCH64`, `S390X` and `WASM`, and GPU platforms `CUDA` and `ROCM`.
+A GPU platform holds beside the host's architecture in both compiler passes, so it never follows a CPU architecture in an `#elif` chain.
+Metal has no compiler macro on the host side, so its host API is a switch the build sets where it links Metal and Foundation.
 Every name in these families is always defined, as 0 or 1, and tested with `#if`, never with `defined(...)`.
 
 For C++ code:
@@ -888,8 +891,9 @@ That may not be noticeable on a micro-benchmark, but it would be noticeable on r
 
 It's important to keep compiler support in mind when extending to new instruction sets.
 Check the most recent CI pipeline configurations in `prerelease.yml` and `release.yml` to see which compilers are used.
-When implementing dynamic dispatch, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
-Instead, use inline assembly to check feature flags and dispatch them to the proper implementation.
+When extending capability detection, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
+Instead, use inline assembly to read the feature flags, and report them through `sz_cpu_capabilities_detected`.
+A new capability's kernels then go into a unit of their own, `c/cpu/<capability>.c`, and into the lists in `c/dispatch/<family>.c` of every family that has them.
 
 ### Working on Faster Edit Distances
 

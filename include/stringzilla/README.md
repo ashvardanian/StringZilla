@@ -3,24 +3,28 @@
 StringZilla is implemented as __C-level string kernels__ with a thin __C++ binding__ for efficient byte-string processing, exposing __lazy, range-compatible iterators__ over an all-`noexcept` surface.
 It bundles:
 
-- a header-only C library importable from `<stringzilla/stringzilla.h>`,
-- a header-only C++ library importable from `<stringzilla/stringzilla.hpp>`,
-- a precompiled __shared__ library enabling dynamic dispatch for maximum portability.
+- a precompiled __static__ or __shared__ library that compiles every capability once and picks one per call, for maximum portability,
+- the C headers `<stringzilla/stringzilla.h>`, which declare that library, or compile the kernels inline with `STRINGZILLA_HEADER_ONLY=1`,
+- the C++ headers `<stringzilla/stringzilla.hpp>`, built on the library.
 
-The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, `sz_copy`/`sz_move`/`sz_fill`/`sz_lookup` memory transforms, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
+The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, `sz_copy_best`/`sz_move_best`/`sz_fill_best`/`sz_lookup_best` memory transforms, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
 The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on top of those kernels, adding an owning Small-String-Optimized container, allocation-free splitting and partitioning views, and free functions for hashing, sorting, and translation.
 
-The fastest SIMD backend is picked per CPU — at compile time in header-only mode, or at runtime when the library is built with dynamic dispatch.
+Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_cpu_capabilities_enabled` reports.
 There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
-An engine is prepared for one residency and one tier — `sz_levenshtein_engine_init_cpu` or `sz_levenshtein_engine_init_gpu`, and the same pairing for overlap and substrings — so choosing a device is choosing a constructor rather than setting a global.
+An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and ordinal, so choosing a device is choosing the mask an engine is built with rather than setting a global.
+Its rounds, such as `sz_levenshtein_distances`, take a trailing stream: null on the CPU, while on a GPU they enqueue there and return, leaving the join to the caller.
+A GPU engine's init uses its stream for its own work alone and sizes a round's device memory from the budgets it takes, so no compute verb allocates or joins, and a round carrying more haystacks than its budget, or on Metal more candidates, is refused with `sz_unexpected_dimensions_k`.
+Overlap and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
 
 The headers compile as freestanding C 99 — set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
-Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` forward to the per-ISA kernels under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, `levenshtein/cuda.cuh`, and so on — each guarded by an `STRINGZILLA_TARGET_*` macro.
+Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro.
+The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, and so on — which the library compiles once, one capability per unit in `c/cpu/`, and header-only builds include into every translation unit.
 
 ## Installation
 
-The core is header-only, so the simplest integration is to put `include/` on your search path and include the umbrella header.
-No build step is required, and the best SIMD backend for your compiler flags is selected at compile time.
+The headers declare the StringZilla library, so the simplest integration links it and includes the umbrella header.
+Its dispatch points pick the best capability at runtime, so one binary runs optimally on any CPU.
 
 ```c
 #include <stringzilla/stringzilla.h> // C
@@ -34,16 +38,16 @@ namespace sz = ashvardanian::stringzilla;
 Each family can also be included on its own when you only need a slice of the API and want to keep compile times down:
 
 ```c
-#include <stringzilla/find.h> // `sz_find`, `sz_rfind`, byte-set scans
-#include <stringzilla/hash.h> // `sz_hash`, `sz_bytesum`, incremental state
-#include <stringzilla/sort.h> // `sz_sequence_argsort`
-#include <stringzilla/compare.h> // `sz_equal`, `sz_order`
-#include <stringzilla/intersect.h> // `sz_sequence_intersect`
-#include <stringzilla/memory.h> // `sz_copy`, `sz_move`, `sz_fill`, `sz_lookup`
+#include <stringzilla/find.h> // `sz_find_best`, `sz_rfind_best`, byte-set scans
+#include <stringzilla/hash.h> // `sz_hash_best`, `sz_bytesum_best`, incremental state
+#include <stringzilla/sort.h> // `sz_sequence_argsort_best`
+#include <stringzilla/compare.h> // `sz_equal_best`, `sz_order_best`
+#include <stringzilla/intersect.h> // `sz_sequence_intersect_best`
+#include <stringzilla/memory.h> // `sz_copy_best`, `sz_move_best`, `sz_fill_best`, `sz_lookup_best`
 #include <stringzilla/small_string.h> // `sz_string_t` SSO container
-#include <stringzilla/levenshtein.h> // `sz_levenshtein_engine_init_cpu`, `sz_levenshtein_distances`
-#include <stringzilla/overlap.h> // `sz_overlap_engine_init_cpu`, `sz_overlap_scores`
-#include <stringzilla/substrings.h> // `sz_substrings_engine_init_cpu`, `sz_substrings_counts`
+#include <stringzilla/levenshtein.h> // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
+#include <stringzilla/overlap.h> // `sz_overlap_engine_init`, `sz_overlap_scores`
+#include <stringzilla/substrings.h> // `sz_substrings_engine_init`, `sz_substrings_counts`
 ```
 
 The three engine families prepare a batch of queries once and score it against many batches of candidates, writing into a strided block the caller supplies rather than allocating one per round.
@@ -107,19 +111,19 @@ The most important ones, mirrored from `stringzilla.h`:
 
 | Macro                                |  Default | Effect                                   |
 | :----------------------------------- | -------: | :--------------------------------------- |
-| `STRINGZILLA_RUNTIME_DISPATCH`       |      `0` | Compile-time vs. runtime backend choice  |
+| `STRINGZILLA_HEADER_ONLY`            |      `0` | Inline kernels instead of the library    |
 | `STRINGZILLA_DEBUG`                  |      `0` | Debug assertions and logging             |
 | `STRINGZILLA_WITH_LIBC`              |      `1` | `0` builds freestanding, without libc    |
 | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` | platform | Unaligned word loads in SWAR fallbacks   |
 | `STRINGZILLA_SWAR_THRESHOLD`         |     `24` | Length below which scalar loops are used |
 | `STRINGZILLA_CACHE_LINE_BYTES`       | platform | Cache-line width for heuristics          |
 
-`STRINGZILLA_RUNTIME_DISPATCH` controls dispatch: with `0` the best backend is chosen at compile time and every public function is `static`/inline, while `1` compiles all backends and selects one at runtime through a dispatch table — this is how the shared library is built.
+`STRINGZILLA_HEADER_ONLY` chooses between the two builds: with `0`, the default, the dispatch points live in the library, which compiles every capability and picks one by the mask each call passes; with `1` the kernels your compiler flags enable inline into your translation unit, and the dispatch points report `sz_missing_library_k`.
 `STRINGZILLA_WITH_LIBC=0` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.
 `STRINGZILLA_ALLOW_MISALIGNED_LOADS` allows unaligned word loads in the SWAR fallbacks where the platform permits.
 
 Per-ISA backends are toggled with their own macros; if left undefined they are auto-detected from the compiler's target flags:
-`STRINGZILLA_TARGET_WESTMERE` for SSE4.2 + AES-NI, `STRINGZILLA_TARGET_GOLDMONT` for SHA-NI, `STRINGZILLA_TARGET_HASWELL` for AVX2, `STRINGZILLA_TARGET_SKYLAKE` for AVX-512 F/BW/VL, `STRINGZILLA_TARGET_ICELAKE` for AVX-512 VBMI + VAES, then `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, and `STRINGZILLA_TARGET_SVE2AES` on ARM, `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` for WebAssembly SIMD128, `STRINGZILLA_TARGET_RVV` and `STRINGZILLA_TARGET_RVVCRYPTO` for the RISC-V Vector extension, `STRINGZILLA_TARGET_LASX` for LoongArch, and `STRINGZILLA_TARGET_POWERVSX` for IBM Power.
+`STRINGZILLA_TARGET_WESTMERE` for SSE4.2 + AES-NI, `STRINGZILLA_TARGET_GOLDMONT` for SHA-NI, `STRINGZILLA_TARGET_HASWELL` for AVX2, `STRINGZILLA_TARGET_SKYLAKE` for AVX-512 F/BW/VL, `STRINGZILLA_TARGET_ICELAKE` for AVX-512 VBMI + VAES, then `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, and `STRINGZILLA_TARGET_SVE2AES` on ARM, `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` for WebAssembly SIMD128, `STRINGZILLA_TARGET_RVV` and `STRINGZILLA_TARGET_RVVCRYPTO` for the RISC-V Vector extension, `STRINGZILLA_TARGET_LOONGSONASX` for LoongArch, and `STRINGZILLA_TARGET_POWERVSX` for IBM Power.
 
 The umbrella header also exposes the version triple as `STRINGZILLA_H_VERSION_MAJOR`/`_MINOR`/`_PATCH`, with matching `sz_version_major()`, `sz_version_minor()`, and `sz_version_patch()` accessors.
 
@@ -170,11 +174,11 @@ sz_byteset_invert(&set);               // complement the set
 `sz_memory_allocator_t` is the explicit allocator, a `{ allocate, free, handle }` triple, handed to any function that may allocate:
 
 ```c
-sz_memory_allocator_t alloc;
-sz_memory_allocator_init_default(&alloc);          // libc malloc/free
+sz_memory_allocator_t allocator;
+sz_memory_allocator_init_default(&allocator);          // libc malloc/free
 // or a fixed arena with no dynamic allocation:
 char arena[4096];
-sz_memory_allocator_init_fixed(&alloc, arena, sizeof(arena));
+sz_memory_allocator_init_fixed(&allocator, arena, sizeof(arena));
 ```
 
 `sz_sequence_t` is the read-only adapter over an arbitrary collection of strings used by the sort and intersect families.
@@ -792,51 +796,93 @@ int main() {
 
 ## Runtime Dispatch and Capabilities
 
-Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_lasx`, `_powervsx`).
-The public, suffix-free name such as `sz_find` or `sz_hash` resolves to the best available backend.
+Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_goldmont`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_rvvcrypto`, `_loongsonasx`, `_powervsx`), and the engines add one per GPU vendor, `_cuda`, `_rocm` and `_metal`.
+Each verb also has a dispatch point, like `sz_find_best` or `sz_hash_best`, taking the kernels' arguments plus a capability mask before the trailing stream, and running the best capability the mask shares with the verb's list, `serial` first on the CPU.
+It returns `sz_missing_kernel_k` when no capability in the mask has the kernel, as a GPU-only mask does for a CPU-only verb.
 
-- __Header-only mode, `STRINGZILLA_RUNTIME_DISPATCH=0`, the default.__ The dispatch is resolved at compile time: the umbrella header picks the most advanced backend enabled by your compiler flags, and the suffix-free functions inline straight to it.
-  No runtime indirection.
-- __Dynamic-dispatch mode, `STRINGZILLA_RUNTIME_DISPATCH=1`.__ All backends are compiled and a dispatch table is initialized once, then the suffix-free functions jump through it.
-  This is how the prebuilt shared library is shipped, so a single binary runs optimally on any CPU.
-  `sz_dynamic_dispatch()` returns non-zero in this mode.
+- __Library builds, `STRINGZILLA_HEADER_ONLY=0`, the default.__ Every capability the toolchain builds is compiled into one binary, and the dispatch points pick among them by the mask each call passes.
+  This is how the prebuilt libraries ship, so a single binary runs optimally on any CPU, and it is what `stringzilla.hpp` links against.
+- __Header-only builds, `STRINGZILLA_HEADER_ONLY=1`.__ The kernels your compiler flags enable inline into your translation unit, so calling one of them by name, like `sz_find_haswell`, costs no indirection at all.
+  The dispatch points and finders compile to stubs returning `sz_missing_library_k`, so this mode serves C alone, and C++ requires the library.
 
 Capabilities are introspectable at both compile and run time.
-`sz_capability_t` is a bitmask whose flags include `sz_cap_serial_k` and `sz_cap_parallel_k`, the x86 tiers `sz_cap_westmere_k`, `sz_cap_goldmont_k`, `sz_cap_haswell_k`, `sz_cap_skylake_k`, and `sz_cap_icelake_k`, the ARM tiers `sz_cap_neon_k`, `sz_cap_neonaes_k`, `sz_cap_neonsha_k`, `sz_cap_sve_k`, `sz_cap_sve2_k`, and `sz_cap_sve2aes_k`, the portable-SIMD tiers `sz_cap_v128_k`, `sz_cap_v128relaxed_k`, `sz_cap_rvv_k`, `sz_cap_rvvcrypto_k`, `sz_cap_lasx_k`, and `sz_cap_powervsx_k`, and the GPU tiers `sz_cap_cuda_k`, `sz_cap_kepler_k`, and `sz_cap_hopper_k`.
+`sz_capability_t` is a 64-bit mask from `capabilities.h`, one bit per capability.
+Within each architecture the bits ascend by preference, so the highest bit a mask shares with a verb's kernels names the kernel to run.
+
+- __Serial__: `sz_cap_serial_k`, bit 0, which every CPU runs.
+- __x86__: `sz_cap_westmere_k`, `sz_cap_goldmont_k`, `sz_cap_haswell_k`, `sz_cap_skylake_k`, `sz_cap_icelake_k`.
+- __Arm__: `sz_cap_neon_k`, `sz_cap_neonaes_k`, `sz_cap_neonsha_k`, `sz_cap_sve_k`, `sz_cap_sve2_k`, `sz_cap_sve2aes_k`.
+- __RISC-V__: `sz_cap_rvv_k`, `sz_cap_rvvcrypto_k`.
+- __WebAssembly__: `sz_cap_v128_k`, `sz_cap_v128relaxed_k`.
+- __LoongArch and Power__: `sz_cap_loongsonasx_k`, `sz_cap_powervsx_k`.
+- __GPUs__: one baseline per vendor above every CPU bit, `sz_cap_cuda_k` at bit 48, `sz_cap_rocm_k` at 56, and `sz_cap_metal_k` at 60.
+
+`sz_cap_cpus_k` and `sz_cap_devices_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
 
 ```c
-sz_capability_t sz_capabilities(void); // intersection of compile-time and runtime
-sz_capability_t sz_capabilities_comptime(void); // what this build was compiled for
-sz_capability_t sz_capabilities_runtime(void); // what this CPU supports
-sz_cptr_t sz_capabilities_to_string(sz_capability_t caps); // e.g. "serial,haswell,skylake"
-int sz_dynamic_dispatch(void);
+sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities); // what this CPU runs
+sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities); // what this build holds kernels for
+sz_status_t sz_cpu_capabilities_enabled(sz_capability_t *capabilities);  // both at once, always with serial
+sz_status_t sz_cpu_configure_thread(sz_capability_t capabilities);       // once per dispatching thread
+sz_status_t sz_cuda_count_devices(sz_size_t *count);
+sz_status_t sz_cuda_capabilities_detected(sz_size_t device, sz_capability_t *capabilities);
+sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities);
+sz_status_t sz_cuda_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities);
+sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity); // "serial,haswell"
+char const *sz_status_name(sz_status_t status);
 ```
 
-The runtime probe inspects CPUID on x86, the AArch64 ID registers on ARM with a `SIGILL`-guarded `mrs` fallback to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
-Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities()` intersects it with the compile-time mask.
+ROCm and Metal have the same four queries, spelled `sz_rocm_*` and `sz_metal_*`.
+The library probes the CPU once per process and caches the answer, while header-only builds probe on every call.
+The GPU queries ask the vendor's runtime every time, by that runtime's own device ordinal, and report no devices where the vendor isn't built.
+The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
+Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_cpu_capabilities_enabled()` intersects it with the compile-time mask.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
+Nothing is process-wide: narrowing the mask a call passes narrows the choice, so `capabilities & ~sz_cap_sve_k` skips SVE and `sz_cap_serial_k` alone runs the reference kernel.
+A host-only process never starts a GPU driver, as only the GPU queries and the engines built for a GPU reach one.
+`sz_cpu_configure_thread` prepares the calling thread for the capabilities it is given, and only those; every current capability needs nothing, so it is a no-op today, kept so bindings call it where NumKong's call theirs.
 
 On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: at the common 128-bit vector length the scalable kernels for length-sensitive operations — comparisons, memory transforms, substring search, UTF-8 token scanning — are often slower than their NEON twins, while crypto-heavy operations like hashing prefer SVE2 at any width.
-Dispatch therefore picks by register width: the load-time table measures it on the running CPU (`svcntb`), and compile-time dispatch consults `__ARM_FEATURE_SVE_BITS` when pinned via `-msve-vector-bits=N`, otherwise assuming the 128-bit case and keeping NEON.
-To force a specific backend regardless, use the `STRINGZILLA_TARGET_SVE`/`STRINGZILLA_TARGET_SVE2`/`STRINGZILLA_TARGET_NEON` toggles.
+So each such SVE kernel measures the register width on the running CPU (`svcntb`) and hands the 128-bit case to its NEON twin, and the dispatch point needs no special case.
+To force a specific backend regardless, narrow the mask or call its kernel directly.
 
-The same machinery drives the build systems through the checked-in `probes/` programs: CMake and Cargo try-compile `probes/<arch>_<tier>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which tiers the toolchain can __compile__, and execute `probes/run_capabilities.c` to learn which tiers the build machine can __run__.
-Runtime-dispatched libraries enable everything compilable, trusting the load-time table to mask the rest; compile-time builds bake the intersection of the two sets.
+The same machinery drives the build through the checked-in `probes/` programs, which CMake compiles for every binding: it try-compiles `probes/<arch>_<kit>.c` — tiny standalone programs reusing the real kernels' `target` pragmas, intrinsics, and platform guards — to learn which kits the toolchain can __compile__, and compiles each again for this machine alone to learn which it can __run__.
+Libraries enable everything compilable and leave the rest to the mask each call passes; header-only builds bake the intersection of the two sets.
 
 ```c
 #include <stdio.h>
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
-    sz_capability_t caps = sz_capabilities();
-    printf("StringZilla %d.%d.%d, backends: %s, dynamic=%d\n",
-           sz_version_major(), sz_version_minor(), sz_version_patch(),
-           sz_capabilities_to_string(caps), sz_dynamic_dispatch());
+    sz_capability_t caps;
+    sz_cpu_capabilities_enabled(&caps);
+    char names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+    sz_capabilities_name(caps, names, sizeof(names));
+    printf("StringZilla %d.%d.%d, backends: %s\n", sz_version_major(), sz_version_minor(), sz_version_patch(), names);
     return 0;
 }
 ```
 
-You can also call any backend directly when you have already established the target supports it — for example `sz_find_haswell(...)` or `sz_hash_icelake(...)` — which is handy for benchmarking and for pinning a code path in a controlled environment.
+You can also call any capability's kernel directly, with the same arguments short of the mask, when you have already established the target supports it — for example `sz_find_haswell(...)` or `sz_hash_icelake(...)` — which is handy for benchmarking and for pinning a code path in a controlled environment.
+
+Picking a capability costs about a nanosecond per call: noise for long inputs, but not for hot short-string paths, like a sort's comparator or a per-token byte search.
+There, call a capability's kernel directly, like `sz_order_neon` or `sz_find_byte_haswell`, or resolve one once through `sz_find_kernel_punned`, and call it many times:
+
+```c
+sz_kernel_order_t order = NULL;
+sz_capability_t capability = 0;
+sz_find_kernel_punned(sz_kernel_order_k, caps, (sz_kernel_punned_t *)&order, &capability);
+
+sz_ordering_t ordering;
+order("apple", 5, "banana", 6, &ordering, NULL);
+```
+
+It picks exactly what the dispatch point picks for the same mask, and returns `sz_missing_kernel_k` when no capability in the mask has the kernel.
+Each family exports its own finder over its kinds, like `sz_compare_find_kernel` in `compare.h`, and `sz_find_kernel_punned` covers every family through one entry point.
+Every verb has a kind, `sz_kernel_<verb>_k`, and a pointer type to cast the result to, `sz_kernel_<verb>_t`, taking the dispatch point's arguments short of the mask.
+`sz_kernel_name` spells a kind without its `sz_kernel_` prefix and `_k` suffix, like `"find_byte"`, and `sz_kernel_named` maps such a name back, or to `sz_kernel_unknown_k`.
+Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, and `sz_kernel_utf8_segmenter_t` for the seven UTF-8 segmenters.
+In C++, every wrapper that takes a mask, like `sz::memcpy` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_cpu_configure_thread`.
 
 ## Memory Ownership and Small String Optimization
 
@@ -1040,23 +1086,27 @@ __`STRINGZILLA_DEBUG`__:
 > If you want to enable more aggressive bounds-checking, define `STRINGZILLA_DEBUG` before including the header.
 > If not explicitly set, it will be inferred from the build type.
 
-__`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TARGET_HASWELL`, `STRINGZILLA_TARGET_SKYLAKE`, `STRINGZILLA_TARGET_ICELAKE`, `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, `STRINGZILLA_TARGET_SVE2AES`, `STRINGZILLA_TARGET_V128`, `STRINGZILLA_TARGET_V128RELAXED`, `STRINGZILLA_TARGET_RVV`, `STRINGZILLA_TARGET_LASX`, `STRINGZILLA_TARGET_POWERVSX`__:
+__`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TARGET_HASWELL`, `STRINGZILLA_TARGET_SKYLAKE`, `STRINGZILLA_TARGET_ICELAKE`, `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, `STRINGZILLA_TARGET_SVE2AES`, `STRINGZILLA_TARGET_V128`, `STRINGZILLA_TARGET_V128RELAXED`, `STRINGZILLA_TARGET_RVV`, `STRINGZILLA_TARGET_LOONGSONASX`, `STRINGZILLA_TARGET_POWERVSX`__:
 
 > One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
 > In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags.
-> The CMake and Cargo builds resolve them from the shared `probes/` sources instead — try-compiling each tier to learn what the toolchain can emit, and executing `probes/run_capabilities.c` to learn what the build machine can run — so runtime-dispatched libraries carry every compilable tier while compile-time builds bake the intersection.
+> The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each kit's probe to learn what the toolchain can emit, and again for this machine alone to learn what it can run — so the libraries carry every compilable kit while header-only builds bake the intersection.
 > The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` overrides the machine gate but never a failed compile probe.
 
-__`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_KEPLER`, `STRINGZILLA_TARGET_HOPPER`__:
+__`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_ROCM`, `STRINGZILLA_TARGET_METAL`__:
 
-> One can explicitly disable certain families of PTX instructions for compatibility purposes.
-> Default values are inferred at compile time depending on compiler support (for dynamic dispatch) and the target architecture (for static dispatch).
+> Compile the GPU kernels of one vendor: CUDA wherever the unit is compiled as CUDA, by nvcc or by Clang, ROCm wherever it is compiled as HIP, and Metal under `STRINGZILLA_WITH_METAL`.
+> Each defaults to 1 wherever its vendor is present, and setting it to 0 keeps the host API while dropping that vendor's kernels.
 
-__`STRINGZILLA_RUNTIME_DISPATCH`__:
+__`STRINGZILLA_WITH_METAL`__:
 
-> By default, StringZilla is a header-only library.
-> But if you are running on different generations of devices, it makes sense to pre-compile the library for all supported generations at once, and dispatch at runtime.
-> This flag does just that and is used to produce the `stringzilla.so` shared library, as well as the Python bindings.
+> Compiles in the Metal host API and the Apple GPU kernels, which travel as embedded source and compile on the device at first use.
+> It defaults to 0; set it to 1 only in targets that link the Metal and Foundation frameworks.
+
+__`STRINGZILLA_HEADER_ONLY`__:
+
+> By default, the headers declare the StringZilla library, which compiles every capability once and dispatches among them at runtime, as the shared library and every binding do.
+> Set it to 1 to inline the kernels your compiler flags enable instead, calling them by name; the dispatch points and finders then report `sz_missing_library_k`.
 
 __`STRINGZILLA_ALLOW_MISALIGNED_LOADS`__:
 
@@ -1066,7 +1116,7 @@ __`STRINGZILLA_ALLOW_MISALIGNED_LOADS`__:
 
 __`STRINGZILLA_WITH_LIBC`__ and __`STRINGZILLA_OVERRIDE_LIBC`__:
 
-> When using the C header-only library one can disable the use of LibC.
+> Both the library and the C headers can be built without LibC.
 > This may affect the type resolution system on obscure hardware platforms. 
 > Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
 > In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize its symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.

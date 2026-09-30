@@ -210,7 +210,7 @@ namespace sz = ashvardanian::stringzilla;
 sz::string_view_t("the quick brown fox").find("brown"); // 10
 ```
 
-The header-only library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm and a CUDA one.
+The library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
 
 ### Rust
 
@@ -680,29 +680,50 @@ The kernels live in `include/stringzilla/levenshtein/cuda.cuh`.
 
 Due to the high-level of fragmentation of SIMD support in different CPUs, StringZilla names its backends after select CPU generations and instruction-set extensions.
 The full v5 set spans the serial SWAR fallback, x86 (Westmere, Goldmont, Haswell, Skylake, Ice Lake), Arm (NEON, NEON-AES, NEON-SHA, SVE, SVE2, SVE2-AES), RISC-V (RVV, RVV-crypto), LoongArch (LASX), IBM Power (PowerVSX), and WebAssembly (v128 and relaxed v128).
-You can query supported backends and use them manually.
-Use it to guarantee constant performance, or to explore how different algorithms scale on your hardware.
+GPUs add one capability per vendor, `cuda`, `rocm` and `metal`, which `sz_cuda_capabilities_enabled` and its ROCm and Metal twins report for one device, named by that runtime's ordinal.
+In C, `sz_cpu_capabilities_detected` reports what the CPU runs as a bitmask, `sz_cpu_capabilities_compiled` what the binary holds kernels for, and `sz_cpu_capabilities_enabled` both at once, while `sz_capabilities_name` spells any mask into a buffer of `STRINGZILLA_CAPABILITIES_NAME_CAPACITY` bytes.
+Every verb has a dispatch point, like `sz_find_best`, which takes such a mask and a stream, and runs the best capability the mask shares with the verb's list, `serial` first on the CPU.
+The stream is null on the CPU.
+Every dispatch point returns a status, `sz_missing_kernel_k` when no capability in the mask has the kernel.
 
 ```c
-sz_find(text, length, pattern, 3);          // Auto-dispatch
-sz_find_westmere(text, length, pattern, 3); // Intel Westmere+ SSE4.2
-sz_find_haswell(text, length, pattern, 3);  // Intel Haswell+ AVX2
-sz_find_skylake(text, length, pattern, 3);  // Intel Skylake+ AVX-512
-sz_find_neon(text, length, pattern, 3);     // Arm NEON 128-bit
-sz_find_sve(text, length, pattern, 3);      // Arm SVE 128/256/512/1024/2048-bit
+sz_capability_t capabilities = sz_cap_serial_k;
+sz_cpu_capabilities_enabled(&capabilities); // detected on this CPU and compiled into this binary
+sz_cptr_t match = NULL;
+sz_find_best(text, length, pattern, 3, &match, capabilities, NULL);                 // the best capability
+sz_find_best(text, length, pattern, 3, &match, capabilities & ~sz_cap_sve_k, NULL); // anything but SVE
+sz_find_best(text, length, pattern, 3, &match, sz_cap_serial_k, NULL);              // the SWAR reference
 ```
 
-StringZilla automatically picks the most advanced backend for the given CPU.
-Similarly, in Python, you can log the auto-detected capabilities:
+Each capability kernel is also callable directly, with the same arguments short of the mask.
+Use it to guarantee constant performance, or to explore how different algorithms scale on your hardware.
+Header-only C builds, with `STRINGZILLA_HEADER_ONLY=1`, compile the kernels into your translation unit for exactly that, while their dispatch points return `sz_missing_library_k`, so the C++ layer and the bindings link the library.
 
-```python
-python -c "import stringzilla; print(stringzilla.__capabilities__)"         # e.g. ('serial', 'westmere', 'goldmont', 'haswell', 'skylake', 'icelake')
-python -c "import stringzilla; print(stringzilla.__capabilities_str__)"     # e.g. "serial, westmere, goldmont, haswell, skylake, icelake"
-# Other targets report their own names: Arm "neon, neonaes, neonsha, sve, sve2, sve2aes",
-# WebAssembly "v128, v128relaxed", RISC-V "rvv", LoongArch "lasx", IBM Power "powervsx".
+```c
+sz_find_westmere(text, length, pattern, 3, &match, NULL); // Intel Westmere+ SSE4.2
+sz_find_haswell(text, length, pattern, 3, &match, NULL);  // Intel Haswell+ AVX2
+sz_find_skylake(text, length, pattern, 3, &match, NULL);  // Intel Skylake+ AVX-512
+sz_find_neon(text, length, pattern, 3, &match, NULL);     // Arm NEON 128-bit
+sz_find_sve(text, length, pattern, 3, &match, NULL);      // Arm SVE 128/256/512/1024/2048-bit
 ```
 
-You can also explicitly set the backend to use, or scope the backend to a specific function.
+Picking a capability costs about a nanosecond per call: noise for long inputs, but not for hot short-string paths, like a sort's comparator or a per-token byte search.
+There, call a capability's kernel directly, like `sz_order_neon` or `sz_find_byte_haswell`, or resolve one once through `sz_find_kernel_punned`, and call it many times:
+
+```c
+sz_kernel_order_t order = NULL;
+sz_capability_t capability = 0;
+sz_find_kernel_punned(sz_kernel_order_k, capabilities, (sz_kernel_punned_t *)&order, &capability);
+
+sz_ordering_t ordering;
+order("apple", 5, "banana", 6, &ordering, NULL);
+```
+
+It picks exactly what the dispatch point picks for the same mask, and returns `sz_missing_kernel_k` when no capability in the mask has the kernel.
+Each family exports its own finder over its kinds, like `sz_compare_find_kernel`, and `sz_find_kernel_punned` covers every family through one entry point.
+The kind names the verb, `sz_kernel_<verb>_k`, and the kernel is cast to that verb's pointer type, `sz_kernel_<verb>_t`.
+In C++, every wrapper that takes a mask defaults to `sz::default_capabilities()`, the enabled CPU mask, and `sz::device_t` answers the same three questions for any device and prepares a CPU thread through `configure_thread`.
+Similarly, in Python, `sz.Capability` flags carry the same masks, and one call or the whole process can be narrowed:
 
 ```python
 import stringzilla as sz
