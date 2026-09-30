@@ -29,7 +29,6 @@
 #include <cstdio>  // `stderr`
 #include <cstring> // `std::memcpy`
 
-#include <algorithm>   // `std::transform`
 #include <iterator>    // `std::distance`
 #include <random>      // `std::uniform_int_distribution`
 #include <string>      // Baseline
@@ -197,8 +196,6 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
 
     while (reinterpret_cast<std::uintptr_t>(haystack) % STRINGZILLA_CACHE_LINE_BYTES != misalignment) ++haystack;
 
-    std::vector<std::size_t> offsets_stl, offsets_sz;
-
     for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();
 
@@ -226,10 +223,8 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
         auto count_sz = std::distance(begin_sz, end_sz);
 
         // To simplify debugging, let's first export all the match offsets, and only then compare them
-        std::transform(begin_stl, end_stl, std::back_inserter(offsets_stl),
-                       [&](auto const &match) { return match.data() - haystack_stl.data(); });
-        std::transform(begin_sz, end_sz, std::back_inserter(offsets_sz),
-                       [&](auto const &match) { return match.data() - haystack_sz.data(); });
+        auto const offsets_stl = offsets_within(haystack_stl, matches_stl);
+        auto const offsets_sz = offsets_within(haystack_sz, matches_sz);
         auto print_all_matches = [&]() {
             fmt::println(stderr, "Breakdown of found matches:\n- STL ({}): {}\n- StringZilla ({}): {}",
                          offsets_stl.size(), fmt::join(offsets_stl, " "), offsets_sz.size(),
@@ -254,9 +249,6 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
         }
         verify(begin_stl == end_stl && begin_sz == end_sz &&
                "Both matchers must exhaust their ranges together, not leave one with unconsumed matches");
-
-        offsets_stl.clear();
-        offsets_sz.clear();
 
 #if defined(__SANITIZE_ADDRESS__)
         // Don't forget to manually unpoison the prefix and the suffix.

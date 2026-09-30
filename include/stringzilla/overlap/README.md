@@ -4,6 +4,7 @@ This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap
 Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, which `c/nvidia/cuda.cu` and `c/amd/rocm.hip` compile into the library, and the Metal ones live in `simt.h` with the `simt.metal` shaders, which `c/apple/metal.c` compiles.
 The init picks the best capability of a mask once, when the batch of queries is prepared on one device, and every later round scores with that capability's kernel alone.
+A device engine keeps no stream: on CUDA it keeps no per-round state either, so any number of streams may score it at once, while on Metal `candidates_budget` sizes one round block at init and a round past it is refused with `sz_unexpected_dimensions_k`.
 
 ## Methodology
 

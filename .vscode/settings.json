@@ -292,6 +292,7 @@
     "__tuple": "cpp",
     "__verbose_abort": "cpp",
     "*.gyp": "json",
+    "*.metal": "cpp",
     "*.tcc": "cpp",
     "algorithm": "cpp",
     "any": "cpp",

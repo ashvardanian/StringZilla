@@ -14,15 +14,15 @@ if (NOT DEFINED BUILD_TYPE)
     message(STATUS "BUILD_TYPE not specified, defaulting to Debug")
 endif ()
 
-# Extract basename without extension
-get_filename_component(BASENAME "${FILE}" NAME_WE)
-
-# Map filename patterns to CMake targets
-if (BASENAME MATCHES "^bench_(.+)$")
-    # Benchmark files: bench_find.cpp -> stringzilla_bench_find_cpp20
-    set(TARGET "stringzilla_${BASENAME}_cpp20")
+# Every CPU benchmark and test source compiles into one executable per directory
+get_filename_component(DIRECTORY "${FILE}" DIRECTORY)
+get_filename_component(DIRECTORY "${DIRECTORY}" NAME)
+if (DIRECTORY STREQUAL "bench")
+    set(TARGET "stringzilla_cpu_bench")
+elseif (DIRECTORY STREQUAL "test")
+    set(TARGET "stringzilla_cpu_test")
 else ()
-    message(FATAL_ERROR "Unknown file pattern: ${BASENAME}\nSupported patterns:\n  - bench_*.cpp\n  - test_stringzilla.cpp")
+    message(FATAL_ERROR "Unknown file location: ${FILE}\nSupported locations:\n  - bench/*.cpp\n  - test/*.cpp")
 endif ()
 
 # Determine build directory
@@ -31,7 +31,10 @@ set(BUILD_DIR "${CMAKE_CURRENT_LIST_DIR}/../build_${build_type_lower}")
 
 # Verify build directory exists
 if (NOT EXISTS "${BUILD_DIR}")
-    message(FATAL_ERROR "Build directory not found: ${BUILD_DIR}\nRun: cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -B ${BUILD_DIR}")
+    message(
+        FATAL_ERROR
+            "Build directory not found: ${BUILD_DIR}\nRun: cmake -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -B ${BUILD_DIR}"
+    )
 endif ()
 
 message(STATUS "Building target: ${TARGET}")

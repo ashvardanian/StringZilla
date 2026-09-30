@@ -19,11 +19,12 @@ env:
   PYTHON_VERSION: 3.13
   PYTHONUTF8: 1
   WASI_SDK_VERSION: "34"
-  # Pinned to the 36 LTS line so the wasm rows run a reproducible engine.
-  WASMTIME_VERSION: v36.0.15
+  # Pinned to the 48 LTS line so the wasm rows run a reproducible engine that speaks exnref exception handling.
+  WASMTIME_VERSION: v48.0.3
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+# `actions: read` lets the Android job, which runs in another repository's workflow, download this run's artifacts.
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -57,16 +58,16 @@ jobs:
             javascript/@stringzilla-linux-x64/package.json:"version": "(\d+\.\d+\.\d+)"
             javascript/@stringzilla-win32-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
             javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
-            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+            Package.swift:releases/download/v(\d+\.\d+\.\d+)
             CITATION.cff:^version: (\d+\.\d+\.\d+)
             StringZilla.csproj:<Version>(\d+\.\d+\.\d+)</Version>
             pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+)</version>
           update-major-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
           update-minor-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
           update-patch-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
           dry-run: "true"
 
   test_ubuntu_gcc:
@@ -116,10 +117,11 @@ jobs:
           }
       - name: Test C++
         run: ctest --preset release
-      - name: Build shared library for Go binding
+      - name: Build static library for Go binding
         run: |
           cmake --preset release_shared
-          cmake --build --preset release_shared
+          cmake --build --preset release_shared --target stringzilla_static
+          cp build_release_shared/libstringzilla_static.a golang/
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -127,18 +129,11 @@ jobs:
           cache: false
       - name: Test Go binding
         working-directory: golang
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_release_shared
         run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Test on Real World Data
-        run: |
-          build_release/stringzilla_bench_memory_cpp20 ${DATASET_PATH}     # for string copies and fills
-          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}       # for substring search
-          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}      # for hashing, equality comparisons, etc.
-          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}   # for sorting arrays of strings
-          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH}  # for STL containers with string keys
+        run: build_release/stringzilla_cpu_bench
         env:
-          DATASET_PATH: ./README.md
+          STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
@@ -160,7 +155,7 @@ jobs:
           import stringzilla as sz
           print("platform:", platform.platform())
           print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("capabilities:", repr(sz.Device.cpu().capabilities_enabled()))
           PY
       - name: Test Python
         run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
@@ -170,16 +165,15 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+        # Without `--omit=optional`, the published `@stringzilla/*` addon satisfies the install and shadows this tree's.
       - name: Build and test JavaScript
-        run: npm install && npm test
+        run: npm install --ignore-scripts --omit=optional && npm run prebuild && npm test
 
       # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with dynamic dispatch
+      - name: Test Rust
         run: cargo test --release
-      - name: Test Rust with compile-time dispatch
-        run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
         # Otherwise `cargo publish` is the first thing that ever reads the `include` list.
@@ -236,10 +230,11 @@ jobs:
           }
       - name: Test C++
         run: ctest --preset release
-      - name: Build shared library for Go binding
+      - name: Build static library for Go binding
         run: |
           cmake --preset release_shared
-          cmake --build --preset release_shared
+          cmake --build --preset release_shared --target stringzilla_static
+          cp build_release_shared/libstringzilla_static.a golang/
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -247,17 +242,11 @@ jobs:
           cache: false
       - name: Test Go binding
         working-directory: golang
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_release_shared
         run: go test -v
       - name: Test on Real World Data
-        run: |
-          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+        run: build_release/stringzilla_cpu_bench
         env:
-          DATASET_PATH: ./README.md
+          STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
@@ -279,7 +268,7 @@ jobs:
           import stringzilla as sz
           print("platform:", platform.platform())
           print("machine:", platform.machine(), "processor:", platform.processor())
-          print("stringzilla.__capabilities__:", sz.__capabilities__)
+          print("capabilities:", repr(sz.Device.cpu().capabilities_enabled()))
           PY
       - name: Test Python
         run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
@@ -287,10 +276,8 @@ jobs:
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with dynamic dispatch
+      - name: Test Rust
         run: cargo test --release
-      - name: Test Rust with compile-time dispatch
-        run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
 
@@ -324,23 +311,25 @@ jobs:
         with:
           go-version: ">=1.24"
           cache: false
-      - name: Test Go binding against the Debug shared library
+        # cGo links no sanitizer runtime, so the Go binding takes a Debug archive built without them.
+      - name: Build Debug static library for Go binding
+        run: |
+          cmake --preset debug -B build_golang -D STRINGZILLA_USE_SANITIZERS=OFF
+          cmake --build build_golang --target stringzilla_static
+      - name: Test Go binding against the Debug static library
         working-directory: golang
         env:
-          CGO_LDFLAGS: -L${{ github.workspace }}/build_debug
-          LD_LIBRARY_PATH: ${{ github.workspace }}/build_debug
+          CGO_LDFLAGS: -L${{ github.workspace }}/build_golang
         run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Build Python with asserts
-        env:
-          CFLAGS: -DSTRINGZILLA_DEBUG=1
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-repeat numpy pyarrow
-          python -m pip install .
+          python -m pip install . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_USE_SANITIZERS=OFF
       - name: Test Python
         run: python -X faulthandler -m pytest test/ -s -vv --maxfail=1 --full-trace
 
@@ -388,19 +377,96 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: ctest --preset cuda -R '^stringzilla_test_cpp20$'
+        run: ctest --preset cuda -R '^stringzilla_cpu_test$'
+
+  # Compile-only in practice: no hosted runner has an AMD GPU, and the test exits zero without one.
+  test_ubuntu_rocm:
+    name: Ubuntu ROCm
+    runs-on: ubuntu-26.04
+    container: rocm/dev-ubuntu-26.04:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y cmake ninja-build git
+          # The image leaves the HIP runtime off the loader path, so the tests could link but not start
+          dirname "$(find /opt/rocm/ -name libamdhip64.so.7 | head -1)" > /etc/ld.so.conf.d/rocm.conf && ldconfig
+      - name: Build C/C++ with ROCm
+        run: |
+          cmake --preset rocm
+          cmake --build --preset rocm
+      - name: Test C++
+        run: ctest --preset rocm
+
+  # Apple Silicon runners expose a paravirtualized GPU, so the Metal kernels compile and run here.
+  test_macos_metal:
+    name: MacOS Metal
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Build C/C++ with Metal
+        run: |
+          cmake --preset metal
+          cmake --build --preset metal
+      - name: Test C++
+        run: ctest --preset metal
+
+  # No hosted runner has an Nvidia or AMD GPU, so the `cuda` and `rocm` features, which build through CMake, are link checks.
+  build_rust_cuda:
+    name: Build Rust with CUDA
+    runs-on: ubuntu-26.04
+    # NVIDIA publishes no Ubuntu 26.04 CUDA image yet, so the toolkit comes in a 24.04 container.
+    container: nvidia/cuda:13.0.1-devel-ubuntu24.04
+    steps:
+      - name: Install dependencies
+        run: apt-get update && apt-get install -y cmake build-essential git curl
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Link Rust tests with CUDA
+        run: cargo test --features cuda --no-run
+
+  build_rust_rocm:
+    name: Build Rust with ROCm
+    runs-on: ubuntu-26.04
+    container: rocm/dev-ubuntu-26.04:latest
+    steps:
+      - name: Install dependencies
+        run: apt-get update && apt-get install -y cmake make git curl
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Link Rust tests with ROCm
+        run: cargo test --features rocm --no-run
+
+  # Every Swift job links the zipped XCFramework or artifact bundle a release would ship, built by CMake from this commit.
+  build_swift_artifacts:
+    name: Build Swift Artifacts
+    uses: ./.github/workflows/_swift.yml
 
   test_ubuntu_swift:
     name: Swift on Linux ${{ matrix.arch }}
+    needs: build_swift_artifacts
     runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-26.04-arm' || 'ubuntu-26.04' }}
     container: swift:6.4
     strategy:
       fail-fast: false
       matrix:
         arch: [x86_64, arm64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
 
       - name: Log hardware capabilities
         run: |
@@ -565,15 +631,15 @@ jobs:
       - name: Verify ${{ matrix.target_arch }} binaries
         run: |
           test -e build_release/libstringzilla_shared.so
-          test -e build_release/stringzilla_test_cpp20
-          file build_release/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
+          test -e build_release/stringzilla_cpu_test
+          file build_release/stringzilla_cpu_test | grep -q "${{ matrix.file_id }}"
           echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
       - name: Upload ${{ matrix.target_arch }} test binaries
         uses: actions/upload-artifact@v7
         with:
           name: cross-tests-${{ matrix.target_arch }}
-          path: build_release/stringzilla*_test_*
+          path: build_release/stringzilla_cpu*_test
           if-no-files-found: error
           retention-days: 1
 
@@ -656,7 +722,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x tests/*
-          for test_binary in $(find tests -type f -name 'stringzilla*_test_*' | sort); do
+          for test_binary in $(find tests -type f -name 'stringzilla_cpu*_test' | sort); do
             echo "▶ ${{ matrix.qemu }} -cpu ${{ matrix.qemu_cpu }} ${test_binary}"
             ${{ matrix.qemu }} -cpu "${{ matrix.qemu_cpu }}" "${test_binary}"
           done
@@ -671,11 +737,12 @@ jobs:
           - tier: v128relaxed
             target_features: "+simd128,+relaxed-simd"
             relaxed_simd: "y"
-            use_v128relaxed: 1
           - tier: v128
             target_features: "+simd128"
             relaxed_simd: "n"
-            use_v128relaxed: 0
+          - tier: serial
+            target_features: "-simd128"
+            relaxed_simd: "n"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -696,24 +763,22 @@ jobs:
         with:
           targets: wasm32-wasip1
 
-      # The C kernels need the WASI SDK clang and sysroot, and compile the SIMD tier that `RUSTFLAGS` declares.
-      # Tests run single-threaded under Wasmtime, which refuses relaxed SIMD in the strict row.
+      # `build.rs` builds the C library through the WASI toolchain file, which finds the SDK from `WASI_SDK_PATH`,
+      # with the SIMD kit `RUSTFLAGS` declares. Tests run single-threaded under Wasmtime, which refuses relaxed SIMD
+      # in the strict rows.
       - name: Test Rust
         env:
-          CC_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/clang
-          AR_wasm32_wasip1: ${{ env.WASI_SDK_PATH }}/bin/llvm-ar
-          CFLAGS_wasm32_wasip1: --sysroot=${{ env.WASI_SDK_PATH }}/share/wasi-sysroot
           RUSTFLAGS: -C target-feature=${{ matrix.target_features }}
           CARGO_TARGET_WASM32_WASIP1_RUNNER: wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} --dir .
         run: |
           cargo build --target wasm32-wasip1
           cargo test --release --target wasm32-wasip1 -- --test-threads=1
 
-      # The C++ suite every native platform runs; the strict row's module runs with relaxed SIMD refused.
+      # The C++ suite every native platform runs; the strict rows' modules run with relaxed SIMD refused.
       # The `utf8` filter stays until `test_hash_unit` stops asserting on wasm.
       - name: Build C++ tests for wasm32-wasip1
         run: |
-          cmake --preset wasm32_wasi -D WASI_SDK_PREFIX="${WASI_SDK_PATH}" -D STRINGZILLA_TARGET_V128RELAXED=${{ matrix.use_v128relaxed }}
+          cmake --preset wasm32_wasi -D WASI_SDK_PREFIX="${WASI_SDK_PATH}" -D STRINGZILLA_TARGET_ARCH=${{ matrix.tier }}
           cmake --build --preset wasm32_wasi
       - name: Test C++ UTF-8 suites under Wasmtime
         env:
@@ -722,7 +787,7 @@ jobs:
         run: |
           wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
             --dir . --env STRINGZILLA_FILTER --env STRINGZILLA_SCALE \
-            build_wasm32_wasi/stringzilla_test_cpp20
+            build_wasm32_wasi/stringzilla_cpu_test
 
   test_macos:
     name: MacOS
@@ -751,13 +816,9 @@ jobs:
       - name: Test C++
         run: ctest --preset release
       - name: Test on Real World Data
-        run: |
-          build_release/stringzilla_bench_find_cpp20 ${DATASET_PATH}      # for substring search
-          build_release/stringzilla_bench_token_cpp20 ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          build_release/stringzilla_bench_sequence_cpp20 ${DATASET_PATH}  # for sorting arrays of strings
-          build_release/stringzilla_bench_container_cpp20 ${DATASET_PATH} # for STL containers with string keys
+        run: build_release/stringzilla_cpu_bench
         env:
-          DATASET_PATH: ./README.md
+          STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
@@ -780,37 +841,51 @@ jobs:
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with dynamic dispatch
+      - name: Test Rust
         run: cargo test --release
-      - name: Test Rust with compile-time dispatch
-        run: cargo test --release --no-default-features --features std
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
+      - name: Test Rust with Metal
+        run: cargo test --release --features metal
 
   test_swift_macos:
     name: Swift on macOS ${{ matrix.arch }}
+    needs: build_swift_artifacts
     runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:
         arch: [arm64, x86_64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.xcframework.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Download XCFramework
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-xcframework
       # The `x86_64` destination runs the Intel build under Rosetta, as no Intel image ships Xcode 27
       - name: Test Swift
         run: xcodebuild test -scheme StringZilla -destination 'platform=macOS,arch=${{ matrix.arch }}'
 
   test_swift_simulators:
     name: Swift on ${{ matrix.platform }} Simulator
+    needs: build_swift_artifacts
     runs-on: xcode-27
     strategy:
       fail-fast: false
       matrix:
         platform: [iOS, tvOS, watchOS, visionOS]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.xcframework.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Download XCFramework
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-xcframework
       - name: Build for Simulator
         run: xcodebuild build -scheme StringZilla -destination 'generic/platform=${{ matrix.platform }} Simulator' CODE_SIGNING_ALLOWED=NO
       - name: Test on iPhone Simulator
@@ -819,14 +894,21 @@ jobs:
 
   test_swift_windows:
     name: Swift on Windows ${{ matrix.arch }}
+    needs: build_swift_artifacts
     runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
       - name: Set Up Swift
         uses: compnerd/gha-setup-swift@v0.5.0
         with:
@@ -836,23 +918,36 @@ jobs:
       - name: Test Swift
         run: swift test
 
+  # The reusable workflow runs in another repository, so it fetches the artifact bundle through `gh`, with the token
+  # and the `actions: read` permission this workflow grants.
   test_swift_android:
     name: Swift on Android
+    needs: build_swift_artifacts
     uses: swiftlang/github-workflows/.github/workflows/swift_package_test.yml@fa1e46cf0f07ffde2de131e9ed5bd66a488c289c # main
     with:
       enable_linux_checks: false
       enable_windows_checks: false
       enable_android_sdk_build: true
       enable_android_sdk_checks: true
+      needs_token: true
+      linux_env_vars: STRINGZILLA_SWIFT_ARTIFACT=StringZillaC.artifactbundle.zip
+      android_sdk_pre_build_command: gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name swift-artifactbundle
       android_sdk_versions: '["6.4"]'
 
   test_swift_wasm:
     name: Swift on WebAssembly WASI
+    needs: build_swift_artifacts
     runs-on: ubuntu-26.04
     container: swift:6.4
+    env:
+      STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      - name: Download Artifact Bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: swift-artifactbundle
       - name: Install Swift SDK for WebAssembly and Wasmtime
         run: |
           swift sdk install https://download.swift.org/swift-6.4.0-release/wasm-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_wasm.artifactbundle.tar.gz --checksum f07b7be3c586d92d7a07051fc6d303b87ebea67eadc40640ba59d5a8b79aa86d
@@ -902,13 +997,9 @@ jobs:
       - name: Test C++
         run: ctest --preset release
       - name: Test on Real World Data
-        run: |
-          .\build_release\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
-          .\build_release\stringzilla_bench_token_cpp20.exe ${DATASET_PATH}     # for hashing, equality comparisons, etc.
-          .\build_release\stringzilla_bench_sequence_cpp20.exe ${DATASET_PATH}  # for sorting arrays of strings
-          .\build_release\stringzilla_bench_container_cpp20.exe ${DATASET_PATH} # for STL containers with string keys
+        run: .\build_release\stringzilla_cpu_bench.exe
         env:
-          DATASET_PATH: ./README.md
+          STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
         # The results in such an unstable environment will be meaningless anyway.
         if: 0
@@ -929,10 +1020,8 @@ jobs:
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with dynamic dispatch
+      - name: Test Rust
         run: cargo test --release
-      - name: Build Rust with compile-time dispatch
-        run: cargo build --release --no-default-features --features std
       - name: Build Rust no_std
         run: cargo build --release --no-default-features
 
@@ -983,8 +1072,8 @@ jobs:
         # Rust
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with compile-time dispatch
-        run: cargo test --release --no-default-features --features std
+      - name: Test Rust
+        run: cargo test --release
       - name: Test Rust no_std
         run: cargo test --release --no-default-features
   # Packaging surface - what a downstream distributor sees, not what our own build tree sees. The consumers
@@ -1012,7 +1101,14 @@ jobs:
           #include <stringzilla/stringzilla.h>
           int main(void) {
               char const *haystack = "hello world";
-              char const *match = sz_find(haystack, 11, "world", 5);
+              sz_cptr_t match = NULL;
+          #if STRINGZILLA_HEADER_ONLY
+              sz_find_serial(haystack, 11, "world", 5, &match, NULL);
+          #else
+              sz_capability_t capabilities = 0;
+              sz_cpu_capabilities_enabled(&capabilities);
+              sz_find_best(haystack, 11, "world", 5, &match, capabilities, NULL);
+          #endif
               printf("%d\n", (int)(match - haystack));
               return match ? 0 : 1;
           }

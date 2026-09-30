@@ -1213,27 +1213,16 @@ void test_extensions_updates_unit() {
     // Range members slice the string they were called on, so offsets stay inside its own buffer.
     {
         str text = "hello brave new world";
-        for (auto segment : text.utf8_wordbreaks()) {
-            std::ptrdiff_t const offset = segment.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
-                   "utf8_wordbreaks segment landed outside the caller's own buffer");
-        }
-        for (auto token : text.utf8_split_whitespaces()) {
-            std::ptrdiff_t const offset = token.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
-                   "utf8_split_whitespaces token landed outside the caller's own buffer");
-        }
-        for (auto field : text.utf8_split_delimiters()) {
-            std::ptrdiff_t const offset = field.data() - text.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(text.size()) &&
-                   "utf8_split_delimiters field landed outside the caller's own buffer");
-        }
+        verify(offsets_within(text, text.utf8_wordbreaks()) ==
+                   (std::vector<std::ptrdiff_t> {0, 5, 6, 11, 12, 15, 16}) &&
+               "utf8_wordbreaks segment landed outside the caller's own buffer");
+        verify(offsets_within(text, text.utf8_split_whitespaces()) == (std::vector<std::ptrdiff_t> {0, 6, 12, 16}) &&
+               "utf8_split_whitespaces token landed outside the caller's own buffer");
+        verify(offsets_within(text, text.utf8_split_delimiters()) == (std::vector<std::ptrdiff_t> {0, 6, 12, 16}) &&
+               "utf8_split_delimiters field landed outside the caller's own buffer");
         str sso = "a b c";
-        for (auto token : sso.utf8_split_whitespaces()) {
-            std::ptrdiff_t const offset = token.data() - sso.data();
-            verify(offset >= 0 && offset <= static_cast<std::ptrdiff_t>(sso.size()) &&
-                   "utf8_split_whitespaces token landed outside the small-string-optimized buffer");
-        }
+        verify(offsets_within(sso, sso.utf8_split_whitespaces()) == (std::vector<std::ptrdiff_t> {0, 2, 4}) &&
+               "utf8_split_whitespaces token landed outside the small-string-optimized buffer");
     }
 
     // Randomization.
@@ -1356,16 +1345,10 @@ void test_extensions_ranges_unit() {
     {
         sz::string_t haystack("hello world, hello cpp");
         sz::string_t sso("a b a");
-        let_verify(auto matches = sz::find_all(haystack, "hello").template to<std::vector<sz::string_view_t>>(),
-                   matches.size() == 2 &&                          //
-                       matches[0].data() - haystack.data() == 0 && //
-                       matches[1].data() - haystack.data() == 13 &&
-                       "Match offsets did not land inside the borrowed lvalue haystack's own buffer");
-        let_verify(auto in_sso = sz::find_all(sso, "a").template to<std::vector<sz::string_view_t>>(),
-                   in_sso.size() == 2 &&                     //
-                       in_sso[0].data() - sso.data() == 0 && //
-                       in_sso[1].data() - sso.data() == 4 &&
-                       "Match offsets did not land inside the small-string-optimized haystack's own buffer");
+        verify(offsets_within(haystack, sz::find_all(haystack, "hello")) == (std::vector<std::ptrdiff_t> {0, 13}) &&
+               "Match offsets did not land inside the borrowed lvalue haystack's own buffer");
+        verify(offsets_within(sso, sz::find_all(sso, "a")) == (std::vector<std::ptrdiff_t> {0, 4}) &&
+               "Match offsets did not land inside the small-string-optimized haystack's own buffer");
     }
 
     // Needles are copied into the matcher, so a temporary one outlives the expression that built it.

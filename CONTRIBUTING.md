@@ -153,7 +153,7 @@ cmake --build --preset release --target stringzilla_cpu_test
 ctest --preset release
 ```
 
-`cmake --list-presets` shows the rest - `debug`, `cuda`, `swift`, the `linux_<arch>` cross builds, and WASI.
+`cmake --list-presets` shows the rest - `debug`, `cuda`, `rocm`, `metal`, `swift`, the `linux_<arch>` cross builds, and WASI.
 Machine-specific settings, like a CUDA host compiler, belong in an untracked `CMakeUserPresets.json`.
 Without a preset, a configure builds the libraries alone, as every binding's build does: `-D STRINGZILLA_BUILD_TEST=1` and `-D STRINGZILLA_BUILD_BENCH=1` add the suites, and `-D STRINGZILLA_BUILD_CUDA=1`, `_ROCM` or `_METAL` the GPUs.
 

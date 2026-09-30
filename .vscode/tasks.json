@@ -3,7 +3,7 @@
   "tasks": [
     {
       "label": "Build Test: Debug C++",
-      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzilla_test_cpp20",
+      "command": "cmake -D CMAKE_BUILD_TYPE=Debug -D STRINGZILLA_BUILD_TEST=1 -B build_debug && cmake --build build_debug --config Debug --target stringzilla_cpu_test",
       "args": [],
       "type": "shell",
       "osx": {

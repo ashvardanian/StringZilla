@@ -25,6 +25,7 @@ CMakeCache.txt
 cmake_install.cmake
 CMakeFiles
 *.so
+*.a
 *.dll
 *.dylib
 *.egg-info
@@ -32,6 +33,7 @@ CMakeFiles
 *.pyd
 .venv/*
 node_modules/
+prebuilds/
 
 # Per-platform npm prebuilts are filled in CI, never committed
 javascript/@stringzilla-*/*.node

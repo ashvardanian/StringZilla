@@ -59,25 +59,22 @@ void test_utf8_uncased_unit() {
     // Rust/Python `Utf8UncasedMatches`. Folding can change a match's byte length, so each yielded
     // slice spans the matched bytes, not the needle's length.
     {
-        std::vector<str> hits;
-        for (str match : str("Ab aB AB xyz ab").utf8_uncased_matches("ab")) hits.push_back(match);
-        verify(hits.size() == 4);
-        verify(hits[0] == "Ab" && hits[1] == "aB" && hits[2] == "AB" && hits[3] == "ab");
+        let_verify(
+            auto hits = str("Ab aB AB xyz ab").utf8_uncased_matches("ab").template to<std::vector<std::string>>(),
+            hits == (std::vector<std::string> {"Ab", "aB", "AB", "ab"}));
         verify(str("xyz").utf8_uncased_matches("ab").empty());
         // An empty needle matches at codepoint boundaries, so 3 times in the 3 bytes of "aé".
         verify(str("a\xC3\xA9").utf8_uncased_matches("").size() == 3);
-        // A truncated rune is one step, capped at the end: {0, 1, 3}, where byte steps give 4.
+        // A truncated rune is one step, capped at the end, where byte steps give 4.
         {
             str const truncated("a\xE4\xB8");
-            std::vector<std::size_t> offsets;
-            for (str match : truncated.utf8_uncased_matches("")) offsets.push_back(match.data() - truncated.data());
-            verify(offsets.size() == 3 && offsets[0] == 0 && offsets[1] == 1 && offsets[2] == 3);
+            verify(offsets_within(truncated, truncated.utf8_uncased_matches("")) ==
+                   (std::vector<std::ptrdiff_t> {0, 1, 3}));
         }
 
         // 'ß' (U+00DF, 2 bytes) folds to "ss": each one is a length-2 match of the needle "SS".
-        std::vector<str> folded;
-        for (str match : str("ßox ß").utf8_uncased_matches("SS")) folded.push_back(match);
-        verify(folded.size() == 2 && folded[0].size() == 2 && folded[1].size() == 2);
+        let_verify(auto folded = str("ßox ß").utf8_uncased_matches("SS").template to<std::vector<std::string>>(),
+                   folded == (std::vector<std::string> {"ß", "ß"}));
     }
 
     // In-place fold on a mutable `sz::string_t`.

@@ -63,6 +63,7 @@
  */
 #pragma once
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
+#include <cstddef> // `std::ptrdiff_t`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::setvbuf`, `stderr`
 #include <cstdlib> // `std::getenv`, `std::strtod`, `std::abort`, `std::malloc`, `std::free`
@@ -508,6 +509,14 @@ inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept 
 template <typename value_type_, std::size_t count_>
 constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
     return span<value_type_ const>(array, count_);
+}
+
+/** The byte offset within @p text of each slice @p range yields, to assert where slices land. */
+template <typename text_type_, typename range_type_>
+std::vector<std::ptrdiff_t> offsets_within(text_type_ const &text, range_type_ const &range) {
+    std::vector<std::ptrdiff_t> offsets;
+    for (auto const slice : range) offsets.push_back(slice.data() - text.data());
+    return offsets;
 }
 
 /**

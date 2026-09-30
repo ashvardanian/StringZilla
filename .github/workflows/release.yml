@@ -17,8 +17,17 @@ permissions:
   packages: write
 
 jobs:
+  build_swift_artifacts:
+    name: Build Swift Artifacts
+    uses: ./.github/workflows/_swift.yml
+    with:
+      release: true
+
+  # `Package.swift` names the Swift artifacts by URL and checksum, so the release commit carries both and the
+  # artifacts join the release it creates.
   versioning:
     name: Update Version
+    needs: build_swift_artifacts
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
@@ -27,6 +36,18 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      - name: Download Swift Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: swift-{xcframework,artifactbundle}
+          path: ${{ runner.temp }}/swift
+          merge-multiple: true
+      - name: Write Swift Checksums
+        run: |
+          apple=$(sha256sum "$RUNNER_TEMP"/swift/*.xcframework.zip | cut -c -64)
+          portable=$(sha256sum "$RUNNER_TEMP"/swift/*.artifactbundle.zip | cut -c -64)
+          sed -i "s/^let appleChecksum = .*/let appleChecksum = \"$apple\"/" Package.swift
+          sed -i "s/^let portableChecksum = .*/let portableChecksum = \"$portable\"/" Package.swift
       - name: Run TinySemVer
         uses: ashvardanian/tinysemver@v3
         with:
@@ -48,20 +69,22 @@ jobs:
             javascript/@stringzilla-linux-x64/package.json:"version": "(\d+\.\d+\.\d+)"
             javascript/@stringzilla-win32-arm64/package.json:"version": "(\d+\.\d+\.\d+)"
             javascript/@stringzilla-win32-x64/package.json:"version": "(\d+\.\d+\.\d+)"
-            CMakeLists.txt:VERSION (\d+\.\d+\.\d+)
+            Package.swift:releases/download/v(\d+\.\d+\.\d+)
             CITATION.cff:^version: (\d+\.\d+\.\d+)
             StringZilla.csproj:<Version>(\d+\.\d+\.\d+)</Version>
             pom.xml:<artifactId>stringzilla</artifactId>\n  <version>(\d+\.\d+\.\d+)</version>
           update-major-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
           update-minor-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
           update-patch-version-in: |
-            include/stringzilla/stringzilla.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
           dry-run: "false"
           push: "true"
           create-release: "true"
           github-token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
+      - name: Upload Swift Artifacts
+        run: git diff --quiet HEAD~1 HEAD -- VERSION || gh release upload "v$(cat VERSION)" "$RUNNER_TEMP"/swift/*.zip
 
   rebase:
     name: Rebase Dev. Branch
@@ -179,7 +202,7 @@ jobs:
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-          CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05
+          CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05 CMAKE_BUILD_PARALLEL_LEVEL=2
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
@@ -370,7 +393,7 @@ jobs:
           ref: "main"
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Test Rust with dynamic dispatch
+      - name: Test Rust
         run: cargo test --release
       - name: Publish to crates.io
         uses: katyo/publish-crates@v2
@@ -387,22 +410,22 @@ jobs:
         include:
           - platform: linux-x64
             os: ubuntu-24.04
-            node-gyp-args: ""
+            script: prebuild
           - platform: linux-arm64
             os: ubuntu-24.04-arm
-            node-gyp-args: ""
+            script: prebuild
           - platform: darwin-arm64
             os: macos-15
-            node-gyp-args: ""
+            script: prebuild
           - platform: darwin-x64
             os: macos-15
-            node-gyp-args: "--arch=x64"
+            script: prebuild-x64
           - platform: win32-x64
             os: windows-latest
-            node-gyp-args: ""
+            script: prebuild
           - platform: win32-arm64
             os: windows-latest
-            node-gyp-args: "--arch=arm64"
+            script: prebuild-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -430,11 +453,9 @@ jobs:
           }
       - name: Install dependencies
         run: npm install --ignore-scripts
+      # Stages the addon into its `javascript/@stringzilla-<platform>` package.
       - name: Build native module
-        run: npx node-gyp rebuild ${{ matrix.node-gyp-args }}
-      - name: Copy binary into platform package
-        shell: bash
-        run: cp build/Release/stringzilla.node javascript/@stringzilla-${{ matrix.platform }}/stringzilla.node
+        run: npm run ${{ matrix.script }}
       - name: Upload platform package
         uses: actions/upload-artifact@v7
         with:

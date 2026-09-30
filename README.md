@@ -303,7 +303,7 @@ StringZilla aims to optimize some of the slowest string operations.
 Some popular operations, however, like equality comparisons and relative order checking, almost always complete on some of the very first bytes in either string.
 In such operations vectorization is almost useless, unless huge and very similar strings are considered.
 StringZilla implements those operations as well, but won't result in substantial speedups.
-Where vectorization stops being effective, batching takes over: an engine prepares a batch of queries once and scores every candidate against all of them, on the host or on a CUDA device.
+Where vectorization stops being effective, batching takes over: an engine prepares a batch of queries once and scores every candidate against all of them, on the host or on a GPU.
 The library owns no thread pool and starts no thread of its own, so a caller wanting more than one core builds one engine per worker and shards the candidate range itself.
 
 ### Exact Substring Search

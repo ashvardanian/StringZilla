@@ -43,7 +43,7 @@ stage_fixture_with_header() { # stage_fixture_with_header <relative-path> <<< co
     local fixture_path="$fixture_directory/$1"
     mkdir -p "$(dirname "$fixture_path")"
     case "$1" in
-    *.h | *.hpp | *.c | *.cpp | *.cu | *.cuh)
+    *.h | *.hpp | *.c | *.cpp | *.cu | *.cuh | *.hip | *.metal)
         {
             printf '/**\n *  @file %s\n *  @author Selftest\n *  @date January 1, 2026\n' "$1"
             printf ' *  @brief One staged fixture for one rule.\n *\n *  The case under test follows.\n */\n'
@@ -350,6 +350,28 @@ struct probe_t {
     /** The value, never a trailing ///< column. */
     int value;
 };
+FIXTURE
+
+assert_rejects "bare trailing doc marker" "with a trailing marker" include/numkong/probe.h <<'FIXTURE'
+static int probe_value; //< The value.
+FIXTURE
+
+assert_rejects "trailing field comment" "on its own line's tail" include/numkong/probe.h <<'FIXTURE'
+typedef struct {
+    int value; // The value.
+} probe_t;
+FIXTURE
+
+assert_rejects "trailing enumerator comment" "on its own line's tail" include/numkong/probe.h <<'FIXTURE'
+enum {
+    probe_one_k = 1, /* One. */
+};
+FIXTURE
+
+assert_accepts "why comment trailing a statement" include/numkong/probe.h <<'FIXTURE'
+static int probe(int value) {
+    return value + 1; // Rounds up.
+}
 FIXTURE
 
 assert_rejects "shape with x" "spells a shape" include/numkong/probe.h <<'FIXTURE'
@@ -839,6 +861,11 @@ assert_accepts "Unicode prose at 100 characters" include/numkong/probe.h <<'FIXT
 int probe(void);
 FIXTURE
 
+assert_rejects "prose past 100 columns in a HIP source" "writes prose past 100 columns" probe.hip <<'FIXTURE'
+/** A sentence that keeps going well past the prose limit of one hundred columns, and then some more. */
+int probe(void);
+FIXTURE
+
 assert_rejects "pipe table" "draws a pipe table" include/numkong/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the instructions.
@@ -1025,6 +1052,17 @@ assert_accepts "prose naming a parameter, a mnemonic and a code span" include/nu
 /** Reads @p buffer with CNT, as `ptr[0]` does, and widens the value. */
 static inline int probe(int const *buffer) { return buffer[0]; }
 FIXTURE
+
+stage_fixture_with_header include/numkong/probe.h <<'FIXTURE'
+typedef int const *probe_buf_t;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+stage_sibling_with_header include/numkong/probe/serial.h <<'FIXTURE'
+/** Reads the first value. */
+static inline int probe_serial(probe_buf_t values) { return values[0]; }
+FIXTURE
+run_precommit
+expect_acceptance "new header reusing a name from HEAD's headers"
 
 assert_rejects "line comment above a preprocessor block" "writes a // comment outside a function body" include/numkong/probe.h <<'FIXTURE'
 // EM_JS expands to an empty-parameter-list declaration, tripping -Wstrict-prototypes.
@@ -1283,6 +1321,15 @@ assert_rejects "unqualified memcpy" "unqualified memcpy" include/probe.hpp <<'FI
 inline void probe(char *to, char const *from) { memcpy(to, from, 8); }
 FIXTURE
 
+assert_rejects "unqualified memcpy behind a return" "unqualified memcpy" include/probe.hpp <<'FIXTURE'
+inline void *probe(char *to, char const *from) { return memcpy(to, from, 8); }
+FIXTURE
+
+assert_accepts "a function named memcpy, declared and defined" include/probe.hpp <<'FIXTURE'
+inline void *memcpy(void *to, void const *from) noexcept;
+inline void *memcpy(void *to, void const *from) noexcept { return std::memcpy(to, from, 8); }
+FIXTURE
+
 assert_accepts "qualified memcpy, plain region, and prose naming the bare forms" include/probe.hpp <<'FIXTURE'
 #pragma region Probes
 
@@ -1348,6 +1395,31 @@ FIXTURE
 assert_accepts "Python lowercase emphasis" python/probe.py <<'FIXTURE'
 """Reads only the header."""
 FIXTURE
+
+stage_fixture_with_header python/probe.py <<'FIXTURE'
+import os
+def probe(value):
+    return value
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+cat >> "$fixture_directory/python/probe.py" <<'FIXTURE'
+
+
+def settled(value):
+    return value
+FIXTURE
+git -C "$fixture_directory" add -- python/probe.py
+run_precommit
+expect_acceptance "ruff debt HEAD carries outside the added lines"
+cat >> "$fixture_directory/python/probe.py" <<'FIXTURE'
+
+
+def flagged(value):
+    return undefined_value
+FIXTURE
+git -C "$fixture_directory" add -- python/probe.py
+run_precommit
+expect_rejection "ruff finding on an added line beside that debt" "has ruff lint findings on its added lines"
 
 assert_rejects "TSDoc type braces" "uses JSDoc tag syntax" javascript/probe.ts <<'FIXTURE'
 /**
@@ -1601,6 +1673,7 @@ assert_accepts "arrows inside HTML code spans holding a less-than" README.md <<'
 FIXTURE
 
 assert_accepts "hash inside a Python string before a return annotation" python/probe.py <<'FIXTURE'
+
 def probe(marker: str = "#") -> int:
     return len(marker)
 FIXTURE
@@ -2191,12 +2264,12 @@ FIXTURE
 
 assert_rejects "copydoc in a backend" "repeats @copydoc in a backend" include/stringzilla/probe/haswell.h <<'FIXTURE'
 /** @copydoc sz_probe */
-STRINGZILLA_API_COMPTIME void sz_probe_haswell(void);
+STRINGZILLA_API void sz_probe_haswell(void);
 FIXTURE
 
 assert_accepts "copydoc in a family header" include/stringzilla/probe.h <<'FIXTURE'
 /** @copydoc sz_probe */
-STRINGZILLA_API_COMPTIME void sz_probe_haswell(void);
+STRINGZILLA_API void sz_probe_haswell(void);
 FIXTURE
 
 assert_rejects "C++ in a CUDA tier" "adds C++, but" include/stringzilla/probe.cuh <<'FIXTURE'
@@ -2209,7 +2282,7 @@ extern "C" void sz_probe_cuda(void);
 FIXTURE
 
 assert_rejects "export macro in a binding" "exports a binding-internal definition" python/probe.c <<'FIXTURE'
-STRINGZILLA_API_RUNTIME void probe(void) {}
+STRINGZILLA_API void probe(void) {}
 FIXTURE
 
 assert_accepts "plain definition in a binding" python/probe.c <<'FIXTURE'
@@ -2251,6 +2324,14 @@ void probe(int value) {
 }
 FIXTURE
 
+assert_rejects "stdout print in a HIP test body" "prints to stdout from a test body" test/probe.hip <<'FIXTURE'
+void probe(void) { fmt::println("  - testing the probe..."); }
+FIXTURE
+
+assert_accepts "entry point printing the summary" test/main_cpu.cpp <<'FIXTURE'
+void print_summary(void) { fmt::println("All tests passed!"); }
+FIXTURE
+
 assert_rejects "raw CUDA memory in a test" "manages CUDA memory by hand" test/probe.cu <<'FIXTURE'
 void probe(void **pointer) { cudaMalloc(pointer, 64); }
 FIXTURE
@@ -2289,28 +2370,38 @@ template <typename value_type_> using unified_vector = std::vector<value_type_>;
 FIXTURE
 
 assert_rejects "Python scaffolding redefined" "redefines shared test scaffolding" test/probe.py <<'FIXTURE'
+
 def scale_iterations(count):
     return count
 FIXTURE
 
 assert_accepts "Python scaffolding in its helpers" test/helpers.py <<'FIXTURE'
+
 def scale_iterations(count):
     return count
 FIXTURE
 
 assert_rejects "seed over a literal list" "parametrizes seed_value over a literal list" test/probe.py <<'FIXTURE'
+import pytest
+
+
 @pytest.mark.parametrize("seed_value", [42, 0])
 def test_probe(seed_value):
     pass
 FIXTURE
 
 assert_rejects "fixed fuzz-loop count" "freezes a fuzz-loop count" test/probe.py <<'FIXTURE'
+
 def test_probe():
     for _ in range(100):
         pass
 FIXTURE
 
 assert_accepts "seed values and a scaled fuzz loop" test/probe.py <<'FIXTURE'
+import pytest
+from test.helpers import SEED_VALUES, scale_iterations
+
+
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_probe(seed_value):
     for _ in range(scale_iterations(100)):
@@ -2344,6 +2435,31 @@ FIXTURE
 assert_accepts "object-like ALL_CAPS macro, and a snake_case_ generator" include/stringzilla/probe.h <<'FIXTURE'
 #define STRINGZILLA_PROBE_LIMIT (64)
 #define sz_probe_twice_(value) ((value) * 2)
+FIXTURE
+
+assert_rejects "hand-rolled ceiling division" "hand-rolls a ceiling division" include/stringzilla/probe.h <<'FIXTURE'
+static sz_size_t probe(sz_size_t count) { return (count + 16 - 1) / 16; }
+FIXTURE
+
+assert_rejects "hand-rolled ceiling division over a suffixed one" "hand-rolls a ceiling division" include/stringzilla/probe.cuh <<'FIXTURE'
+static sz_u32_t probe(sz_u32_t count, sz_u32_t first) { return (count + (count - first) - 1u) / (count - first); }
+FIXTURE
+
+assert_accepts "ceiling helper call, its own body, and prose naming the formula" include/stringzilla/probe.h <<'FIXTURE'
+/* Spelled `(number + divisor - 1) / divisor` only inside the helper. */
+STRINGZILLA_CONSTEXPR sz_u32_t sz_u32_divide_round_up(sz_u32_t number, sz_u32_t divisor) {
+    return (number + divisor - 1) / divisor;
+}
+static sz_size_t probe(sz_size_t count) { return sz_size_divide_round_up(count, 16); }
+FIXTURE
+
+assert_rejects "CPython format-string shortcut" "calls a format-string shortcut of the CPython API" python/probe.c <<'FIXTURE'
+static PyObject *probe(PyObject *type, Py_ssize_t width) { return PyObject_CallFunction(type, "n", width); }
+FIXTURE
+
+assert_accepts "CPython tuple packed by hand, and prose naming Py_BuildValue" python/probe.c <<'FIXTURE'
+/* Built by hand rather than with Py_BuildValue("(nn)", ...). */
+static PyObject *probe(PyObject *type, PyObject *width) { return PyObject_CallFunctionObjArgs(type, width, NULL); }
 FIXTURE
 
 # endregion StringZilla Fixtures
