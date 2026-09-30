@@ -1,13 +1,13 @@
 /**
- *  @file include/stringzilla/memory/lasx.h
+ *  @file include/stringzilla/memory/loongsonasx.h
  *  @author Ash Vardanian
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for memory.
  *
  *  @sa include/stringzilla/memory.h
  */
-#ifndef STRINGZILLA_MEMORY_LASX_H_
-#define STRINGZILLA_MEMORY_LASX_H_
+#ifndef STRINGZILLA_MEMORY_LOONGSONASX_H_
+#define STRINGZILLA_MEMORY_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/memory/serial.h"
@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_LASX
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 /**
  *  @brief Broadcast a 16-byte slice of the 256-entry lookup table into both 128-bit lanes of a YMM.
@@ -25,15 +25,15 @@ extern "C" {
  *  @param[in] offset Byte offset into @p lut at which to start the 16-byte slice.
  *  @return A 256-bit LASX register with the 16-byte slice duplicated into both 128-bit lanes.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_lookup_load_lut_lasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
+STRINGZILLA_INLINE __m256i sz_lookup_load_lut_loongsonasx_(char const lut[sz_at_least_(256)], sz_size_t offset) {
     sz_u8_t lut_pairs[32];
     for (sz_size_t lane_index = 0; lane_index < 16; ++lane_index)
         lut_pairs[lane_index] = lut_pairs[lane_index + 16] = (sz_u8_t)lut[offset + lane_index];
     return __lasx_xvld(lut_pairs, 0);
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    if (length <= 32) { sz_fill_serial(target, length, value); }
+STRINGZILLA_INLINE void sz_fill_loongsonasx_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    if (length <= 32) { sz_fill_serial_(target, length, value); }
     else {
         __m256i value_u8x32 = __lasx_xvreplgr2vr_b((char)value);
         // Store the unaligned head, then walk the aligned body, overlapping the tail at the end.
@@ -46,7 +46,13 @@ STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_fill_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_loongsonasx_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_copy_loongsonasx_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_assert_no_overlap_(target, length, source, length);
     if (length < 8) {
         while (length--) *(target++) = *(source++);
@@ -89,7 +95,13 @@ STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_copy_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_loongsonasx_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_move_loongsonasx_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (length < 8) {
         if (target < source)
             while (length--) *(target++) = *(source++);
@@ -105,7 +117,7 @@ STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz
         sz_u64_store(target + length - 8, source_second_word);
     }
     else if (length <= 32) {
-        // Both overlapping 128-bit halves are loaded before either store, so source/target overlap is safe.
+        // Both overlapping 128-bit halves load before either store, so overlapping ranges are safe.
         sz_u128_vec_t source_first_vec, source_second_vec;
         source_first_vec.lsx = __lsx_vld(source, 0);
         source_second_vec.lsx = __lsx_vld(source + length - 16, 0);
@@ -131,41 +143,47 @@ STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]) {
+STRINGZILLA_API sz_status_t sz_move_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_loongsonasx_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_lookup_loongsonasx_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                               char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // The setup cost only pays off for larger inputs.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
-    // Pull the 256-entry lookup table into 16x YMM registers, each holding a 16-byte slice broadcast
-    // into both 128-bit lanes, so `__lasx_xvshuf_b` can index it with the same nibble in either lane.
-    // Unlike AVX2's `_mm256_shuffle_epi8`, `__lasx_xvshuf_b(a, b, idx)` picks `b[idx & 15]` within a
-    // lane when `idx & 31 < 16`. Because all our indices are nibbles (0..15), this matches pshufb.
+    // Pull the 256-entry lookup table into 16 LASX registers, each holding a 16-byte slice
+    // broadcast into both 128-bit lanes, so `__lasx_xvshuf_b` can index it with the same nibble in
+    // either lane. Unlike AVX2's `_mm256_shuffle_epi8`, `__lasx_xvshuf_b(a, b, idx)` picks
+    // `b[idx & 15]` within a lane when `idx & 31 < 16`, which matches pshufb for nibble indices.
     sz_u256_vec_t lut_0_to_15_vec, lut_16_to_31_vec, lut_32_to_47_vec, lut_48_to_63_vec, //
         lut_64_to_79_vec, lut_80_to_95_vec, lut_96_to_111_vec, lut_112_to_127_vec,       //
         lut_128_to_143_vec, lut_144_to_159_vec, lut_160_to_175_vec, lut_176_to_191_vec,  //
         lut_192_to_207_vec, lut_208_to_223_vec, lut_224_to_239_vec, lut_240_to_255_vec;
 
-    lut_0_to_15_vec.lasx = sz_lookup_load_lut_lasx_(lut, 0);
-    lut_16_to_31_vec.lasx = sz_lookup_load_lut_lasx_(lut, 16);
-    lut_32_to_47_vec.lasx = sz_lookup_load_lut_lasx_(lut, 32);
-    lut_48_to_63_vec.lasx = sz_lookup_load_lut_lasx_(lut, 48);
-    lut_64_to_79_vec.lasx = sz_lookup_load_lut_lasx_(lut, 64);
-    lut_80_to_95_vec.lasx = sz_lookup_load_lut_lasx_(lut, 80);
-    lut_96_to_111_vec.lasx = sz_lookup_load_lut_lasx_(lut, 96);
-    lut_112_to_127_vec.lasx = sz_lookup_load_lut_lasx_(lut, 112);
-    lut_128_to_143_vec.lasx = sz_lookup_load_lut_lasx_(lut, 128);
-    lut_144_to_159_vec.lasx = sz_lookup_load_lut_lasx_(lut, 144);
-    lut_160_to_175_vec.lasx = sz_lookup_load_lut_lasx_(lut, 160);
-    lut_176_to_191_vec.lasx = sz_lookup_load_lut_lasx_(lut, 176);
-    lut_192_to_207_vec.lasx = sz_lookup_load_lut_lasx_(lut, 192);
-    lut_208_to_223_vec.lasx = sz_lookup_load_lut_lasx_(lut, 208);
-    lut_224_to_239_vec.lasx = sz_lookup_load_lut_lasx_(lut, 224);
-    lut_240_to_255_vec.lasx = sz_lookup_load_lut_lasx_(lut, 240);
+    lut_0_to_15_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 0);
+    lut_16_to_31_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 16);
+    lut_32_to_47_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 32);
+    lut_48_to_63_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 48);
+    lut_64_to_79_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 64);
+    lut_80_to_95_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 80);
+    lut_96_to_111_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 96);
+    lut_112_to_127_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 112);
+    lut_128_to_143_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 128);
+    lut_144_to_159_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 144);
+    lut_160_to_175_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 160);
+    lut_176_to_191_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 176);
+    lut_192_to_207_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 192);
+    lut_208_to_223_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 208);
+    lut_224_to_239_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 224);
+    lut_240_to_255_vec.lasx = sz_lookup_load_lut_loongsonasx_(lut, 240);
 
     sz_u256_vec_t source_vec, source_bot_vec;
     sz_u256_vec_t blended_0_to_31_vec, blended_32_to_63_vec, blended_64_to_95_vec, blended_96_to_127_vec,
@@ -175,8 +193,8 @@ STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, 
     __m256i const nibble_mask_u8x32 = __lasx_xvreplgr2vr_b(0x0F);
 
     // `__lasx_xvbitsel_v(a, b, c)` selects bit-by-bit: result = (a & ~c) | (b & c).
-    // We build full-byte selector masks (0xFF -> pick `b`, 0x00 -> pick `a`) by testing one source bit
-    // via `__lasx_xvslt_bu(0, byte & mask)`, which yields 0xFF whenever the masked byte is non-zero.
+    // Full-byte selector masks, 0xFF picking `b` and 0x00 picking `a`, come from testing one
+    // source bit with `__lasx_xvslt_bu(0, byte & mask)`, which is 0xFF wherever the bit is set.
     while (length >= 32) {
         source_vec.lasx = __lasx_xvld(source, 0);
         source_bot_vec.lasx = __lasx_xvand_v(source_vec.lasx, nibble_mask_u8x32);
@@ -247,13 +265,20 @@ STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, 
         source += 32, target += 32, length -= 32;
     }
 
-    if (length) sz_lookup_serial(target, length, source, lut);
+    if (length) sz_lookup_serial_(target, source, length, lut);
 }
 
-#endif // STRINGZILLA_TARGET_LASX
+STRINGZILLA_API sz_status_t sz_lookup_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                  char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_loongsonasx_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // STRINGZILLA_MEMORY_LASX_H_
+#endif // STRINGZILLA_MEMORY_LOONGSONASX_H_

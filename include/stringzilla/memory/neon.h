@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_neon_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_assert_no_overlap_(target, length, source, length);
     // In most cases the `source` and the `target` are not aligned, but we should
     // at least make sure that writes don't touch many cache lines.
@@ -44,7 +44,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz
     // Tiny buffers (`< 16`) can't use the overlapping trick (no 16 bytes to reach back into), so the
     // serial path handles them.
     if (length < 16) {
-        if (length) sz_copy_serial(target, source, length);
+        if (length) sz_copy_serial_(target, source, length);
         return;
     }
     for (; length >= 64; target += 64, source += 64, length -= 64) {
@@ -63,7 +63,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_move_neon_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     // When moving small buffers, using a small buffer on stack as a temporary storage is faster.
 
     if (target < source || target >= source + length) {
@@ -100,12 +100,12 @@ STRINGZILLA_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_neon_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     uint8x16_t fill_u8x16 = vdupq_n_u8(value); // Broadcast the value across the register
 
     // Tiny buffers (`< 16`) can't use the overlapping trick, so the serial path handles them.
     if (length < 16) {
-        if (length) sz_fill_serial(target, length, value);
+        if (length) sz_fill_serial_(target, length, value);
         return;
     }
 
@@ -121,14 +121,14 @@ STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz
     if (length) vst1q_u8((sz_u8_t *)(target - (16 - length)), fill_u8x16);
 }
 
-STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_neon_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                        char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
@@ -173,12 +173,41 @@ STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, 
     for (; tail_length; target += 1, source += 1, tail_length -= 1) *target = lut[*(sz_u8_t const *)source];
 }
 
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_neon_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_neon_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_neon_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_neon_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SKYLAKE
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
@@ -27,7 +27,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_skylake_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     __m512i value_u8x64 = _mm512_set1_epi8(value);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores".
@@ -57,7 +57,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length,
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_skylake_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_assert_no_overlap_(target, length, source, length);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
@@ -139,7 +139,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source,
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_move_skylake_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target == source) return; // Don't be silly, don't move the data if it's already there.
 
     // On very short buffers, that are one cache line in width or less, we don't need any loops.
@@ -181,7 +181,7 @@ STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source,
     }
 
     // If the regions don't overlap at all, just use "copy" and save some brain cells thinking about corner cases.
-    else if (target + length < source || target >= source + length) { sz_copy_skylake(target, source, length); }
+    else if (target + length < source || target >= source + length) { sz_copy_skylake_(target, source, length); }
 
     // When the buffer is over 64 bytes, it's guaranteed to touch at least two cache lines - the head and tail,
     // and may include more cache-lines in-between. Knowing this, we can avoid expensive unaligned stores
@@ -244,12 +244,34 @@ STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source,
     }
 }
 
+#if STRINGZILLA_TARGET_SKYLAKE
+
+STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_skylake_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_skylake_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_skylake_(target, source, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SKYLAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SKYLAKE
+#endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 
 #ifdef __cplusplus
 }

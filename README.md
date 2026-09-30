@@ -70,14 +70,14 @@ Find the first occurrence of a random word, ≅ 5 bytes  (GB/s)
   LibC            strstr                               21.3       3.5
   STL C++         std::string::find                     9.1      10.9
   Python          str.find                              2.5       3.1
-  StringZilla.C   sz_find                              21.0      37.1
+  StringZilla.C   sz_find_best                         21.0      37.1
   StringZilla.Py  sz.find                              18.6      33.4
 
 Split lines separated by \n or \r  (GB/s)
   LibC            strcspn                               9.2       3.8
   STL C++         std::string::find_first_of            1.1       4.1
   Python          re.finditer                          0.32      0.64
-  StringZilla.C   sz_find_byteset                      13.8      23.7
+  StringZilla.C   sz_find_byteset_best                 13.8      23.7
   StringZilla.Py  sz.split_byteset_iter                11.2      21.7
 ```
 
@@ -201,7 +201,10 @@ Header-only, or pull it in with CMake `FetchContent`, or `find_package(stringzil
 
 ```c
 #include <stringzilla/stringzilla.h>
-sz_find(haystack, h_length, "brown", 5); // pointer to the match, or NULL
+sz_capability_t capabilities = sz_cap_serial_k;
+sz_cpu_capabilities_enabled(&capabilities); // what this CPU runs and this binary holds
+sz_cptr_t match = NULL;
+sz_find_best(haystack, h_length, "brown", 5, &match, capabilities, NULL); // pointer to the match, or NULL
 ```
 
 ```cpp

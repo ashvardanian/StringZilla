@@ -222,20 +222,27 @@ Convenience byte-sets are available as free functions: `sz::whitespaces_set()`, 
 
 ### C
 
-The forward and reverse substring scans mirror libc's `memchr`/`memrchr` and `memmem`, but always take explicit lengths and return a pointer into the haystack, or `NULL` when there is no match:
+The forward and reverse substring scans mirror libc's `memchr`/`memrchr` and `memmem`, but always take explicit lengths and report a pointer into the haystack, or `NULL` when there is no match.
+Like every dispatch point, each takes the mask to pick a capability from and a stream, null on the CPU, and returns `sz_success_k`, or `sz_missing_kernel_k` when no capability in the mask has the kernel:
 
 ```c
-sz_cptr_t sz_find_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
-sz_cptr_t sz_rfind_byte(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle);
-sz_cptr_t sz_find(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length);
-sz_cptr_t sz_rfind(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length);
+sz_status_t sz_find_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, //
+                              sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, //
+                               sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+sz_status_t sz_find_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
+                         sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
+                          sz_cptr_t *match, sz_capability_t capabilities, void *stream);
 ```
 
 Byte-set scans replace `strspn`/`strcspn` and take a prebuilt `sz_byteset_t`:
 
 ```c
-sz_cptr_t sz_find_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
-sz_cptr_t sz_rfind_byteset(sz_cptr_t text, sz_size_t length, sz_byteset_t const *set);
+sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set, //
+                                 sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set, //
+                                  sz_cptr_t *match, sz_capability_t capabilities, void *stream);
 ```
 
 Four header-only shortcuts build the set for you from a needle string, optionally inverting it:
@@ -252,25 +259,31 @@ Example: find a substring, then count occurrences by re-scanning the tail.
 ```c
 #include <stringzilla/stringzilla.h>
 
-sz_size_t count_occurrences(sz_cptr_t text, sz_size_t length, sz_cptr_t needle, sz_size_t needle_length) {
+sz_size_t count_occurrences(sz_cptr_t text, sz_size_t length, sz_cptr_t needle, sz_size_t needle_length,
+                            sz_capability_t capabilities) {
     sz_size_t total = 0;
-    sz_cptr_t cursor = text, end = text + length;
-    while ((cursor = sz_find(cursor, (sz_size_t)(end - cursor), needle, needle_length))) {
+    sz_cptr_t cursor = text, end = text + length, match = NULL;
+    while (sz_find_best(cursor, (sz_size_t)(end - cursor), needle, needle_length, &match, capabilities, NULL) ==
+               sz_success_k && match) {
         ++total;
-        cursor += needle_length;             // disjoint matches; use `+1` for overlapping
+        cursor = match + needle_length;      // disjoint matches; use `+1` for overlapping
     }
     return total;
 }
 
 int main(void) {
+    sz_capability_t capabilities = sz_cap_serial_k;
+    sz_cpu_capabilities_enabled(&capabilities);
+
     sz_byteset_t whitespace;
     sz_byteset_init(&whitespace);
     char const *spaces = " \t\n\r\v\f";
     for (char const *p = spaces; *p; ++p) sz_byteset_add(&whitespace, *p);
 
     char const *line = "  hello world";
-    sz_cptr_t first_word = sz_find_byteset(line, 13, /*inverted?*/ &whitespace); // first whitespace
-    (void)first_word;
+    sz_cptr_t first_space = NULL;
+    sz_find_byteset_best(line, 13, &whitespace, &first_space, capabilities, NULL);
+    (void)first_space;
     return 0;
 }
 ```
@@ -307,7 +320,7 @@ The view also offers character-class predicates — `is_alpha`, `is_alnum`, `is_
 
 ## Splitting and Partitioning
 
-This is a C++-only convenience layer; the C ABI provides the underlying scans `sz_find` and `sz_find_byteset` that you compose by hand.
+This is a C++-only convenience layer; the C ABI provides the underlying scans `sz_find_best` and `sz_find_byteset_best` that you compose by hand.
 
 `partition` and `rpartition` return a three-way `sz::string_partition_result` struct with `before`, `match`, and `after` members around the first or last occurrence of a pattern.
 The pattern can be a view, a single character, or a byte-set.
@@ -470,7 +483,7 @@ int main() {
 }
 ```
 
-Translation — mapping every byte through a 256-entry lookup table — is offered both at the C ABI level through `sz_lookup`, documented under [Memory Operations](#memory-operations), and in C++ through `sz::lookup`:
+Translation — mapping every byte through a 256-entry lookup table — is offered both at the C ABI level through `sz_lookup_best`, documented under [Memory Operations](#memory-operations), and in C++ through `sz::lookup`:
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -488,7 +501,7 @@ int main() {
 ```
 
 The C side ships ready-made table initializers — `sz_lookup_init_lower`, `sz_lookup_init_upper`, and `sz_lookup_init_ascii`.
-To select an ASCII-only fast path, scan for the complement of `sz_byteset_init_ascii` with `sz_find_byteset`, which reaches the SIMD byteset kernels instead of a scalar loop.
+To select an ASCII-only fast path, scan for the complement of `sz_byteset_init_ascii` with `sz_find_byteset_best`, which reaches the SIMD byteset kernels instead of a scalar loop.
 
 
 ## Hashing and Checksums
@@ -693,23 +706,30 @@ For code that accepts exceptions, throwing `sz::argsort` and `sz::argsort_utf8_u
 The four memory kernels mirror `memcpy`, `memmove`, `memset`, and a lookup-table transform, all writing into the first argument and minimizing unaligned stores:
 
 ```c
-void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length); // like memcpy (no overlap)
-void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length); // like memmove (overlap ok)
-void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value); // like memset
-void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source, char const lut[256]);
+sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memcpy (no overlap)
+                         sz_capability_t capabilities, void *stream);
+sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memmove (overlap ok)
+                         sz_capability_t capabilities, void *stream);
+sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, // like memset
+                         sz_capability_t capabilities, void *stream);
+sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const lut[256],
+                           sz_capability_t capabilities, void *stream);
 ```
 
-`sz_lookup` applies `target[i] = lut[source[i]]`; `target` and `source` may alias but must not partially overlap, and the table must be exactly 256 bytes.
+`sz_lookup_best` applies `target[i] = lut[source[i]]`; `target` and `source` may alias but must not partially overlap, and the table must be exactly 256 bytes.
 
 ```c
 #include <ctype.h>
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
+    sz_capability_t capabilities = sz_cap_serial_k;
+    sz_cpu_capabilities_enabled(&capabilities);
+
     char to_lower[256];
     sz_lookup_init_lower(to_lower);
     char buffer[3] = {'A', 'B', 'C'};
-    sz_lookup(buffer, 3, buffer, to_lower);
+    sz_lookup_best(buffer, buffer, 3, to_lower, capabilities, NULL);
     assert(buffer[0] == 'a' && buffer[1] == 'b' && buffer[2] == 'c'); // "abc"
     return 0;
 }

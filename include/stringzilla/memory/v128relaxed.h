@@ -24,16 +24,34 @@ extern "C" {
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_copy_v128(target, source, length);
+STRINGZILLA_INLINE void sz_copy_v128relaxed_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_copy_v128_(target, source, length);
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    sz_move_v128(target, source, length);
+STRINGZILLA_API sz_status_t sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_v128relaxed_(target, source, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-    sz_fill_v128(target, length, value);
+STRINGZILLA_INLINE void sz_move_v128relaxed_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    sz_move_v128_(target, source, length);
+}
+
+STRINGZILLA_API sz_status_t sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_v128relaxed_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE void sz_fill_v128relaxed_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+    sz_fill_v128_(target, length, value);
+}
+
+STRINGZILLA_API sz_status_t sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_v128relaxed_(target, length, value);
+    return sz_success_k;
 }
 
 /*  @c sz_lookup_v128relaxed replaces every @c wasm_i8x16_swizzle with
@@ -42,13 +60,13 @@ STRINGZILLA_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t len
  *  selector here is always the low nibble of a byte, so indices are in `[0, 15]` and never
  *  trigger the strict variant's zeroing path — the result is therefore byte-for-byte
  *  identical to @c sz_lookup_serial. */
-STRINGZILLA_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                    char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_v128relaxed_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                               char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // For tiny inputs the SIMD setup isn't worth it. Match the baseline heuristic.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
@@ -95,7 +113,14 @@ STRINGZILLA_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t l
     }
 
     // Handle the tail with serial code.
-    if (length) sz_lookup_serial(target, length, source, lut);
+    if (length) sz_lookup_serial_(target, source, length, lut);
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                  char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_v128relaxed_(target, source, length, lut);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

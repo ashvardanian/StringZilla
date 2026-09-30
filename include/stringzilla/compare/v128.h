@@ -16,19 +16,19 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_v128_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Lexicographic ordering needs the byte-reversed comparison of the first differing word,
     //! which has no cheap SIMD128 equivalent that beats the serial SWAR variant. Delegate.
-    return sz_order_serial(a, a_length, b, b_length);
+    return sz_order_serial_(a, a_length, b, b_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    if (length < 16) return sz_equal_serial(a, b, length);
+STRINGZILLA_INLINE sz_bool_t sz_equal_v128_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    if (length < 16) return sz_equal_serial_(a, b, length);
 
     // Per block we `xor` the inputs and test with `wasm_v128_any_true` (a single cheap reduction the
     // engines lower to one `ptest`), instead of `wasm_i8x16_eq` + `wasm_i8x16_all_true` (a lane
@@ -56,10 +56,27 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_si
     return sz_true_k;
 }
 
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                          sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_v128_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_v128_(a, b, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

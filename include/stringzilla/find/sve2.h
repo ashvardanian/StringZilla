@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,8 +27,8 @@ extern "C" {
 /** Byte-set membership for one predicated vector: the serial `set->_u8s[c >> 3] & (1 << (c & 7))`
  *  test rides two 16-byte @c svtbl tables — the second addressed at `index - 16`, where the wrap
  *  past the zero-padded table reads zero at any vector length. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_find_byteset_matches_sve2_(svbool_t progress_b8x, svuint8_t haystack_u8x,
-                                                                 svuint8_t set_low_u8x, svuint8_t set_high_u8x) {
+STRINGZILLA_INLINE svbool_t sz_find_byteset_matches_sve2_(svbool_t progress_b8x, svuint8_t haystack_u8x,
+                                                          svuint8_t set_low_u8x, svuint8_t set_high_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(progress_b8x, haystack_u8x, 3);
     svuint8_t const bit_mask_u8x = svlsl_u8_x(progress_b8x, svdup_n_u8(1), svand_n_u8_x(progress_b8x, haystack_u8x, 7));
     svuint8_t const bitmap_u8x = svorr_u8_x(progress_b8x, svtbl_u8(set_low_u8x, byte_index_u8x),
@@ -36,8 +36,8 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_find_byteset_matches_sve2_(svbool_t progre
     return svcmpne_n_u8(progress_b8x, svand_u8_x(progress_b8x, bitmap_u8x, bit_mask_u8x), 0);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_sve2_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                   sz_byteset_t const *set) {
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
     if (!haystack_length) return STRINGZILLA_NULL_CHAR;
@@ -89,8 +89,8 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_s
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_sve2_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                    sz_byteset_t const *set) {
     sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
     if (!haystack_length) return STRINGZILLA_NULL_CHAR;
@@ -154,12 +154,30 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
+                                                 sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byteset_sve2_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                  sz_byteset_t const *set, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byteset_sve2_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE2
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

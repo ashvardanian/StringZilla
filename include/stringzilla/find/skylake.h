@@ -10,7 +10,7 @@
 #define STRINGZILLA_FIND_SKYLAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
+#include "stringzilla/compare/skylake.h" // `sz_equal_skylake_`
 #include "stringzilla/find/serial.h"
 
 #ifdef __cplusplus
@@ -21,7 +21,7 @@ extern "C" {
  *  Includes extensions: F, CD, ER, PF, VL, DQ, BW.
  *
  *  This is the "starting level" for the advanced algorithms using K-mask registers on x86. */
-#if STRINGZILLA_TARGET_SKYLAKE
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt,evex512"))), \
                              apply_to = function)
@@ -33,8 +33,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2", "lzcnt")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_skylake_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __mmask64 matches_mask_m64;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -57,13 +56,13 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_s
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_skylake_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_find_byte_skylake(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_find_byte_skylake_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -92,7 +91,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t
                 _mm512_cmpeq_epi8_mask(h_last_vec.zmm, n_last_vec.zmm));
             while (matches_m64) {
                 int potential_offset = (int)_tzcnt_u64(matches_m64);
-                if (sz_equal_skylake(haystack + potential_offset, needle, needle_length))
+                if (sz_equal_skylake_(haystack + potential_offset, needle, needle_length))
                     return haystack + potential_offset;
                 matches_m64 &= matches_m64 - 1;
             }
@@ -155,7 +154,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t
         matches_m64 &= load_mask_m64;
         while (matches_m64) {
             int potential_offset = (int)_tzcnt_u64(matches_m64);
-            if (needle_length <= 3 || sz_equal_skylake(haystack + potential_offset, needle, needle_length))
+            if (needle_length <= 3 || sz_equal_skylake_(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_m64 &= matches_m64 - 1;
         }
@@ -163,8 +162,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_skylake(sz_cptr_t haystack, sz_size_t
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_skylake_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __mmask64 matches_mask_m64;
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
@@ -187,13 +185,13 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                    sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_skylake_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_rfind_byte_skylake(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_rfind_byte_skylake_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -222,7 +220,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_
         while (matches_m64) {
             int potential_offset = (int)_lzcnt_u64(matches_m64);
             if (needle_length <= 3 ||
-                sz_equal_skylake(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
+                sz_equal_skylake_(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             sz_assert_((matches_m64 & (1ull << (63 - potential_offset))) != 0 &&
                        "The bit must be set before we squash it");
@@ -244,7 +242,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_
         matches_m64 &= load_mask_m64;
         while (matches_m64) {
             int potential_offset = (int)_lzcnt_u64(matches_m64);
-            if (needle_length <= 3 || sz_equal_skylake(haystack + 64 - potential_offset - 1, needle, needle_length))
+            if (needle_length <= 3 || sz_equal_skylake_(haystack + 64 - potential_offset - 1, needle, needle_length))
                 return haystack + 64 - potential_offset - 1;
             sz_assert_((matches_m64 & (1ull << (63 - potential_offset))) != 0 &&
                        "The bit must be set before we squash it");
@@ -255,12 +253,44 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_SKYLAKE
+
+STRINGZILLA_API sz_status_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byte_skylake_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_skylake_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                  sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byte_skylake_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_skylake_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SKYLAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SKYLAKE
+#endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 
 #ifdef __cplusplus
 }

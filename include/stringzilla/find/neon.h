@@ -10,7 +10,7 @@
 #define STRINGZILLA_FIND_NEON_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
+#include "stringzilla/compare/neon.h" // `sz_equal_neon_`
 #include "stringzilla/find/serial.h"
 
 #ifdef __cplusplus
@@ -20,7 +20,7 @@ extern "C" {
 /*  Implementation of the string search algorithms using the Arm NEON instruction set, available on
  *  64-bit Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series,
  *  and Qualcomm's Snapdragon. */
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -35,14 +35,14 @@ extern "C" {
  *  @param[in] vec_u8x16 A 16-byte NEON comparison vector (0xFF where matched, 0x00 otherwise).
  *  @return 64-bit mask with one set bit per matching byte (at bit positions 0, 4, 8, ..., 60).
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec_u8x16) {
+STRINGZILLA_INLINE sz_u64_t sz_find_vreinterpretq_u8_u4_(uint8x16_t vec_u8x16) {
     // Use `vshrn` to produce a bitmask, similar to `movemask` in SSE.
     // https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(vec_u8x16), 4)), 0) &
            0x8888888888888888ull;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_neon_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)needle);
@@ -59,10 +59,10 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_neon(sz_cptr_t haystack, sz_size
         haystack += 16, haystack_length -= 16;
     }
 
-    return sz_find_byte_serial(haystack, haystack_length, needle);
+    return sz_find_byte_serial_(haystack, haystack_length, needle);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_neon_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec, needle_vec, matches_vec;
     needle_vec.u8x16 = vld1q_dup_u8((sz_u8_t const *)needle);
@@ -75,7 +75,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_siz
         haystack_length -= 16;
     }
 
-    return sz_rfind_byte_serial(haystack, haystack_length, needle);
+    return sz_rfind_byte_serial_(haystack, haystack_length, needle);
 }
 
 /**
@@ -86,7 +86,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_siz
  *  @param[in] set_bottom_vec_u8x16 Bottom half of the 32-byte byteset (bytes 16..31).
  *  @return 64-bit mask with 4-bit-spaced bits set for matching positions.
  */
-STRINGZILLA_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
+STRINGZILLA_INLINE sz_u64_t sz_find_byteset_neon_register_( //
     sz_u128_vec_t haystack_vec, uint8x16_t set_top_vec_u8x16, uint8x16_t set_bottom_vec_u8x16) {
 
     // Once we've read the characters in the haystack, we want to
@@ -107,34 +107,13 @@ STRINGZILLA_API_COMPTIME sz_u64_t sz_find_byteset_neon_register_( //
     return sz_find_vreinterpretq_u8_u4_(matches_u8x16);
 }
 
-/** Branch-light substring verify, bit-identical to @c sz_equal_neon, inlined into the match loop to
- *  avoid the per-candidate call and length re-dispatch. Loops over 16-byte @c vceqq_u8 chunks with
- *  a @c vminvq_u8 all-match reduction and closes with one overlapping tail window. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_find_verify_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    if (length < 16) return sz_equal_serial(a, b, length);
-
-    sz_size_t offset = 0;
-    do {
-        uint8x16_t a_u8x16 = vld1q_u8((sz_u8_t const *)(a + offset));
-        uint8x16_t b_u8x16 = vld1q_u8((sz_u8_t const *)(b + offset));
-        if (vminvq_u8(vceqq_u8(a_u8x16, b_u8x16)) != 255) return sz_false_k; // Check if all bytes match.
-        offset += 16;
-    } while (offset + 16 <= length);
-
-    // Final check - load the last register-long window from the end.
-    uint8x16_t a_tail_u8x16 = vld1q_u8((sz_u8_t const *)(a + length - 16));
-    uint8x16_t b_tail_u8x16 = vld1q_u8((sz_u8_t const *)(b + length - 16));
-    if (vminvq_u8(vceqq_u8(a_tail_u8x16, b_tail_u8x16)) != 255) return sz_false_k;
-    return sz_true_k;
-}
-
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_neon_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_find_byte_neon(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_find_byte_neon_(haystack, haystack_length, needle);
 
     // Scan through the string.
     // Assuming how tiny the Arm NEON registers are, we should avoid internal branches at all costs.
@@ -201,23 +180,23 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_neon(sz_cptr_t haystack, sz_size_t ha
             matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
             while (matches) {
                 int potential_offset = sz_u64_ctz_neon_(matches) / 4;
-                if (sz_find_verify_neon_(haystack + potential_offset, needle, needle_length))
+                if (sz_equal_neon_(haystack + potential_offset, needle, needle_length))
                     return haystack + potential_offset;
                 matches &= matches - 1;
             }
         }
     }
 
-    return sz_find_serial(haystack, haystack_length, needle, needle_length);
+    return sz_find_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                 sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_neon_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_rfind_byte_neon(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_rfind_byte_neon_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -244,8 +223,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h
         matches = sz_find_vreinterpretq_u8_u4_(matches_vec.u8x16);
         while (matches) {
             int potential_offset = sz_u64_clz_neon_(matches) / 4;
-            if (sz_find_verify_neon_(haystack + haystack_length - needle_length - potential_offset, needle,
-                                     needle_length))
+            if (sz_equal_neon_(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             sz_assert_((matches & (1ull << (63 - potential_offset * 4))) != 0 &&
                        "The bit must be set before we squash it");
@@ -253,11 +231,11 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t h
         }
     }
 
-    return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
+    return sz_rfind_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_neon_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                   sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
@@ -269,11 +247,11 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_neon(sz_cptr_t haystack, sz_s
         if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
     }
 
-    return sz_find_byteset_serial(haystack, haystack_length, set);
+    return sz_find_byteset_serial_(haystack, haystack_length, set);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_neon_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                    sz_byteset_t const *set) {
     sz_u64_t matches;
     sz_u128_vec_t haystack_vec;
     uint8x16_t set_top_vec_u8x16 = vld1q_u8(&set->_u8s[0]);
@@ -286,15 +264,61 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_
         if (matches) return haystack + haystack_length - 1 - sz_u64_clz_neon_(matches) / 4;
     }
 
-    return sz_rfind_byteset_serial(haystack, haystack_length, set);
+    return sz_rfind_byteset_serial_(haystack, haystack_length, set);
 }
+
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_find_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byte_neon_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byte_neon_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                         sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_neon_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_neon_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
+                                                 sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byteset_neon_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                  sz_byteset_t const *set, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byteset_neon_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

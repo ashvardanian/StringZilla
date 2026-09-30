@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SKYLAKE
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
@@ -27,8 +27,7 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "bmi", "bmi2")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                        sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_skylake_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u512_vec_t a_vec, b_vec;
 
     // Pointer arithmetic is cheap, fetching memory is not!
@@ -74,7 +73,7 @@ STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a
         // Restrict the comparison to bytes valid in both strings. The masked loads zero out lanes
         // past each string's end, so an unmasked compare would see spurious mismatches against
         // those zeros in the longer string's tail and read out of bounds for the shorter one
-        // (e.g. `sz_order("\0baa", 4, "", 0)` would dereference `b[1]`).
+        // (e.g. `sz_order_skylake_("\0baa", 4, "", 0)` would dereference `b[1]`).
         __mmask64 const common_mask_m64 = a_mask_m64 & b_mask_m64;
         mask_not_equal_m64 = _mm512_mask_cmpneq_epi8_mask(common_mask_m64, a_vec.zmm, b_vec.zmm);
         if (mask_not_equal_m64 != 0) {
@@ -90,7 +89,7 @@ STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_skylake(sz_cptr_t a, sz_size_t a
     return sz_equal_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_skylake_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     __mmask64 mask_m64;
     sz_u512_vec_t a_vec, b_vec;
 
@@ -114,12 +113,30 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz
     return sz_true_k;
 }
 
+#if STRINGZILLA_TARGET_SKYLAKE
+
+STRINGZILLA_API sz_status_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                             sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_skylake_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                             void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_skylake_(a, b, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SKYLAKE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SKYLAKE
+#endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 
 #ifdef __cplusplus
 }

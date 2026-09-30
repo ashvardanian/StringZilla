@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("avx2")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_haswell_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     char value_char = *(char *)&value;
     __m256i value_u8x32 = _mm256_set1_epi8(value_char);
     // The naive implementation of this function is very simple.
@@ -34,7 +34,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length,
     //    sz_fill_serial(target, length, value);
     //
     // When the buffer is small, there isn't much to innovate.
-    if (length <= 32) sz_fill_serial(target, length, value);
+    if (length <= 32) sz_fill_serial_(target, length, value);
     // When the buffer is aligned, we can avoid any split-stores.
     else {
         sz_size_t head_length = (32 - ((sz_size_t)target % 32)) % 32; // 31 or less.
@@ -67,7 +67,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length,
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_haswell_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_assert_no_overlap_(target, length, source, length);
     // The naive implementation of this function is very simple.
     // It assumes the CPU is great at handling unaligned "stores" and "loads".
@@ -116,7 +116,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source,
     else if ((sz_size_t)target % 32 == 0 && (sz_size_t)source % 32 == 0 && !is_huge) {
         for (; length >= 32; target += 32, source += 32, length -= 32)
             _mm256_store_si256((__m256i *)target, _mm256_load_si256((__m256i const *)source));
-        if (length) sz_copy_serial(target, source, length);
+        if (length) sz_copy_serial_(target, source, length);
     }
     // The trickiest case is when both `source` and `target` are not aligned.
     // In such and simpler cases we can copy enough bytes into `target` to reach its cacheline boundary,
@@ -172,7 +172,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source,
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_move_haswell_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 
     if (length < 8) {
         if (target < source)
@@ -224,15 +224,15 @@ STRINGZILLA_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source,
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_haswell_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
     // more for organizing the SIMD registers and changing the CPU state, than for the actual computation.
     // But if at least 3 cache lines are touched, the AVX-2 implementation should be faster.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
@@ -359,15 +359,44 @@ STRINGZILLA_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t lengt
     }
 
     // Handle the tail.
-    if (length) sz_lookup_serial(target, length, source, lut);
+    if (length) sz_lookup_serial_(target, source, length, lut);
 }
+
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_haswell_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_haswell_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_haswell_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                              char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_haswell_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

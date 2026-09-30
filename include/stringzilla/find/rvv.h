@@ -11,13 +11,13 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/find/serial.h"
-#include "stringzilla/compare.h" // `sz_equal`
+#include "stringzilla/compare/rvv.h" // `sz_equal_rvv_`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +25,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_rvv_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
@@ -47,13 +47,13 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_
  *  lanes, beyond the RVV 1.0 maximum @c VLEN of 64 Kib at @c e8m4 where VLMAX = VLEN / 2, so no
  *  software cap is ever needed.
  */
-STRINGZILLA_HELPER_INLINE vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vector_length) {
+STRINGZILLA_INLINE vuint8m4_t sz_reverse_strip_rvv_(vuint8m4_t strip_u8m4, sz_size_t vector_length) {
     vuint16m8_t iota_u16m8 = __riscv_vid_v_u16m8(vector_length);
     vuint16m8_t reverse_index_u16m8 = __riscv_vrsub_vx_u16m8(iota_u16m8, (sz_u16_t)(vector_length - 1), vector_length);
     return __riscv_vrgatherei16_vv_u8m4(strip_u8m4, reverse_index_u16m8, vector_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_rvv_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
@@ -81,8 +81,8 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size
  *  @param[in] vector_length Vector length for this strip.
  *  @return Predicate mask where lane @c i is set if `haystack_u8m8[i]` is in the set.
  */
-STRINGZILLA_HELPER_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
-                                                                sz_size_t vector_length) {
+STRINGZILLA_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
+                                                         sz_size_t vector_length) {
     vuint8m8_t byte_index_u8m8 = __riscv_vsrl_vx_u8m8(haystack_u8m8, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m8_t bit_position_u8m8 = __riscv_vand_vx_u8m8(haystack_u8m8, 7, vector_length); // c & 7
     vuint8m8_t one_u8m8 = __riscv_vmv_v_x_u8m8(1, vector_length);
@@ -93,8 +93,8 @@ STRINGZILLA_HELPER_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t hayst
 }
 
 /** The @c m4 sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip. */
-STRINGZILLA_HELPER_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
-                                                                sz_size_t vector_length) {
+STRINGZILLA_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
+                                                         sz_size_t vector_length) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m4_t bit_position_u8m4 = __riscv_vand_vx_u8m4(haystack_u8m4, 7, vector_length); // c & 7
     vuint8m4_t one_u8m4 = __riscv_vmv_v_x_u8m4(1, vector_length);
@@ -104,8 +104,8 @@ STRINGZILLA_HELPER_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t hayst
     return __riscv_vmsne_vx_u8m4_b2(anded_u8m4, 0, vector_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                       sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_rvv_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                  sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
@@ -118,8 +118,8 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_si
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_byteset_t const *set) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_rvv_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                   sz_byteset_t const *set) {
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m4(haystack_length);
@@ -133,12 +133,12 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_s
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_rvv_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_find_byte_rvv(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_find_byte_rvv_(haystack, haystack_length, needle);
 
     sz_size_t offset_first, offset_mid, offset_last;
     sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
@@ -165,7 +165,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t hay
         for (long match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length); match_index >= 0;
              match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length)) {
             sz_size_t candidate = position + (sz_size_t)match_index;
-            if (sz_equal_rvv((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
+            if (sz_equal_rvv_((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
                 return (sz_cptr_t)(haystack_u8 + candidate);
             match_mask_b1 = __riscv_vmandn_mm_b1(match_mask_b1, __riscv_vmsif_m_b1(match_mask_b1, vector_length),
                                                  vector_length);
@@ -175,12 +175,12 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_rvv(sz_cptr_t haystack, sz_size_t hay
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_rvv_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_rfind_byte_rvv(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_rfind_byte_rvv_(haystack, haystack_length, needle);
 
     sz_size_t offset_first, offset_mid, offset_last;
     sz_locate_needle_anomalies_(needle, needle_length, &offset_first, &offset_mid, &offset_last);
@@ -211,7 +211,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t ha
         for (long reversed_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length); reversed_index >= 0;
              reversed_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length)) {
             sz_size_t candidate = base + (vector_length - 1 - (sz_size_t)reversed_index);
-            if (sz_equal_rvv((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
+            if (sz_equal_rvv_((sz_cptr_t)(haystack_u8 + candidate), needle, needle_length))
                 return (sz_cptr_t)(haystack_u8 + candidate);
             match_mask_b2 = __riscv_vmandn_mm_b2(match_mask_b2, __riscv_vmsif_m_b2(match_mask_b2, vector_length),
                                                  vector_length);
@@ -221,12 +221,58 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t ha
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_RVV
+
+STRINGZILLA_API sz_status_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byte_rvv_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byte_rvv_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
+                                                sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byteset_rvv_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byteset_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
+                                                 sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byteset_rvv_(haystack, haystack_length, set);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_rvv_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                         sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_rvv_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_RVV
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVV
+#endif // STRINGZILLA_ARCH_RISCV64_RVV_
 
 #ifdef __cplusplus
 }

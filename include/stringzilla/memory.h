@@ -6,10 +6,10 @@
  *
  *  Includes core APIs for contiguous memory operations:
  *
- *  - @c sz_copy - analog to @c memcpy, probably the most common operation in a computer.
- *  - @c sz_move - analog to @c memmove, allowing overlapping regions, often used in string edits.
- *  - @c sz_fill - analog to @c memset, often used to initialize memory with a constant, like zero.
- *  - @c sz_lookup - Look-Up Table @b (LUT) transformation, mapping every byte to a new value.
+ *  - @c sz_copy_best - analog to @c memcpy, probably the most common operation in a computer.
+ *  - @c sz_move_best - analog to @c memmove, allowing overlaps, often used in string edits.
+ *  - @c sz_fill_best - analog to @c memset, often used to initialize memory with a constant.
+ *  - @c sz_lookup_best - Look-Up Table @b (LUT) transformation, mapping every byte to a new value.
  *  - @c sz_lookup_utf8 - planned LUT transformation of a UTF-8 string, usable for normalization.
  *
  *  All of the core APIs receive the target output buffer as the first argument, and aim to minimize
@@ -27,6 +27,7 @@
 #define STRINGZILLA_MEMORY_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/capabilities.h" // `sz_capability_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,6 +41,9 @@ extern "C" {
  *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
  *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcpy: https://en.cppreference.com/w/c/string/byte/memcpy
  *
  *  Copying two bytes into a buffer:
@@ -47,29 +51,33 @@ extern "C" {
  *  @code{.c}
  *      #include <stringzilla/memory.h>
  *      int main() {
+ *          sz_capability_t capabilities;
  *          char output[2];
- *          sz_copy(output, "hi", 2);
+ *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_copy_best(output, "hi", 2, capabilities, NULL);
  *          return output[0] == 'h' && output[1] == 'i' ? 0 : 1;
  *      }
  *  @endcode
  *
  *  @pre The @p target and @p source must not overlap.
- *  @sa sz_move
+ *  @sa sz_move_best
  *
- *  @note Selects the fastest backend at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_copy_serial, sz_copy_haswell, sz_copy_skylake, sz_copy_neon, sz_copy_sve, sz_copy_v128,
- *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_lasx, sz_copy_powervsx
+ *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_loongsonasx, sz_copy_powervsx
  */
-STRINGZILLA_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                         sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Similar to @c memmove, copies (moves) contents of one string into another. Unlike
- *      @c sz_copy, allows overlapping strings as arguments.
+ *      @c sz_copy_best, allows overlapping strings as arguments.
  *
  *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
  *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memmove: https://en.cppreference.com/w/c/string/byte/memmove
  *
  *  Shifting a buffer left by one byte in place:
@@ -77,18 +85,19 @@ STRINGZILLA_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_
  *  @code{.c}
  *      #include <stringzilla/memory.h>
  *      int main() {
+ *          sz_capability_t capabilities;
  *          char buffer[3] = {'a', 'b', 'c'};
- *          sz_move(buffer, buffer + 1, 2);
+ *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_move_best(buffer, buffer + 1, 2, capabilities, NULL);
  *          return buffer[0] == 'b' && buffer[1] == 'c' && buffer[2] == 'c' ? 0 : 1;
  *      }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_move_serial, sz_move_haswell, sz_move_skylake, sz_move_neon, sz_move_sve, sz_move_v128,
- *      sz_move_v128relaxed, sz_move_rvv, sz_move_lasx, sz_move_powervsx
+ *      sz_move_v128relaxed, sz_move_rvv, sz_move_loongsonasx, sz_move_powervsx
  */
-STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                         sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Similar to @c memset, fills a string with a given value.
@@ -96,6 +105,9 @@ STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_
  *  @param[out] target String to fill. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to fill. Can be a zero.
  *  @param[in] value Value to fill with.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memset: https://en.cppreference.com/w/c/string/byte/memset
  *
  *  Filling a buffer with one character:
@@ -103,27 +115,31 @@ STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_
  *  @code{.c}
  *     #include <stringzilla/memory.h>
  *     int main() {
+ *          sz_capability_t capabilities;
  *          char buffer[2];
- *          sz_fill(buffer, 2, 'x');
+ *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_fill_best(buffer, 2, 'x', capabilities, NULL);
  *          return buffer[0] == 'x' && buffer[1] == 'x' ? 0 : 1;
  *     }
  *  @endcode
  *
- *  @note Selects the fastest backend at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH.
  *  @sa sz_fill_serial, sz_fill_haswell, sz_fill_skylake, sz_fill_neon, sz_fill_sve, sz_fill_v128,
- *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_lasx, sz_fill_powervsx
+ *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_loongsonasx, sz_fill_powervsx
  */
-STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_capability_t capabilities,
+                                         void *stream);
 
 /**
  *  @brief Look Up Table @b (LUT) transformation of a @p source string, the same as
  *      `for (char &c : text) c = lut[c]`.
  *
  *  @param[out] target Output string, can point to the same address as @p source.
- *  @param[in] length Number of bytes in the string.
  *  @param[in] source String to be mapped using the @p lut table into the @p target.
+ *  @param[in] length Number of bytes in the string.
  *  @param[in] lut Look Up Table to apply. Must be exactly @b 256 bytes long.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see Lookup table: https://en.wikipedia.org/wiki/Lookup_table
  *
  *  Can be used to implement some form of string normalization, partially masking punctuation marks,
@@ -136,10 +152,12 @@ STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t 
  *     #include <ctype.h> // for `tolower`
  *     #include <stringzilla/memory.h>
  *     int main() {
+ *          sz_capability_t capabilities;
  *          char to_lower_lut[256];
  *          for (int i = 0; i < 256; ++i) to_lower_lut[i] = tolower(i);
  *          char buffer[3] = {'A', 'B', 'C'};
- *          sz_lookup(buffer, 3, buffer, to_lower_lut);
+ *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_lookup_best(buffer, buffer, 3, to_lower_lut, capabilities, NULL);
  *          return buffer[0] == 'a' && buffer[1] == 'b' && buffer[2] == 'c' ? 0 : 1;
  *     }
  *  @endcode
@@ -147,173 +165,182 @@ STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t 
  *  @pre The @p lut must be exactly 256 bytes long, even if @p source has no bytes in the top range.
  *  @pre The @p target and @p source can be the same, but must not overlap.
  *
- *  @note Selects the fastest backend at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH.
- *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon, sz_lookup_sve,
- *      sz_lookup_v128, sz_lookup_v128relaxed, sz_lookup_rvv, sz_lookup_lasx, sz_lookup_powervsx
+ *  @sa sz_lookup_serial, sz_lookup_haswell, sz_lookup_icelake, sz_lookup_neon,
+ *      sz_lookup_sve, sz_lookup_v128, sz_lookup_v128relaxed, sz_lookup_rvv,
+ *      sz_lookup_loongsonasx, sz_lookup_powervsx
  */
-STRINGZILLA_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                       char const lut[sz_at_least_(256)]);
+STRINGZILLA_API sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], sz_capability_t capabilities,
+                                           void *stream);
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_serial(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                               char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                             char const lut[sz_at_least_(256)], void *stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_haswell(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                              char const lut[sz_at_least_(256)], void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_icelake(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                              char const lut[sz_at_least_(256)], void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_neon(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                            char const lut[sz_at_least_(256)]);
-#endif
-
-#if STRINGZILLA_TARGET_V128
-
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]);
-#endif
-
-#if STRINGZILLA_TARGET_V128RELAXED
-
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
-
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value);
-
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_v128relaxed(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                    char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                          char const lut[sz_at_least_(256)], void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                            char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                          char const lut[sz_at_least_(256)], void *stream);
 #endif
 
-#if STRINGZILLA_TARGET_LASX
+#if STRINGZILLA_TARGET_V128
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_lasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_lasx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_lasx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128RELAXED
+
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                  char const lut[sz_at_least_(256)], void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_LOONGSONASX
+
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                  char const lut[sz_at_least_(256)], void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 
-/** @copydoc sz_copy */
-STRINGZILLA_API_COMPTIME void sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_copy_best */
+STRINGZILLA_API sz_status_t sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_move */
-STRINGZILLA_API_COMPTIME void sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length);
+/** @copydoc sz_move_best */
+STRINGZILLA_API sz_status_t sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
 
-/** @copydoc sz_fill */
-STRINGZILLA_API_COMPTIME void sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value);
+/** @copydoc sz_fill_best */
+STRINGZILLA_API sz_status_t sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
 
-/** @copydoc sz_lookup */
-STRINGZILLA_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                 char const lut[sz_at_least_(256)]);
+/** @copydoc sz_lookup_best */
+STRINGZILLA_API sz_status_t sz_lookup_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                               char const lut[sz_at_least_(256)], void *stream);
 #endif
+
+/**
+ *  @brief Finds the memory kernel of @p kind, from the best of @p capabilities.
+ *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
+ *  @param[out] capability The capability the kernel belongs to, or zero.
+ *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ */
+STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                  sz_kernel_punned_t *kernel, sz_capability_t *capability);
 
 #pragma endregion Core API
 
@@ -329,7 +356,7 @@ STRINGZILLA_API_COMPTIME void sz_lookup_powervsx(sz_ptr_t target, sz_size_t leng
  *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
  *  different solution is needed.
  */
-STRINGZILLA_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_init_lower(char lut[sz_at_least_(256)]) {
     static sz_u8_t const lowered[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -361,7 +388,7 @@ STRINGZILLA_API_COMPTIME void sz_lookup_init_lower(char lut[sz_at_least_(256)]) 
  *  bit of each inappropriate character byte. This, however, breaks for extended ASCII, so a
  *  different solution is needed.
  */
-STRINGZILLA_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_init_upper(char lut[sz_at_least_(256)]) {
     static sz_u8_t const upped[256] = {
         0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  //
         16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  //
@@ -387,13 +414,14 @@ STRINGZILLA_API_COMPTIME void sz_lookup_init_upper(char lut[sz_at_least_(256)]) 
  *  @brief Initializes a lookup table for converting bytes to ASCII characters.
  *  @param[out] lut Lookup table to be initialized. Must be exactly 256 bytes long.
  */
-STRINGZILLA_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
+STRINGZILLA_CONSTEXPR void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
     for (sz_size_t byte_index = 0; byte_index < 256; ++byte_index) lut[byte_index] = (sz_u8_t)(byte_index & 0x7F);
 }
 
 #pragma endregion Helper API
 
 #include "stringzilla/memory/serial.h"
+#if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/memory/haswell.h"
 #include "stringzilla/memory/skylake.h"
 #include "stringzilla/memory/icelake.h"
@@ -402,115 +430,47 @@ STRINGZILLA_API_COMPTIME void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) 
 #include "stringzilla/memory/v128relaxed.h"
 #include "stringzilla/memory/v128.h"
 #include "stringzilla/memory/rvv.h"
-#include "stringzilla/memory/lasx.h"
+#include "stringzilla/memory/loongsonasx.h"
 #include "stringzilla/memory/powervsx.h"
+#endif // STRINGZILLA_HEADER_ONLY
 
-/*  Pick the right implementation for the memory kernels. To override this behavior and precompile
- *  all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
-#pragma region Compile Time Dispatching
-#if !STRINGZILLA_RUNTIME_DISPATCH
+/*  Header-only builds link no library, so their dispatch points only report it missing. */
+#if STRINGZILLA_HEADER_ONLY
 
-#pragma region Core Functionality
-
-STRINGZILLA_API_RUNTIME void sz_copy(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if STRINGZILLA_TARGET_V128RELAXED
-    sz_copy_v128relaxed(target, source, length);
-#elif STRINGZILLA_TARGET_V128
-    sz_copy_v128(target, source, length);
-#elif STRINGZILLA_TARGET_RVV
-    sz_copy_rvv(target, source, length);
-#elif STRINGZILLA_TARGET_LASX
-    sz_copy_lasx(target, source, length);
-#elif STRINGZILLA_TARGET_POWERVSX
-    sz_copy_powervsx(target, source, length);
-#elif STRINGZILLA_TARGET_SKYLAKE
-    sz_copy_skylake(target, source, length);
-#elif STRINGZILLA_TARGET_HASWELL
-    sz_copy_haswell(target, source, length);
-#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
-    sz_copy_sve(target, source, length);
-#elif STRINGZILLA_TARGET_NEON
-    sz_copy_neon(target, source, length);
-#else
-    sz_copy_serial(target, source, length);
-#endif
+STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                         sz_capability_t capabilities, void *stream) {
+    sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-STRINGZILLA_API_RUNTIME void sz_move(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if STRINGZILLA_TARGET_V128RELAXED
-    sz_move_v128relaxed(target, source, length);
-#elif STRINGZILLA_TARGET_V128
-    sz_move_v128(target, source, length);
-#elif STRINGZILLA_TARGET_RVV
-    sz_move_rvv(target, source, length);
-#elif STRINGZILLA_TARGET_LASX
-    sz_move_lasx(target, source, length);
-#elif STRINGZILLA_TARGET_POWERVSX
-    sz_move_powervsx(target, source, length);
-#elif STRINGZILLA_TARGET_SKYLAKE
-    sz_move_skylake(target, source, length);
-#elif STRINGZILLA_TARGET_HASWELL
-    sz_move_haswell(target, source, length);
-#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
-    sz_move_sve(target, source, length);
-#elif STRINGZILLA_TARGET_NEON
-    sz_move_neon(target, source, length);
-#else
-    sz_move_serial(target, source, length);
-#endif
+STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                         sz_capability_t capabilities, void *stream) {
+    sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-STRINGZILLA_API_RUNTIME void sz_fill(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
-#if STRINGZILLA_TARGET_V128RELAXED
-    sz_fill_v128relaxed(target, length, value);
-#elif STRINGZILLA_TARGET_V128
-    sz_fill_v128(target, length, value);
-#elif STRINGZILLA_TARGET_RVV
-    sz_fill_rvv(target, length, value);
-#elif STRINGZILLA_TARGET_LASX
-    sz_fill_lasx(target, length, value);
-#elif STRINGZILLA_TARGET_POWERVSX
-    sz_fill_powervsx(target, length, value);
-#elif STRINGZILLA_TARGET_SKYLAKE
-    sz_fill_skylake(target, length, value);
-#elif STRINGZILLA_TARGET_HASWELL
-    sz_fill_haswell(target, length, value);
-#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
-    sz_fill_sve(target, length, value);
-#elif STRINGZILLA_TARGET_NEON
-    sz_fill_neon(target, length, value);
-#else
-    sz_fill_serial(target, length, value);
-#endif
+STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_capability_t capabilities,
+                                         void *stream) {
+    sz_unused_(target), sz_unused_(length), sz_unused_(value), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-STRINGZILLA_API_RUNTIME void sz_lookup(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                       char const lut[sz_at_least_(256)]) {
-#if STRINGZILLA_TARGET_V128RELAXED
-    sz_lookup_v128relaxed(target, length, source, lut);
-#elif STRINGZILLA_TARGET_V128
-    sz_lookup_v128(target, length, source, lut);
-#elif STRINGZILLA_TARGET_RVV
-    sz_lookup_rvv(target, length, source, lut);
-#elif STRINGZILLA_TARGET_LASX
-    sz_lookup_lasx(target, length, source, lut);
-#elif STRINGZILLA_TARGET_POWERVSX
-    sz_lookup_powervsx(target, length, source, lut);
-#elif STRINGZILLA_TARGET_ICELAKE
-    sz_lookup_icelake(target, length, source, lut);
-#elif STRINGZILLA_TARGET_HASWELL
-    sz_lookup_haswell(target, length, source, lut);
-#elif STRINGZILLA_TARGET_SVE && STRINGZILLA_SVE_WIDER_THAN_NEON_
-    sz_lookup_sve(target, length, source, lut);
-#elif STRINGZILLA_TARGET_NEON
-    sz_lookup_neon(target, length, source, lut);
-#else
-    sz_lookup_serial(target, length, source, lut);
-#endif
+STRINGZILLA_API sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], sz_capability_t capabilities,
+                                           void *stream) {
+    sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(lut), sz_unused_(capabilities),
+        sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-#endif // !STRINGZILLA_RUNTIME_DISPATCH
-#pragma endregion Compile Time Dispatching
+STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                  sz_kernel_punned_t *kernel, sz_capability_t *capability) {
+    sz_unused_(kind), sz_unused_(capabilities);
+    *kernel = STRINGZILLA_NULL, *capability = 0;
+    return sz_missing_library_k;
+}
+
+#endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 }

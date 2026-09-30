@@ -24,8 +24,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x16,
-                                                             __vector unsigned char b_u8x16) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x16, __vector unsigned char b_u8x16) {
     // On Power10 `vec_first_mismatch_index` reports the first differing lane (16 if none) in a
     // single instruction, replacing the `vec_all_eq` compare + branch reduction. The Power9
     // fallback keeps the byte-for-byte identical `vec_all_eq` semantics.
@@ -36,7 +35,7 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned c
 #endif
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
@@ -90,11 +89,24 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, s
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                         sz_size_t b_length) {
+STRINGZILLA_API sz_status_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                              void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_powervsx_(a, b, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_ordering_t sz_order_powervsx_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Lexicographic ordering is endian-sensitive and not worth vectorizing — see the
     //! "Operations Not Worth Optimizing" note in the Contributions Guide, mirroring NEON.
-    return sz_order_serial(a, a_length, b, b_length);
+    return sz_order_serial_(a, a_length, b, b_length);
+}
+
+STRINGZILLA_API sz_status_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                              sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_powervsx_(a, a_length, b, b_length);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

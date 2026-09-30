@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_WESTMERE
+#if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,14 +24,13 @@ extern "C" {
 #pragma GCC target("sse4.2")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                         sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_westmere_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
-    return sz_order_serial(a, a_length, b, b_length);
+    return sz_order_serial_(a, a_length, b, b_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_westmere_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
         while (a != a_end && *a == *b) a++, b++;
@@ -76,12 +75,30 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, s
     }
 }
 
+#if STRINGZILLA_TARGET_WESTMERE
+
+STRINGZILLA_API sz_status_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                              sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_westmere_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                              void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_westmere_(a, b, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_WESTMERE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_WESTMERE
+#endif // STRINGZILLA_ARCH_X8664_WESTMERE_
 
 #ifdef __cplusplus
 }

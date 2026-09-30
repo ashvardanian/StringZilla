@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_rvv_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     sz_u8_t const *source_cursor = (sz_u8_t const *)source;
     while (length) {
@@ -35,8 +35,8 @@ STRINGZILLA_API_COMPTIME void sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-    if (target < source || target >= source + length) { sz_copy_rvv(target, source, length); }
+STRINGZILLA_INLINE void sz_move_rvv_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+    if (target < source || target >= source + length) { sz_copy_rvv_(target, source, length); }
     else {
         // Overlapping with `target > source`: walk from the end backwards.
         sz_u8_t *target_cursor = (sz_u8_t *)target + length;
@@ -51,7 +51,7 @@ STRINGZILLA_API_COMPTIME void sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_rvv_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     while (length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(length);
@@ -66,8 +66,8 @@ STRINGZILLA_API_COMPTIME void sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_
  *  any @c VLEN: no register-group capacity ceiling, hence no half-split and no scalar fallback. The
  *  loop driven by @c vsetvl handles every length, including a tail shorter than @c VLMAX, so there
  *  is no serial path. */
-STRINGZILLA_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                            char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_rvv_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                       char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
     sz_u8_t *target_cursor = (sz_u8_t *)target;
     sz_u8_t const *source_cursor = (sz_u8_t const *)source;
@@ -81,12 +81,41 @@ STRINGZILLA_API_COMPTIME void sz_lookup_rvv(sz_ptr_t target, sz_size_t length, s
     }
 }
 
+#if STRINGZILLA_TARGET_RVV
+
+STRINGZILLA_API sz_status_t sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_rvv_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_rvv_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_rvv_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                          char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_rvv_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_RVV
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVV
+#endif // STRINGZILLA_ARCH_RISCV64_RVV_
 
 #ifdef __cplusplus
 }

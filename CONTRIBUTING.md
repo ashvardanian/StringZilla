@@ -852,9 +852,9 @@ go run bench/stringzilla.go
 
 One of the hardest things to learn in HPC is when to stop optimizing, and where not to start.
 
-It doesn't make sense to optimize `sz_order`, because almost always, the relative order of two strings depends on the first bytes.
+It doesn't make sense to optimize the kernels behind `sz_order_best`, because almost always, the relative order of two strings depends on the first bytes.
 Fetching more bytes is not worth it.
-In `sz_equal`, however, in rare cases, SIMD can help, if the user is comparing two mostly similar strings with identical hashes or checksums.
+Behind `sz_equal_best`, however, in rare cases, SIMD can help, if the user is comparing two mostly similar strings with identical hashes or checksums.
 
 ### Unaligned Loads
 

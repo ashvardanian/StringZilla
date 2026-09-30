@@ -10,8 +10,9 @@
 #define STRINGZILLA_FIND_SVE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
+#include "stringzilla/compare/sve.h" // `sz_equal_sve_`
 #include "stringzilla/find/serial.h"
+#include "stringzilla/find/neon.h" // `sz_find_neon_`, `sz_rfind_neon_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +20,7 @@ extern "C" {
 
 /*  Implementation of the string search algorithms using the Arm SVE variable-length registers,
  *  available in Arm v9 processors, like in Apple M4+ and Graviton 3+ CPUs. */
-#if STRINGZILLA_TARGET_SVE
+#if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,7 +28,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_sve_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -48,7 +49,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_sve_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -71,12 +72,12 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_sve_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                          sz_size_t needle_length) {
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_find_byte_sve(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_find_byte_sve_(haystack, haystack_length, needle);
 
     // Determine the number of bytes in an SVE vector.
     sz_size_t const vector_bytes = svcntb();
@@ -145,7 +146,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t hay
             while (svptest_any(pred_b8x, matches_b8x)) {
                 svbool_t pred_to_skip_b8x = svbrkb_b_z(pred_b8x, matches_b8x);
                 sz_size_t forward_offset_in_register = svcntp_b8(pred_b8x, pred_to_skip_b8x);
-                if (sz_equal_sve(haystack + progress + forward_offset_in_register, needle, needle_length))
+                if (sz_equal_sve_(haystack + progress + forward_offset_in_register, needle, needle_length))
                     return haystack + progress + forward_offset_in_register;
                 // If it doesn't match - clear the first bit and continue
                 svbool_t first_match_b8x = svpnext_b8(svptrue_b8(), pred_to_skip_b8x);
@@ -158,12 +159,12 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_sve(sz_cptr_t haystack, sz_size_t hay
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_sve_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                           sz_size_t needle_length) {
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_rfind_byte_sve(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_rfind_byte_sve_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -193,7 +194,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t ha
             svbool_t const pred_to_skip_b8x = svbrkb_b_z(pred_b8x, matches_b8x);
             sz_size_t const backward_offset = svcntp_b8(pred_b8x, pred_to_skip_b8x);
             sz_size_t const candidate = candidates - progress - backward_offset - 1;
-            if (sz_equal_sve(haystack + candidate, needle, needle_length)) return haystack + candidate;
+            if (sz_equal_sve_(haystack + candidate, needle, needle_length)) return haystack + candidate;
             // If it doesn't match - clear the first (i.e. rightmost) bit and continue.
             svbool_t const first_match_b8x = svpnext_b8(svptrue_b8(), pred_to_skip_b8x);
             matches_b8x = svbic_b_z(svptrue_b8(), matches_b8x, first_match_b8x);
@@ -203,12 +204,48 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t ha
     return STRINGZILLA_NULL_CHAR;
 }
 
+#if STRINGZILLA_TARGET_SVE
+
+STRINGZILLA_API sz_status_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byte_sve_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byte_sve_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                        sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable substring search only outruns NEON on registers wider than 128 bits.
+    *match = svcntb() <= 16 ? sz_find_neon_(haystack, haystack_length, needle, needle_length)
+                            : sz_find_sve_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                         sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable substring search only outruns NEON on registers wider than 128 bits.
+    *match = svcntb() <= 16 ? sz_rfind_neon_(haystack, haystack_length, needle, needle_length)
+                            : sz_rfind_sve_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE
+#endif // STRINGZILLA_ARCH_ARM64_SVE_
 
 #ifdef __cplusplus
 }

@@ -10,7 +10,7 @@
 #define STRINGZILLA_FIND_HASWELL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
+#include "stringzilla/compare/haswell.h" // `sz_equal_haswell_`
 #include "stringzilla/find/serial.h"
 
 #ifdef __cplusplus
@@ -19,7 +19,7 @@ extern "C" {
 
 /*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation. */
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,8 +27,7 @@ extern "C" {
 #pragma GCC target("avx2", "bmi", "bmi2", "lzcnt")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byte_haswell_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u256_vec_t haystack_vec, needle_vec;
     needle_vec.ymm = _mm256_set1_epi8(needle[0]);
@@ -40,11 +39,10 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_s
         haystack += 32, haystack_length -= 32;
     }
 
-    return sz_find_byte_serial(haystack, haystack_length, needle);
+    return sz_find_byte_serial_(haystack, haystack_length, needle);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_cptr_t needle) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_haswell_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     int matches_mask;
     sz_u256_vec_t haystack_vec, needle_vec;
     needle_vec.ymm = _mm256_set1_epi8(needle[0]);
@@ -56,16 +54,16 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_
         haystack_length -= 32;
     }
 
-    return sz_rfind_byte_serial(haystack, haystack_length, needle);
+    return sz_rfind_byte_serial_(haystack, haystack_length, needle);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                   sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_haswell_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                              sz_size_t needle_length) {
 
     // Empty needle matches at the start, like `strstr`.
     if (!needle_length) return haystack;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_find_byte_haswell(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_find_byte_haswell_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -89,22 +87,22 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_haswell(sz_cptr_t haystack, sz_size_t
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
             int potential_offset = (int)_tzcnt_u32(matches_vec.u32);
-            if (sz_equal_haswell(haystack + potential_offset, needle, needle_length))
+            if (sz_equal_haswell_(haystack + potential_offset, needle, needle_length))
                 return haystack + potential_offset;
             matches_vec.u32 &= matches_vec.u32 - 1;
         }
     }
 
-    return sz_find_serial(haystack, haystack_length, needle, needle_length);
+    return sz_find_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                    sz_size_t needle_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_haswell_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                               sz_size_t needle_length) {
 
     // Empty needle matches at the end.
     if (!needle_length) return haystack + haystack_length;
     if (haystack_length < needle_length) return STRINGZILLA_NULL_CHAR;
-    if (needle_length == 1) return sz_rfind_byte_haswell(haystack, haystack_length, needle);
+    if (needle_length == 1) return sz_rfind_byte_haswell_(haystack, haystack_length, needle);
 
     // Pick the parts of the needle that are worth comparing.
     sz_size_t offset_first, offset_mid, offset_last;
@@ -130,17 +128,17 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_
             _mm256_movemask_epi8(_mm256_cmpeq_epi8(h_last_vec.ymm, n_last_vec.ymm));
         while (matches_vec.u32) {
             int potential_offset = (int)_lzcnt_u32(matches_vec.u32);
-            if (sz_equal_haswell(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
+            if (sz_equal_haswell_(haystack + haystack_length - needle_length - potential_offset, needle, needle_length))
                 return haystack + haystack_length - needle_length - potential_offset;
             matches_vec.u32 &= ~(1u << (31 - potential_offset));
         }
     }
 
-    return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
+    return sz_rfind_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_size_t length,
-                                                           sz_byteset_t const *filter) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                      sz_byteset_t const *filter) {
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
@@ -176,32 +174,32 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_si
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
-    while (length >= 32) {
+    while (haystack_length >= 32) {
         // The following algorithm is a transposed equivalent of the "SIMD-ized check which bytes are in a set"
         // solutions by Wojciech Muła. We populate the bitmask differently and target newer CPUs, so
         // StrinZilla uses a somewhat different approach.
         // http://0x80.pl/articles/simd-byte-lookup.html#alternative-implementation-new
         //
-        //      sz_u8_t input = *(sz_u8_t const *)text;
+        //      sz_u8_t input = *(sz_u8_t const *)haystack;
         //      sz_u8_t lo_nibble = input & 0x0f;
         //      sz_u8_t hi_nibble = input >> 4;
         //      sz_u8_t bitset_even = filter_even_vec.u8s[hi_nibble];
         //      sz_u8_t bitset_odd = filter_odd_vec.u8s[hi_nibble];
         //      sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
         //      sz_u8_t bitset = lo_nibble < 8 ? bitset_even : bitset_odd;
-        //      if ((bitset & bitmask) != 0) return text;
-        //      else { length--, text++; }
+        //      if ((bitset & bitmask) != 0) return haystack;
+        //      else { haystack_length--, haystack++; }
         //
         // The nice part about this, loading the strided data is vey easy with Arm NEON,
         // while with x86 CPUs after AVX, shuffles within 256 bits shouldn't be an issue either.
-        text_vec.ymm = _mm256_lddqu_si256((__m256i const *)text);
+        text_vec.ymm = _mm256_lddqu_si256((__m256i const *)haystack);
         lower_nibbles_vec.ymm = _mm256_and_si256(text_vec.ymm, _mm256_set1_epi8(0x0f));
         bitmask_vec.ymm = _mm256_shuffle_epi8(bitmask_lookup_vec.ymm, lower_nibbles_vec.ymm);
         //
         // At this point we can validate the `bitmask_vec` contents like this:
         //
         //      for (sz_size_t i = 0; i != 32; ++i) {
-        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t input = *(sz_u8_t const *)(haystack + i);
         //          sz_u8_t lo_nibble = input & 0x0f;
         //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
         //          sz_assert_(bitmask_vec.u8s[i] == bitmask);
@@ -217,7 +215,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_si
         // At this point we can validate the `bitset_even_vec` and `bitset_odd_vec` contents like this:
         //
         //      for (sz_size_t i = 0; i != 32; ++i) {
-        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t input = *(sz_u8_t const *)(haystack + i);
         //          sz_u8_t const *bitset_ptr = &filter->_u8s[0];
         //          sz_u8_t hi_nibble = input >> 4;
         //          sz_u8_t bitset_even = bitset_ptr[hi_nibble * 2];
@@ -237,16 +235,16 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_haswell(sz_cptr_t text, sz_si
         int matches_mask = ~_mm256_movemask_epi8(matches_vec.ymm);
         if (matches_mask) {
             int offset = (int)_tzcnt_u32(matches_mask);
-            return text + offset;
+            return haystack + offset;
         }
-        else { text += 32, length -= 32; }
+        else { haystack += 32, haystack_length -= 32; }
     }
 
-    return sz_find_byteset_serial(text, length, filter);
+    return sz_find_byteset_serial_(haystack, haystack_length, filter);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_size_t length,
-                                                            sz_byteset_t const *filter) {
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                       sz_byteset_t const *filter) {
 
     // Mirror of `sz_find_byteset_haswell` scanning from the end: the same transposed Muła nibble-bitset
     // classifier, but each iteration tests the trailing 32-byte window and resolves the highest matching
@@ -282,8 +280,8 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_s
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
-    while (length >= 32) {
-        sz_cptr_t const window = text + length - 32;
+    while (haystack_length >= 32) {
+        sz_cptr_t const window = haystack + haystack_length - 32;
         text_vec.ymm = _mm256_lddqu_si256((__m256i const *)window);
         lower_nibbles_vec.ymm = _mm256_and_si256(text_vec.ymm, _mm256_set1_epi8(0x0f));
         bitmask_vec.ymm = _mm256_shuffle_epi8(bitmask_lookup_vec.ymm, lower_nibbles_vec.ymm);
@@ -300,18 +298,64 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_haswell(sz_cptr_t text, sz_s
             int offset = 31 - (int)_lzcnt_u32((sz_u32_t)matches_mask);
             return window + offset;
         }
-        else { length -= 32; }
+        else { haystack_length -= 32; }
     }
 
-    return sz_rfind_byteset_serial(text, length, filter);
+    return sz_rfind_byteset_serial_(haystack, haystack_length, filter);
 }
+
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                 sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byte_haswell_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                                  sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byte_haswell_(haystack, haystack_length, needle);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                            sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_haswell_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
+                                             sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_haswell_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                    sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byteset_haswell_(haystack, haystack_length, filter);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                     sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byteset_haswell_(haystack, haystack_length, filter);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

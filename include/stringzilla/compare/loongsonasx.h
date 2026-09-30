@@ -1,13 +1,13 @@
 /**
- *  @file include/stringzilla/compare/lasx.h
+ *  @file include/stringzilla/compare/loongsonasx.h
  *  @author Ash Vardanian
  *  @date June 7, 2026
  *  @brief LoongArch LASX (256-bit) backend for compare.
  *
  *  @sa include/stringzilla/compare.h
  */
-#ifndef STRINGZILLA_COMPARE_LASX_H_
-#define STRINGZILLA_COMPARE_LASX_H_
+#ifndef STRINGZILLA_COMPARE_LOONGSONASX_H_
+#define STRINGZILLA_COMPARE_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/compare/serial.h"
@@ -21,8 +21,8 @@ extern "C" {
  *  word 4 for the high one. Recombining them yields the same 32-bit mask @c _mm256_movemask_epi8
  *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
  *  identically to the Haswell backend. */
-#if STRINGZILLA_TARGET_LASX
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_extended) {
+#if STRINGZILLA_TARGET_LOONGSONASX
+STRINGZILLA_INLINE sz_u32_t sz_xvmovemask_b_compare_loongsonasx_(__m256i sign_extended) {
     __m256i collected_u8x32 = __lasx_xvmskltz_b(sign_extended);
     unsigned int low = __lasx_xvpickve2gr_wu(collected_u8x32, 0);
     unsigned int high = __lasx_xvpickve2gr_wu(collected_u8x32, 4);
@@ -33,17 +33,25 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_compare_lasx_(__m256i sign_ex
  *  element 0, so a single GPR extraction yields the SSE-style 16-bit @c _mm_movemask_epi8 value.
  *  LSX is the natural fit for sub-32-byte inputs, where a 256-bit LASX register would be half-empty
  *  and a serial byte loop wastes the wide datapath the Loongson cores expose. */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
+STRINGZILLA_INLINE sz_u32_t sz_vmovemask_b_compare_lsx_(__m128i sign_extended) {
     return (unsigned int)__lsx_vpickve2gr_wu(__lsx_vmskltz_b(sign_extended), 0) & 0xFFFFu;
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_lasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_loongsonasx_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                       sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
-    return sz_order_serial(a, a_length, b, b_length);
+    return sz_order_serial_(a, a_length, b, b_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_API sz_status_t sz_order_loongsonasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                                 sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_loongsonasx_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_bool_t sz_equal_loongsonasx_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
 
     if (length < 8) {
         sz_cptr_t const a_end = a + length;
@@ -56,8 +64,8 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_si
         sz_u64_t a_second_word = sz_u64_load(a + length - 8).u64, b_second_word = sz_u64_load(b + length - 8).u64;
         return (sz_bool_t)((a_first_word == b_first_word) & (a_second_word == b_second_word));
     }
-    // Two overlapping 128-bit LSX loads cover [17, 32]; LSX keeps the whole register busy on short inputs
-    // instead of leaving half of a 256-bit LASX register idle.
+    // Two overlapping 128-bit LSX loads cover [17, 32]; LSX keeps the whole register busy on short
+    // inputs instead of leaving half of a 256-bit LASX register idle.
     else if (length <= 32) {
         sz_u128_vec_t a_first_vec, b_first_vec, a_second_vec, b_second_vec;
         a_first_vec.lsx = __lsx_vld(a, 0);
@@ -69,7 +77,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_si
         __m128i both_matches_u8x16 = __lsx_vand_v(first_matches_u8x16, second_matches_u8x16);
         return (sz_bool_t)(sz_vmovemask_b_compare_lsx_(both_matches_u8x16) == 0xFFFFu);
     }
-    // We can use 2x 256-bit interleaving loads, similar to the AVX2 backend, to handle up to 64 bytes.
+    // Two interleaving 256-bit loads, as in the AVX2 backend, handle up to 64 bytes.
     else if (length <= 64) {
         sz_u256_vec_t a_first_vec, b_first_vec, a_second_vec, b_second_vec;
         a_first_vec.lasx = __lasx_xvld(a, 0);
@@ -79,7 +87,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_si
         __m256i first_matches_u8x32 = __lasx_xvseq_b(a_first_vec.lasx, b_first_vec.lasx);
         __m256i second_matches_u8x32 = __lasx_xvseq_b(a_second_vec.lasx, b_second_vec.lasx);
         __m256i both_matches_u8x32 = __lasx_xvand_v(first_matches_u8x32, second_matches_u8x32);
-        return (sz_bool_t)(sz_xvmovemask_b_compare_lasx_(both_matches_u8x32) == 0xFFFFFFFFu);
+        return (sz_bool_t)(sz_xvmovemask_b_compare_loongsonasx_(both_matches_u8x32) == 0xFFFFFFFFu);
     }
     else {
         sz_size_t byte_index = 0;
@@ -87,19 +95,27 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_lasx(sz_cptr_t a, sz_cptr_t b, sz_si
         do {
             a_vec.lasx = __lasx_xvld(a + byte_index, 0);
             b_vec.lasx = __lasx_xvld(b + byte_index, 0);
-            if (sz_xvmovemask_b_compare_lasx_(__lasx_xvseq_b(a_vec.lasx, b_vec.lasx)) != 0xFFFFFFFFu) return sz_false_k;
+            if (sz_xvmovemask_b_compare_loongsonasx_(__lasx_xvseq_b(a_vec.lasx, b_vec.lasx)) != 0xFFFFFFFFu)
+                return sz_false_k;
             byte_index += 32;
         } while (byte_index + 32 <= length);
         a_vec.lasx = __lasx_xvld(a + length - 32, 0);
         b_vec.lasx = __lasx_xvld(b + length - 32, 0);
-        return (sz_bool_t)(sz_xvmovemask_b_compare_lasx_(__lasx_xvseq_b(a_vec.lasx, b_vec.lasx)) == 0xFFFFFFFFu);
+        return (sz_bool_t)(sz_xvmovemask_b_compare_loongsonasx_(__lasx_xvseq_b(a_vec.lasx, b_vec.lasx)) == 0xFFFFFFFFu);
     }
 }
 
-#endif // STRINGZILLA_TARGET_LASX
+STRINGZILLA_API sz_status_t sz_equal_loongsonasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                                 void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_loongsonasx_(a, b, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // STRINGZILLA_COMPARE_LASX_H_
+#endif // STRINGZILLA_COMPARE_LOONGSONASX_H_

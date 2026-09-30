@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("arch=+v")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_rvv_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     while (length) {
@@ -39,7 +39,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_siz
     return sz_true_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_rvv_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_u8_t const *a_u8 = (sz_u8_t const *)a;
     sz_u8_t const *b_u8 = (sz_u8_t const *)b;
     // Scan the common prefix in `e8m8` strips; `vmsne` + `vfirst` locate the first differing byte natively, and
@@ -59,12 +59,29 @@ STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_rvv(sz_cptr_t a, sz_size_t a_len
     return sz_order_scalars_(a_length, b_length);
 }
 
+#if STRINGZILLA_TARGET_RVV
+
+STRINGZILLA_API sz_status_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_rvv_(a, b, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                         sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_rvv_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_RVV
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_RVV
+#endif // STRINGZILLA_ARCH_RISCV64_RVV_
 
 #ifdef __cplusplus
 }

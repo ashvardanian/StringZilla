@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,14 +24,14 @@ extern "C" {
 #pragma GCC target("+simd")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_neon_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Before optimizing this, read the "Operations Not Worth Optimizing" in Contributions Guide:
     //! https://github.com/ashvardanian/StringZilla/blob/main/CONTRIBUTING.md#general-performance-observations
-    return sz_order_serial(a, a_length, b, b_length);
+    return sz_order_serial_(a, a_length, b, b_length);
 }
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
-    if (length < 16) return sz_equal_serial(a, b, length);
+STRINGZILLA_INLINE sz_bool_t sz_equal_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+    if (length < 16) return sz_equal_serial_(a, b, length);
 
     sz_u128_vec_t a_vec, b_vec;
     sz_size_t offset = 0;
@@ -51,12 +51,29 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_si
     return sz_true_k;
 }
 
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                          sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_neon_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_neon_(a, b, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

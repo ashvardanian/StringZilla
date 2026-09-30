@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_serial_(sz_cptr_t a, sz_cptr_t b, sz_size_t length) {
     sz_cptr_t const a_end = a + length;
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
     if (length >= STRINGZILLA_SWAR_THRESHOLD) {
@@ -31,8 +31,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_
     return (sz_bool_t)(a_end == a);
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                       sz_size_t b_length) {
+STRINGZILLA_INLINE sz_ordering_t sz_order_serial_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     sz_bool_t a_shorter = (sz_bool_t)(a_length < b_length);
     sz_size_t min_length = a_shorter ? a_length : b_length;
     sz_cptr_t min_end = a + min_length;
@@ -52,6 +51,24 @@ STRINGZILLA_API_COMPTIME sz_ordering_t sz_order_serial(sz_cptr_t a, sz_size_t a_
     // If the strings are equal up to `min_end`, then the shorter string is smaller
     return sz_order_scalars_(a_length, b_length);
 }
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                            void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *equal = sz_equal_serial_(a, b, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                            sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_order_serial_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

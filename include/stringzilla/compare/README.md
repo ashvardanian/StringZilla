@@ -1,8 +1,9 @@
 # Compare: Equality and Lexicographic Ordering
 
-This directory holds the comparison kernels behind `sz_equal` and `sz_order`.
+This directory holds the comparison kernels behind `sz_equal_best` and `sz_order_best`.
 Each operation has a serial baseline plus per-ISA SIMD backends, like `haswell`, `skylake`, `icelake` on x86.
-The dispatcher picks the fastest one available on the running CPU.
+`sz_equal_best` and `sz_order_best` run the best kernel the capability mask they are passed names.
+For hot paths on short inputs, like a sort comparator, pick a capability's kernel, like `sz_order_neon`, or resolve one once through `sz_find_kernel_punned`, rather than paying the pick on every call.
 
 ## Methodology
 
@@ -13,28 +14,28 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 
 ## Short Words
 
-| Backend          | `sz_equal` | `sz_order` |
-| :--------------- | ---------: | ---------: |
-| Standard @ Xeon4 |  0.40 GB/s |  0.35 GB/s |
-| Serial @ Xeon4   |  0.57 GB/s |  0.53 GB/s |
-| Haswell @ Xeon4  |  0.26 GB/s |  0.50 GB/s |
-| Skylake @ Xeon4  |  0.47 GB/s |  0.34 GB/s |
-| Ice Lake @ Xeon4 |          ↑ |          ↑ |
-| NEON @ Graviton4 |          … |          … |
-| SVE @ Graviton3  |          … |          … |
+| Backend          | `sz_equal_best` | `sz_order_best` |
+| :--------------- | --------------: | --------------: |
+| Standard @ Xeon4 |       0.40 GB/s |       0.35 GB/s |
+| Serial @ Xeon4   |       0.57 GB/s |       0.53 GB/s |
+| Haswell @ Xeon4  |       0.26 GB/s |       0.50 GB/s |
+| Skylake @ Xeon4  |       0.47 GB/s |       0.34 GB/s |
+| Ice Lake @ Xeon4 |               ↑ |               ↑ |
+| NEON @ Graviton4 |               … |               … |
+| SVE @ Graviton3  |               … |               … |
 
 > Measured June 26th, 2026.
 
 ## Long Lines
 
-| Backend          | `sz_equal` | `sz_order` |
-| :--------------- | ---------: | ---------: |
-| Standard @ Xeon4 |  7.43 GB/s |  7.40 GB/s |
-| Serial @ Xeon4   | 13.41 GB/s | 12.30 GB/s |
-| Haswell @ Xeon4  |  5.78 GB/s | 13.89 GB/s |
-| Skylake @ Xeon4  |  7.72 GB/s |  5.77 GB/s |
-| Ice Lake @ Xeon4 |          ↑ |          ↑ |
-| NEON @ Graviton4 |          … |          … |
-| SVE @ Graviton3  |          … |          … |
+| Backend          | `sz_equal_best` | `sz_order_best` |
+| :--------------- | --------------: | --------------: |
+| Standard @ Xeon4 |       7.43 GB/s |       7.40 GB/s |
+| Serial @ Xeon4   |      13.41 GB/s |      12.30 GB/s |
+| Haswell @ Xeon4  |       5.78 GB/s |      13.89 GB/s |
+| Skylake @ Xeon4  |       7.72 GB/s |       5.77 GB/s |
+| Ice Lake @ Xeon4 |               ↑ |               ↑ |
+| NEON @ Graviton4 |               … |               … |
+| SVE @ Graviton3  |               … |               … |
 
 > Measured June 26th, 2026.

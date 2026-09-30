@@ -10,7 +10,6 @@
 #define STRINGZILLA_FIND_ICELAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/compare.h" // `sz_equal`
 #include "stringzilla/find/serial.h"
 
 #ifdef __cplusplus
@@ -39,19 +38,19 @@ extern "C" {
                    "lzcnt")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_size_t length,
-                                                           sz_byteset_t const *filter) {
+STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                      sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.
     //
-    //      if (length < STRINGZILLA_SWAR_THRESHOLD)
-    //          return sz_find_byteset_serial(text, length, filter);
+    //      if (haystack_length < STRINGZILLA_SWAR_THRESHOLD)
+    //          return sz_find_byteset_serial(haystack, haystack_length, filter);
     //      sz_cptr_t early_result =
-    //          sz_find_byteset_serial(text, STRINGZILLA_SWAR_THRESHOLD, filter);
+    //          sz_find_byteset_serial(haystack, STRINGZILLA_SWAR_THRESHOLD, filter);
     //      if (early_result) return early_result;
-    //      text += STRINGZILLA_SWAR_THRESHOLD;
-    //      length -= STRINGZILLA_SWAR_THRESHOLD;
+    //      haystack += STRINGZILLA_SWAR_THRESHOLD;
+    //      haystack_length -= STRINGZILLA_SWAR_THRESHOLD;
     //
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm512_shuffle_epi8` we can use the same mask for both lanes.
@@ -91,34 +90,34 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_si
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
-    while (length) {
+    while (haystack_length) {
         // The following algorithm is a transposed equivalent of the "SIMDized check which bytes are in a set"
         // solutions by Wojciech Muła. We populate the bitmask differently and target newer CPUs, so
         // StrinZilla uses a somewhat different approach.
         // http://0x80.pl/articles/simd-byte-lookup.html#alternative-implementation-new
         //
-        //      sz_u8_t input = *(sz_u8_t const *)text;
+        //      sz_u8_t input = *(sz_u8_t const *)haystack;
         //      sz_u8_t lo_nibble = input & 0x0f;
         //      sz_u8_t hi_nibble = input >> 4;
         //      sz_u8_t bitset_even = filter_even_vec.u8s[hi_nibble];
         //      sz_u8_t bitset_odd = filter_odd_vec.u8s[hi_nibble];
         //      sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
         //      sz_u8_t bitset = lo_nibble < 8 ? bitset_even : bitset_odd;
-        //      if ((bitset & bitmask) != 0) return text;
-        //      else { length--, text++; }
+        //      if ((bitset & bitmask) != 0) return haystack;
+        //      else { haystack_length--, haystack++; }
         //
         // The nice part about this, loading the strided data is vey easy with Arm NEON,
         // while with x86 CPUs after AVX, shuffles within 256 bits shouldn't be an issue either.
-        sz_size_t load_length = sz_min_of_two(length, 64);
+        sz_size_t load_length = sz_min_of_two(haystack_length, 64);
         __mmask64 load_m64 = sz_u64_mask_until_(load_length);
-        text_vec.zmm = _mm512_maskz_loadu_epi8(load_m64, text);
+        text_vec.zmm = _mm512_maskz_loadu_epi8(load_m64, haystack);
         lower_nibbles_vec.zmm = _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8(0x0f));
         bitmask_vec.zmm = _mm512_shuffle_epi8(bitmask_lookup_vec.zmm, lower_nibbles_vec.zmm);
         //
         // At this point we can validate the `bitmask_vec` contents like this:
         //
         //      for (sz_size_t i = 0; i != load_length; ++i) {
-        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t input = *(sz_u8_t const *)(haystack + i);
         //          sz_u8_t lo_nibble = input & 0x0f;
         //          sz_u8_t bitmask = (1 << (lo_nibble & 0x7));
         //          sz_assert_(bitmask_vec.u8s[i] == bitmask);
@@ -134,7 +133,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_si
         // At this point we can validate the `bitset_even_vec` and `bitset_odd_vec` contents like this:
         //
         //      for (sz_size_t i = 0; i != load_length; ++i) {
-        //          sz_u8_t input = *(sz_u8_t const *)(text + i);
+        //          sz_u8_t input = *(sz_u8_t const *)(haystack + i);
         //          sz_u8_t const *bitset_pointer = &filter->_u8s[0];
         //          sz_u8_t hi_nibble = input >> 4;
         //          sz_u8_t bitset_even = bitset_pointer[hi_nibble * 2];
@@ -149,16 +148,23 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_find_byteset_icelake(sz_cptr_t text, sz_si
         __mmask64 matches_m64 = _mm512_mask_test_epi8_mask(load_m64, bitset_even_vec.zmm, bitmask_vec.zmm);
         if (matches_m64) {
             int offset = (int)_tzcnt_u64(matches_m64);
-            return text + offset;
+            return haystack + offset;
         }
-        else { text += load_length, length -= load_length; }
+        else { haystack += load_length, haystack_length -= load_length; }
     }
 
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_size_t length,
-                                                            sz_byteset_t const *filter) {
+STRINGZILLA_API sz_status_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                    sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_find_byteset_icelake_(haystack, haystack_length, filter);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                       sz_byteset_t const *filter) {
 
     // Reverse mirror of `sz_find_byteset_icelake`: identical membership computation, but we scan
     // 64-byte windows from the end of the buffer and take the highest set bit, the one closest to
@@ -181,10 +187,10 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_s
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1, //
         -128, 64, 32, 16, 8, 4, 2, 1, -128, 64, 32, 16, 8, 4, 2, 1);
 
-    while (length) {
+    while (haystack_length) {
         // Take the trailing window of up to 64 bytes; valid lanes occupy bits [0, load_length).
-        sz_size_t load_length = sz_min_of_two(length, 64);
-        sz_cptr_t window = text + length - load_length;
+        sz_size_t load_length = sz_min_of_two(haystack_length, 64);
+        sz_cptr_t window = haystack + haystack_length - load_length;
         __mmask64 load_m64 = sz_u64_mask_until_(load_length);
         text_vec.zmm = _mm512_maskz_loadu_epi8(load_m64, window);
         lower_nibbles_vec.zmm = _mm512_and_si512(text_vec.zmm, _mm512_set1_epi8(0x0f));
@@ -200,10 +206,17 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_rfind_byteset_icelake(sz_cptr_t text, sz_s
             int offset = 63 - (int)_lzcnt_u64(matches_mask); // highest set bit -> last in-set byte
             return window + offset;
         }
-        else { length -= load_length; }
+        else { haystack_length -= load_length; }
     }
 
     return STRINGZILLA_NULL_CHAR;
+}
+
+STRINGZILLA_API sz_status_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                     sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_rfind_byteset_icelake_(haystack, haystack_length, filter);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

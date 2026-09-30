@@ -11,12 +11,13 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/memory/serial.h"
+#include "stringzilla/memory/neon.h" // `sz_copy_neon_`, `sz_move_neon_`, `sz_fill_neon_`, `sz_lookup_neon_`
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE
+#if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -24,7 +25,7 @@ extern "C" {
 #pragma GCC target("+sve")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_sve_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     svuint8_t value_u8x = svdup_u8(value);
     sz_size_t vector_length = svcntb(); // Vector length in bytes (scalable)
 
@@ -54,7 +55,7 @@ STRINGZILLA_API_COMPTIME void sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_sve_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_assert_no_overlap_(target, length, source, length);
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
@@ -91,7 +92,7 @@ STRINGZILLA_API_COMPTIME void sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_move_sve_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     sz_size_t vector_length = svcntb(); // Vector length in bytes
 
     // When the buffer is small, there isn't much to innovate.
@@ -155,12 +156,12 @@ STRINGZILLA_API_COMPTIME void sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                            char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_sve_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                       char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
@@ -232,12 +233,50 @@ STRINGZILLA_API_COMPTIME void sz_lookup_sve(sz_ptr_t target, sz_size_t length, s
         svst1_u8(active_b8x, (sz_u8_t *)(target + byte_index), result_u8x);
     }
 }
+
+#if STRINGZILLA_TARGET_SVE
+
+STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
+    if (svcntb() <= 16) sz_fill_neon_(target, length, value);
+    else sz_fill_sve_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
+    if (svcntb() <= 16) sz_copy_neon_(target, source, length);
+    else sz_copy_sve_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
+    if (svcntb() <= 16) sz_move_neon_(target, source, length);
+    else sz_move_sve_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                          char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
+    if (svcntb() <= 16) sz_lookup_neon_(target, source, length, lut);
+    else sz_lookup_sve_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE
+#endif // STRINGZILLA_ARCH_ARM64_SVE_
 
 #ifdef __cplusplus
 }

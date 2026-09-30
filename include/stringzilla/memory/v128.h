@@ -22,12 +22,12 @@ extern "C" {
  *  is a small constant-lane switch; the 8..15 case loads the low 8 with @c load64_zero and folds
  *  the remaining bytes in with one constant `i8x16.shuffle`. Other @c v128 backends `#include` this
  *  header to reuse these (hash short-string loads, @c fill_random tails, …). */
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-STRINGZILLA_HELPER_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
+STRINGZILLA_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
     v128_t result_u8x16 = wasm_u64x2_splat(0);
     switch (remainder) {
     case 1: result_u8x16 = wasm_v128_load8_lane(source_pointer, result_u8x16, 0); break;
@@ -56,7 +56,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source
 }
 
 /** Load exactly @p length (0..16) bytes into a v128; remaining lanes zero; no over-read. */
-STRINGZILLA_HELPER_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t const *source_pointer = (sz_u8_t const *)source;
     if (length >= 16) return wasm_v128_load(source_pointer);
     if (length & 8) {
@@ -68,8 +68,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size
     return sz_load_partial_lo8_v128_(source_pointer, length);
 }
 
-STRINGZILLA_HELPER_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data_u8x16,
-                                                          sz_size_t remainder) {
+STRINGZILLA_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data_u8x16, sz_size_t remainder) {
     switch (remainder) {
     case 1: wasm_v128_store8_lane(target_pointer, data_u8x16, 0); break;
     case 2: wasm_v128_store16_lane(target_pointer, data_u8x16, 0); break;
@@ -96,7 +95,7 @@ STRINGZILLA_HELPER_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointe
 }
 
 /** Store exactly @p length (0..16) bytes from a v128; no over-write past the buffer. */
-STRINGZILLA_HELPER_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t data_u8x16, sz_size_t length) {
+STRINGZILLA_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t data_u8x16, sz_size_t length) {
     sz_u8_t *target_pointer = (sz_u8_t *)target;
     if (length >= 16) {
         wasm_v128_store(target_pointer, data_u8x16);
@@ -111,15 +110,15 @@ STRINGZILLA_HELPER_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t da
     else { sz_store_partial_lo8_v128_(target_pointer, data_u8x16, length); }
 }
 
-STRINGZILLA_API_COMPTIME void sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_copy_v128_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     for (; length >= 16; target += 16, source += 16, length -= 16) wasm_v128_store(target, wasm_v128_load(source));
     if (length) sz_store_partial_v128_(target, sz_load_partial_v128_(source, length), length);
 }
 
-STRINGZILLA_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE void sz_move_v128_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
     if (target < source || target >= source + length) {
         // Non-overlapping (or `target` precedes `source`): copy forward.
-        sz_copy_v128(target, source, length);
+        sz_copy_v128_(target, source, length);
     }
     else {
         // Overlapping with `target` after `source`: copy backward.
@@ -136,7 +135,7 @@ STRINGZILLA_API_COMPTIME void sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz
     }
 }
 
-STRINGZILLA_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
+STRINGZILLA_INLINE void sz_fill_v128_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     v128_t fill_u8x16 = wasm_i8x16_splat((sz_i8_t)value);
     while (length >= 16) {
         wasm_v128_store(target, fill_u8x16);
@@ -146,13 +145,13 @@ STRINGZILLA_API_COMPTIME void sz_fill_v128(sz_ptr_t target, sz_size_t length, sz
     if (length) sz_store_partial_v128_(target, fill_u8x16, length);
 }
 
-STRINGZILLA_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                             char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_v128_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                        char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // For tiny inputs the SIMD setup isn't worth it. Match the NEON heuristic.
     if (length <= 128) {
-        sz_lookup_serial(target, length, source, lut);
+        sz_lookup_serial_(target, source, length, lut);
         return;
     }
 
@@ -202,13 +201,42 @@ STRINGZILLA_API_COMPTIME void sz_lookup_v128(sz_ptr_t target, sz_size_t length, 
     }
 
     // Handle the tail with serial code.
-    if (length) sz_lookup_serial(target, length, source, lut);
+    if (length) sz_lookup_serial_(target, source, length, lut);
 }
+
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_copy_v128_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_move_v128_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_fill_v128_(target, length, value);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_v128_(target, source, length, lut);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

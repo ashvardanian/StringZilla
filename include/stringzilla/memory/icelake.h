@@ -30,8 +30,8 @@ extern "C" {
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "bmi", "bmi2")
 #endif
 
-STRINGZILLA_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t length, sz_cptr_t source,
-                                                char const lut[sz_at_least_(256)]) {
+STRINGZILLA_INLINE void sz_lookup_icelake_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                           char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
 
     // If the input is tiny (especially smaller than the look-up table itself), we may end up paying
@@ -107,6 +107,13 @@ STRINGZILLA_API_COMPTIME void sz_lookup_icelake(sz_ptr_t target, sz_size_t lengt
         _mm512_mask_storeu_epi8(target, tail_mask_m64, result_vec.zmm);
         source += tail_length, target += tail_length, length -= tail_length;
     }
+}
+
+STRINGZILLA_API sz_status_t sz_lookup_icelake(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                              char const lut[sz_at_least_(256)], void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_lookup_icelake_(target, source, length, lut);
+    return sz_success_k;
 }
 
 #if defined(__clang__)
