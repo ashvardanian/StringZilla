@@ -17,20 +17,26 @@ extern "C" {
 
 /*  Relaxed-SIMD offers no win for the count / find-nth kernels (they use @c wasm_i8x16_eq, range
  *  compares, compile-time-constant @c wasm_i8x16_shuffle rotations, and @c wasm_i8x16_bitmask -
- *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The multistep
- *  newline/whitespace iterators are not defined here at all: the dispatch table routes the
- *  @c v128relaxed capability straight to the @c v128 kernels. */
+ *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The decoder and
+ *  the multistep newline/whitespace iterators are not defined here at all: a @c v128relaxed mask
+ *  also carries @c v128, so their lists pick the @c v128 kernels. */
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
 #endif
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length) {
-    return sz_utf8_count_v128(text, length);
+STRINGZILLA_API sz_status_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                      void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *count = sz_utf8_count_v128_(text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n) {
-    return sz_utf8_seek_v128(text, length, n);
+STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
+                                                     void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *position = sz_utf8_seek_v128_(text, length, n);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

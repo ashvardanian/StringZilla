@@ -9,13 +9,14 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_tokens/serial.h"
+#include "stringzilla/utf8_tokens/neon.h"
 #include "stringzilla/utf8_runes/sve2.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -34,7 +35,7 @@ extern "C" {
  *  64-bit widening, so multi-gigabyte inputs never truncate. The caller's @c while loop resumes
  *  past the last emitted match when the capacity cuts the tile.
  */
-STRINGZILLA_HELPER_INLINE void sz_utf8_token_drain_sve2_(                           //
+STRINGZILLA_INLINE void sz_utf8_token_drain_sve2_(                                  //
     svbool_t starts_b8x, svuint8_t lengths_u8x, sz_size_t position, sz_size_t span, //
     sz_size_t emit_count, sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
@@ -75,16 +76,16 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_token_drain_sve2_(                       
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_sve2( //
-    sz_cptr_t text, sz_size_t length,                     //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_sve2_(    //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
-    // Too narrow to host a safe 3-byte straddle and a 32-bit compaction sub-block? Delegate wholesale to serial.
-    if (step < 16)
-        return sz_utf8_newlines_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+    // Graviton 5: the scalable scan only outruns NEON with wider-than-NEON registers.
+    if (step <= 16)
+        return sz_utf8_newlines_neon_(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 
     // Fixed logical tile (64 bytes when the register is wide enough), capped by the register width so the
     // shifted views for 2-/3-byte delimiters are always fully loaded on a full tile.
@@ -171,15 +172,16 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_sve2( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_sve2_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
-    if (step < 16)
-        return sz_utf8_whitespaces_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
+    // Graviton 5 at 128 bits: the load-view NEON scan leads the mixed corpus, 737 vs 663 MiB/s.
+    if (step <= 16)
+        return sz_utf8_whitespaces_neon_(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 
     sz_size_t const tile = step < 64 ? step : 64;
     sz_size_t count = 0, position = 0;
@@ -279,8 +281,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_sve2( //
  *  16-byte table vectors: the byte at `value >> 3` rides two @c svtbl tables - the second addressed
  *  at `index - 16`, where the wrap past the zero-padded table reads zero at any vector length - and
  *  the bit `value & 7` decides. The in-register alternative to a gathered two-level walk. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
-                                                                    svuint8_t table_high_u8x, svuint8_t value_u8x) {
+STRINGZILLA_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_b8x, svuint8_t table_low_u8x,
+                                                             svuint8_t table_high_u8x, svuint8_t value_u8x) {
     svuint8_t const byte_index_u8x = svlsr_n_u8_x(pg_b8x, value_u8x, 3);
     svuint8_t const bitmap_u8x = svorr_u8_x(pg_b8x, svtbl_u8(table_low_u8x, byte_index_u8x),
                                             svtbl_u8(table_high_u8x, svsub_n_u8_x(pg_b8x, byte_index_u8x, 16)));
@@ -288,15 +290,15 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_delimiter_bitmap32_sve2_(svbool_t pg_
     return svcmpne_n_u8(pg_b8x, svand_u8_x(pg_b8x, bitmap_u8x, bit_mask_u8x), 0);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_sve2_(  //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    // Unlike newlines and whitespaces, delimiters lead NEON even at 128 bits on Graviton 5, so this
+    // kernel has no NEON redirect.
     sz_size_t const step = svcntb();
-    if (step < 16)
-        return sz_utf8_delimiters_serial(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 
     // Two 32-byte bitmaps as zero-padded 16-byte table pairs: BMP row 0 (exact membership of every codepoint
     // below U+0100) and the block-level pre-filter over `cp >> 8`.
@@ -499,12 +501,46 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_sve2( //
     return count;
 }
 
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_newlines_sve2(                                  //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_sve2_(text, length, match_offsets, match_lengths, matches_capacity,
+                                            bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_sve2(                               //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_sve2_(text, length, match_offsets, match_lengths, matches_capacity,
+                                               bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_sve2(                                //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_sve2_(text, length, match_offsets, match_lengths, matches_capacity,
+                                              bytes_consumed);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE2
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

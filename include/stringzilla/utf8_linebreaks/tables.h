@@ -974,7 +974,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_palette_dotted_[256] = {
 };
 
 #pragma region Haswell AVX2 nibble cascade palette index tables
-#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_
 
 /**
  *  @brief SIMD palette-index tables mapping a codepoint to the 6-bit palette index to unpack.
@@ -1264,12 +1264,12 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage4_groups_[4096] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0};
 
-#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_
 #pragma endregion Haswell AVX2 nibble cascade palette index tables
 #pragma endregion Line_Break tables
 
 #pragma region Flat BMP classifier tables
-#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_
 // clang-format off
 
 /**
@@ -2395,7 +2395,7 @@ sz_align_(64) static const sz_u16_t sz_utf8_line_break_flat_palette_[64] = {
 };
 
 // clang-format on
-#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_
 #pragma endregion Flat BMP classifier tables
 
 #ifdef __cplusplus

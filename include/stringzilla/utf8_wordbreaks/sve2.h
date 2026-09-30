@@ -41,7 +41,7 @@ extern "C" {
 
 /*  In-register SVE2 Word_Break classifier core: flat-table BMP classify + astral nibble cascade +
  *  the predicate/lane-mask bridge. The substrate LUT readers live in `utf8_runes/sve2.h`. */
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -51,14 +51,14 @@ extern "C" {
 
 /** Word_Break class byte for sixteen-bit-wide BMP codepoints (per-lane high = cp>>8, low =
  *  cp&0xFF). */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_bmp_class_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     return sz_utf8_rune_flat_lookup_sve2_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_, high_u8x,
                                           low_u8x);
 }
 
 /** Word_Break class byte for sixteen astral codepoints over the 20-bit offset = cp - 0x10000. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_off_u8x, svuint8_t high_u8x,
-                                                                          svuint8_t low_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint8_t plane_off_u8x, svuint8_t high_u8x,
+                                                                   svuint8_t low_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(pg_b8x, plane_off_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(pg_b8x, svlsr_n_u8_x(pg_b8x, high_u8x, 4), 0x0F);
@@ -93,7 +93,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_astral_class_sve2_(svuint
  *  the byte groups OR-fold within every 64-bit element (bit sets are disjoint, so shifts never
  *  carry), and the per-element mask bytes recombine through one shifted @c svaddv — no stack
  *  round-trip, no lane loop. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t loaded) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const pg_b64x = svptrue_b64();
     svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)loaded);
@@ -111,7 +111,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_pred_to_u64_sve2_(svbool_t p_b8x, sz_
 /** 64-bit lane mask → predicate bridge, the inverse of @ref sz_utf8_pred_to_u64_sve2_: each lane
  *  reads its mask byte via @c svtbl over the broadcast mask and tests bit `lane & 7`, with no
  *  round-trip through the stack. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
+STRINGZILLA_INLINE svbool_t sz_utf8_u64_to_pred_sve2_(sz_u64_t mask, sz_size_t loaded) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t const iota_u8x = svindex_u8(0, 1);
     svuint8_t const mask_bytes_u8x = svtbl_u8(svreinterpret_u8_u64(svdup_n_u64(mask)),
@@ -129,8 +129,8 @@ typedef struct sz_utf8_word_window_sve2_t {
 
 /** Decode one window into per-lane (high, low, plane_off) substrate bytes + the codepoint
  *  partition. */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
-    sz_u8_t const *text, sz_size_t available, int at_end_of_text,                      //
+STRINGZILLA_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_sve2_( //
+    sz_u8_t const *text, sz_size_t available, int at_end_of_text,               //
     sz_u8_t *high_out, sz_u8_t *low_out, sz_u8_t *plane_off_out) {
 
     svbool_t const pg_b8x = svptrue_b8();
@@ -211,7 +211,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_window_sve2_t sz_utf8_word_decode_window_
 
 /** Classify each lane of one window into its Word_Break class byte (ASCII/BMP/astral,
  *  forced-Other). */
-STRINGZILLA_HELPER_INLINE void sz_utf8_word_classify_window_sve2_(     //
+STRINGZILLA_INLINE void sz_utf8_word_classify_window_sve2_(            //
     sz_u8_t const *high, sz_u8_t const *low, sz_u8_t const *plane_off, //
     sz_u64_t four_byte_starts, sz_u64_t forced_other, sz_size_t loaded, sz_u8_t *out) {
     svbool_t const loaded_b8x = svwhilelt_b8_u64(0, (sz_u64_t)loaded);
@@ -234,20 +234,20 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_word_classify_window_sve2_(     //
 /** Full-width SVE2 rule engine; the portable @c sz_u64_t engine's `<<k` / `>>1` lane
  *  algebra is realized on per-lane 0/1 vectors via @c svext-based lane shifts, which scale
  *  beyond a 64-bit movemask. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a_u8x) { return svinsr_n_u8(a_u8x, 0); }
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_lane_up1_sve2_(svuint8_t a_u8x) { return svinsr_n_u8(a_u8x, 0); }
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) {
     return svext_u8(a_u8x, svdup_n_u8(0), 1);
 }
 
 /** The @c svext lane-shift amount must be an integer-constant expression, so the variable-k helpers
  *  are function-like macros rather than functions: the literal k at each call site reaches the
  *  intrinsic unchanged. Macros also keep this header a single code path for C99 and C++, as it is
- *  compiled into the C99 library (`c/stringzilla/utf8_wordbreaks.c`), which cannot parse C++
- *  templates or an `extern "C++"` island. */
+ *  compiled into the C99 library (`c/cpu/sve2.c`), which cannot parse C++ templates or an
+ *  `extern "C++"` island. */
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))
 
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
@@ -269,7 +269,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_right_sve2_(svuint8_
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t seed_u8x, svuint8_t gate_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = seed_u8x, reach_u8x = gate_u8x;
     bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
@@ -291,15 +291,15 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_fill_left_sve2_(svuint8_t
                           svand_u8_x(pg_b8x, sz_utf8_word_break_lane_dn_sve2_(bits_u8x, 32), reach_u8x));
     return bits_u8x;
 }
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits_u8x, svuint8_t reach_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_smear_right_sve2_(svuint8_t bits_u8x, svuint8_t reach_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     for (int s = 0; s < sz_utf8_word_break_smear_steps_k; ++s)
         bits_u8x = svorr_u8_x(pg_b8x, bits_u8x,
                               svand_u8_x(pg_b8x, sz_utf8_word_break_lane_up1_sve2_(bits_u8x), reach_u8x));
     return bits_u8x;
 }
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri_u8x, svuint8_t run_gate_u8x,
-                                                                     int inbound_parity, svuint8_t *inclusive_out_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t ri_u8x, svuint8_t run_gate_u8x,
+                                                              int inbound_parity, svuint8_t *inclusive_out_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svuint8_t bits_u8x = ri_u8x, reach_u8x = run_gate_u8x;
     bits_u8x = sveor_u8_x(pg_b8x, bits_u8x,
@@ -328,21 +328,19 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_ri_join_sve2_(svuint8_t r
     *inclusive_out_u8x = bits_u8x;
     return svand_u8_x(pg_b8x, ri_u8x, sveor_u8_x(pg_b8x, bits_u8x, ri_u8x));
 }
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
+STRINGZILLA_INLINE sz_u8_t sz_utf8_word_break_at_first_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t const p_b8x = svcmpne_n_u8(pg_b8x, m_u8x, 0);
     svbool_t const first_b8x = svand_b_z(svptrue_b8(), p_b8x, svbrka_b_z(svptrue_b8(), p_b8x));
     return svlastb_u8(first_b8x, v_u8x);
 }
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
+STRINGZILLA_INLINE sz_u8_t sz_utf8_word_break_at_last_sve2_(svuint8_t m_u8x, svuint8_t v_u8x) {
     svbool_t const pg_b8x = svptrue_b8();
     return svlastb_u8(svcmpne_n_u8(pg_b8x, m_u8x, 0), v_u8x);
 }
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v_u8x) {
-    return svlasta_u8(svpfalse_b(), v_u8x);
-}
+STRINGZILLA_INLINE sz_u8_t sz_utf8_word_break_lane0_sve2_(svuint8_t v_u8x) { return svlasta_u8(svpfalse_b(), v_u8x); }
 
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_break_decide_window_sve2_(                                 //
+STRINGZILLA_INLINE sz_size_t sz_utf8_word_break_decide_window_sve2_(                                        //
     svuint8_t class_aletter_in_u8x, svuint8_t class_hebrew_in_u8x, svuint8_t class_numeric_in_u8x,          //
     svuint8_t class_katakana_in_u8x, svuint8_t class_extendnumlet_in_u8x, svuint8_t class_extend_in_u8x,    //
     svuint8_t class_zwj_in_u8x, svuint8_t class_format_in_u8x, svuint8_t class_midletter_in_u8x,            //
@@ -700,9 +698,8 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_break_decide_window_sve2_(     
  *  @c sz_utf8_word_break_range16_one_neon_ (not-below: high greater, or equal-high with low at
  *  least lo; symmetric for not-above). Used by the WSegSpace / Extended_Pictographic scans inside
  *  @ref sz_utf8_word_break_resolve_window_sve2_. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x,
-                                                                     sz_u16_t const *lo_t, sz_u16_t const *hi_t,
-                                                                     int count) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t high_u8x, svuint8_t low_u8x,
+                                                              sz_u16_t const *lo_t, sz_u16_t const *hi_t, int count) {
     svbool_t const pg_b8x = svptrue_b8();
     svbool_t acc_b8x = svpfalse_b();
     for (int i = 0; i < count; ++i) {
@@ -724,7 +721,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_word_break_range16_sve2_(svuint8_t h
  *  quote bytes + partition masks, then decides for @p complete_limit and re-resolves the carry to
  *  @p adv when an open bridge is still undecided at the edge - the two-edge carry logic mirroring
  *  the NEON driver. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                       //
+STRINGZILLA_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(                                              //
     sz_u8_t const *raw, sz_u8_t const *high_a, sz_u8_t const *low_a, sz_u8_t const *plane_a, sz_u8_t const *cls_a, //
     sz_u64_t start_bytes_all, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,                    //
     sz_u64_t continuation_all, sz_u64_t forced_other, sz_u64_t four_byte_starts,                                   //
@@ -873,9 +870,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_break_resolve_window_sve2_(    
  *  @p boundary_b8x is compacted, widened to absolute 64-bit positions, and chained through the
  *  carried open @c word_start with an @c svinsr shift-in, so consecutive boundaries become (start,
  *  length) pairs without a stack round-trip. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
-                                                             sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
-                                                             sz_size_t *word_start_io) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b8x, sz_size_t base, sz_size_t *starts,
+                                                      sz_size_t *lengths, sz_size_t produced, sz_size_t capacity,
+                                                      sz_size_t *word_start_io) {
     svbool_t const pg_b32x = svptrue_b32();
     svbool_t const pg_b64x = svptrue_b64();
     sz_size_t const quarter_lanes = svcntw();
@@ -918,9 +915,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_word_drain_sve2_(svbool_t boundary_b
  *  Each iteration commits at most `svcntb()` bytes (one byte-vector of engine lanes); the carry
  *  mechanism re-decodes the deferred tail, so the windowed result is bit-exact with serial
  *  regardless of the per-iteration ceiling. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *word_starts, sz_size_t *word_lengths,          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *word_starts, sz_size_t *word_lengths,   //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -1030,24 +1027,28 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_sve2_( //
     return words;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *word_starts, sz_size_t *word_lengths,        //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_wordbreaks_sve2_(text, length, word_starts, word_lengths, words_capacity,
-                                                              bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *words_count = sz_utf8_wordbreaks_sve2_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
                                          bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
                                          sz_true_k));
-    return segments_count;
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_SVE2
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

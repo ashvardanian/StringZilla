@@ -9,6 +9,7 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_POWERVSX_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_POWERVSX_H_
 
+#include "stringzilla/types.h"
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
@@ -23,9 +24,11 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length,
-                                                                 sz_ptr_t destination) {
-    return sz_utf8_uncased_fold_serial(source, source_length, destination);
+STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_powervsx(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
+                                                          sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_uncased_fold_serial_(source, source_length, target);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

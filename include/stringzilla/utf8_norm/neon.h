@@ -27,7 +27,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -45,8 +45,8 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
-                                                                      uint8x16_t flag_vec_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
+                                                               uint8x16_t flag_vec_u8x16) {
     uint8x16_t non_ascii_u8x16 = vcgeq_u8(v_u8x16, vdupq_n_u8(0x80));
     uint8x16_t continuation_u8x16 = vcltq_u8(vsubq_u8(v_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
     uint8x16_t is_lead_u8x16 = vbicq_u8(non_ascii_u8x16, continuation_u8x16);
@@ -64,8 +64,7 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *const end = ptr + length;
     sz_u8_t const flag = sz_utf8_norm_form_flag_(form);
@@ -135,22 +134,30 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text
     return sz_utf8_norm_verify_block_(&ptr, end, end, flag, &previous_canonical_combining_class);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                     sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_neon_);
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_utf8_norm_neon(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                              sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_neon_);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_neon(sz_cptr_t source, sz_size_t length,
-                                                                  sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_neon_);
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_neon(sz_cptr_t source, sz_size_t source_length,
+                                                           sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_neon_);
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_NEON
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

@@ -15,16 +15,16 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
 
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_rotate1_v128_(v128_t bytes_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_rotate1_v128_(v128_t bytes_u8x16) {
     return wasm_i8x16_shuffle(bytes_u8x16, bytes_u8x16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0);
 }
 
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
     return wasm_i8x16_shuffle(bytes_u8x16, bytes_u8x16, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1);
 }
 
@@ -39,7 +39,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_rotate2_v128_(v128_t bytes_u8x16) {
  *  from @c compact_lut, then copies the low @p emit_count entries out in ascending lane order,
  *  byte-exact, with no per-match @c ctz.
  */
-STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_v128_(                     //
+STRINGZILLA_INLINE void sz_utf8_iterate_peel_v128_(                            //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -87,9 +87,9 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_v128_(                     /
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_v128( //
-    sz_cptr_t text, sz_size_t length,                     //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_v128_(    //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -175,9 +175,9 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_v128( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_v128_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -273,10 +273,34 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_v128( //
 
 #pragma endregion Multistep newline and whitespace iteration
 
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_utf8_newlines_v128(                                  //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_v128_(text, length, match_offsets, match_lengths, matches_capacity,
+                                            bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_v128(                               //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_v128_(text, length, match_offsets, match_lengths, matches_capacity,
+                                               bytes_consumed);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

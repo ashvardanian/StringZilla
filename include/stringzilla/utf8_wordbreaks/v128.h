@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -47,7 +47,7 @@ extern "C" {
 /** Build a per-quarter byte-boolean selector (0x00/0xFF) from the 16 lane bits of @p bits at
  *  offset @p shift, the v128 twin of @ref sz_utf8_word_break_byte_mask_from_bits_neon_ confined
  *  to one quarter. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_byte_mask_from_bits_v128_(sz_u64_t bits, int shift) {
+STRINGZILLA_INLINE v128_t sz_utf8_word_break_byte_mask_from_bits_v128_(sz_u64_t bits, int shift) {
     static sz_u8_t const bit_position_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     static sz_u8_t const lane_half[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     sz_u8_t const low_byte = (sz_u8_t)((bits >> shift) & 0xFF);
@@ -62,7 +62,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_byte_mask_from_bits_v128_(sz
  *  property table, read by a bounded scalar L1 walk over `raw & 0x7F` (v128's @c wasm_i8x16_swizzle
  *  reaches only 16 B, so NEON's in-register @c vqtbl4q_u8 read does not port). The window byte
  *  equals the codepoint on ASCII lanes. Addresses one quarter. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_ascii_class_v128_(v128_t bytes_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_word_break_ascii_class_v128_(v128_t bytes_u8x16) {
     sz_align_(16) sz_u8_t index_lanes[16], class_lanes[16];
     wasm_v128_store(index_lanes, wasm_v128_and(bytes_u8x16, wasm_i8x16_splat(0x7F)));
     for (int lane = 0; lane < 16; ++lane) class_lanes[lane] = sz_utf8_word_break_property_ascii_[index_lanes[lane]];
@@ -73,7 +73,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_ascii_class_v128_(v128_t byt
  *  flat page-compressed table via @ref sz_utf8_rune_flat_lookup_v128_, the v128 twin of
  *  @ref sz_utf8_word_break_bmp_class_neon_. Bit-exact with @c sz_rune_word_break_property over the
  *  whole BMP. Addresses one quarter. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_bmp_class_v128_(v128_t high_bytes_u8x16, v128_t low_bytes_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_word_break_bmp_class_v128_(v128_t high_bytes_u8x16, v128_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_v128_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                           (int)sz_utf8_word_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -83,8 +83,8 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_bmp_class_v128_(v128_t high_
  *  @p plane_off_u8x16 = (offset>>16)&0xFF (low nibble meaningful), @p high_u8x16 =
  *  (offset>>8)&0xFF, @p low_u8x16 = offset&0xFF. Bit-exact with @c sz_rune_word_break_property over
  *  the Supplementary Planes. Addresses one quarter. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_astral_class_v128_(v128_t plane_off_u8x16, v128_t high_u8x16,
-                                                                       v128_t low_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_word_break_astral_class_v128_(v128_t plane_off_u8x16, v128_t high_u8x16,
+                                                                v128_t low_u8x16) {
     v128_t const low_nibble_mask_u8x16 = wasm_i8x16_splat(0x0F);
     v128_t const nibble4_u8x16 = wasm_v128_and(plane_off_u8x16, low_nibble_mask_u8x16);
     v128_t const nibble3_u8x16 = wasm_v128_and(wasm_u8x16_shr(high_u8x16, 4), low_nibble_mask_u8x16);
@@ -125,7 +125,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_astral_class_v128_(v128_t pl
  *  @c bmp_compact start-gather needs @c ctz (banned here), and the flat lookup is index-safe on any
  *  byte, so the maskless full-window read matches the RVV backend and stays bit-exact at every
  *  start lane (every other lane is a don't-care left at zero, exactly as NEON leaves it). */
-STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_v128_( //
+STRINGZILLA_INLINE void sz_utf8_word_break_classify_window_v128_( //
     sz_utf8_rune_window_v128_t window, v128_t *classes_u8x16) {
     v128_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -190,7 +190,7 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_v128_( //
 
 /** A 64-bit "class byte == @p value" lane mask over the four class quarters (four @c wasm_i8x16_eq
  *  → combine). */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_v128_(v128_t const *classes_u8x16, sz_u8_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_class_mask_v128_(v128_t const *classes_u8x16, sz_u8_t value) {
     v128_t const value_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)value);
     return sz_utf8_mask_combine_v128_(
         wasm_i8x16_eq(classes_u8x16[0], value_broadcast_u8x16), wasm_i8x16_eq(classes_u8x16[1], value_broadcast_u8x16),
@@ -198,7 +198,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_v128_(v128_t co
 }
 
 /** A 64-bit "raw window byte == @p value" lane mask over the four window quarters. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_v128_(v128_t const *quarters_u8x16, sz_u8_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_equal_v128_(v128_t const *quarters_u8x16, sz_u8_t value) {
     v128_t const value_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)value);
     return sz_utf8_mask_combine_v128_(wasm_i8x16_eq(quarters_u8x16[0], value_broadcast_u8x16),
                                       wasm_i8x16_eq(quarters_u8x16[1], value_broadcast_u8x16),
@@ -208,7 +208,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_v128_(v128_t co
 
 /** A 64-bit "raw window byte >= @p bound" (unsigned) lane mask over the four window quarters
  *  (wasm_u8x16_ge). */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const *quarters_u8x16, sz_u8_t bound) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const *quarters_u8x16, sz_u8_t bound) {
     v128_t const bound_broadcast_u8x16 = wasm_i8x16_splat((sz_i8_t)bound);
     return sz_utf8_mask_combine_v128_(wasm_u8x16_ge(quarters_u8x16[0], bound_broadcast_u8x16),
                                       wasm_u8x16_ge(quarters_u8x16[1], bound_broadcast_u8x16),
@@ -219,8 +219,8 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_ge_v128_(v128_t const
 /** Per-quarter "(high,low) 16-bit value in `[lo, hi]`" membership for one range, the v128 unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_v128_.
  *  @c wasm_u8x16_ge and @c wasm_u8x16_lt are native, so no @c max_epu8 emulation is needed. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t high_u8x16, v128_t low_u8x16, sz_u16_t lo,
-                                                                      sz_u16_t hi) {
+STRINGZILLA_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t high_u8x16, v128_t low_u8x16, sz_u16_t lo,
+                                                               sz_u16_t hi) {
     v128_t const lo_high_u8x16 = wasm_i8x16_splat((sz_i8_t)(lo >> 8)),
                  lo_low_u8x16 = wasm_i8x16_splat((sz_i8_t)(lo & 0xFF));
     v128_t const hi_high_u8x16 = wasm_i8x16_splat((sz_i8_t)(hi >> 8)),
@@ -241,7 +241,7 @@ STRINGZILLA_HELPER_INLINE v128_t sz_utf8_word_break_range16_one_v128_(v128_t hig
 /** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over the four window
  *  quarters, the v128 twin of @ref sz_utf8_word_break_range16_mask_neon_ (WSegSpace /
  *  Extended_Pictographic). */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
     v128_t const *high_u8x16, v128_t const *low_u8x16, sz_u16_t const *lo_table, sz_u16_t const *hi_table, int count) {
     v128_t hit_u8x16[4] = {wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0), wasm_i8x16_splat(0)};
     for (int range = 0; range < count; ++range)
@@ -257,7 +257,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_v128_( //
  *  Applies the truncated-edge U+FFFD reclassify to the class quarters, materializes every per-class
  *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
  *  scan), and the per-lane class byte array. */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_(
+STRINGZILLA_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_v128_(
     sz_utf8_rune_window_v128_t window, v128_t *classes_u8x16, sz_u64_t start_bytes_all, sz_u64_t length_two,
     sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -366,8 +366,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_fr
 /** Resolve one window into the maximal-subpart partition — the v128 twin of
  *  @ref sz_utf8_word_break_partition_neon_: compute the per-ISA @c sz_u64_t masks and delegate to
  *  the portable @ref sz_utf8_word_break_partition_from_masks_. */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_v128_(
-    sz_utf8_rune_window_v128_t window, sz_u64_t valid, int at_end_of_text) {
+STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_v128_(sz_utf8_rune_window_v128_t window,
+                                                                                     sz_u64_t valid,
+                                                                                     int at_end_of_text) {
     v128_t const *raw_u8x16 = window.window_u8x16s;
     sz_u64_t const real_continuation = window.continuation & valid;
     // Declared length follows the serial high-nibble rule: 0xC/0xD → 2, 0xE → 3, 0xF → 4. The strict
@@ -406,9 +407,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_part
  *  advancing driver, mirroring @ref sz_utf8_wordbreaks_neon over the v128
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial,
  *  @c sz_utf8_wordbreaks_neon, and @c sz_utf8_wordbreaks_rvv. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_v128_( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *word_starts, sz_size_t *word_lengths,          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_v128_( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *word_starts, sz_size_t *word_lengths,   //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -530,26 +531,30 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_v128_( //
     return words;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *word_starts, sz_size_t *word_lengths,        //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_wordbreaks_v128_(text, length, word_starts, word_lengths, words_capacity,
-                                                              bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
 
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_v128(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *words_count = sz_utf8_wordbreaks_v128_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
+                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
+                                         sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

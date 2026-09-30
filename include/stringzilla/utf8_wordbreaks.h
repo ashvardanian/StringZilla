@@ -8,6 +8,7 @@
 #define STRINGZILLA_UTF8_WORDBREAKS_H_
 
 #include "stringzilla/types.h"
+#include "stringzilla/capabilities.h" // `sz_capability_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,7 +17,7 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Segment UTF-8 text into UAX-29 words in a single pass (dispatch function).
+ *  @brief Segment UTF-8 text into UAX-29 words in a single pass.
  *
  *  Walks the whole input left-to-right and writes one entry per word into two parallel output
  *  arrays: `word_starts[i]` is the byte offset of the i-th word and `word_lengths[i]` its byte
@@ -28,17 +29,21 @@ extern "C" {
  *  @param[out] word_starts Word byte offsets, at least @p words_capacity entries.
  *  @param[out] word_lengths Word byte lengths, at least @p words_capacity entries.
  *  @param[in] words_capacity Capacity of the output arrays, in entries.
+ *  @param[out] words_count Number of words written, at most @p words_capacity.
  *  @param[out] bytes_consumed Optional byte offset up to which the input was segmented: @p length
  *      when everything fit, else the start of the first word that did not fit (a TR29 boundary), so
  *      the caller may resume from `text + *bytes_consumed`.
- *  @return Number of words written (at most @p words_capacity).
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
- *  @note No zero-length words are emitted; @p length == 0 returns 0.
+ *  @note No zero-length words are emitted; @p length == 0 yields no words.
  */
-STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_wordbreaks( //
-    sz_cptr_t text, sz_size_t length,                 //
-    sz_size_t *word_starts, sz_size_t *word_lengths,  //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed);
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed,                         //
+    sz_capability_t capabilities, void *stream);
 
 /**
  *  @brief Get the Unicode TR29 Word_Break property for a codepoint.
@@ -51,7 +56,7 @@ STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_wordbreaks( //
  *
  *  @see Unicode Text Segmentation: https://www.unicode.org/reports/tr29/
  */
-STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
+STRINGZILLA_CONSTEXPR sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
 
 /**
  *  @brief Check if a codepoint is a "word character" (has word-forming property).
@@ -62,10 +67,10 @@ STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune);
  *  @param[in] rune The Unicode codepoint to check.
  *  @return @c sz_true_k if the codepoint is a word character, @c sz_false_k otherwise.
  */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
+STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_word_char(sz_rune_t rune);
 
 /**
- *  @brief Suggested batch size for streaming boundaries through the @c sz_utf8_find_* kernels.
+ *  @brief Suggested batch size for streaming boundaries through the segmenting kernels.
  *
  *  Iterators that emit one segment/delimiter at a time buffer this many boundaries per call so
  *  the per-item overhead amortizes without an unbounded output buffer. It is only a default -
@@ -91,118 +96,127 @@ enum { sz_iterators_default_steps_k = 64 };
  *  @note Position 0 and position == length are always boundaries (SOT/EOT).
  *  @note This is an internal helper used by the iterators; not part of stable ABI.
  */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length,
-                                                                   sz_size_t position);
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position);
+
+/**
+ *  @brief Finds the UTF-8 word break kernel of @p kind, from the best of @p capabilities.
+ *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
+ *  @param[out] capability The capability the kernel belongs to, or zero.
+ *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                           sz_kernel_punned_t *kernel, sz_capability_t *capability);
 
 #pragma endregion
 
 #pragma region Platform Specific Backends
 
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                             sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                             sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_serial(                         //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 
 #if STRINGZILLA_TARGET_HASWELL
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                              sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                              sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_haswell(                        //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                              sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                              sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_icelake(                        //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                           sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_neon(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                           sz_size_t *bytes_consumed);
-#endif
-
-#if STRINGZILLA_TARGET_V128
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                           sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                          sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                          sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_rvv(                            //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
-#if STRINGZILLA_TARGET_LASX
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_lasx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                           sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                           sz_size_t *bytes_consumed);
+#if STRINGZILLA_TARGET_V128
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_v128(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_LOONGSONASX
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(                    //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
-/** @copydoc sz_utf8_wordbreaks */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                               sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                               sz_size_t *bytes_consumed);
+/** @copydoc sz_utf8_wordbreaks_best */
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(                       //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream);
 #endif
 
 #pragma endregion
 
-/*  Implementation Section - each ISA backend lives in its own header, included serial-first. */
+/*  Header-only builds define each kernel inline from its tier header, while the library defines
+ *  every kernel once, in its capability's unit under `c/cpu/`. */
 #include "stringzilla/utf8_wordbreaks/serial.h"
+#if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/utf8_wordbreaks/icelake.h"
 #include "stringzilla/utf8_wordbreaks/haswell.h"
 #include "stringzilla/utf8_wordbreaks/neon.h"
 #include "stringzilla/utf8_wordbreaks/sve2.h"
 #include "stringzilla/utf8_wordbreaks/v128.h"
 #include "stringzilla/utf8_wordbreaks/rvv.h"
-#include "stringzilla/utf8_wordbreaks/lasx.h"
+#include "stringzilla/utf8_wordbreaks/loongsonasx.h"
 #include "stringzilla/utf8_wordbreaks/powervsx.h"
+#endif // STRINGZILLA_HEADER_ONLY
 
-#pragma region Dynamic Dispatch
+#if STRINGZILLA_HEADER_ONLY
 
-#if !STRINGZILLA_RUNTIME_DISPATCH
-
-STRINGZILLA_API_RUNTIME sz_size_t sz_utf8_wordbreaks(sz_cptr_t text, sz_size_t length, sz_size_t *word_starts,
-                                                     sz_size_t *word_lengths, sz_size_t words_capacity,
-                                                     sz_size_t *bytes_consumed) {
-#if STRINGZILLA_TARGET_ICELAKE
-    return sz_utf8_wordbreaks_icelake(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_HASWELL
-    return sz_utf8_wordbreaks_haswell(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_SVE2
-    return sz_utf8_wordbreaks_sve2(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_NEON
-    return sz_utf8_wordbreaks_neon(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_V128
-    return sz_utf8_wordbreaks_v128(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_RVV
-    return sz_utf8_wordbreaks_rvv(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_LASX
-    return sz_utf8_wordbreaks_lasx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#elif STRINGZILLA_TARGET_POWERVSX
-    return sz_utf8_wordbreaks_powervsx(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#else
-    return sz_utf8_wordbreaks_serial(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
-#endif
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(                           //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed,                         //
+    sz_capability_t capabilities, void *stream) {
+    sz_unused_(text), sz_unused_(length), sz_unused_(word_starts), sz_unused_(word_lengths), sz_unused_(words_capacity),
+        sz_unused_(words_count), sz_unused_(bytes_consumed), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-#endif // !STRINGZILLA_RUNTIME_DISPATCH
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                           sz_kernel_punned_t *kernel, sz_capability_t *capability) {
+    sz_unused_(kind), sz_unused_(capabilities);
+    *kernel = STRINGZILLA_NULL, *capability = 0;
+    return sz_missing_library_k;
+}
 
-#pragma endregion
+#endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 }

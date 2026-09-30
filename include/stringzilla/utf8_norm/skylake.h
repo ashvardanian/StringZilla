@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SKYLAKE
+#if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
                              apply_to = function)
@@ -41,14 +41,13 @@ extern "C" {
 
 /** Per-tier lead classifier: given a 64-byte vector, the lead mask, and the form flag, returns the
  *  mask of lanes that begin a candidate non-inert lead. It is the only step Ice Lake overrides. */
-typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t)(__m512i, __mmask64, sz_u8_t);
+typedef __mmask64 (*sz_utf8_norm_lead_classify_avx512_t_)(__m512i, __mmask64, sz_u8_t);
 
 /** 64-entry lead lookup without AVX-512 VBMI: four per-128-lane @c vpshufb over the
  *  broadcast LUT quadrants, selected by the high two index bits, then `families & flag`
  *  picks out the requested form. */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64,
-                                                                                  __mmask64 is_lead_m64,
-                                                                                  sz_u8_t form_flag) {
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake_(__m512i bytes_u8x64, __mmask64 is_lead_m64,
+                                                                            sz_u8_t form_flag) {
     __m512i index_u8x64 = _mm512_and_si512(bytes_u8x64, _mm512_set1_epi8(0x3F));
     __m512i low_nibble_u8x64 = _mm512_and_si512(index_u8x64, _mm512_set1_epi8(0x0F));
     // `srli_epi16` leaks the neighbouring byte's low bits into bits 4..7; index is in [0,63] so the high
@@ -71,9 +70,8 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_norm_lead_classify_shuffle_skylake
 
 /** Shared AVX-512 scan skeleton: a 64-byte all-ASCII gate, lead-classify via @p classify, then the
  *  shared scalar verify on any block that survives the gate. Ice Lake reuses this verbatim. */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_normal_form_t form,
-                                                                  sz_utf8_norm_lead_classify_avx512_t classify) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form,
+                                                           sz_utf8_norm_lead_classify_avx512_t_ classify) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -105,27 +103,35 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_norm_classify_avx512_(sz_cptr_t text
 
 /** Skylake scan primitive: the first byte beginning a non-inert codepoint for
  *  @p form, else NULL. */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length,
-                                                                     sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_skylake_(sz_cptr_t text, sz_size_t length,
+                                                               sz_normal_form_t form) {
     return sz_utf8_norm_classify_avx512_(text, length, form, &sz_utf8_norm_lead_classify_shuffle_skylake_);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                        sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_skylake_);
+#if STRINGZILLA_TARGET_SKYLAKE
+
+STRINGZILLA_API sz_status_t sz_utf8_norm_skylake(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                 sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_skylake_);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t length,
-                                                                     sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_skylake_);
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, sz_size_t source_length,
+                                                              sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_skylake_);
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_SKYLAKE
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SKYLAKE
+#endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
 
 #ifdef __cplusplus
 }

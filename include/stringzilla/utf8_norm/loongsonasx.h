@@ -1,28 +1,28 @@
 /**
- *  @file include/stringzilla/utf8_norm/lasx.h
+ *  @file include/stringzilla/utf8_norm/loongsonasx.h
  *  @author Ash Vardanian
  *  @date June 15, 2026
  *  @brief LoongArch LASX 256-bit backend for the single-pass normalizer, NFD / NFC / NFKD / NFKC.
  *
  *  This backend overrides exactly one point of the shared engine: the scan primitive
- *  @c sz_utf8_norm_classify_lasx_, which locates the first non-inert byte for a form. The two
- *  public entry points, @c sz_utf8_norm_lasx and @c sz_utf8_find_denormalized_lasx, reuse the
- *  force-inlined engines from `serial.h`, passing this scanner as the constant function address
- *  that devirtualizes the call.
+ *  @c sz_utf8_norm_classify_loongsonasx_, which locates the first non-inert byte for a form. The
+ *  two public entry points, @c sz_utf8_norm_loongsonasx and
+ *  @c sz_utf8_find_denormalized_loongsonasx, reuse the force-inlined engines from `serial.h`,
+ *  passing this scanner as the constant function address that devirtualizes the call.
  *
  *  The scanner mirrors the Skylake structure at 256-bit width: a 32-byte all-ASCII gate via the
- *  @c sz_xvmovemask_b_utf8_norm_lasx_ reduction, then a lead-byte classify over the shared 64-entry
- *  @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint verify,
+ *  @c sz_xvmovemask_b_utf8_norm_loongsonasx_ reduction, then a lead-byte classify over the shared
+ *  64-entry @c sz_utf8_norm_lead_lut_, then the shared cold per-codepoint verify,
  *  @c sz_utf8_norm_verify_block_. LASX has no 64-entry permute, so the lookup uses the even/odd
- *  two-table @c __lasx_xvshuf_b blend from `find/lasx.h`: `xvshuf_b(hi, lo, index)` is a 32-entry
- *  per-128-bit-lane select over two 16-byte tables, keyed on the low five index bits, and two such
- *  selects, for index < 32 and index ≥ 32, are blended by @c __lasx_xvbitsel_v on bit five of the
- *  index to cover all 64 entries.
+ *  two-table @c __lasx_xvshuf_b blend from `find/loongsonasx.h`: `xvshuf_b(hi, lo, index)` is a
+ *  32-entry per-128-bit-lane select over two 16-byte tables, keyed on the low five index bits, and
+ *  two such selects, for index < 32 and index ≥ 32, are blended by @c __lasx_xvbitsel_v on bit five
+ *  of the index to cover all 64 entries.
  *
  *  @sa include/stringzilla/utf8_norm.h
  */
-#ifndef STRINGZILLA_UTF8_NORM_LASX_H_
-#define STRINGZILLA_UTF8_NORM_LASX_H_
+#ifndef STRINGZILLA_UTF8_NORM_LOONGSONASX_H_
+#define STRINGZILLA_UTF8_NORM_LOONGSONASX_H_
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_norm/serial.h"
@@ -31,15 +31,15 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_LASX
+#if STRINGZILLA_TARGET_LOONGSONASX
 
 /**
  *  @brief Packs each byte's sign bit into a 32-bit mask, matching AVX2's @c _mm256_movemask_epi8.
  *
- *  See `utf8_runes/lasx.h`: @c __lasx_xvmskltz_b packs each byte's sign bit into a per-128-bit-lane
- *  16-bit mask, word 0 for the low lane and word 4 for the high lane, recombined here.
+ *  As in `utf8_runes/loongsonasx.h`, @c __lasx_xvmskltz_b packs the sign bits into a 16-bit mask
+ *  per 128-bit lane, word 0 for the low lane and word 4 for the high one, and this joins the two.
  */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_extended_u8x32) {
+STRINGZILLA_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_loongsonasx_(__m256i sign_extended_u8x32) {
     __m256i collected_u32x8 = __lasx_xvmskltz_b(sign_extended_u8x32);
     sz_u32_t low = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 0);
     sz_u32_t high = (sz_u32_t)__lasx_xvpickve2gr_wu(collected_u32x8, 4);
@@ -58,12 +58,12 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_xvmovemask_b_utf8_norm_lasx_(__m256i sign_
  *  the index onto [0, 32) over tables 32..47 and 48..63. @c __lasx_xvbitsel_v then picks the high
  *  select wherever bit five of the index is set, i.e. for indices of 32 and above.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
+STRINGZILLA_INLINE __m256i sz_utf8_norm_lead_lookup_loongsonasx_(__m256i index_u8x32, __m256i table_low_0_u8x32,
                                                                  __m256i table_low_1_u8x32, __m256i table_high_0_u8x32,
                                                                  __m256i table_high_1_u8x32) {
     __m256i families_low_u8x32 = __lasx_xvshuf_b(table_low_1_u8x32, table_low_0_u8x32, index_u8x32);
     __m256i families_high_u8x32 = __lasx_xvshuf_b(table_high_1_u8x32, table_high_0_u8x32, index_u8x32);
-    // Bit five (value 0x20) of the index is set exactly for index >= 32: select the high half there.
+    // Bit five (0x20) of the index is set exactly for index ≥ 32, so select the high half there.
     __m256i select_high_u8x32 = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0x1F), index_u8x32);
     return __lasx_xvbitsel_v(families_low_u8x32, families_high_u8x32, select_high_u8x32);
 }
@@ -78,15 +78,15 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_norm_lead_lookup_lasx_(__m256i index_u
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_loongsonasx_(sz_cptr_t text, sz_size_t length,
+                                                                   sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
     sz_u8_t previous_canonical_combining_class = 0;
 
-    // The 64-entry LUT split into four 16-byte tables, each duplicated into both 128-bit lanes so the
-    // per-lane `__lasx_xvshuf_b` selects the same table for either half (mirroring `find/lasx.h`).
+    // The 64-entry LUT as four 16-byte tables, each copied into both 128-bit lanes as in
+    // `find/loongsonasx.h`, so the per-lane `__lasx_xvshuf_b` picks the same table for either half.
     sz_u8_t table_low_0_bytes[32], table_low_1_bytes[32], table_high_0_bytes[32], table_high_1_bytes[32];
     for (sz_size_t lane = 0; lane != 16; ++lane) {
         table_low_0_bytes[lane] = table_low_0_bytes[lane + 16] = sz_utf8_norm_lead_lut_[lane + 0];
@@ -102,7 +102,7 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text
     while (position + 32 <= end) {
         __m256i bytes_u8x32 = __lasx_xvld(position, 0);
         // All-ASCII gate: a high (sign) bit marks a non-ASCII byte. An ASCII-only window is inert.
-        sz_u32_t non_ascii = sz_xvmovemask_b_utf8_norm_lasx_(bytes_u8x32);
+        sz_u32_t non_ascii = sz_xvmovemask_b_utf8_norm_loongsonasx_(bytes_u8x32);
         if (non_ascii == 0) {
             position += 32, previous_canonical_combining_class = 0;
             continue;
@@ -112,14 +112,14 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text
         __m256i continuation_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(bytes_u8x32, __lasx_xvreplgr2vr_b((char)0xC0)),
                                                     __lasx_xvreplgr2vr_b((char)0x80));
         __m256i is_lead_u8x32 = __lasx_xvandn_v(continuation_u8x32, non_ascii_u8x32);
-        // Classify each lead via the 64-entry LUT (index = byte & 0x3F), then keep the flagged form bit.
+        // Classify each lead by the 64-entry LUT at byte & 0x3F, then keep the flagged form bit.
         __m256i index_u8x32 = __lasx_xvand_v(bytes_u8x32, __lasx_xvreplgr2vr_b(0x3F));
-        __m256i families_u8x32 = sz_utf8_norm_lead_lookup_lasx_(index_u8x32, table_low_0_u8x32, table_low_1_u8x32,
-                                                                table_high_0_u8x32, table_high_1_u8x32);
+        __m256i families_u8x32 = sz_utf8_norm_lead_lookup_loongsonasx_(
+            index_u8x32, table_low_0_u8x32, table_low_1_u8x32, table_high_0_u8x32, table_high_1_u8x32);
         __m256i has_flag_u8x32 = __lasx_xvslt_bu(__lasx_xvreplgr2vr_b(0),
                                                  __lasx_xvand_v(families_u8x32, __lasx_xvreplgr2vr_b((char)form_flag)));
         __m256i flagged_u8x32 = __lasx_xvand_v(is_lead_u8x32, has_flag_u8x32);
-        if (sz_xvmovemask_b_utf8_norm_lasx_(flagged_u8x32) == 0) {
+        if (sz_xvmovemask_b_utf8_norm_loongsonasx_(flagged_u8x32) == 0) {
             // 32 bytes inert for the form: skip, then realign onto a codepoint boundary.
             position += 32, previous_canonical_combining_class = 0;
             while (position < end && (*position & 0xC0) == 0x80) ++position;
@@ -130,24 +130,29 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_lasx_(sz_cptr_t text
                                                          &previous_canonical_combining_class);
         if (violation) return violation;
     }
-    // Tail (< 32 bytes): the shared scalar verify carries the combining class across the final boundary.
+    // The shared scalar verify finishes the sub-32-byte tail, carrying the combining class across.
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_lasx(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                     sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_lasx_);
+STRINGZILLA_API sz_status_t sz_utf8_norm_loongsonasx(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                     sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_loongsonasx_);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_lasx(sz_cptr_t source, sz_size_t length,
-                                                                  sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_lasx_);
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_loongsonasx(sz_cptr_t source, sz_size_t source_length,
+                                                                  sz_normal_form_t form, sz_cptr_t *match,
+                                                                  void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_loongsonasx_);
+    return sz_success_k;
 }
 
-#endif // STRINGZILLA_TARGET_LASX
+#endif // STRINGZILLA_TARGET_LOONGSONASX
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // STRINGZILLA_UTF8_NORM_LASX_H_
+#endif // STRINGZILLA_UTF8_NORM_LOONGSONASX_H_

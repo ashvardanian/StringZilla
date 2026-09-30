@@ -9,7 +9,8 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_ICELAKE_H_
 #define STRINGZILLA_UTF8_UNCASED_ICELAKE_H_
 
-#include "stringzilla/find/skylake.h" // `sz_find_skylake`
+#include "stringzilla/types.h"
+#include "stringzilla/find/skylake.h" // `sz_find_skylake_`
 #include "stringzilla/utf8_uncased/serial.h"
 
 #ifdef __cplusplus
@@ -18,16 +19,17 @@ extern "C" {
 
 #if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
-#pragma clang attribute push(                                                                                  \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,evex512"))), \
+#pragma clang attribute push(                                                                                        \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                          \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2"))), \
+#pragma clang attribute push(                                                                                \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2")
+#pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
+                   "lzcnt")
 #endif
 
 #pragma region ASCII Uncased Find
@@ -39,7 +41,7 @@ extern "C" {
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_ascii_fold_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_ascii_fold_zmm_(__m512i text_u8x64) {
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
     __m512i const x_20_u8x64 = _mm512_set1_epi8(0x20);
@@ -57,11 +59,11 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_ascii_fold_zmm_
  *  combine all 3, and VPTESTNMB to find matches. No window verification is needed, since the probes
  *  cover the entire window.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                                //
-    sz_cptr_t needle, sz_size_t needle_length,                                    //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                     //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length,                             //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
+    sz_size_t *match_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -114,7 +116,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
-                matched_length);
+                match_length);
             if (match) { return match; }
         }
         haystack_ptr += step;
@@ -155,11 +157,12 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
-                matched_length);
+                match_length);
             if (match) { return match; }
         }
     }
 
+    *match_length = 0;
     return STRINGZILLA_NULL_CHAR;
 }
 
@@ -171,11 +174,11 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_3probe_
  *  to find matches. Window verification is required, since the probes don't cover all positions in
  *  the folded window.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                                //
-    sz_cptr_t needle, sz_size_t needle_length,                                    //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                     //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                         //
+    sz_cptr_t needle, sz_size_t needle_length,                             //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
+    sz_size_t *match_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -246,7 +249,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
-                matched_length);
+                match_length);
             if (match) { return match; }
         }
         haystack_ptr += step;
@@ -301,11 +304,12 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_
                 haystack_candidate_ptr - haystack, folded_window_length,                                   //
                 needle_metadata->offset_in_unfolded,                                                       //
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, //
-                matched_length);
+                match_length);
             if (match) { return match; }
         }
     }
 
+    *match_length = 0;
     return STRINGZILLA_NULL_CHAR;
 }
 
@@ -314,13 +318,13 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_ascii_4probe_
 #pragma region Scripted Uncased Find
 
 /** Folds one ZMM register of haystack text using script-specific rules. */
-typedef __m512i (*sz_utf8_uncased_fold_zmm_t)(__m512i text_u8x64);
+typedef __m512i (*sz_utf8_uncased_fold_zmm_t_)(__m512i text_u8x64);
 
 /**
  *  @brief Flags positions of "danger" characters that fold to a different byte width.
  *  @param[in] load_m64 Bitmask of the bytes loaded from the haystack, for tail-safe range checks.
  */
-typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t)(__m512i text_u8x64, __mmask64 load_m64);
+typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t_)(__m512i text_u8x64, __mmask64 load_m64);
 
 /**
  *  @brief Shared scan loop behind all script-specific uncased searches.
@@ -341,16 +345,16 @@ typedef __mmask64 (*sz_utf8_uncased_alarm_zmm_t)(__m512i text_u8x64, __mmask64 l
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
-    sz_utf8_uncased_fold_zmm_t fold,                                          //
-    sz_utf8_uncased_alarm_zmm_t alarm,                                        //
-    sz_cptr_t haystack, sz_size_t haystack_length,                            //
-    sz_cptr_t needle, sz_size_t needle_length,                                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
+    sz_utf8_uncased_fold_zmm_t_ fold,                                  //
+    sz_utf8_uncased_alarm_zmm_t_ alarm,                                //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+    sz_size_t *match_length) {
 
     // Validate inputs
     sz_assert_(needle_metadata && "needle_metadata must be provided");
@@ -412,7 +416,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
                     haystack_ptr, chunk_size,                             // extended danger zone
                     needle_first_safe_folded_rune,                        // pivot point
                     needle_metadata->offset_in_unfolded,                  // its location in the needle
-                    matched_length);
+                    match_length);
                 if (match) return match;
                 haystack_ptr += step;
                 continue;
@@ -447,7 +451,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
                 haystack_candidate_ptr - haystack, needle_metadata->folded_slice_length, // matched offset & length
                 needle_metadata->offset_in_unfolded,                                     // head
                 needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded, // tail
-                matched_length);
+                match_length);
             if (match) { return match; }
         }
         haystack_ptr += step;
@@ -463,10 +467,11 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
             haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr), // the unprobed tail
             needle_first_safe_folded_rune,                          // pivot point
             needle_metadata->offset_in_unfolded,                    // its location in the needle
-            matched_length);
+            match_length);
         if (match) { return match; }
     }
 
+    *match_length = 0;
     return STRINGZILLA_NULL_CHAR;
 }
 
@@ -481,7 +486,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_scripted_( //
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -532,8 +537,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_western_europe_
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_western_europe_fold_efficiently_zmm_(
-    __m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_western_europe_fold_efficiently_zmm_(__m512i text_u8x64) {
     // No cheaper instruction selection has been found for this fold yet: the naive
     // version already folds Latin-1 with a single masked range check and a blend.
     return sz_utf8_uncased_search_icelake_western_europe_fold_naively_zmm_(text_u8x64);
@@ -562,8 +566,7 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_western_europ
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_naively_zmm_(
-    __m512i text_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_naively_zmm_(__m512i text_u8x64) {
     // Lead byte constants
     __m512i const x_e1_u8x64 = _mm512_set1_epi8((char)0xE1);
     __m512i const x_e2_u8x64 = _mm512_set1_epi8((char)0xE2);
@@ -633,9 +636,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_western_europ
  *  @param[in] text_u8x64 The text ZMM register to scan for danger bytes.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_efficiently_zmm_(
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_western_europe_alarm_efficiently_zmm_(
     __m512i text_u8x64, __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices_u8x64 = _mm512_set_epi8( //
@@ -698,18 +701,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_western_eur
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                                  //
-    sz_cptr_t needle, sz_size_t needle_length,                                      //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                       //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                           //
+    sz_cptr_t needle, sz_size_t needle_length,                               //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_western_europe_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_western_europe_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Western European Uncased Find
@@ -723,7 +726,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_western_europ
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -825,8 +828,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_central_europe_
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_central_europe_fold_efficiently_zmm_(
-    __m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_central_europe_fold_efficiently_zmm_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -931,8 +933,7 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_central_europ
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_naively_zmm_(
-    __m512i text_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_naively_zmm_(__m512i text_u8x64) {
     // Lead byte constants
     __m512i const x_e2_u8x64 = _mm512_set1_epi8((char)0xE2); // for Kelvin sign
     __m512i const x_c3_u8x64 = _mm512_set1_epi8((char)0xC3); // for Sharp S
@@ -987,9 +988,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_central_europ
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_efficiently_zmm_(
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_central_europe_alarm_efficiently_zmm_(
     __m512i text_u8x64, __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices_u8x64 = _mm512_set_epi8( //
@@ -1038,18 +1039,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_central_eur
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Safe window metadata.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                                  //
-    sz_cptr_t needle, sz_size_t needle_length,                                      //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                       //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europe_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                           //
+    sz_cptr_t needle, sz_size_t needle_length,                               //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_central_europe_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_central_europe_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Central European Uncased Find
@@ -1065,7 +1066,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_central_europ
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -1124,7 +1125,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_n
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_efficiently_zmm_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_cyrillic_fold_efficiently_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -1195,7 +1196,7 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_cyrillic_fold
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_naively_zmm_(__m512i text_u8x64) {
     __mmask64 is_e1_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
     __mmask64 is_b2_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB2));
     __mmask64 is_folding_third_m64 = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, _mm512_set1_epi8((char)0x80)),
@@ -1211,11 +1212,11 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alar
  *  refinement hides behind a branch and the hot path is two compares.
  *
  *  @param[in] text_u8x64 The haystack ZMM register.
- *  @param[in] load_m64 Present for the shared @ref sz_utf8_uncased_alarm_zmm_t signature.
+ *  @param[in] load_m64 Present for the shared @ref sz_utf8_uncased_alarm_zmm_t_ signature.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_efficiently_zmm_(
-    __m512i text_u8x64, __mmask64 load_m64) {
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_cyrillic_alarm_efficiently_zmm_(__m512i text_u8x64,
+                                                                                               __mmask64 load_m64) {
     sz_unused_(load_m64);
     __mmask64 is_e1_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
     __mmask64 is_b2_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB2));
@@ -1239,18 +1240,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_cyrillic_al
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Safe window metadata.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                            //
-    sz_cptr_t needle, sz_size_t needle_length,                                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_cyrillic_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_cyrillic_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Cyrillic Uncased Find
@@ -1264,7 +1265,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_cyrillic_( //
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -1332,7 +1333,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_n
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold_efficiently_zmm_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_armenian_fold_efficiently_zmm_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -1408,7 +1409,7 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_armenian_fold
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_naively_zmm_(__m512i text_u8x64) {
     // Lead byte constants
     __m512i const x_d6_u8x64 = _mm512_set1_epi8((char)0xD6); // for Ech-Yiwn
     __m512i const x_ef_u8x64 = _mm512_set1_epi8((char)0xEF); // for ligatures
@@ -1440,9 +1441,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alar
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_efficiently_zmm_(
-    __m512i text_u8x64, __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_armenian_alarm_efficiently_zmm_(__m512i text_u8x64,
+                                                                                               __mmask64 load_m64) {
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Only 4 CMPEQ operations - optimization overhead likely not worth it
     return sz_utf8_uncased_search_icelake_armenian_alarm_naively_zmm_(text_u8x64);
@@ -1457,18 +1458,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_armenian_al
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                            //
-    sz_cptr_t needle, sz_size_t needle_length,                                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_armenian_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_armenian_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Armenian Uncased Find
@@ -1482,7 +1483,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_armenian_( //
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -1614,7 +1615,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_naiv
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_efficiently_zmm_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_greek_fold_efficiently_zmm_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -1708,7 +1709,7 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_greek_fold_ef
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_naively_zmm_(__m512i text_u8x64) {
     // All constants local to function
     __m512i const x_ce_u8x64 = _mm512_set1_epi8((char)0xCE);
     __m512i const x_cf_u8x64 = _mm512_set1_epi8((char)0xCF);
@@ -1756,9 +1757,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_n
  *  @param[in] text_u8x64 The haystack ZMM register.
  *  @return Bitmask of positions where danger characters are detected.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_efficiently_zmm_(__m512i text_u8x64,
-                                                                                                  __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_greek_alarm_efficiently_zmm_(__m512i text_u8x64,
+                                                                                            __mmask64 load_m64) {
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // The naive reference burns 13 CMPEQs - all bound to port 5. The danger second bytes pair up
     // across the 9x and Bx columns (90/B0, 91/B1, 95/B5), so clearing bit 5 with one VPANDD (a
@@ -1817,18 +1818,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_greek_alarm
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                         //
-    sz_cptr_t needle, sz_size_t needle_length,                             //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,              //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                  //
+    sz_cptr_t needle, sz_size_t needle_length,                      //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,       //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_greek_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_greek_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Greek Uncased Find
@@ -1842,7 +1843,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_greek_( //
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_zmm_(__m512i text_u8x64) {
+STRINGZILLA_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_naively_zmm_(__m512i text_u8x64) {
     // Start with ASCII folded
     __m512i result_u8x64 = sz_utf8_uncased_search_icelake_ascii_fold_zmm_(text_u8x64);
 
@@ -1952,8 +1953,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold
  *  @param[in] text_u8x64 The text ZMM register.
  *  @return The folded ZMM register.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_efficiently_zmm_(
-    __m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_vietnamese_fold_efficiently_zmm_(__m512i text_u8x64) {
     // Inline ASCII fold (avoiding function call overhead)
     __m512i const a_upper_u8x64 = _mm512_set1_epi8('A');
     __m512i const range26_u8x64 = _mm512_set1_epi8(26);
@@ -2082,8 +2082,8 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_vietnamese_fo
  *  @param[in] load_m64 Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_naively_zmm_(__m512i text_u8x64,
-                                                                                                 __mmask64 load_m64) {
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_naively_zmm_(__m512i text_u8x64,
+                                                                                          __mmask64 load_m64) {
     // Lead byte constants
     __m512i const x_e1_u8x64 = _mm512_set1_epi8((char)0xE1);
     __m512i const x_c3_u8x64 = _mm512_set1_epi8((char)0xC3);
@@ -2142,8 +2142,8 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_al
  *  @param[in] load_m64 Mask of valid bytes in the ZMM register.
  *  @return Bitmask of positions where danger characters are detected (at sequence start).
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_efficiently_zmm_(
-    __m512i text_u8x64, __mmask64 load_m64) {
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_vietnamese_alarm_efficiently_zmm_(__m512i text_u8x64,
+                                                                                                 __mmask64 load_m64) {
     // Range constants
     __m512i const x_e1_u8x64 = _mm512_set1_epi8((char)0xE1);
     __m512i const x_c3_u8x64 = _mm512_set1_epi8((char)0xC3);
@@ -2206,18 +2206,18 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_vietnamese_
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                              //
-    sz_cptr_t needle, sz_size_t needle_length,                                  //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                   //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                       //
+    sz_cptr_t needle, sz_size_t needle_length,                           //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,            //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_vietnamese_fold_efficiently_zmm_,
         sz_utf8_uncased_search_icelake_vietnamese_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Vietnamese Uncased Find
@@ -2236,9 +2236,9 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_vietnamese_( 
  *
  *  All Georgian scripts use 3-byte UTF-8, so no length changes during folding.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_zmm_(__m512i text_u8x64,
-                                                                                       __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+STRINGZILLA_INLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_zmm_(__m512i text_u8x64,
+                                                                                __mmask64 load_m64) {
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Lead byte detection
     __mmask64 is_e1_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
@@ -2280,9 +2280,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alar
  *  port-5 ops. The reference @ref sz_utf8_uncased_search_icelake_georgian_alarm_zmm_ keeps its name
  *  unsuffixed because the probe harness references it directly.
  */
-STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_efficiently_zmm_(
-    __m512i text_u8x64, __mmask64 load_m64) {
-    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t` signature
+STRINGZILLA_OUTLINED_ __mmask64 sz_utf8_uncased_search_icelake_georgian_alarm_efficiently_zmm_(__m512i text_u8x64,
+                                                                                               __mmask64 load_m64) {
+    sz_unused_(load_m64); // Present for the shared `sz_utf8_uncased_alarm_zmm_t_` signature
 
     // Index vector for materializing the previous byte: lane i takes byte i-1, lane 0 is zeroed
     __m512i const previous_byte_indices_u8x64 = _mm512_set_epi8( //
@@ -2334,7 +2334,7 @@ STRINGZILLA_HELPER_NOINLINE __mmask64 sz_utf8_uncased_search_icelake_georgian_al
  *  Georgian Mkhedruli is caseless, so Georgian characters pass through unchanged.
  *  Only ASCII uppercase letters need folding for mixed Latin text.
  */
-STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_georgian_fold_zmm_(__m512i text_u8x64) {
+STRINGZILLA_OUTLINED_ __m512i sz_utf8_uncased_search_icelake_georgian_fold_zmm_(__m512i text_u8x64) {
     // ASCII A-Z range check: (byte - 'A') <= 25
     __m512i offset_a_u8x64 = _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8('A'));
     __mmask64 is_upper_m64 = _mm512_cmple_epu8_mask(offset_a_u8x64, _mm512_set1_epi8(25));
@@ -2353,97 +2353,23 @@ STRINGZILLA_HELPER_NOINLINE __m512i sz_utf8_uncased_search_icelake_georgian_fold
  *  @param[in] needle Pointer to the full needle string.
  *  @param[in] needle_length Length of the full needle in bytes.
  *  @param[in] needle_metadata Pre-folded window content with probe positions.
- *  @param[out] matched_length Haystack bytes consumed by the match.
+ *  @param[out] match_length Haystack bytes consumed by the match.
  *  @return Pointer to match start or @c STRINGZILLA_NULL_CHAR if not found.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_georgian_( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                            //
-    sz_cptr_t needle, sz_size_t needle_length,                                //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata,                 //
-    sz_size_t *matched_length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_georgian_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,                     //
+    sz_cptr_t needle, sz_size_t needle_length,                         //
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata,          //
+    sz_size_t *match_length) {
     return sz_utf8_uncased_search_icelake_scripted_( //
         sz_utf8_uncased_search_icelake_georgian_fold_zmm_,
         sz_utf8_uncased_search_icelake_georgian_alarm_efficiently_zmm_, //
-        haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
+        haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
 #pragma endregion Georgian Uncased Find
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_icelake( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                 //
-    sz_cptr_t needle, sz_size_t needle_length,                     //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-
-    // Handle the obvious edge cases first
-    if (needle_length == 0) {
-        *matched_length = 0;
-        return haystack;
-    }
-
-    // If the needle is entirely made of case-less characters - perform direct substring search
-    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
-    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_icelake(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
-        sz_cptr_t result = sz_find_skylake(haystack, haystack_length, needle, needle_length);
-        *matched_length = result ? needle_length : 0;
-        return result;
-    }
-
-    // Analyze needle to find the best safe window for each script
-    if (is_unknown) {
-        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
-        // If no SIMD-safe window found, fall back to serial immediately
-        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                 matched_length);
-    }
-
-    // Dispatch to appropriate kernel
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_ascii_invariant_k) {
-        // Use XOR+VPTERNLOG+VPTESTNMB variants for better port distribution
-        if (needle_metadata->folded_slice_length <= 3)
-            return sz_utf8_uncased_search_icelake_ascii_3probe_( //
-                haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-        else
-            return sz_utf8_uncased_search_icelake_ascii_4probe_( //
-                haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-    }
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_western_europe_k)
-        return sz_utf8_uncased_search_icelake_western_europe_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_central_europe_k)
-        return sz_utf8_uncased_search_icelake_central_europe_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_greek_k)
-        return sz_utf8_uncased_search_icelake_greek_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_armenian_k)
-        return sz_utf8_uncased_search_icelake_armenian_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_vietnamese_k)
-        return sz_utf8_uncased_search_icelake_vietnamese_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_cyrillic_k)
-        return sz_utf8_uncased_search_icelake_cyrillic_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_georgian_k)
-        return sz_utf8_uncased_search_icelake_georgian_( //
-            haystack, haystack_length, needle, needle_length, needle_metadata, matched_length);
-
-    // No suitable SIMD path found (needle has complex Unicode), fall back to serial
-    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-    return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                         matched_length);
-}
-
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_icelake_(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
 
     // Pre-computed constants
@@ -2467,7 +2393,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
         // 1. ASCII letter check (zeros beyond string are fine - not letters)
         __mmask64 is_upper_m64 = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_upper_u8x64), range26_u8x64);
         __mmask64 is_lower_m64 = _mm512_cmplt_epu8_mask(_mm512_sub_epi8(text_u8x64, a_lower_u8x64), range26_u8x64);
-        if (is_upper_m64 | is_lower_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+        if (is_upper_m64 | is_lower_m64) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
 
         // 2. Check for non-ASCII in lead positions
         __mmask64 is_non_ascii_m64 = _mm512_movepi8_mask(text_u8x64) & lead_m64;
@@ -2489,7 +2415,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
                 __mmask64 is_9d_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9D));
                 __mmask64 is_9e_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0x9E));
                 if (after_f0_m64 & (is_90_m64 | is_91_m64 | is_96_m64 | is_9d_m64 | is_9e_m64))
-                    return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                    return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
             }
 
             // 5. Check 2-byte bicameral leads: C3-D6
@@ -2504,7 +2430,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
                 if (is_c2_m64) {
                     __mmask64 after_c2_m64 = is_c2_m64 << 1;
                     __mmask64 is_b5_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xB5));
-                    if (after_c2_m64 & is_b5_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                    if (after_c2_m64 & is_b5_m64) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
 
                 // Note: CA 80-BF includes both IPA Extensions (U+0280-02AF) and Spacing Modifier Letters
@@ -2512,18 +2438,18 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
                 // e.g., ẚ (U+1E9A) folds to [a, ʾ] where ʾ = U+02BE is a Spacing Modifier Letter.
                 // So we must not exclude this range from bicameral check.
 
-                if (is_bicameral_m64 & is_two_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_bicameral_m64 & is_two_m64) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
             }
 
             // 6. Check 3-byte bicameral sequences
             if (is_three_m64) {
                 // E1: Georgian, Greek Extended, Latin Extended Additional
                 __mmask64 is_e1_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE1));
-                if (is_e1_m64 & is_three_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_e1_m64 & is_three_m64) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
 
                 // EF: Fullwidth Latin
                 __mmask64 is_ef_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xEF));
-                if (is_ef_m64 & is_three_m64) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_ef_m64 & is_three_m64) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
 
                 // E2: Safe only for second byte 80-83
                 __mmask64 is_e2_m64 = _mm512_cmpeq_epi8_mask(text_u8x64, _mm512_set1_epi8((char)0xE2)) & is_three_m64;
@@ -2532,7 +2458,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
                     __mmask64 e2_second_safe_m64 = _mm512_cmplt_epu8_mask( //
                         _mm512_sub_epi8(text_u8x64, x80_u8x64), _mm512_set1_epi8(0x04));
                     if (after_e2_m64 & ~e2_second_safe_m64)
-                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                        return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
 
                 // EA: Bicameral second bytes 99-9F, AD-AE
@@ -2544,7 +2470,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
                     __mmask64 is_ad_range_m64 = _mm512_cmplt_epu8_mask( //
                         _mm512_sub_epi8(text_u8x64, _mm512_set1_epi8((char)0xAC)), _mm512_set1_epi8(0x03));
                     if (after_ea_m64 & (is_99_range_m64 | is_ad_range_m64))
-                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                        return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
             }
         }
@@ -2556,9 +2482,103 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_icelake(sz_cptr_t str, sz_
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_icelake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                     sz_size_t b_length) {
-    return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_icelake(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                       void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_cased_icelake_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_icelake_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,            //
+    sz_cptr_t needle, sz_size_t needle_length,                //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
+
+    // Handle the obvious edge cases first
+    if (needle_length == 0) {
+        *match_length = 0;
+        return haystack;
+    }
+
+    // If the needle is entirely made of case-less characters - perform direct substring search
+    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
+    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
+    if (known_agnostic || (is_unknown && sz_utf8_find_cased_icelake_(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
+        sz_cptr_t result = sz_find_skylake_(haystack, haystack_length, needle, needle_length);
+        *match_length = result ? needle_length : 0;
+        return result;
+    }
+
+    // Analyze needle to find the best safe window for each script
+    if (is_unknown) {
+        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
+        // If no SIMD-safe window found, fall back to serial immediately
+        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
+            return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                                  match_length);
+    }
+
+    // Dispatch to appropriate kernel
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_ascii_invariant_k) {
+        // Use XOR+VPTERNLOG+VPTESTNMB variants for better port distribution
+        if (needle_metadata->folded_slice_length <= 3)
+            return sz_utf8_uncased_search_icelake_ascii_3probe_( //
+                haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+        else
+            return sz_utf8_uncased_search_icelake_ascii_4probe_( //
+                haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+    }
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_western_europe_k)
+        return sz_utf8_uncased_search_icelake_western_europe_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_central_europe_k)
+        return sz_utf8_uncased_search_icelake_central_europe_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_greek_k)
+        return sz_utf8_uncased_search_icelake_greek_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_armenian_k)
+        return sz_utf8_uncased_search_icelake_armenian_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_vietnamese_k)
+        return sz_utf8_uncased_search_icelake_vietnamese_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_cyrillic_k)
+        return sz_utf8_uncased_search_icelake_cyrillic_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    if (needle_metadata->kernel_id == sz_utf8_uncased_rune_safe_georgian_k)
+        return sz_utf8_uncased_search_icelake_georgian_( //
+            haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
+
+    // No suitable SIMD path found (needle has complex Unicode), fall back to serial
+    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
+    return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                          match_length);
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_icelake( //
+    sz_cptr_t haystack, sz_size_t haystack_length,          //
+    sz_cptr_t needle, sz_size_t needle_length,              //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata,     //
+    sz_cptr_t *match, sz_size_t *match_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_uncased_search_icelake_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                             match_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_order_icelake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                          sz_size_t b_length, sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_utf8_uncased_order_serial_(a, a_length, b, b_length);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

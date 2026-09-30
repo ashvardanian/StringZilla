@@ -22,9 +22,9 @@ extern "C" {
  *  is added to every emitted offset and to `*bytes_consumed`, the resume offset, which is always a
  *  true delimiter boundary.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_( //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,         //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_serial_(  //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_bytes = (sz_u8_t const *)text;
@@ -63,9 +63,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_newlines_serial_( //
  *  Same contract as @ref sz_utf8_newlines_serial_ but for the Unicode White_Space set. There is no
  *  CRLF merging here - CR and LF are independent length-1 matches.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,            //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_bytes = (sz_u8_t const *)text;
@@ -113,38 +113,13 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_whitespaces_serial_( //
     return match_count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_serial( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
-    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const matches_count = sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths,
-                                                             matches_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
-    return matches_count;
-}
-
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_serial( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
-    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const matches_count = sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths,
-                                                                matches_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
-    return matches_count;
-}
-
 #pragma region Serial
 
 /** Largest byte prefix of a 64-lane decode window whose multi-byte leads are fully loaded: the
  *  first 2-/3-/4-byte start whose declared span runs past @p loaded defers to the next window.
  *  Shared u64 mask math for every windowed ISA front-end. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts,
-                                                                     sz_u64_t three_byte_starts,
-                                                                     sz_u64_t four_byte_starts, sz_size_t loaded) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                              sz_u64_t four_byte_starts, sz_size_t loaded) {
     sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
                              (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
                              (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
@@ -154,7 +129,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_complete_span_(sz_u64_t tw
 /** Emits already-decided delimiter starts from a vector tile's lane mask and returns how many it
  *  appended, as the portable ctz-drain twin of @ref sz_utf8_rune_drain_forward_serial_. Bit @c i of
  *  @p hits marks a verified match at `base + i`, its length read from the lead's high nibble. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
     sz_u8_t const *text, sz_size_t base, sz_u64_t hits, sz_size_t *match_offsets, sz_size_t *match_lengths,
     sz_size_t capacity) {
     static sz_u8_t const length_by_nibble[16] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4};
@@ -178,9 +153,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiter_emit_matches_( //
  *  byte at a time and is never reported as a delimiter. @p base is added to every emitted offset
  *  and to `*bytes_consumed`, the resume offset, which is always a true codepoint boundary.
  */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_( //
-    sz_cptr_t text, sz_size_t length, sz_size_t base,         //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
+STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_delimiters_serial_( //
+    sz_cptr_t text, sz_size_t length, sz_size_t base,       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_cptr_t const start = text;
@@ -203,19 +178,50 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_delimiters_serial_( //
     return match_count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_serial( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
-    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const matches_count = sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths,
-                                                               matches_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+#pragma endregion Serial
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_utf8_newlines_serial(                                //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
+                                              bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
                                          bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
                                          sz_false_k));
-    return matches_count;
+    return sz_success_k;
 }
 
-#pragma endregion Serial
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_serial(                             //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
+                                                 bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_serial(                              //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_serial_(text, length, 0, match_offsets, match_lengths, matches_capacity,
+                                                bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

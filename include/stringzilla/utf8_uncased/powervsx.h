@@ -9,6 +9,7 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_POWERVSX_H_
 #define STRINGZILLA_UTF8_UNCASED_POWERVSX_H_
 
+#include "stringzilla/types.h"
 #include "stringzilla/utf8_uncased/serial.h"
 
 #ifdef __cplusplus
@@ -25,21 +26,29 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_powervsx( //
-    sz_cptr_t haystack, sz_size_t haystack_length,                  //
-    sz_cptr_t needle, sz_size_t needle_length,                      //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-    return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                         matched_length);
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_powervsx( //
+    sz_cptr_t haystack, sz_size_t haystack_length,           //
+    sz_cptr_t needle, sz_size_t needle_length,               //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata,      //
+    sz_cptr_t *match, sz_size_t *match_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                            match_length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_powervsx(sz_cptr_t str, sz_size_t length) {
-    return sz_utf8_find_cased_serial(str, length);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_powervsx(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                        void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_cased_serial_(text, length);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                      sz_size_t b_length) {
-    return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
+STRINGZILLA_API sz_status_t sz_utf8_uncased_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                           sz_size_t b_length, sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_utf8_uncased_order_serial_(a, a_length, b, b_length);
+    return sz_success_k;
 }
 
 #if defined(__clang__)

@@ -62,7 +62,7 @@ extern "C" {
  *  every tile is read straight from aligned .rodata through the substrate @c permute256_ and
  *  @c lut_cascade_ helpers. Bit-exact with @c sz_rune_line_break_property over the astral planes.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
+STRINGZILLA_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
         sz_utf8_line_break_astral_s0_, _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
@@ -91,14 +91,14 @@ STRINGZILLA_HELPER_INLINE __m512i sz_line_break_classify_astral16_icelake_(__m51
  *  @c sz_utf8_line_break_flat_palette_, not the 62-entry cascade palette. Only the low byte of each
  *  u32 lane is the index; the caller truncates with @c vpmovdb.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
+STRINGZILLA_INLINE __m512i sz_line_break_bmp_flat_index16_icelake_(__m512i codepoints_u32x16) {
     return sz_utf8_rune_flat_lookup_icelake_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                              codepoints_u32x16);
 }
 
 /** Flat-palette index for one sixteen-byte group, where `cp = (high << 8) | low`, narrowed back to
  *  bytes with @c vpmovdb. */
-STRINGZILLA_HELPER_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high_u8x16, __m128i low_u8x16) {
+STRINGZILLA_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high_u8x16, __m128i low_u8x16) {
     __m512i const high_u32x16 = _mm512_cvtepu8_epi32(high_u8x16);
     __m512i const low_u32x16 = _mm512_cvtepu8_epi32(low_u8x16);
     __m512i const codepoints_u32x16 = _mm512_or_si512(_mm512_slli_epi32(high_u32x16, 8), low_u32x16);
@@ -113,8 +113,7 @@ STRINGZILLA_HELPER_INLINE __m128i sz_line_break_flat_group_icelake_(__m128i high
  *  caller blends the astral path over them. The sixteen-lane groups are unrolled because
  *  @c vextracti32x4 and @c vinserti32x4 take an immediate lane selector.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64,
-                                                                        __m512i low_bytes_u8x64) {
+STRINGZILLA_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i high_bytes_u8x64, __m512i low_bytes_u8x64) {
     __m128i const group0_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 0),
                                                                    _mm512_extracti32x4_epi32(low_bytes_u8x64, 0));
     __m128i const group1_u8x16 = sz_line_break_flat_group_icelake_(_mm512_extracti32x4_epi32(high_bytes_u8x64, 1),
@@ -140,10 +139,10 @@ STRINGZILLA_HELPER_INLINE __m512i sz_line_break_bmp_flat_index_icelake_(__m512i 
  *  Cn|Ext side bits come from descriptor bits 6, 7, 8 and 9; the RI and ZWJ side bits from the raw
  *  class; CM or ZWJ sets the mark side bit; DottedCircle comes from bit 13.
  */
-STRINGZILLA_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors_u16x32,
-                                                                             __m512i *classes_out_u16x32,
-                                                                             __m512i *side_out_u16x32,
-                                                                             __mmask32 *dotted_out_m32) {
+STRINGZILLA_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m512i descriptors_u16x32,
+                                                                      __m512i *classes_out_u16x32,
+                                                                      __m512i *side_out_u16x32,
+                                                                      __mmask32 *dotted_out_m32) {
     __m512i classes_u16x32 = _mm512_and_si512(descriptors_u16x32, _mm512_set1_epi16(0x3F));
     __mmask32 const is_sa_m32 = _mm512_cmpeq_epi16_mask(classes_u16x32, _mm512_set1_epi16(sz_line_break_sa_k));
     __mmask32 const sa_is_mark_m32 = _mm512_test_epi16_mask(descriptors_u16x32, _mm512_set1_epi16(1 << 12));
@@ -200,10 +199,9 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_descriptor_unpack_half_icelake_(__m
  *  Bit-identical to the cascade's class, side and dotted byte-table permutes, @c palette_class_ and
  *  its siblings, which carry the same resolution baked in.
  */
-STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
-                                                                          __m512i *classes_out_u8x64,
-                                                                          __m512i *side_out_u8x64,
-                                                                          sz_u64_t *dotted_out) {
+STRINGZILLA_INLINE void sz_line_break_flat_palette_unpack_icelake_(__m512i palette_indices_u8x64,
+                                                                   __m512i *classes_out_u8x64, __m512i *side_out_u8x64,
+                                                                   sz_u64_t *dotted_out) {
     __m512i const palette_low_tile_u16x32 = _mm512_load_si512((void const *)sz_utf8_line_break_flat_palette_);
     __m512i const palette_high_tile_u16x32 = _mm512_load_si512((void const *)(sz_utf8_line_break_flat_palette_ + 32));
     __m512i const indices_low_u16x32 = _mm512_cvtepu8_epi16(_mm512_castsi512_si256(palette_indices_u8x64));
@@ -261,8 +259,8 @@ typedef struct sz_line_break_classified_t {
  *  decoded value - page, trie, big or astral - matching the serial resolution precedence. The BMP
  *  trie uses the shared substrate @c trie_walk_icelake_.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelake_(
-    sz_utf8_rune_window_t window, __m512i lane_identity_u8x64) {
+STRINGZILLA_INLINE sz_line_break_classified_t sz_line_break_classify_window_icelake_(sz_utf8_rune_window_t window,
+                                                                                     __m512i lane_identity_u8x64) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_(window.loaded);
     sz_u64_t const continuation = _cvtmask64_u64(window.continuation) & loaded_mask;
     sz_u64_t const two_byte = _cvtmask64_u64(window.two_byte_starts);
@@ -454,19 +452,19 @@ STRINGZILLA_HELPER_INLINE sz_line_break_classified_t sz_line_break_classify_wind
 #pragma region Mask algebra rule engine
 
 /** Build a 64-bit "lane class == @p cls" mask with one @c vpcmpeqb into a kmask. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_class_mask_icelake_(__m512i classes_u8x64, sz_u8_t cls) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_class_mask_icelake_(__m512i classes_u8x64, sz_u8_t cls) {
     return _cvtmask64_u64(_mm512_cmpeq_epi8_mask(classes_u8x64, _mm512_set1_epi8((char)cls)));
 }
 
 /** The class or side byte held at lane @p lane, extracted in-register by a single byte permute,
  *  with no scalar loop. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_line_break_byte_at_icelake_(__m512i lanes_u8x64, sz_size_t lane) {
+STRINGZILLA_INLINE sz_u8_t sz_line_break_byte_at_icelake_(__m512i lanes_u8x64, sz_size_t lane) {
     __m512i const broadcast_u8x64 = _mm512_permutexvar_epi8(_mm512_set1_epi8((char)lane), lanes_u8x64);
     return (sz_u8_t)_mm_cvtsi128_si32(_mm512_castsi512_si128(broadcast_u8x64));
 }
 
 /** Build a 64-bit "lane (side & @p bit) ≠ 0" mask with one @c vptestmb into a kmask. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo_u8x64, sz_u8_t bit) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_side_mask_icelake_(__m512i side_lo_u8x64, sz_u8_t bit) {
     __m512i const masked_u8x64 = _mm512_and_si512(side_lo_u8x64, _mm512_set1_epi8((char)bit));
     return _cvtmask64_u64(_mm512_test_epi8_mask(masked_u8x64, masked_u8x64));
 }
@@ -478,8 +476,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_side_mask_icelake_(__m512i side
  *  Used as a cheap combined presence test that gates the rarely-fired script blocks, Hangul and
  *  Brahmic, without extracting each individual per-class mask on the common Latin and CJK path.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classes_u8x64, sz_u8_t lo,
-                                                                           sz_u8_t hi) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_class_range_mask_icelake_(__m512i classes_u8x64, sz_u8_t lo, sz_u8_t hi) {
     __mmask64 const ge_m64 = _mm512_cmp_epu8_mask(classes_u8x64, _mm512_set1_epi8((char)lo), _MM_CMPINT_NLT);
     __mmask64 const le_m64 = _mm512_cmp_epu8_mask(classes_u8x64, _mm512_set1_epi8((char)hi), _MM_CMPINT_LE);
     return _cvtmask64_u64(_kand_mask64(ge_m64, le_m64));
@@ -507,8 +504,7 @@ typedef struct sz_line_break_byte_frame_t {
     sz_u64_t lone_mark;
 } sz_line_break_byte_frame_t;
 
-STRINGZILLA_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(
-    sz_line_break_classified_t classified) {
+STRINGZILLA_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_icelake_(sz_line_break_classified_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
     sz_u64_t const mark_start = (sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_cm_k) |
                                  sz_line_break_class_mask_icelake_(classified.classes_u8x64, sz_line_break_zwj_k)) &
@@ -546,8 +542,9 @@ STRINGZILLA_HELPER_INLINE sz_line_break_byte_frame_t sz_line_break_byte_frame_ic
  *  side-bit masks, and the per-lane class and side bytes for the carry-out reads. All @c __m512i →
  *  @c sz_u64_t work lives here, so the rule engine that consumes the frame stays fully portable.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(
-    sz_line_break_classified_t classified, sz_u8_t *effective_class_byte_out, sz_u8_t *side_byte_out) {
+STRINGZILLA_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelake_(sz_line_break_classified_t classified,
+                                                                            sz_u8_t *effective_class_byte_out,
+                                                                            sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_t const byte_frame = sz_line_break_byte_frame_icelake_(classified);
     __m512i const classes_u8x64 = byte_frame.classes_u8x64;
     //  LB10 reclassifies a lone CM/ZWJ to AL; its descriptor side bits (EAW/Pi/Pf/...) must go with it, else LB19/LB15
@@ -587,9 +584,11 @@ STRINGZILLA_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_icelak
 /** Byte-level UAX-14 rule engine, Ice Lake entry: extract the portable frame in-register, then
  *  delegate every LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. Kept as the
  *  driver's call target so the forward driver is unchanged. */
-STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(
-    sz_line_break_classified_t classified, sz_line_break_carry_t carry, sz_line_break_carry_t *carry_out,
-    sz_size_t complete_limit, sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_line_break_window_t sz_line_break_decide_window_icelake_(sz_line_break_classified_t classified,
+                                                                               sz_line_break_carry_t carry,
+                                                                               sz_line_break_carry_t *carry_out,
+                                                                               sz_size_t complete_limit,
+                                                                               sz_bool_t more_text) {
     sz_u8_t effective_class_byte[64], side_byte[64];
     sz_line_break_frame_t const frame = sz_line_break_build_frame_icelake_(classified, effective_class_byte, side_byte);
     return sz_line_break_decide_window_(&frame, effective_class_byte, side_byte, carry, carry_out, complete_limit,
@@ -607,7 +606,7 @@ STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_ice
  *  declared-length lead whose span exceeds @c loaded ends the trusted region just before it; with
  *  no more text the whole window is complete.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_window_t window, sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_(loaded);
@@ -636,9 +635,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_line_break_complete_limit_(sz_utf8_rune_w
  *  left context. @c bytes_consumed is always a confirmed break, a @c line_start, so resume is
  *  bit-identical and capacity-free.
  */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
-    sz_cptr_t text, sz_size_t length,                                 //
-    sz_size_t *starts, sz_size_t *lengths,                            //
+STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_icelake_( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *starts, sz_size_t *lengths,                //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -696,16 +695,15 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake_bytes_( //
  *  flat in run length. Emits at most @p capacity segments and stores the resume offset
  *  through @p bytes_consumed.
  */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_icelake( //
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_icelake(        //
     sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *starts, sz_size_t *lengths,                     //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
-
-    sz_size_t const segments_count = sz_utf8_linebreaks_icelake_bytes_(text, length, starts, lengths, capacity,
-                                                                       bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, segments_count, bytes_consumed ? *bytes_consumed : length,
+    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
+    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *lines_count = sz_utf8_linebreaks_icelake_(text, length, starts, lengths, capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
                                          starts, lengths, 0, sz_true_k));
-    return segments_count;
+    return sz_success_k;
 }
 
 #pragma endregion Forward driver

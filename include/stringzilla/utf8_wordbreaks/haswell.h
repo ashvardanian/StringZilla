@@ -37,7 +37,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -52,8 +52,7 @@ extern "C" {
 /** Word_Break class byte for thirty-two BMP codepoints (per-lane high = cp>>8, low = cp&0xFF): the
  *  @c bmp_page_lut_ page LUT selects one of the 52 distinct 256-byte pages, then @c flat_bmp_ is
  *  fetched by @c vpgatherdd. Bit-exact with @c sz_rune_word_break_property over the whole BMP. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_u8x32,
-                                                                        __m256i low_bytes_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i high_bytes_u8x32, __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_word_break_bmp_page_lut_, sz_utf8_word_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -63,8 +62,8 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_bmp_class_haswell_(__m256i 
  *  bytes: @p plane_off_u8x32 holds `(offset >> 16) & 0xFF` (low nibble meaningful), @p high_u8x32
  *  holds `(offset >> 8) & 0xFF`, and @p low_u8x32 holds `offset & 0xFF`. The result is bit-exact
  *  with @c sz_rune_word_break_property over the Supplementary Planes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
-                                                                           __m256i low_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plane_off_u8x32, __m256i high_u8x32,
+                                                                    __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_off_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -101,7 +100,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m25
 /** Word_Break class byte for thirty-two ASCII codepoints (cp < 0x80) via the existing 128-entry
  *  property table, read in-register by two @c lut64 halves (low six bits) blended on bit 6, the
  *  AVX2 twin of the icelake ASCII permute. The window byte equals the codepoint on ASCII lanes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256i bytes_u8x32) {
     __m256i const index_low6_u8x32 = _mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(0x3F));
     __m256i const low_half_u8x32 = sz_utf8_rune_lut64_haswell_(sz_utf8_word_break_property_ascii_ + 0,
                                                                index_low6_u8x32);
@@ -121,7 +120,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_ascii_class_haswell_(__m256
  *  bytes back to their original byte lanes. The pack/scatter touch only set bits of @p bmp_starts.
  *  Bit-identical to two full @ref sz_utf8_word_break_bmp_class_haswell_ passes on every BMP-start
  *  lane; every other lane is a don't-care left at its incoming value. */
-STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_bmp_compact_haswell_( //
+STRINGZILLA_INLINE void sz_utf8_word_break_bmp_compact_haswell_( //
     sz_u64_t bmp_starts, __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32,
     __m256i *out_lo_u8x32, __m256i *out_hi_u8x32) {
     sz_u8_t high_bytes[64], low_bytes[64];
@@ -167,7 +166,7 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_bmp_compact_haswell_( //
  *  Haswell twin of @ref sz_utf8_word_break_classify_window_icelake_, bit-identical on every start
  *  lane. ASCII through the property table, BMP through the nibble cascade, 4-byte leads through the
  *  astral cascade with the codepoint high/low/plane reconstructed from the forward neighbours. */
-STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_haswell_( //
+STRINGZILLA_INLINE void sz_utf8_word_break_classify_window_haswell_( //
     sz_utf8_rune_window_haswell_t window, __m256i *classes_lo_u8x32, __m256i *classes_hi_u8x32) {
     __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const ascii_starts = window.codepoint_starts & ~window.two_byte_starts & ~window.three_byte_starts &
@@ -248,16 +247,16 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_word_break_classify_window_haswell_( //
 
 /** A 64-bit "class byte == @p value" lane mask over both class halves (two @c vpcmpeqb →
  *  mask_combine). */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo_u8x32,
-                                                                          __m256i classes_hi_u8x32, sz_u8_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_class_mask_haswell_(__m256i classes_lo_u8x32, __m256i classes_hi_u8x32,
+                                                                   sz_u8_t value) {
     __m256i const v_u8x32 = _mm256_set1_epi8((char)value);
     return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(classes_lo_u8x32, v_u8x32),
                                          _mm256_cmpeq_epi8(classes_hi_u8x32, v_u8x32));
 }
 
 /** A 64-bit "raw window byte == @p value" lane mask over both window halves. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half_u8x32,
-                                                                          __m256i high_half_u8x32, sz_u8_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256i low_half_u8x32, __m256i high_half_u8x32,
+                                                                   sz_u8_t value) {
     __m256i const v_u8x32 = _mm256_set1_epi8((char)value);
     return sz_utf8_mask_combine_haswell_(_mm256_cmpeq_epi8(low_half_u8x32, v_u8x32),
                                          _mm256_cmpeq_epi8(high_half_u8x32, v_u8x32));
@@ -265,14 +264,14 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_byte_equal_haswell_(__m256
 
 /** Per-half unsigned `value >= bound` mask (AVX2 has no unsigned compare):
  *  `max_epu8(value,bound)==value`. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_word_break_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
 /** Per-half "(high,low) 16-bit value in `[lo, hi]`" membership for one range (the AVX2 unsigned
  *  16-bit window-compare building block of @ref sz_utf8_word_break_range16_mask_haswell_). */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_u8x32, __m256i low_u8x32,
-                                                                          sz_u16_t lo, sz_u16_t hi) {
+STRINGZILLA_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256i high_u8x32, __m256i low_u8x32, sz_u16_t lo,
+                                                                   sz_u16_t hi) {
     __m256i const lo_high_u8x32 = _mm256_set1_epi8((char)(lo >> 8)), lo_low_u8x32 = _mm256_set1_epi8((char)(lo & 0xFF));
     __m256i const hi_high_u8x32 = _mm256_set1_epi8((char)(hi >> 8)), hi_low_u8x32 = _mm256_set1_epi8((char)(hi & 0xFF));
     __m256i const ones_u8x32 = _mm256_set1_epi8((char)0xFF);
@@ -292,7 +291,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_word_break_range16_one_haswell_(__m256
 /** A 64-bit "(high,low) 16-bit value in any sorted `[lo, hi]` range" lane mask over both window
  *  halves, the AVX2 twin of @ref sz_utf8_word_break_range16_mask_icelake_ (WSegSpace /
  *  Extended_Pictographic). */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
+STRINGZILLA_INLINE sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
     __m256i high_lo_u8x32, __m256i high_hi_u8x32, __m256i low_lo_u8x32, __m256i low_hi_u8x32, sz_u16_t const *lo_table,
     sz_u16_t const *hi_table, int count) {
     __m256i hit_lo_u8x32 = _mm256_setzero_si256(), hit_hi_u8x32 = _mm256_setzero_si256();
@@ -312,7 +311,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_word_break_range16_mask_haswell_( //
  *  Applies the truncated-edge U+FFFD reclassify to the class halves, materializes every per-class
  *  lane mask + the raw-byte membership masks, the Extended_Pictographic mask (BMP + SMP range
  *  scan), and the per-lane class byte array. */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswell_(
+STRINGZILLA_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_haswell_(
     sz_utf8_rune_window_haswell_t window, __m256i classes_lo_u8x32, __m256i classes_hi_u8x32, sz_u64_t start_bytes_all,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, int want_pictographic) {
 
@@ -447,7 +446,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_fr
 /** Resolve one window into the maximal-subpart partition - the AVX2 twin of
  *  @ref sz_utf8_word_break_partition_icelake_: compute the per-ISA @c sz_u64_t masks and delegate
  *  to the portable @ref sz_utf8_word_break_partition_from_masks_. */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
+STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_haswell_(
     sz_utf8_rune_window_haswell_t window, sz_u64_t valid, int at_end_of_text) {
     __m256i const raw_lo_u8x32 = window.window_low_u8x32, raw_hi_u8x32 = window.window_high_u8x32;
     sz_u64_t const real_continuation = window.continuation & valid;
@@ -507,9 +506,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_part
  *  driver, mirroring @ref sz_utf8_wordbreaks_icelake over the AVX2
  *  window/classify/partition/decide/drain leaves. Bit-exact with @c sz_utf8_wordbreaks_serial and
  *  @c sz_utf8_wordbreaks_icelake. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_haswell_( //
-    sz_cptr_t text, sz_size_t length,                            //
-    sz_size_t *word_starts, sz_size_t *word_lengths,             //
+STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_haswell_( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *word_starts, sz_size_t *word_lengths,      //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || words_capacity == 0) {
@@ -630,27 +629,32 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_haswell_( //
     return words;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_haswell( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *word_starts, sz_size_t *word_lengths,           //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_wordbreaks_haswell_(text, length, word_starts, word_lengths,
-                                                                 words_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 29 Word Boundaries forward kernel
+
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_haswell(                        //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *words_count = sz_utf8_wordbreaks_haswell_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
+                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
+                                         sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

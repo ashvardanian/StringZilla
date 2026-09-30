@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -47,8 +47,7 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *position = (sz_u8_t const *)text;
     sz_u8_t const *const end = position + length;
     sz_u8_t const form_flag = sz_utf8_norm_form_flag_(form);
@@ -100,22 +99,30 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_v128_(sz_cptr_t text
     return sz_utf8_norm_verify_block_(&position, end, end, form_flag, &previous_canonical_combining_class);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_v128(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                     sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_v128_);
-}
-
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_size_t length,
-                                                                  sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_v128_);
-}
-
 #pragma endregion simd128
+
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_utf8_norm_v128(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                              sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_v128_);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_v128(sz_cptr_t source, sz_size_t source_length,
+                                                           sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_v128_);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

@@ -9,13 +9,14 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_HASWELL_H_
 
+#include "stringzilla/types.h"
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -31,14 +32,13 @@ extern "C" {
  *  and the @c VPMINUB and @c VPCMPEQB pair realizes the unsigned ≤ in two single-uop instructions,
  *  cheaper and clearer than the sign-flip pair of @c VPXOR and @c VPCMPGTB.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start,
-                                                            sz_u8_t range_length) {
+STRINGZILLA_INLINE __m256i sz_haswell_in_byte_range_(__m256i values_u8x32, sz_u8_t range_start, sz_u8_t range_length) {
     __m256i offsets_u8x32 = _mm256_sub_epi8(values_u8x32, _mm256_set1_epi8((char)range_start));
     return _mm256_cmpeq_epi8(_mm256_min_epu8(offsets_u8x32, _mm256_set1_epi8((char)(range_length - 1))), offsets_u8x32);
 }
 
 /** Folds ASCII A-Z to a-z across the whole vector via a masked +0x20, with no @c VPBLENDVB. */
-STRINGZILLA_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_u8x32) {
+STRINGZILLA_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_u8x32) {
     __m256i is_ascii_upper_u8x32 = sz_haswell_in_byte_range_(source_u8x32, 'A', 26);
     return _mm256_add_epi8(source_u8x32, _mm256_and_si256(is_ascii_upper_u8x32, _mm256_set1_epi8(0x20)));
 }
@@ -50,7 +50,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_haswell_fold_ascii_(__m256i source_u8x32) {
  *  characters, so a chunk never starts with a continuation byte that needs its true predecessor.
  *  AVX2 @c VPALIGNR works per 128-bit lane, so a @c VPERM2I128 first builds the cross-lane carry.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x32, int byte_offset) {
+STRINGZILLA_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x32, int byte_offset) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x08); // [zero, source.low]
     return byte_offset == 1 ? _mm256_alignr_epi8(source_u8x32, carry_u8x32, 15)
                             : _mm256_alignr_epi8(source_u8x32, carry_u8x32, 14);
@@ -58,13 +58,13 @@ STRINGZILLA_HELPER_INLINE __m256i sz_haswell_previous_bytes_(__m256i source_u8x3
 
 /** Shifts the 32 source bytes left by one lane, so lane i holds byte i + 1. Lane 31 receives zero;
  *  any 2-byte lead there is trimmed as incomplete before folding anyway. */
-STRINGZILLA_HELPER_INLINE __m256i sz_haswell_next_bytes_(__m256i source_u8x32) {
+STRINGZILLA_INLINE __m256i sz_haswell_next_bytes_(__m256i source_u8x32) {
     __m256i carry_u8x32 = _mm256_permute2x128_si256(source_u8x32, source_u8x32, 0x81); // [source.high, zero]
     return _mm256_alignr_epi8(carry_u8x32, source_u8x32, 1);
 }
 
 /** First @p n bits set; BZHI keeps n = 32 defined, unlike the `(1 << n) − 1` idiom. */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) {
+STRINGZILLA_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) {
     return (sz_u32_t)_bzhi_u32(0xFFFFFFFFu, (unsigned)n);
 }
 
@@ -81,7 +81,7 @@ STRINGZILLA_HELPER_INLINE sz_u32_t sz_haswell_mask_until_(sz_size_t n) {
  *      still copies its longest caseless prefix vectorized.
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_( //
     __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -125,7 +125,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_caseless_chunk_
  *      prefix vectorized instead of degrading to one-rune serial steps per chunk.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( //
     __m256i source_u8x32, sz_u32_t is_continuation_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -305,7 +305,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_latin_chunk_( /
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_( //
     __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -377,7 +377,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_cyrillic_chunk_
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( //
     __m256i source_u8x32, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -465,7 +465,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_greek_chunk_( /
  *
  *  @return Bytes consumed and written, or zero if the first character needs another handler.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_( //
     __m256i source_u8x32, sz_u32_t is_three_byte_lead_mask, sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -543,7 +543,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_georgian_chunk_
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_( //
     __m256i source_u8x32, sz_u32_t is_two_byte_lead_mask, sz_u32_t is_three_byte_lead_mask,
     sz_u32_t is_foreign_lead_mask, sz_ptr_t target) {
 
@@ -605,7 +605,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_guarded_chunk_(
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_( //
     __m256i source_u8x32, sz_u32_t is_lead_mask, sz_u32_t malformed_lead_mask, sz_ptr_t target) {
 
     __m256i previous_bytes_u8x32 = sz_haswell_previous_bytes_(source_u8x32, 1);
@@ -677,7 +677,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_armenian_chunk_
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_supplementary_chunk_( //
     __m256i source_u8x32, sz_u32_t is_complex_lead_mask, sz_u32_t is_four_byte_lead_mask, sz_u32_t is_foreign_lead_mask,
     sz_ptr_t target) {
 
@@ -731,7 +731,7 @@ typedef struct sz_utf8_uncased_fold_haswell_leads_t {
  *  byte the Ice Lake @c VPERMB LUT produces. The caseless family merges D7-DF and E0 into one
  *  contiguous D7-E0 span.
  */
-STRINGZILLA_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
+STRINGZILLA_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_fold_haswell_classify_leads_(
     __m256i source_u8x32, sz_u32_t is_non_ascii_mask) {
     sz_utf8_uncased_fold_haswell_leads_t leads;
 
@@ -820,7 +820,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_uncased_fold_haswell_leads_t sz_utf8_uncased_f
  *
  *  @return Bytes consumed and written, or zero if every handler declined the chunk.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_(
     __m256i source_u8x32, sz_utf8_uncased_fold_haswell_leads_t const *leads, sz_ptr_t target) {
 
     // Malformed leads (overlong, surrogate, truncated, out-of-range, C0/C1, F5..FF) are foreign to
@@ -888,9 +888,8 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_dispatch_chunk_
  *  @param[out] rune_length Receives the number of source bytes consumed.
  *  @return Bytes written to @p target (Unicode case folding produces at most 3 runes).
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end,
-                                                                           sz_ptr_t target,
-                                                                           sz_rune_length_t *rune_length) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cptr_t source, sz_cptr_t source_end,
+                                                                    sz_ptr_t target, sz_rune_length_t *rune_length) {
     sz_rune_t rune;
     sz_rune_length_t const parsed_length = sz_rune_decode(source, source_end, &rune);
     if (parsed_length == sz_rune_invalid_k) {
@@ -907,8 +906,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_haswell_one_rune_(sz_cp
     return (sz_size_t)(target_ptr - target);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size_t source_length,
-                                                                sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_haswell_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // The 32-byte port of the Ice Lake classify-once design: every full chunk is classified into
     // lead-byte families with a compare tree, and uniform chunks route straight to their handler.
     // Chunks that mix families beyond the handlers below fold one rune serially and re-enter the
@@ -951,19 +949,30 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_haswell(sz_cptr_t source
 
     // The sub-32-byte tail goes through the serial kernel, inheriting its handling of
     // incomplete or invalid trailing sequences byte-for-byte
-    target += sz_utf8_uncased_fold_serial(source, source_length, target);
+    target += sz_utf8_uncased_fold_serial_(source, source_length, target);
     sz_size_t const folded_length = (sz_size_t)(target - target_start);
     sz_assert_(folded_length <= source_full_length * 3 && "Folding grows one byte into three at most");
     sz_assert_no_overlap_(target_start, folded_length, source_start, source_full_length);
     return folded_length;
 }
 
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
+                                                         sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_uncased_fold_haswell_(source, source_length, target);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

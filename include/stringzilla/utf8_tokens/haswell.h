@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 /** Unsigned byte greater-than-or-equal comparison for AVX2 via the `max(a, b) == a` identity. */
-STRINGZILLA_HELPER_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b_u8x32) {
+STRINGZILLA_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i b_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(a_u8x32, b_u8x32), a_u8x32);
 }
 
@@ -47,7 +47,7 @@ static sz_u32_t const sz_utf8_compact_lut_haswell_[16][8] = {
 /** Peels the window's first @p emit_count matches with a @c vpermd left-pack, 4 lanes per
  *  sub-block: each sub-block gathers its set lanes to the front and masked-stores them at the
  *  advancing output cursor. */
-STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_haswell_(                  //
+STRINGZILLA_INLINE void sz_utf8_iterate_peel_haswell_(                         //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -84,9 +84,9 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_haswell_(                  /
     }
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_haswell( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_haswell_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -155,9 +155,9 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_haswell( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,         //
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_haswell_( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,    //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -248,14 +248,14 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_haswell( //
 
 /** Per-half unsigned `value >= bound` mask, as AVX2 has no unsigned compare:
  *  `max_epu8(value, bound) == value`. */
-STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
+STRINGZILLA_INLINE __m256i sz_delimiter_cmpge_epu8_haswell_(__m256i value_u8x32, __m256i bound_u8x32) {
     return _mm256_cmpeq_epi8(_mm256_max_epu8(value_u8x32, bound_u8x32), value_u8x32);
 }
 
 /** Per-half "third forward neighbour" `next3[i] = window[i + 3]` for the 4-byte astral codepoint
  *  reconstruction, wrapping modulo 64 to mirror the substrate neighbour helper that only emits
  *  next1 and next2. */
-STRINGZILLA_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
+STRINGZILLA_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
     __m256i window_lo_u8x32, __m256i window_hi_u8x32, __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
     *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
@@ -265,7 +265,7 @@ STRINGZILLA_HELPER_INLINE void sz_delimiter_forward_neighbour3_haswell_( //
 
 /** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` for one 32-lane half as a 0xFF/0x00
  *  byte mask; the bit `1 << (low & 7)` is a @c vpshufb over the resident power-of-two table. */
-STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
+STRINGZILLA_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
     __m256i const bit_table_u8x32 = _mm256_setr_epi8(              //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0, //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0);
@@ -280,8 +280,8 @@ STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_test_bit_haswell_(__m256i bitmap_
  *  which column `(low >> 3)` selects. The transposed `..._columns_` layout, where column @c c holds
  *  `bitmaps[id * 32 + c]`, makes each column lut256-addressable for `block_id < 64` without needing
  *  a page network. */
-STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id_u8x32,
-                                                                    __m256i low_u8x32) {
+STRINGZILLA_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t const *columns, __m256i block_id_u8x32,
+                                                             __m256i low_u8x32) {
     __m256i const selector_u8x32 = _mm256_and_si256(_mm256_srli_epi16(block_id_u8x32, 4),
                                                     _mm256_set1_epi8(0x0F));               // block_id>>4 (0..3)
     __m256i const within_u8x32 = _mm256_and_si256(block_id_u8x32, _mm256_set1_epi8(0x0F)); // block_id&15
@@ -300,8 +300,8 @@ STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_bitmap_byte_haswell_(sz_u8_t cons
 /** BMP (codepoint < 0x10000) delimiter membership for one 32-lane half, as a 0xFF/0x00 byte mask.
  *  ASCII lanes (top bit clear) carry their codepoint in the raw byte, so are overridden to (high =
  *  0, low = byte). */
-STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_bmp_membership_haswell_(__m256i window_u8x32, __m256i high_in_u8x32,
-                                                                       __m256i low_in_u8x32) {
+STRINGZILLA_INLINE __m256i sz_delimiter_bmp_membership_haswell_(__m256i window_u8x32, __m256i high_in_u8x32,
+                                                                __m256i low_in_u8x32) {
     __m256i const ascii_u8x32 = _mm256_cmpeq_epi8(_mm256_and_si256(window_u8x32, _mm256_set1_epi8((char)0x80)),
                                                   _mm256_setzero_si256());
     __m256i const high_u8x32 = _mm256_andnot_si256(ascii_u8x32, high_in_u8x32);
@@ -316,7 +316,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_bmp_membership_haswell_(__m256i w
  *  mask. The full 21-bit codepoint is reconstructed in byte-domain from the raw lead/continuation
  *  bytes; the small L1/L2 network and bitmap are then walked exactly as for the BMP path. Only
  *  meaningful on 4-byte lead lanes, which the caller blends. */
-STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_astral_membership_haswell_( //
+STRINGZILLA_INLINE __m256i sz_delimiter_astral_membership_haswell_( //
     __m256i window_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, __m256i next3_u8x32) {
     __m256i const b0_u8x32 = _mm256_and_si256(window_u8x32, _mm256_set1_epi8(0x07)); // lead bits  cp[20:18]
     __m256i const b1_u8x32 = _mm256_and_si256(next1_u8x32, _mm256_set1_epi8(0x3F));  // cp[17:12]
@@ -356,7 +356,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_delimiter_astral_membership_haswell_( //
  *  2/3/4-byte lead is valid only when its continuation bytes are present (within the loaded span)
  *  and well-formed, and it is not overlong, a surrogate, or beyond U+10FFFF. Returned as a @c
  *  sz_u64_t lane mask. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
+STRINGZILLA_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
     sz_utf8_rune_window_haswell_t const *decoded, __m256i next1_lo_u8x32, __m256i next1_hi_u8x32,
     __m256i next2_lo_u8x32, __m256i next2_hi_u8x32, __m256i next3_lo_u8x32, __m256i next3_hi_u8x32) {
     sz_size_t const loaded = decoded->loaded;
@@ -432,9 +432,9 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_delimiter_valid_starts_haswell_( //
 
 #pragma region Enumerate delimiters
 
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_haswell_( //
-    sz_cptr_t text, sz_size_t length,                            //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_haswell_( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t base = 0, count = 0;
@@ -508,26 +508,51 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_haswell_( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_haswell( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
-    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const matches_count = sz_utf8_delimiters_haswell_(text, length, match_offsets, match_lengths,
-                                                                matches_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
-                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
-                                         sz_false_k));
-    return matches_count;
+#pragma endregion Enumerate delimiters
+
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_utf8_newlines_haswell(                               //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_haswell_(text, length, match_offsets, match_lengths, matches_capacity,
+                                               bytes_consumed);
+    return sz_success_k;
 }
 
-#pragma endregion Enumerate delimiters
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_haswell(                            //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_haswell_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                  bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_haswell(                             //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_haswell_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                 bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
+                                         sz_false_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

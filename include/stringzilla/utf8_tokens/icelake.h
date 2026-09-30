@@ -37,9 +37,9 @@ extern "C" {
  *  vector, then @c vpcompressb peels the matching lanes and lengths. Starts are trusted in lanes
  *  [0,61], stepping 62, so any 2-/3-byte delimiter is fully loaded; a `t[pos - 1] == '\r'` carry
  *  suppresses an LF closing an edge CRLF. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_icelake( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,      //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_icelake_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -113,9 +113,19 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_icelake( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,         //
+STRINGZILLA_API sz_status_t sz_utf8_newlines_icelake(                               //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_icelake_(text, length, match_offsets, match_lengths, matches_capacity,
+                                               bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_icelake_( //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,    //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -204,11 +214,21 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_icelake( //
     return count;
 }
 
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_icelake(                            //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_icelake_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                  bytes_consumed);
+    return sz_success_k;
+}
+
 #pragma region Membership
 
 /** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1` over all 64 lanes of
  *  @p bitmap_byte_u8x64 and @p low_u8x64, as a mask. */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte_u8x64, __m512i low_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitmap_byte_u8x64, __m512i low_u8x64) {
     __m512i const bit_table_u8x64 = _mm512_broadcast_i32x4(_mm_setr_epi8( //
         1, 2, 4, 8, 16, 32, 64, (char)128, 0, 0, 0, 0, 0, 0, 0, 0));
     __m512i const bit_mask_u8x64 = _mm512_permutexvar_epi8(_mm512_and_si512(low_u8x64, _mm512_set1_epi8(0x07)),
@@ -216,8 +236,8 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_test_bit_icelake_(__m512i bitma
     return _mm512_test_epi8_mask(bitmap_byte_u8x64, bit_mask_u8x64);
 }
 
-STRINGZILLA_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0_u32x16, __m512i chunk1_u32x16,
-                                                                         __m512i chunk2_u32x16, __m512i chunk3_u32x16) {
+STRINGZILLA_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i chunk0_u32x16, __m512i chunk1_u32x16,
+                                                                  __m512i chunk2_u32x16, __m512i chunk3_u32x16) {
     // Each chunk holds 16 byte-domain results in its low 16 32-bit lanes; place them in byte order [0,64).
     __m512i result_u8x64 = _mm512_castsi128_si512(_mm512_cvtepi32_epi8(chunk0_u32x16));
     result_u8x64 = _mm512_mask_expand_epi8(result_u8x64, _cvtu64_mask64((sz_u64_t)0xFFFFull << 16),
@@ -238,8 +258,8 @@ STRINGZILLA_HELPER_INLINE __m512i sz_delimiter_pack_chunks_epi8_icelake_(__m512i
  *  bit `(low & 7)` is tested. ASCII lanes (high == 0) fall through naturally, as block 0 encodes
  *  the ASCII delimiter set.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
-                                                                         __m512i low_in_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i window_u8x64, __m512i high_in_u8x64,
+                                                                  __m512i low_in_u8x64) {
     // The decode window only reconstructs `high`/`low` for 2-/3-byte leads; ASCII lanes (top bit clear) carry their
     // codepoint in the raw byte itself, so override them with (high=0, low=byte) before addressing the BMP tables.
     __mmask64 const ascii_m64 = ~_mm512_movepi8_mask(window_u8x64);
@@ -285,8 +305,8 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_bmp_membership_icelake_(__m512i
  *  group × 256 names the bitmap row, and the bit `(offset & 7)` is tested. The walk covers all 64
  *  lanes, and the caller blends the result onto the four-byte lanes.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
-                                                                            __m512i next2_u8x64, __m512i next3_u8x64) {
+STRINGZILLA_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m512i window_u8x64, __m512i next1_u8x64,
+                                                                     __m512i next2_u8x64, __m512i next3_u8x64) {
     __m512i const byte0_u8x64 = _mm512_and_si512(window_u8x64, _mm512_set1_epi8(0x07));
     __m512i const byte1_u8x64 = _mm512_and_si512(next1_u8x64, _mm512_set1_epi8(0x3F));
     __m512i const byte2_u8x64 = _mm512_and_si512(next2_u8x64, _mm512_set1_epi8(0x3F));
@@ -350,7 +370,7 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_astral_membership_icelake_(__m5
  *  and well-formed, and it is not overlong, a surrogate, or beyond U+10FFFF. Invalid leads are
  *  never reported: serial advances one byte and re-syncs, which never matches the cleared lane.
  */
-STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
+STRINGZILLA_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
     __m512i window_u8x64, __m512i next1_u8x64, __m512i next2_u8x64, __m512i next3_u8x64,
     sz_utf8_rune_window_t const *decoded) {
     __mmask64 const loaded_m64 = sz_u64_clamp_mask_until_(decoded->loaded);
@@ -399,9 +419,9 @@ STRINGZILLA_HELPER_INLINE __mmask64 sz_delimiter_valid_starts_icelake_( //
 
 #pragma region Forward driver
 
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_icelake_( //
-    sz_cptr_t text, sz_size_t length,                            //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_icelake_( //
+    sz_cptr_t text, sz_size_t length,                     //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,   //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
     sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
@@ -473,16 +493,17 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_delimiters_icelake_( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_delimiters_icelake( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,        //
-    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const matches_count = sz_utf8_delimiters_icelake_(text, length, match_offsets, match_lengths,
-                                                                matches_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, matches_count,
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_icelake(                             //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_icelake_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                 bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
                                          bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths, 0,
                                          sz_false_k));
-    return matches_count;
+    return sz_success_k;
 }
 
 #pragma endregion Forward driver

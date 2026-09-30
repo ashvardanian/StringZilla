@@ -24,7 +24,7 @@ extern "C" {
  *  then a flat low-plane LUT for codepoint < 0x800, then a B=8 / SB=16 trie over the rest of the
  *  BMP, then a sorted astral range list, defaulting to Other for everything else.
  */
-STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_word_break_big_count_k; ++range)
         if (rune >= sz_utf8_word_break_big_lo_[range] && rune <= sz_utf8_word_break_big_hi_[range])
             return sz_utf8_word_break_big_cls_[range];
@@ -50,7 +50,7 @@ STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_word_break_property(sz_rune_t rune) {
 }
 
 /** Checks if a codepoint is a "word character", having a word-forming Word_Break property. */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
     sz_u8_t property = sz_rune_word_break_property(rune);
     // Word characters: ALetter(8), Hebrew_Letter(9), Numeric(10), Katakana(11),
     // ExtendNumLet(12), MidLetter(13), MidNum(14), MidNumLet/Quotes(15)
@@ -59,7 +59,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_word_char(sz_rune_t rune) {
 
 /** Check if @p rune is Extended_Pictographic (UAX-29 WB3c). Not part of the 4-bit Word_Break model,
  *  so it is resolved by binary search over the sorted Extended_Pictographic range table. */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t rune) {
     int low = 0, high = (int)sz_utf8_word_break_pict_u32_count_k - 1;
     while (low <= high) {
         int const mid = low + (high - low) / 2;
@@ -71,7 +71,7 @@ STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_extended_pictographic(sz_rune_t ru
 }
 
 /** Check if @p rune is WSegSpace (UAX-29 WB3d); resolved by range membership (six ranges). */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
     for (int range = 0; range < (int)sz_utf8_word_break_wseg_u32_count_k; ++range)
         if ((sz_u32_t)rune >= sz_utf8_word_break_wseg_u32_lo_[range] &&
             (sz_u32_t)rune <= sz_utf8_word_break_wseg_u32_hi_[range])
@@ -91,18 +91,18 @@ enum {
 };
 
 /** Check if a property is WB4-ignorable (Extend, Format, ZWJ). */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_word_break_is_ignorable_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_ignorable_set_k >> property) & 1u);
 }
 
 /** Check if a property is AHLetter (ALetter or Hebrew_Letter). */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_word_break_is_aletter_or_hebrew_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_aletter_or_hebrew_set_k >> property) & 1u);
 }
 
 /** Checks if a property is MidNumLetQ (MidNumLet or Single_Quote). In this encoding,
  *  @c sz_utf8_word_break_mid_quotes_k (15) covers MidNumLet and the quotes. */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_word_break_is_mid_quotes_(sz_u8_t property) {
     return (sz_bool_t)((sz_utf8_word_break_mid_quotes_set_k >> property) & 1u);
 }
 
@@ -134,7 +134,7 @@ typedef struct sz_word_element_t {
 } sz_word_element_t;
 
 /** True for the newline family CR/LF/Newline, which neither absorb (WB4) nor are absorbed. */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_newline_(sz_u8_t property) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_is_newline_(sz_u8_t property) {
     return (sz_bool_t)(property == sz_utf8_word_break_cr_k || property == sz_utf8_word_break_lf_k ||
                        property == sz_utf8_word_break_newline_k);
 }
@@ -143,13 +143,13 @@ STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_newline_(sz_u8_t property) {
  *  @c sz_utf8_word_break_mid_quotes_k, so the WB6/WB7/WB7a-c/WB11/WB12 distinctions are
  *  recovered from the codepoint. MidNumLetQ = MidNumLet + Single_Quote, i.e. every such
  *  codepoint except the Double_Quote. */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_is_single_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0027u);
 }
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_is_double_quote_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint == 0x0022u);
 }
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz_rune_t codepoint) {
     return (sz_bool_t)(property == sz_utf8_word_break_mid_quotes_k && codepoint != 0x0022u);
 }
 
@@ -162,7 +162,7 @@ STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_is_mid_num_let_q_(sz_u8_t property, sz
  *  and forging a WB5/6/7 join the forward pass never sees - that asymmetry is the
  *  capacity-dependence. Treating every stray as its own non-skippable U+FFFD makes a resumed call
  *  reproduce the single pass. */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_size_t position) {
     sz_size_t lead = position - 1;
     while (lead > 0 && ((sz_u8_t)text[lead] & 0xC0) == 0x80) lead--;
     sz_size_t reach = lead;
@@ -172,7 +172,7 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_word_previous_start_(sz_cptr_t text, sz_siz
 
 /** The element whose final codepoint ends just before @p position, or the sot sentinel when
  *  @p position is 0. */
-STRINGZILLA_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_word_element_t sz_word_previous_element_(sz_cptr_t text, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     if (position == 0) return element;
@@ -204,8 +204,7 @@ STRINGZILLA_HELPER_AUTO sz_word_element_t sz_word_previous_element_(sz_cptr_t te
 }
 
 /** The element following the one whose base is at @p position (eot sentinel at end of text). */
-STRINGZILLA_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_size_t position) {
+STRINGZILLA_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_word_element_t element;
     element.valid = sz_false_k;
     sz_size_t cursor = position;
@@ -231,7 +230,7 @@ STRINGZILLA_HELPER_INLINE sz_word_element_t sz_word_next_element_(sz_cptr_t text
 
 /** Count of contiguous Regional_Indicator elements immediately before @p position (for WB15/WB16
  *  parity). */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_size_t position) {
     sz_size_t count = 0;
     sz_size_t cursor = position;
     for (;;) {
@@ -252,8 +251,7 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_word_regional_run_before_(sz_cptr_t text, s
  *  machine against, which is what turns @c sz_word_serial_boundary_'s byte-identity claim into
  *  something checked rather than asserted.
  */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length,
-                                                                   sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     if (position == 0) return sz_true_k;      // WB1
     if (position >= length) return sz_true_k; // WB2
     // Never split inside a codepoint - but only a continuation byte genuinely covered by a
@@ -395,8 +393,8 @@ typedef struct sz_word_serial_state_t {
 /** Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new
  *  element base, maintaining the two-back base chain, the Regional_Indicator parity, and
  *  the raw-previous fields. */
-STRINGZILLA_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property,
-                                                     sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property,
+                                                   sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
     sz_bool_t const is_ignorable = sz_utf8_word_break_is_ignorable_(property);
@@ -421,9 +419,9 @@ STRINGZILLA_HELPER_AUTO void sz_word_serial_advance_(sz_word_serial_state_t *sta
  *  The only right-context rules (WB6 / WB7b / WB12) reuse the bounded @c sz_word_next_element_
  *  forward fold; all left context comes from @p state. Byte-identical to
  *  @c sz_utf8_is_word_boundary_serial. */
-STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
-                                                           sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
-                                                           sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
+                                                         sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
+                                                         sz_size_t position) {
     sz_u8_t const immediate_property = state->previous_raw_property;
     sz_rune_t const immediate_codepoint = state->previous_raw_codepoint;
     if (immediate_property == sz_utf8_word_break_cr_k && next_property == sz_utf8_word_break_lf_k)
@@ -502,9 +500,9 @@ STRINGZILLA_HELPER_AUTO sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_
  *  Byte-identical to driving @c sz_utf8_is_word_boundary_serial per position. On a full buffer
  *  `*bytes_consumed` is the start of the first word that did not fit, always a true TR29 boundary,
  *  so a caller resumes from `text + *bytes_consumed` and obtains the identical remainder. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *word_starts, sz_size_t *word_lengths,            //
+STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *word_starts, sz_size_t *word_lengths,     //
     sz_size_t words_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t words = 0;
@@ -562,18 +560,6 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
     return words;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *word_starts, sz_size_t *word_lengths,          //
-    sz_size_t words_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_wordbreaks_serial_(text, length, word_starts, word_lengths, words_capacity,
-                                                                bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
-                                         sz_true_k));
-    return segments_count;
-}
-
 #pragma region Portable Word_Break Codepoint Partition
 
 /**
@@ -586,9 +572,9 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_wordbreaks_serial( //
  *  @param[in] claims_full Lead lanes whose full declared multi-byte sequence is well-formed; a lead
  *      of length ≥ 2 outside this set collapses to a 1-byte U+FFFD.
  */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_u64_t length_two,
-                                                                    sz_u64_t length_three, sz_u64_t length_four,
-                                                                    sz_u64_t claims_full, sz_u64_t valid) {
+STRINGZILLA_CONSTEXPR sz_u64_t sz_utf8_word_break_subpart_starts_(sz_u64_t length_one, sz_u64_t length_two,
+                                                                  sz_u64_t length_three, sz_u64_t length_four,
+                                                                  sz_u64_t claims_full, sz_u64_t valid) {
     sz_u64_t const length_ge_two = length_two | length_three | length_four;
     sz_u64_t const sub1 = length_one | (length_ge_two & ~claims_full);
     sz_u64_t const sub2 = length_two & claims_full;
@@ -631,7 +617,7 @@ typedef struct sz_utf8_word_break_partition_t {
  *  a stray continuation, a short lead, or an overlong/surrogate/range lead takes the data-dependent
  *  reachability fixpoint. @p at_end_of_text distinguishes a benign interior straddle from a true
  *  end-of-text truncation. */
-STRINGZILLA_HELPER_AUTO sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
+STRINGZILLA_CONSTEXPR sz_utf8_word_break_partition_t sz_utf8_word_break_partition_from_masks_( //
     sz_u64_t real_continuation, sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four,
     sz_u64_t bad_second_byte, sz_u64_t valid, int at_end_of_text) {
     sz_u64_t const length_one = valid & ~length_two & ~length_three & ~length_four;
@@ -749,7 +735,7 @@ typedef struct sz_utf8_word_break_window_t {
 } sz_utf8_word_break_window_t;
 
 /** Start-of-text carry: no previous element, all runs closed. */
-STRINGZILLA_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
+STRINGZILLA_CONSTEXPR sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_(void) {
     sz_utf8_word_break_carry_t carry;
     carry.bridge_open = 0;
     carry.bridge_kind = sz_utf8_word_break_bridge_none_k;
@@ -769,7 +755,7 @@ STRINGZILLA_HELPER_AUTO sz_utf8_word_break_carry_t sz_utf8_word_break_carry_sot_
  *  @p inbound_parity at the lowest lane, computed in log-depth Kogge-Stone doubling (no per-lane
  *  loop). @p ri lanes are RI codepoint starts; ignorables/continuations between two RIs are part of
  *  the same run via @p run_gate. */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_utf8_word_break_ri_join_( //
+STRINGZILLA_CONSTEXPR sz_u64_t sz_utf8_word_break_ri_join_( //
     sz_u64_t ri, sz_u64_t run_gate, sz_u8_t inbound_parity, sz_u64_t *inclusive_parity_out) {
     sz_u64_t bits = ri;
     sz_u64_t reach = run_gate;
@@ -868,7 +854,7 @@ typedef struct sz_utf8_word_break_frame_t {
  *  next, fully-contextual window re-resolves it. @p carry is updated from the trailing run-state
  *  read at the block edge by plain shifts.
  */
-STRINGZILLA_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( //
+STRINGZILLA_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_window_( //
     sz_utf8_word_break_frame_t const *frame, sz_u64_t start_bytes_all, sz_u64_t continuation_all, sz_u64_t forced_other,
     sz_u64_t length_two, sz_u64_t length_three, sz_u64_t length_four, sz_size_t loaded,
     sz_utf8_word_break_carry_t *carry, sz_bool_t more_text) {
@@ -1150,6 +1136,22 @@ STRINGZILLA_HELPER_INLINE sz_utf8_word_break_window_t sz_utf8_word_break_decide_
 #pragma endregion Portable Word_Break Block Rule Engine
 
 #pragma endregion UAX 29 Word Boundaries
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_serial(                         //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *word_starts, sz_size_t *word_lengths, sz_size_t words_capacity, //
+    sz_size_t *words_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *words_count = sz_utf8_wordbreaks_serial_(text, length, word_starts, word_lengths, words_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, words_capacity, *words_count,
+                                         bytes_consumed ? *bytes_consumed : length, word_starts, word_lengths, 0,
+                                         sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

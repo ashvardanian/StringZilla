@@ -456,14 +456,15 @@ greeting.try_utf8_uncased_fold(); // in place; `ß` expands to `ss`
 assert(greeting == "grüsse");
 ```
 
-In C, `sz_utf8_uncased_search` takes a `sz_utf8_uncased_needle_metadata_t *` that it fills on the first call and reuses on later ones, so repeated searches for the same needle skip re-analysis:
+In C, `sz_utf8_uncased_search_best` takes a `sz_utf8_uncased_needle_metadata_t *` that it fills on the first call and reuses on later ones, so repeated searches for the same needle skip re-analysis, whichever capability runs them:
 
 ```c
 #include <stringzilla/stringzilla.h>
 
 sz_utf8_uncased_needle_metadata_t needle = {0}; // cached across searches of the same pattern
-sz_size_t matched_length = 0;
-sz_cptr_t hit = sz_utf8_uncased_search(haystack, haystack_length, "café", 5, &needle, &matched_length);
+sz_cptr_t hit = NULL;
+sz_size_t match_length = 0;
+sz_utf8_uncased_search_best(haystack, haystack_length, "café", 5, &needle, &hit, &match_length, capabilities, NULL);
 // `hit` points at the first case-insensitive match, or NULL; reuse `needle` for the next haystack.
 ```
 

@@ -95,7 +95,7 @@ enum sz_utf8_norm_quick_check_t {
 
 /** 3-stage trie index for @p codepoint, 0 for out-of-range or default codepoints. Shared by the
  *  props and scan lookups. */
-STRINGZILLA_HELPER_AUTO sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
     if (codepoint >= sz_utf8_norm_table_max_k) return 0;
     sz_size_t leaf = codepoint >> sz_utf8_norm_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
@@ -105,7 +105,7 @@ STRINGZILLA_HELPER_AUTO sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
 
 /** Look up the per-codepoint normalization properties: canonical combining class, quick-check,
  *  decomposition and composition. */
-STRINGZILLA_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
+STRINGZILLA_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint) {
     return sz_utf8_norm_props_[sz_utf8_norm_index_(codepoint)];
 }
 
@@ -119,7 +119,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t co
  *  slower. Hangul's decomposition bits are baked into the generated values, so no runtime Hangul
  *  test is needed here.
  */
-STRINGZILLA_HELPER_AUTO sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
+STRINGZILLA_CONSTEXPR sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
     if (codepoint >= sz_utf8_norm_table_max_k) return 0;
     sz_size_t leaf = codepoint >> sz_utf8_norm_scan_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> sz_utf8_norm_scan_mid_bits_k];
@@ -131,7 +131,7 @@ STRINGZILLA_HELPER_AUTO sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
 }
 
 /** Canonical_Combining_Class of a codepoint, 0 for starters and all Hangul jamo. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
+STRINGZILLA_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
     return sz_utf8_norm_lookup_(codepoint).canonical_combining_class;
 }
 
@@ -143,8 +143,8 @@ STRINGZILLA_HELPER_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
  *
  *  @return Number of runes written to @p out and @p out_canonical_combining_class, at least 1.
  */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
-                                                               sz_u8_t *out_canonical_combining_class) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
+                                                             sz_u8_t *out_canonical_combining_class) {
     // Hangul syllables decompose algorithmically - they are absent from the tables; jamo are starters.
     if (codepoint >= sz_utf8_norm_hangul_s_base_k &&
         codepoint < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k) {
@@ -184,7 +184,7 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoi
  *  @brief Compose a starter @p a with a following codepoint @p b into a primary composite.
  *  @return The composed codepoint, or 0 if the pair does not compose.
  */
-STRINGZILLA_HELPER_AUTO sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
+STRINGZILLA_CONSTEXPR sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_rune_t b) {
     // Hangul: leading + vowel jamo → LV syllable.
     if (a >= sz_utf8_norm_hangul_l_base_k && a < sz_utf8_norm_hangul_l_base_k + sz_utf8_norm_hangul_l_count_k && //
         b >= sz_utf8_norm_hangul_v_base_k && b < sz_utf8_norm_hangul_v_base_k + sz_utf8_norm_hangul_v_count_k) {
@@ -217,18 +217,17 @@ STRINGZILLA_HELPER_AUTO sz_rune_t sz_utf8_norm_compose_pair_(sz_rune_t a, sz_run
 }
 
 /** Canonical ordering: a stable insertion sort of a combining segment by its combining classes. */
-STRINGZILLA_HELPER_AUTO void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
-                                                           sz_size_t count) {
+STRINGZILLA_CONSTEXPR void sz_utf8_norm_canonical_order_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
+                                                         sz_size_t count) {
     for (sz_size_t i = 1; i < count; ++i) {
         sz_rune_t rune = runes[i];
         sz_u8_t canonical_combining_class = canonical_combining_classes[i];
         if (canonical_combining_class == 0) continue; // starters never move (only the leading one can be a starter)
+        // Finding the slot before shifting keeps GCC's vectorizer off a false -Wstringop-overflow.
         sz_size_t j = i;
-        while (j > 0 && canonical_combining_classes[j - 1] > canonical_combining_class) {
-            runes[j] = runes[j - 1];
-            canonical_combining_classes[j] = canonical_combining_classes[j - 1];
-            --j;
-        }
+        while (j > 0 && canonical_combining_classes[j - 1] > canonical_combining_class) --j;
+        for (sz_size_t k = i; k > j; --k)
+            runes[k] = runes[k - 1], canonical_combining_classes[k] = canonical_combining_classes[k - 1];
         runes[j] = rune;
         canonical_combining_classes[j] = canonical_combining_class;
     }
@@ -253,7 +252,7 @@ typedef struct sz_utf8_norm_out_t {
     sz_bool_t matches;
 } sz_utf8_norm_out_t;
 
-STRINGZILLA_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune_t rune) {
     sz_u8_t bytes[4];
     sz_size_t length = (sz_size_t)sz_rune_encode(rune, bytes);
     if (out->dst) {
@@ -277,7 +276,7 @@ STRINGZILLA_HELPER_AUTO void sz_utf8_norm_emit_(sz_utf8_norm_out_t *out, sz_rune
  *  output verbatim, never round-tripped through @c sz_rune_encode. It is an opaque barrier: it does
  *  not decompose, compose, or participate in canonical ordering.
  */
-STRINGZILLA_HELPER_AUTO void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
+STRINGZILLA_CONSTEXPR void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz_u8_t byte) {
     if (out->dst) { *out->dst++ = byte, ++out->written; }
     else if (out->matches) {
         if (out->cmp == out->cmp_end || *out->cmp++ != byte) out->matches = sz_false_k;
@@ -285,8 +284,8 @@ STRINGZILLA_HELPER_AUTO void sz_utf8_norm_emit_byte_(sz_utf8_norm_out_t *out, sz
 }
 
 /** Order, optionally compose, and emit one buffered combining segment. */
-STRINGZILLA_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes,
-                                                 sz_size_t count, sz_bool_t compose, sz_utf8_norm_out_t *out) {
+STRINGZILLA_CONSTEXPR void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canonical_combining_classes, sz_size_t count,
+                                               sz_bool_t compose, sz_utf8_norm_out_t *out) {
     if (count == 0) return;
     sz_utf8_norm_canonical_order_(runes, canonical_combining_classes, count);
 
@@ -319,8 +318,8 @@ STRINGZILLA_HELPER_AUTO void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *cano
 }
 
 /** Core normalization engine, shared by the write and compare entry points. */
-STRINGZILLA_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                 sz_utf8_norm_out_t *out) {
+STRINGZILLA_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                          sz_utf8_norm_out_t *out) {
     sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
     sz_bool_t compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
 
@@ -385,7 +384,7 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t sou
  *  a starter that is QC=Maybe, such as a Hangul vowel or trailing jamo that composes backward, must
  *  not be a split point, or `가` + `ᆨ` would be separated mid-composition.
  */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
+STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint, sz_normal_form_t form) {
     sz_bool_t hangul = (codepoint >= sz_utf8_norm_hangul_s_base_k &&
                         codepoint < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k)
                            ? sz_true_k
@@ -408,11 +407,9 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t cod
  *  whose quick-check is not Yes, whose canonical combining class is nonzero, or that has a relevant
  *  decomposition for the D-forms - or @b STRINGZILLA_NULL_CHAR if the whole span is inert. This is
  *  the scalar reference; the NEON backend replaces just this with a @c vqtbl4q lead-classify plus a
- *  64-byte gate. Semantics match the old module's @c sz_utf8_find_denormalized, but are computed
- *  from the unified props trie, with no dependency on the `utf8_*` segmentation modules.
+ *  64-byte gate. It reads the unified props trie and depends on no `utf8_*` segmentation module.
  */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length,
-                                                                    sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     sz_u8_t const *ptr = (sz_u8_t const *)text;
     sz_u8_t const *end = ptr + length;
     while (ptr < end) {
@@ -448,7 +445,7 @@ STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t te
 }
 
 /** Map a normalization form to its hot-path `sz_utf8_norm_quick_check_k*` flag bit. */
-STRINGZILLA_HELPER_AUTO sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
+STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
     case sz_normal_form_nfkc_k: return sz_utf8_norm_quick_check_nfkc_k;
@@ -471,9 +468,9 @@ STRINGZILLA_HELPER_AUTO sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
  *  carry-sensitive logic. A malformed byte is an opaque 1-byte barrier: it is inert, never flagged
  *  and passed through unchanged, and resets the carried combining class, exactly like ASCII.
  */
-STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
-                                                             sz_u8_t const *end, sz_u8_t form_flag,
-                                                             sz_u8_t *previous_canonical_combining_class_io) {
+STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **position_io, sz_u8_t const *block_end,
+                                                           sz_u8_t const *end, sz_u8_t form_flag,
+                                                           sz_u8_t *previous_canonical_combining_class_io) {
     sz_u8_t const *position = *position_io;
     sz_u8_t previous_canonical_combining_class = *previous_canonical_combining_class_io;
     while (position < block_end) {
@@ -524,11 +521,11 @@ STRINGZILLA_HELPER_AUTO sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **pos
  *
  *  @c sz_utf8_norm_classify_serial_ is the scalar reference; @c sz_utf8_norm_classify_neon_ in
  *  `neon.h` is the vectorized override. Passing a constant function address into the
- *  always-inline @c STRINGZILLA_HELPER_AUTO engines below devirtualizes the call at -O2 and -O3,
+ *  always-inline @c STRINGZILLA_CONSTEXPR engines below devirtualizes the call at -O2 and -O3,
  *  so each backend pays no indirection - the same force-inlined function-pointer idiom the
  *  case-folding family uses.
  */
-typedef sz_cptr_t (*sz_utf8_norm_scan_t)(sz_cptr_t, sz_size_t, sz_normal_form_t);
+typedef sz_cptr_t (*sz_utf8_norm_scan_t_)(sz_cptr_t, sz_size_t, sz_normal_form_t);
 
 /**
  *  @brief Does the codepoint or malformed byte at @p position open a safe split boundary
@@ -537,8 +534,8 @@ typedef sz_cptr_t (*sz_utf8_norm_scan_t)(sz_cptr_t, sz_size_t, sz_normal_form_t)
  *  A malformed byte is an opaque 1-byte barrier that never decomposes, composes or reorders, so it
  *  is always a safe boundary. A well-formed rune defers to @c sz_utf8_norm_is_safe_boundary_.
  */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end,
-                                                              sz_normal_form_t form) {
+STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *position, sz_u8_t const *end,
+                                                       sz_normal_form_t form) {
     sz_rune_t rune;
     sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
     if (rune_length == sz_rune_invalid_k) return sz_true_k; // malformed byte: opaque barrier
@@ -552,7 +549,7 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_utf8_norm_boundary_at_(sz_u8_t const *pos
  *  well-formed lead, or that would cross @p begin, is treated as single literal bytes, so the
  *  cursor retreats exactly one byte rather than over-reading.
  */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
+STRINGZILLA_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *position, sz_u8_t const *begin) {
     sz_u8_t const *probe = position - 1;
     while (probe > begin && (*probe & 0xC0u) == 0x80u && (position - probe) < 4) --probe;
     sz_rune_t rune;
@@ -565,9 +562,8 @@ STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *
 /** Normalize via skip-and-fix: copy the already-normalized runs verbatim, located by the @p scan
  *  primitive, and run the decompose, reorder and compose engine only on the short dirty regions,
  *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                         sz_normal_form_t form, sz_ptr_t destination,
-                                                         sz_utf8_norm_scan_t scan) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                  sz_ptr_t destination, sz_utf8_norm_scan_t_ scan) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
     sz_u8_t const *const end = begin + source_length;
     sz_u8_t *out = (sz_u8_t *)destination;
@@ -636,8 +632,8 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_si
  *  same benign segments and back up to the same boundary, and it carries the clean guarantee that
  *  every byte before the returned pointer is provably in @p form.
  */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                                      sz_normal_form_t form, sz_utf8_norm_scan_t scan) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
+                                                               sz_normal_form_t form, sz_utf8_norm_scan_t_ scan) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 
@@ -677,15 +673,23 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t 
     return STRINGZILLA_NULL_CHAR;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                       sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, source_length, form, destination, &sz_utf8_norm_classify_serial_);
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                                sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_serial_);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_serial(sz_cptr_t source, sz_size_t source_length,
-                                                                    sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_serial(sz_cptr_t source, sz_size_t source_length,
+                                                             sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

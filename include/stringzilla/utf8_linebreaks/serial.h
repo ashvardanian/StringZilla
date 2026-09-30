@@ -19,7 +19,7 @@ extern "C" {
 
 /** Returns the UAX-14 palette descriptor for a codepoint, with the class in bits 0-5 and side flags
  *  in bits 6-13. */
-STRINGZILLA_API_COMPTIME sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
     for (sz_size_t range = 0; range < sz_utf8_line_break_big_count_k; ++range)
         if (rune >= sz_utf8_line_break_big_lo_[range] && rune <= sz_utf8_line_break_big_hi_[range])
             return sz_utf8_line_break_palette_[sz_utf8_line_break_big_idx_[range]];
@@ -42,44 +42,44 @@ STRINGZILLA_API_COMPTIME sz_u16_t sz_rune_line_break_property(sz_rune_t rune) {
 }
 
 /** Resolved Line_Break class, in palette bits 0-5, of a descriptor. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_line_break_descriptor_class_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_u8_t sz_line_break_descriptor_class_(sz_u16_t descriptor) {
     return (sz_u8_t)(descriptor & 0x3Fu);
 }
 
 /** True if a descriptor carries the general-category Pi initial-quote flag. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_pi_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_descriptor_is_pi_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 6) & 1u);
 }
 
 /** True if a descriptor carries the general-category Pf final-quote flag. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_pf_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_descriptor_is_pf_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 7) & 1u);
 }
 
 /** True if a descriptor carries the East-Asian Width F/W/H flag. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_eaw_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_descriptor_is_eaw_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 8) & 1u);
 }
 
 /** True if a descriptor is an unassigned Extended_Pictographic, the second clause of LB30b. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_extpict_cn_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_descriptor_is_extpict_cn_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 9) & 1u);
 }
 
 /** True if a descriptor is Dotted_Circle U+25CC, an aksara base in LB28a. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_descriptor_is_dotted_circle_(sz_u16_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_descriptor_is_dotted_circle_(sz_u16_t descriptor) {
     return (sz_bool_t)((descriptor >> 13) & 1u);
 }
 
 /** True for a Line_Break CM or ZWJ class, the LB9 attachment candidates. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_is_cm_or_zwj_(sz_u8_t line_break_class) {
     return (sz_bool_t)(line_break_class == sz_line_break_cm_k || line_break_class == sz_line_break_zwj_k);
 }
 
 /** One decoded codepoint's LB1-resolved Line_Break class; advances @p position and
  *  returns the descriptor. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
-                                                            sz_u16_t *descriptor_out) {
+STRINGZILLA_INLINE sz_u8_t sz_line_break_decode_one_(sz_cptr_t text, sz_size_t length, sz_size_t *position,
+                                                     sz_u16_t *descriptor_out) {
     sz_size_t decode = *position;
     sz_rune_t const rune = sz_utf8_next_rune_(text, length, &decode);
     sz_u16_t const descriptor = sz_rune_line_break_property(rune);
@@ -118,7 +118,7 @@ typedef struct sz_line_break_cluster_t {
 
 /** A fully-zeroed invalid cluster standing in for the start or end of text: every field is set, so
  *  no slot is ever read uninitialized even though `valid == sz_false_k` gates its use. */
-STRINGZILLA_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
+STRINGZILLA_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_(void) {
     sz_line_break_cluster_t cluster;
     cluster.byte_start = 0;
     cluster.descriptor = 0;
@@ -136,9 +136,9 @@ STRINGZILLA_HELPER_INLINE sz_line_break_cluster_t sz_line_break_cluster_invalid_
  *  LB10: kept as a lone AL cluster. @p last_codepoint_was_zwj carries the LB8a "preceded by ZWJ"
  *  bit across calls.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
-                                                                              sz_size_t *position,
-                                                                              sz_bool_t *last_codepoint_was_zwj) {
+STRINGZILLA_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t text, sz_size_t length,
+                                                                       sz_size_t *position,
+                                                                       sz_bool_t *last_codepoint_was_zwj) {
     sz_line_break_cluster_t cluster;
     if (*position >= length) return sz_line_break_cluster_invalid_();
     cluster.valid = sz_true_k;
@@ -217,8 +217,8 @@ typedef struct sz_line_break_serial_state_t {
 /** Advance @p state by the @c right cluster, the one about to become @c left: refresh the
  *  nearest non-space context, the numeric-run flags, the Regional_Indicator parity, and
  *  the cluster counter. */
-STRINGZILLA_HELPER_AUTO void sz_line_break_serial_advance_(sz_line_break_serial_state_t *state,
-                                                           sz_line_break_cluster_t const *right, sz_u8_t left_class) {
+STRINGZILLA_CONSTEXPR void sz_line_break_serial_advance_(sz_line_break_serial_state_t *state,
+                                                         sz_line_break_cluster_t const *right, sz_u8_t left_class) {
     sz_u8_t const right_class = right->line_break_class;
     if (right_class != sz_line_break_sp_k) {
         state->last_non_space_class = right_class;
@@ -251,9 +251,9 @@ STRINGZILLA_HELPER_AUTO void sz_line_break_serial_advance_(sz_line_break_serial_
  *  did not fit - always a true LB boundary - so a caller resumes from `text + *bytes_consumed`
  *  and obtains the identical remainder.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *line_starts, sz_size_t *line_lengths,            //
+STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *line_starts, sz_size_t *line_lengths,     //
     sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t lines = 0;
@@ -607,18 +607,6 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
     return lines;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_serial( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *line_starts, sz_size_t *line_lengths,          //
-    sz_size_t lines_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_linebreaks_serial_(text, length, line_starts, line_lengths, lines_capacity,
-                                                                bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, lines_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, line_starts, line_lengths, 0,
-                                         sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion UAX 14 Line Boundaries
 
 #pragma region UAX 14 Line Boundaries window engine
@@ -715,12 +703,12 @@ typedef struct sz_line_break_carry_t {
 /** Is the carried one-hot class word @p class_bits set for class @p cls? @p class_bits is hoisted
  *  once per window into a register, 0 at start-of-text, so every call is a pure register shift and
  *  AND that the compiler CSEs. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_class_is_(sz_u64_t class_bits, sz_u8_t cls) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_class_is_(sz_u64_t class_bits, sz_u8_t cls) {
     return (sz_bool_t)((class_bits >> cls) & 1ull);
 }
 
 /** Is the carried one-hot class word @p class_bits a member of @p class_set? */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_line_break_class_in_(sz_u64_t class_bits, sz_u64_t class_set) {
+STRINGZILLA_INLINE sz_bool_t sz_line_break_class_in_(sz_u64_t class_bits, sz_u64_t class_set) {
     return (sz_bool_t)((class_bits & class_set) != 0);
 }
 
@@ -736,7 +724,7 @@ typedef struct sz_line_break_window_t {
 } sz_line_break_window_t;
 
 /** Start-of-text carry: no previous cluster, all runs closed. */
-STRINGZILLA_HELPER_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
+STRINGZILLA_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
     sz_line_break_carry_t carry;
     carry.have_prev = 0, carry.previous_class_bit = 1ull << sz_line_break_xx_k,
     carry.previous2_class_bit = 1ull << sz_line_break_xx_k;
@@ -750,10 +738,10 @@ STRINGZILLA_HELPER_INLINE sz_line_break_carry_t sz_line_break_carry_sot_(void) {
 /** Largest byte prefix of a decode window whose codepoints are all fully loaded, from the plain u64
  *  lane masks, never below 1 when the window is non-empty: the mask-domain twin of the per-ISA
  *  @c complete_limit helpers, for back-ends that carry their window state as scalars. */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, sz_u64_t start_bytes,
-                                                                      sz_u64_t two_byte_starts,
-                                                                      sz_u64_t three_byte_starts,
-                                                                      sz_u64_t four_byte_starts, sz_bool_t more_text) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_line_break_complete_limit_masks_(sz_size_t loaded, sz_u64_t start_bytes,
+                                                                    sz_u64_t two_byte_starts,
+                                                                    sz_u64_t three_byte_starts,
+                                                                    sz_u64_t four_byte_starts, sz_bool_t more_text) {
     if (!more_text) return loaded;
     sz_u64_t const straddle = ((two_byte_starts & ~sz_u64_mask_until_serial_(loaded > 1 ? loaded - 1 : 0)) |
                                (three_byte_starts & ~sz_u64_mask_until_serial_(loaded > 2 ? loaded - 2 : 0)) |
@@ -787,8 +775,8 @@ typedef struct sz_line_break_frame_t {
 /** OR-reduction of the per-class membership masks over the inclusive class range from @p lo to
  *  @p hi; the portable twin of the icelake @c class_range_mask byte-range compare used to cheaply
  *  gate the script blocks. */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_line_break_effective_range_(sz_line_break_frame_t const *frame, sz_u8_t lo,
-                                                                sz_u8_t hi) {
+STRINGZILLA_CONSTEXPR sz_u64_t sz_line_break_effective_range_(sz_line_break_frame_t const *frame, sz_u8_t lo,
+                                                              sz_u8_t hi) {
     sz_u64_t accumulated = 0;
     for (sz_u8_t cls = lo; cls <= hi; ++cls) accumulated |= frame->effective_class[cls];
     return accumulated;
@@ -796,40 +784,39 @@ STRINGZILLA_HELPER_AUTO sz_u64_t sz_line_break_effective_range_(sz_line_break_fr
 
 /** Previous-cluster mask: bit k set means the cluster ending just before lane k has a base
  *  in @p class_base. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_prev_(sz_u64_t class_base, sz_u64_t gate) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_prev_(sz_u64_t class_base, sz_u64_t gate) {
     return sz_u64_fill_right_(class_base, gate) << 1;
 }
 
 /** Next-cluster mask: bit k set means the cluster starting just after lane k has a base
  *  in @p class_base. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_next_(sz_u64_t class_base, sz_u64_t gate) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_next_(sz_u64_t class_base, sz_u64_t gate) {
     return sz_u64_fill_left_(class_base, gate) >> 1;
 }
 
 /** Carry-aware previous-cluster mask: like @ref sz_line_break_prev_, but additionally marks
  *  @p edge, lane 0, when the carried left cluster matches per @p left_in_set, so cross-window left
  *  context needs no byte re-read. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_prevc_(sz_u64_t class_base, sz_u64_t gate, sz_bool_t left_in_set,
-                                                        sz_u64_t edge) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_prevc_(sz_u64_t class_base, sz_u64_t gate, sz_bool_t left_in_set,
+                                                 sz_u64_t edge) {
     return (sz_u64_fill_right_(class_base, gate) << 1) | (left_in_set ? edge : 0);
 }
 
 /** Commit a forced break at the undecided lanes of @p where, setting both break and settled. */
-STRINGZILLA_HELPER_INLINE void sz_line_break_force_break_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled,
-                                                          sz_u64_t *breaks) {
+STRINGZILLA_INLINE void sz_line_break_force_break_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled, sz_u64_t *breaks) {
     sz_u64_t const w = where & ~*settled & all;
     *breaks |= w, *settled |= w;
 }
 
 /** Commit a forced join, no break, at the undecided lanes of @p where, setting only settled. */
-STRINGZILLA_HELPER_INLINE void sz_line_break_force_join_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled) {
+STRINGZILLA_INLINE void sz_line_break_force_join_(sz_u64_t where, sz_u64_t all, sz_u64_t *settled) {
     *settled |= where & ~*settled & all;
 }
 
 /** Opener-governed "X SP*" run over byte-start lanes, for LB8/14/16/17: flood the opener rightward
  *  across the transparent gate and the space bases; the result marks the opener and the governed
  *  space base lanes. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u64_t spaces, sz_u64_t gate) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u64_t spaces, sz_u64_t gate) {
     return sz_u64_fill_right_(opener, gate | spaces) & (opener | spaces);
 }
 
@@ -843,8 +830,8 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_run_byte_(sz_u64_t opener, sz_u
  *
  *  @return The per-lane inclusive parity.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u64_t run_gate,
-                                                                   sz_bool_t inbound_parity) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t members, sz_u64_t run_gate,
+                                                            sz_bool_t inbound_parity) {
     sz_u64_t bits = sz_u64_segmented_parity_(members, run_gate);
     if (inbound_parity) bits ^= sz_u64_fill_right_(run_gate & 1ull, run_gate);
     return bits;
@@ -860,7 +847,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_segmented_parity_(sz_u64_t memb
  *  precomputed in @p frame by a per-ISA extractor. The returned mask has bits only at base lanes,
  *  where a break opportunity precedes that cluster.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
+STRINGZILLA_INLINE sz_line_break_window_t sz_line_break_decide_window_(
     sz_line_break_frame_t const *frame, sz_u8_t const *effective_class_byte, sz_u8_t const *side_byte,
     sz_line_break_carry_t carry, sz_line_break_carry_t *carry_out, sz_size_t complete_limit, sz_bool_t more_text) {
     sz_u64_t const base = frame->base, gate = frame->gate, non_start = frame->non_start;
@@ -1573,6 +1560,22 @@ STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_(
 }
 
 #pragma endregion UAX 14 Line Boundaries window engine
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_serial(                         //
+    sz_cptr_t text, sz_size_t length,                                          //
+    sz_size_t *line_starts, sz_size_t *line_lengths, sz_size_t lines_capacity, //
+    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *lines_count = sz_utf8_linebreaks_serial_(text, length, line_starts, line_lengths, lines_capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, lines_capacity, *lines_count,
+                                         bytes_consumed ? *bytes_consumed : length, line_starts, line_lengths, 0,
+                                         sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

@@ -31,7 +31,7 @@ extern "C" {
  *  2-lane spill since VSX has no masked store; the low @p emit_count entries copy out in ascending
  *  lane order, byte-exact.
  */
-STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_powervsx_(                 //
+STRINGZILLA_INLINE void sz_utf8_iterate_peel_powervsx_(                        //
     sz_u32_t start_bits, sz_u32_t two_byte_starts, sz_u32_t three_byte_starts, //
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
@@ -79,9 +79,9 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_iterate_peel_powervsx_(                 /
         match_offsets[emitted] = scratch_offsets[emitted], match_lengths[emitted] = scratch_lengths[emitted];
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
+STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_powervsx_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,  //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -161,9 +161,19 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_newlines_powervsx( //
     return count;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
-    sz_cptr_t text, sz_size_t length,                            //
-    sz_size_t *match_offsets, sz_size_t *match_lengths,          //
+STRINGZILLA_API sz_status_t sz_utf8_newlines_powervsx(                              //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_newlines_powervsx_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                bytes_consumed);
+    return sz_success_k;
+}
+
+STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_powervsx_( //
+    sz_cptr_t text, sz_size_t length,                       //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,     //
     sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -262,6 +272,16 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_whitespaces_powervsx( //
     sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, count, bytes_consumed ? *bytes_consumed : length,
                                          match_offsets, match_lengths, 0, sz_false_k));
     return count;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_whitespaces_powervsx(                           //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_whitespaces_powervsx_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                   bytes_consumed);
+    return sz_success_k;
 }
 
 #pragma endregion Multistep newline and whitespace iteration

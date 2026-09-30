@@ -10,13 +10,14 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_linebreaks/tables.h"
 #include "stringzilla/utf8_linebreaks/serial.h"
+#include "stringzilla/utf8_linebreaks/neon.h"
 #include "stringzilla/utf8_runes/sve2.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -34,8 +35,8 @@ extern "C" {
  *
  *  @return 62-entry palette indices.
  */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                                        svuint8_t low_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                                 svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -70,9 +71,9 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_line_break_classify_astral_sve2_(svuint8_
 /** Split one chunk of flat-palette indices into the low and high bytes of their 16-bit Line_Break
  *  descriptors, gathered straight from the 64-word palette by one @c svld1uh_gather per 32-bit
  *  quarter: the SVE2 stand-in for the NEON resident @c vqtbl4q pair and the AVX2 @c vpgatherdd. */
-STRINGZILLA_HELPER_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indices_u8x,
-                                                                    svuint8_t *descriptor_low_out_u8x,
-                                                                    svuint8_t *descriptor_high_out_u8x) {
+STRINGZILLA_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t palette_indices_u8x,
+                                                             svuint8_t *descriptor_low_out_u8x,
+                                                             svuint8_t *descriptor_high_out_u8x) {
     svbool_t const all_b32x = svptrue_b32();
     sz_u16_t const *palette = sz_utf8_line_break_flat_palette_;
     svuint16_t const indices_lo_u16x = svunpklo_u16(palette_indices_u8x),
@@ -108,10 +109,9 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_flat_descriptors_sve2_(svuint8_t pa
  *  aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); the RI and ZWJ side bits come from the raw class,
  *  the mark side bit from the resolved class.
  */
-STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_indices_u8x,
-                                                                       svuint8_t *classes_out_u8x,
-                                                                       svuint8_t *side_out_u8x,
-                                                                       svbool_t *dotted_out_b8x) {
+STRINGZILLA_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t palette_indices_u8x,
+                                                                svuint8_t *classes_out_u8x, svuint8_t *side_out_u8x,
+                                                                svbool_t *dotted_out_b8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t descriptor_low_u8x, descriptor_high_u8x;
     sz_line_break_flat_descriptors_sve2_(palette_indices_u8x, &descriptor_low_u8x, &descriptor_high_u8x);
@@ -154,7 +154,7 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_sve2_(svuint8_t
 }
 
 /** Membership mask of class @p cls over the six class bit-planes, as class ids are below 64. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t const *planes, sz_u8_t cls) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t const *planes, sz_u8_t cls) {
     sz_u64_t members = ~0ull;
     for (int bit = 0; bit < 6; ++bit) members &= ((cls >> bit) & 1) ? planes[bit] : ~planes[bit];
     return members;
@@ -176,10 +176,13 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_plane_class_sve2_(sz_u64_t cons
  *  class bit-planes and side masks the frame needs; fifteen-plus per-class masks then assemble from
  *  six bit-planes with scalar mask algebra instead of one compare per class.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *starts, sz_size_t *lengths,                    //
+STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *starts, sz_size_t *lengths,             //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
+
+    // Graviton 5: the scalable front only outruns NEON with wider-than-NEON registers.
+    if (svcntb() <= 16) return sz_utf8_linebreaks_neon_(text, length, starts, lengths, capacity, bytes_consumed);
 
     if (length == 0 || capacity == 0) {
         if (bytes_consumed) *bytes_consumed = 0;
@@ -481,24 +484,29 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
     return produced;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_sve2( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *starts, sz_size_t *lengths,                  //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_linebreaks_sve2_(text, length, starts, lengths, capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, segments_count, bytes_consumed ? *bytes_consumed : length,
+#pragma endregion UAX 14 Line Boundaries forward kernel
+
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_sve2(           //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
+    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *lines_count = sz_utf8_linebreaks_sve2_(text, length, starts, lengths, capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
                                          starts, lengths, 0, sz_true_k));
-    return segments_count;
+    return sz_success_k;
 }
 
-#pragma endregion UAX 14 Line Boundaries forward kernel
+#endif // STRINGZILLA_TARGET_SVE2
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

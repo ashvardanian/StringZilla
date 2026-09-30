@@ -19,7 +19,7 @@ extern "C" {
 
 /** Returns the packed Grapheme_Cluster_Break descriptor, `gcb | incb << 4 | extpict << 6`,
  *  for a codepoint. */
-STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
+STRINGZILLA_CONSTEXPR sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune) {
     if (rune >= 0xAC00u && rune <= 0xD7A3u)
         return ((rune - 0xAC00u) % 28u == 0u) ? (sz_u8_t)(sz_grapheme_break_hangul_lv_k)
                                               : (sz_u8_t)(sz_grapheme_break_hangul_lvt_k);
@@ -44,7 +44,7 @@ STRINGZILLA_API_COMPTIME sz_u8_t sz_rune_grapheme_break_property(sz_rune_t rune)
  *  malformed input identically. Stepping by the lead's declared byte length would skip past
  *  trailing non-continuation bytes of a truncated lead, diverging from the window decoder.
  */
-STRINGZILLA_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, sz_size_t length, sz_size_t position) {
     sz_size_t next = position + 1;
     while (next < length && ((sz_u8_t)text[next] & 0xC0) == 0x80) ++next;
     return next;
@@ -63,7 +63,7 @@ STRINGZILLA_HELPER_AUTO sz_size_t sz_grapheme_break_next_start_(sz_cptr_t text, 
  *  ill-formed input, which UAX-29 leaves undefined. Valid UTF-8 decodes identically to the checked
  *  path; only malformed input differs, by design.
  */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
+STRINGZILLA_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text, sz_size_t length, sz_size_t start) {
     sz_u8_t const lead = (sz_u8_t)text[start];
     sz_u8_t const byte1 = (start + 1 < length) ? (sz_u8_t)text[start + 1] : 0;
     sz_u8_t const byte2 = (start + 2 < length) ? (sz_u8_t)text[start + 2] : 0;
@@ -96,17 +96,17 @@ STRINGZILLA_HELPER_INLINE sz_u8_t sz_grapheme_break_property_at_(sz_cptr_t text,
 }
 
 /** Extracts the Grapheme_Cluster_Break class, bits 0-3, from a packed descriptor. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) {
+STRINGZILLA_INLINE sz_u8_t sz_grapheme_break_descriptor_gcb_(sz_u8_t descriptor) {
     return (sz_u8_t)(descriptor & 0x0Fu);
 }
 
 /** Extracts the Indic_Conjunct_Break value, bits 4-5, from a packed descriptor. */
-STRINGZILLA_HELPER_INLINE sz_u8_t sz_grapheme_break_descriptor_incb_(sz_u8_t descriptor) {
+STRINGZILLA_INLINE sz_u8_t sz_grapheme_break_descriptor_incb_(sz_u8_t descriptor) {
     return (sz_u8_t)((descriptor >> 4) & 0x03u);
 }
 
 /** Extracts the Extended_Pictographic flag, bit 6, from a packed descriptor. */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descriptor) {
+STRINGZILLA_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_t descriptor) {
     return (sz_bool_t)((descriptor >> 6) & 1u);
 }
 
@@ -116,8 +116,8 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_grapheme_break_descriptor_extpict_(sz_u8_
  *  Nothing in the library calls this: the segmenters run a streaming state machine instead. It is
  *  the independent second opinion the tests measure that machine against.
  */
-STRINGZILLA_API_COMPTIME sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length,
-                                                                       sz_size_t position) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t text, sz_size_t length,
+                                                                    sz_size_t position) {
     if (position == 0) return sz_true_k;      // GB1
     if (position >= length) return sz_true_k; // GB2
     if (((sz_u8_t)text[position] & 0xC0) == 0x80) return sz_false_k;
@@ -245,8 +245,7 @@ typedef struct sz_grapheme_serial_state_t {
 
 /** Boundary decision between @p state's previous codepoint and the @p after codepoint,
  *  GB3..GB13 in O(1). */
-STRINGZILLA_HELPER_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state,
-                                                                 sz_u8_t after) {
+STRINGZILLA_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
     sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     if (before_class == sz_grapheme_break_cr_k && after_class == sz_grapheme_break_lf_k) return sz_false_k; // GB3
@@ -284,7 +283,7 @@ STRINGZILLA_HELPER_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_ser
 
 /** Advances @p state by the @p after codepoint, toggling or closing the RI, ExtPict-ZWJ,
  *  and InCB runs. */
-STRINGZILLA_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
+STRINGZILLA_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
                                             ? (sz_bool_t)(!state->regional_indicator_run_odd)
@@ -326,9 +325,9 @@ STRINGZILLA_HELPER_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_st
  *  parallel @p cluster_starts and @p cluster_lengths, carrying the GB9c, GB11, and GB12-13
  *  runs in a register state, O(n) with no backward re-walks. Byte-identical to the
  *  per-position @c sz_utf8_is_grapheme_boundary_serial. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_serial_( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,     //
+STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_(    //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t clusters = 0;
@@ -380,18 +379,6 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_serial_( //
     return clusters;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_serial( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,   //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths,
-                                                               clusters_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
-                                         sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion UAX 29 Grapheme Cluster Boundaries
 
 #pragma region Portable grapheme boundary algebra
@@ -400,8 +387,8 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_serial( //
  *  first 2-, 3-, or 4-byte start whose declared span crosses the window edge defers to the next
  *  window. Shared u64 mask math for the windowed ISA fronts; short final windows keep
  *  everything, as their neighbours read 0. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_grapheme_byte_span_serial_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
-                                                                  sz_u64_t four_byte_starts, sz_size_t loaded) {
+STRINGZILLA_INLINE sz_size_t sz_grapheme_byte_span_serial_(sz_u64_t two_byte_starts, sz_u64_t three_byte_starts,
+                                                           sz_u64_t four_byte_starts, sz_size_t loaded) {
     sz_u64_t const overrun = (two_byte_starts & ~sz_u64_mask_until_serial_(loaded - 1)) |
                              (three_byte_starts & ~sz_u64_mask_until_serial_(loaded - 2)) |
                              (four_byte_starts & ~sz_u64_mask_until_serial_(loaded - 3));
@@ -420,7 +407,7 @@ typedef struct sz_grapheme_bit_route_t {
 
 /** Builds the per-selector routing plan once; reuse it for every gather or scatter sharing
  *  this @p selector. */
-STRINGZILLA_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
+STRINGZILLA_CONSTEXPR sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_u64_t selector) {
     sz_grapheme_bit_route_t route;
     route.selector = selector;
     sz_u64_t routing_selector = selector;
@@ -442,7 +429,7 @@ STRINGZILLA_HELPER_AUTO sz_grapheme_bit_route_t sz_grapheme_bit_route_build_(sz_
 
 /** A @c pext via a precomputed @p route: gathers the bits of @p value at the selector positions
  *  to the low end. */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+STRINGZILLA_CONSTEXPR sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
     value &= route->selector;
     for (int step = 0; step < 6; ++step) {
         sz_u64_t const movable_value = value & route->move_masks[step];
@@ -453,7 +440,7 @@ STRINGZILLA_HELPER_AUTO sz_u64_t sz_grapheme_bit_gather_(sz_u64_t value, sz_grap
 
 /** A @c pdep via a precomputed @p route: scatters the low bits of @p value into
  *  the selector positions. */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
+STRINGZILLA_CONSTEXPR sz_u64_t sz_grapheme_bit_scatter_(sz_u64_t value, sz_grapheme_bit_route_t const *route) {
     for (int step = 5; step >= 0; --step) {
         sz_u64_t const movable_value = value << (1u << step);
         value = (value & ~route->move_masks[step]) | (movable_value & route->move_masks[step]);
@@ -490,7 +477,7 @@ typedef struct sz_grapheme_carry_t {
 
 /** A zero-initialized cross-window carry for the stream start: no previous codepoint,
  *  no open runs. */
-STRINGZILLA_HELPER_AUTO sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
+STRINGZILLA_CONSTEXPR sz_grapheme_carry_t sz_grapheme_carry_empty_(void) {
     sz_grapheme_carry_t carry;
     carry.has_previous = 0;
     for (int class_index = 0; class_index < 14; ++class_index) carry.previous_class_bit[class_index] = 0;
@@ -521,9 +508,9 @@ typedef struct sz_grapheme_window_masks_t {
  *  result set → a no-break suppression sits before dense codepoint i. ISA-independent: pure
  *  @c sz_u64_t bit-mask algebra over the substrate scan primitives.
  */
-STRINGZILLA_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window,
-                                                             int codepoint_count, sz_grapheme_carry_t const *previous,
-                                                             sz_grapheme_carry_t *next) {
+STRINGZILLA_CONSTEXPR sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_masks_t const *window,
+                                                           int codepoint_count, sz_grapheme_carry_t const *previous,
+                                                           sz_grapheme_carry_t *next) {
     sz_u64_t const regional = window->class_bit[sz_grapheme_break_regional_indicator_k];
     sz_u64_t const extend = window->class_bit[sz_grapheme_break_extend_k];
     sz_u64_t const zero_width_joiner = window->class_bit[sz_grapheme_break_zwj_k];
@@ -598,8 +585,8 @@ STRINGZILLA_HELPER_AUTO sz_u64_t sz_grapheme_stateful_joins_(sz_grapheme_window_
 
 /** Per-class shift of @p current into the (i-1) position, seeding lane 0 from the inbound
  *  carry's last class. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous,
-                                                         int class_index) {
+STRINGZILLA_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_grapheme_carry_t const *previous,
+                                                  int class_index) {
     return (current << 1) | (previous->previous_class_bit[class_index] & 1ull);
 }
 
@@ -611,9 +598,9 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_previous_(sz_u64_t current, sz_gr
  *  twin of the Ice Lake fused window-boundaries; a per-ISA extractor builds @p window from
  *  descriptors, then calls this. Pure @c sz_u64_t algebra, no intrinsics.
  */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window,
-                                                                  int codepoint_count, sz_u64_t valid,
-                                                                  sz_grapheme_carry_t *carry) {
+STRINGZILLA_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_masks_t const *window,
+                                                           int codepoint_count, sz_u64_t valid,
+                                                           sz_grapheme_carry_t *carry) {
     sz_grapheme_carry_t const previous = *carry;
 
     sz_u64_t const carriage_return = window->class_bit[sz_grapheme_break_cr_k];
@@ -669,6 +656,23 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_wi
 }
 
 #pragma endregion Portable grapheme boundary algebra
+
+#if STRINGZILLA_TARGET_SERIAL
+
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_serial(                                   //
+    sz_cptr_t text, sz_size_t length,                                                   //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
+    sz_size_t *clusters_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *clusters_count = sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
+                                                bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, *clusters_count,
+                                         bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
+                                         sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SERIAL
 
 #ifdef __cplusplus
 }

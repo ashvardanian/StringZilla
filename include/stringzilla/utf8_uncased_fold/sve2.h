@@ -9,7 +9,9 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SVE2_H_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_SVE2_H_
 
+#include "stringzilla/types.h"
 #include "stringzilla/utf8_uncased_fold/serial.h"
+#include "stringzilla/utf8_uncased_fold/neon.h"
 #include "stringzilla/utf8_runes/sve2.h"
 
 #ifdef __cplusplus
@@ -22,7 +24,7 @@ extern "C" {
  *  positions ride the shared value-domain up-shift with a cross-chunk carry; stop lanes lower once
  *  per chunk through the predicate bridge and resolve through the serial boundary walk-back that
  *  all back-ends share. */
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -31,7 +33,7 @@ extern "C" {
 #endif
 
 /** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const is_upper_b8x = svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 'A'), 26);
     return svadd_n_u8_m(is_upper_b8x, source_u8x, 0x20);
@@ -42,7 +44,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8
  *      @ref sz_utf8_fold_neon_malformed_lead_ over one (chunk, peek) pair.
  *  @return Predicate set on every lead byte that does not begin a well-formed rune.
  */
-STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
+STRINGZILLA_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const next1_u8x = svext_u8(source_u8x, peek_u8x, 1);
     svuint8_t const next2_u8x = svext_u8(source_u8x, peek_u8x, 2);
@@ -87,7 +89,7 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t s
  *      the SVE2 twin of @ref sz_utf8_uncased_fold_neon_caseless_chunk_.
  *  @return Bytes consumed; always 62..64, never zero.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     for (sz_size_t chunk_base = 0; chunk_base < 64; chunk_base += chunk_bytes) {
         svbool_t const loaded_b8x = svwhilelt_b8_u64((sz_u64_t)chunk_base, 64);
@@ -107,7 +109,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz
  *      through chunked @c svtbl walks and the same stop policy.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -250,7 +252,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cp
  *      @ref sz_utf8_uncased_fold_neon_cyrillic_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -313,7 +315,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz
  *      @ref sz_utf8_uncased_fold_neon_greek_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -392,7 +394,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cp
  *      @ref sz_utf8_uncased_fold_neon_armenian_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -467,7 +469,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz
  *      twin of @ref sz_utf8_uncased_fold_neon_georgian_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -550,7 +552,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz
  *      SVE2 twin of @ref sz_utf8_uncased_fold_neon_guarded_chunk_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     sz_u64_t stop_lanes = 0;
@@ -599,8 +601,10 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_
     return 64;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, sz_size_t source_length,
-                                                             sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+    // Same 16-byte granularity as NEON at 128 bits, with slower predicate compares.
+    if (svcntb() <= 16) return sz_utf8_uncased_fold_neon_(source, source_length, target);
+
     // The same 64-byte logical superchunk and family dispatch as the serial / NEON / Ice Lake kernels, so chunk
     // decisions stay comparable for differential debugging. The output buffer holds at least 3x the source, so
     // full-register stores with partial advance are safe anywhere inside the superchunk path.
@@ -707,19 +711,30 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, s
         source += rune_length, source_length -= rune_length;
     }
 
-    if (source_length) target += sz_utf8_uncased_fold_serial(source, source_length, target);
+    if (source_length) target += sz_utf8_uncased_fold_serial_(source, source_length, target);
     sz_size_t const folded_length = (sz_size_t)(target - target_start);
     sz_assert_(folded_length <= source_full_length * 3 && "Folding grows one byte into three at most");
     sz_assert_no_overlap_(target_start, folded_length, source_start, source_full_length);
     return folded_length;
 }
 
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
+                                                      sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_uncased_fold_sve2_(source, source_length, target);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE2
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

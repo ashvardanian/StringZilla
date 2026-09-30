@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -40,27 +40,34 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_HELPER_NOINLINE sz_cptr_t sz_utf8_norm_classify_sve2_(sz_cptr_t text, sz_size_t length,
-                                                                  sz_normal_form_t form) {
+STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_sve2_(sz_cptr_t text, sz_size_t length, sz_normal_form_t form) {
     return sz_utf8_norm_classify_sve_(text, length, form);
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_norm_sve2(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                     sz_ptr_t destination) {
-    return sz_utf8_norm_engine_(source, length, form, destination, &sz_utf8_norm_classify_sve2_);
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_norm_sve2(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
+                                              sz_ptr_t target, sz_size_t *target_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_sve2_);
+    return sz_success_k;
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_denormalized_sve2(sz_cptr_t source, sz_size_t length,
-                                                                  sz_normal_form_t form) {
-    return sz_utf8_find_denormalized_engine_(source, length, form, &sz_utf8_norm_classify_sve2_);
+STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_sve2(sz_cptr_t source, sz_size_t source_length,
+                                                           sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_sve2_);
+    return sz_success_k;
 }
+
+#endif // STRINGZILLA_TARGET_SVE2
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

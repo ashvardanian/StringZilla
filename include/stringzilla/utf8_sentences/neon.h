@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -44,7 +44,7 @@ extern "C" {
  *  low end, so bit j of the result is the j-th set bit of @p value within @p selector. NEON has
  *  no @c pext; the sparse loop trips once per set @p selector bit, the codepoint-dense
  *  compaction over the start lanes. Bit-exact with BMI2. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selector) {
+STRINGZILLA_INLINE sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     sz_u64_t out_bit = 1;
     while (selector) {
@@ -60,7 +60,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_sentence_break_pext_neon_(sz_u64_t value, 
  *  @p selector, so the j-th set bit of @p selector receives bit j of @p value. NEON has no
  *  @c pdep; the sparse loop trips once per set @p selector bit, the dense-boundary scatter back
  *  onto codepoint-start lanes. Bit-exact with BMI2. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
+STRINGZILLA_INLINE sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, sz_u64_t selector) {
     sz_u64_t result = 0;
     while (selector) {
         sz_u64_t const low = selector & (~selector + 1); // lowest set bit of `selector`
@@ -77,7 +77,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_sentence_break_pdep_neon_(sz_u64_t value, 
 
 /** Expands a 16-bit lane mask into a @c uint8x16_t select vector, byte i = 0xFF when bit i is
  *  set, the NEON twin of @ref sz_utf8_byte_mask_from_bits_haswell_ confined to one quarter. */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
+STRINGZILLA_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
     static sz_u8_t const byte_router_lanes[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
     static sz_u8_t const bit_select_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const broadcast_u8x16 = vreinterpretq_u8_u16(vdupq_n_u16((sz_u16_t)bits));
@@ -102,7 +102,7 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_sentence_break_byte_mask_from_bits_neon_
  *  nor a 3-byte lead keep @p raw_u8x16 as the low byte and zero as the high byte; the classifier
  *  re-seats raw and 4-byte lanes anyway.
  */
-STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
+STRINGZILLA_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
     uint8x16_t raw_u8x16, uint8x16_t next1_u8x16, uint8x16_t next2_u8x16, sz_u64_t two_bits, sz_u64_t three_bits,
     uint8x16_t *out_high_u8x16, uint8x16_t *out_low_u8x16) {
     uint8x16_t const low_two_bits_u8x16 = vdupq_n_u8(0x03);
@@ -134,8 +134,8 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_neon_( //
  *  NEON twin of @ref sz_utf8_sentence_break_bmp_class_haswell_. Bit-exact with
  *  @c sz_rune_sentence_break_property over the whole BMP. Operates on one quarter; the caller
  *  iterates the four quarters. */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
-                                                                            uint8x16_t low_bytes_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint8x16_t high_bytes_u8x16,
+                                                                     uint8x16_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_neon_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
                                           (int)sz_utf8_sentence_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -145,9 +145,8 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_bmp_class_neon_(uint
  *  Per-lane bytes: @p plane holds `(offset >> 16) & 0xFF`, of which only the low nibble matters,
  *  @p high holds `(offset >> 8) & 0xFF`, and @p low holds `offset & 0xFF`. Operates on one quarter
  *  and is bit-exact with @c sz_rune_sentence_break_property over all of the astral planes. */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane_u8x16,
-                                                                               uint8x16_t high_u8x16,
-                                                                               uint8x16_t low_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
+                                                                        uint8x16_t low_u8x16) {
     uint8x16_t const low_nibble_mask_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t const n4_u8x16 = vandq_u8(plane_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const n3_u8x16 = vandq_u8(vshrq_n_u8(high_u8x16, 4), low_nibble_mask_u8x16);
@@ -191,7 +190,7 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(u
  *  through the astral cascade. The class on non-codepoint-start lanes is irrelevant, as the dense
  *  compaction only reads start lanes, so those lanes are never selected.
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
+STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neon_( //
     uint8x16_t window_high_u8x16, uint8x16_t window_low_u8x16, uint8x16_t raw_u8x16, uint8x16_t next1_u8x16,
     uint8x16_t next2_u8x16, uint8x16_t next3_u8x16, sz_u64_t four_byte_bits) {
     uint8x16_t const low_two_bits_u8x16 = vdupq_n_u8(0x03);
@@ -259,8 +258,8 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_utf8_sentence_break_classify_quarter_neo
  *  each class is one @c vceqq_u8 per quarter OR-combined to a u64, the NEON twin of
  *  @ref sz_utf8_sentence_break_frame_haswell_ with no scalar pass. The dense stream is at most
  *  64 lanes, held as four @c uint8x16_t quarters. */
-STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(
-    sz_u8_t const *dense_classes, sz_u64_t valid) {
+STRINGZILLA_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_neon_(sz_u8_t const *dense_classes,
+                                                                                     sz_u64_t valid) {
     uint8x16_t dense_u8x16[4];
     dense_u8x16[0] = vld1q_u8(dense_classes + 0);
     dense_u8x16[1] = vld1q_u8(dense_classes + 16);
@@ -279,7 +278,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_
 
 /** Runs the portable rule engine over a dense class stream, building the frame with
  *  NEON compares first. */
-STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_neon_( //
+STRINGZILLA_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_neon_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t const frame = sz_utf8_sentence_break_frame_neon_(dense_classes, valid);
@@ -289,9 +288,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break
 /** Largest byte prefix of the window whose codepoints are all fully loaded, the NEON twin of
  *  @ref sz_utf8_sentence_break_complete_limit_haswell_ over the NEON window struct. Never below
  *  1 when the window is non-empty. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
-                                                                                sz_u8_t const *bytes_after,
-                                                                                sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
+                                                                         sz_u8_t const *bytes_after,
+                                                                         sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -324,7 +323,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_neon_(
  *  shared portable rule engine @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are
  *  scattered back to byte lanes.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_neon_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_neon_(        //
     sz_cptr_t text, sz_size_t length,                        //
     sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
@@ -497,27 +496,33 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_neon_( //
     return sentences;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_neon(   //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
-    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_sentences_neon_(text, length, sentence_starts, sentence_lengths,
-                                                             sentences_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
-                                         0, sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 29 Sentence Boundaries forward kernel
+
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_utf8_sentences_neon(                                        //
+    sz_cptr_t text, sz_size_t length,                                                      //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, sz_size_t sentences_capacity, //
+    sz_size_t *sentences_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *sentences_count = sz_utf8_sentences_neon_(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                               bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, *sentences_count,
+                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
+                                         0, sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

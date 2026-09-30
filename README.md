@@ -63,7 +63,7 @@ Only the languages that ship a counterpart appear under each heading.
 ─────────────────────────────────────────────────────────────────────────────────
 Unicode case-insensitive substring search  (GB/s)
   Python          icu.StringSearch                     0.06      0.15
-  StringZilla.C   sz_utf8_uncased_search              13.16      9.30
+  StringZilla.C   sz_utf8_uncased_search_best         13.16      9.30
   StringZilla.Py  sz.utf8_uncased_search              12.40      9.19
 
 Find the first occurrence of a random word, ≅ 5 bytes  (GB/s)

@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -22,7 +22,7 @@ extern "C" {
 #pragma GCC target("+sve+sve2")
 #endif
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_count_sve2_(sz_cptr_t text, sz_size_t length) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
     sz_size_t char_count = 0;
@@ -46,7 +46,7 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t 
  *  lead-lane iota of the one quarter the @p n-th lead falls in and reading it with @c svlastb.
  *  Byte-exact to serial.
  */
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_sve2_(sz_cptr_t text, sz_size_t length, sz_size_t n) {
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const window_bytes = svcntb();
     sz_size_t const quarter_lanes = svcntw();
@@ -87,7 +87,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t l
  *  0/1 bytes pack into each 64-bit lane's top byte via one multiply (every partial product lands on
  *  a distinct bit, so no carries), and a lane-indexed shift + @c svaddv folds the disjoint per-lane
  *  bytes into one scalar. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_b8x) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_b8x) {
     svbool_t const all_b64x = svptrue_b64();
     svuint64_t const flag_bytes_u64x = svreinterpret_u64_u8(svdup_u8_z(mask_b8x, 1));
     svuint64_t const packed_u64x = svlsr_n_u64_x(all_b64x,
@@ -99,7 +99,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_utf8_rune_pred_to_u64_sve2_(svbool_t mask_
  *  @c svtbl over the broadcast word and tests its bit. The inverse of
  *  @ref sz_utf8_rune_pred_to_u64_sve2_; for a chunked window pass the mask pre-shifted so bit 0 is
  *  the chunk's first lane. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_t lane_iota_u8x) {
+STRINGZILLA_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask, svuint8_t lane_iota_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const mask_bytes_u8x = svtbl_u8(svreinterpret_u8_u64(svdup_n_u64(mask)),
                                               svlsr_n_u8_x(all_b8x, lane_iota_u8x, 3));
@@ -111,9 +111,8 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_utf8_rune_u64_to_pred_sve2_(sz_u64_t mask,
  *  chunk boundary: low lanes fill from the top of @p carry_u8x (the previous chunk), the SVE2
  *  value-domain twin of the icelake `mask << amount` with a cross-window carry. Out-of-range
  *  @c svtbl indices resolve to 0, so each lane reads exactly one of the two sources. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry_u8x, svuint8_t value_u8x,
-                                                                      sz_u8_t amount, svuint8_t lane_iota_u8x,
-                                                                      sz_u8_t chunk_lanes) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t carry_u8x, svuint8_t value_u8x, sz_u8_t amount,
+                                                               svuint8_t lane_iota_u8x, sz_u8_t chunk_lanes) {
     svbool_t const all_b8x = svptrue_b8();
     return svorr_u8_x(all_b8x, svtbl_u8(value_u8x, svsub_n_u8_x(all_b8x, lane_iota_u8x, amount)),
                       svtbl_u8(carry_u8x, svadd_n_u8_x(all_b8x, lane_iota_u8x, (sz_u8_t)(chunk_lanes - amount))));
@@ -124,7 +123,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_shift_value_up_pair_sve2_(svuint8_t 
  *  lanes on the load pipes. Every offset is in-bounds by construction (the page offset is a
  *  byte, and `page * 256 + low` stays under `pages * 256`), so `svptrue_b32()` governs even
  *  the tail lanes. */
-STRINGZILLA_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
+STRINGZILLA_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint32_t high_bytes_u32x, svuint32_t low_bytes_u32x) {
     svbool_t const all_words_b32x = svptrue_b32();
     svuint32_t const page_indices_u32x = svld1ub_gather_u32offset_u32(all_words_b32x, page_lut, high_bytes_u32x);
@@ -139,7 +138,7 @@ STRINGZILLA_HELPER_INLINE svuint32_t sz_utf8_rune_flat_lookup_quarter_sve2_( //
  *  @ref sz_utf8_rune_flat_lookup_icelake_. An @c svtbl_u8 scan of the 256-entry page LUT would cost
  *  sixteen shuffle-pipe lookups at the architectural minimum vector length, while gathering both
  *  stages stays length-agnostic with no VL-dependent branch. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
+STRINGZILLA_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t high_bytes_u8x, svuint8_t low_bytes_u8x) {
 
     // Widen both byte-lane vectors into four 32-bit-lane quarters each, preserving lane order. SVE vector types
@@ -171,7 +170,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_sve2_( //
 /** Read up to 256 LUT entries by per-lane u8 index via overlapping @c svtbl_u8 chunks
  *  (gather-free); lanes outside a chunk's span select zero and OR away. Serves the astral
  *  cascade stage-1 tables. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table, int count, svuint8_t index_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
     int const vector_length = (int)svcntb();
     svuint8_t result_u8x = svdup_n_u8(0);
@@ -192,7 +191,7 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_lut_sve2_(sz_u8_t const *table,
  *  compare + @c ptest, never an extra LUT). Requires inactive lanes of @p bytes_u8x to be
  *  zero-filled (any @c svld1 with a @c whilelt predicate is), so the whole-chunk ASCII test never
  *  trips on tail garbage. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
+STRINGZILLA_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( //
     sz_u8_t const *page_lut, sz_u8_t const *flat, svuint8_t bytes_u8x, svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     if (!svptest_any(all_b8x, svcmpge_n_u8(all_b8x, bytes_u8x, 0x80)))
@@ -202,8 +201,8 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_flat_lookup_ascii_gated_sve2_( 
 
 /** Select one of @p tile_count 16-entry rows by @c selector and index it by @c within (nibble
  *  cascade tile), serving the astral cascade stages on every property. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count,
-                                                               svuint8_t selector_u8x, svuint8_t within_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *table, int tile_count, svuint8_t selector_u8x,
+                                                        svuint8_t within_u8x) {
     svbool_t const all_bytes_b8x = svptrue_b8();
     svbool_t const row_b8x = svwhilelt_b8_u64(0, 16);
     svuint8_t result_u8x = svdup_n_u8(0);
@@ -216,8 +215,8 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_utf8_rune_cascade_sve2_(sz_u8_t const *ta
 
 /** Select and widen one 32-bit quarter of a byte-lane vector given its two
  *  unpacked 16-bit halves. */
-STRINGZILLA_HELPER_INLINE svuint32_t sz_utf8_rune_quarter_words_sve2_(svuint16_t half_lo_u16x, svuint16_t half_hi_u16x,
-                                                                      int high_half, int high_quarter) {
+STRINGZILLA_INLINE svuint32_t sz_utf8_rune_quarter_words_sve2_(svuint16_t half_lo_u16x, svuint16_t half_hi_u16x,
+                                                               int high_half, int high_quarter) {
     svuint16_t const half_u16x = high_half ? half_hi_u16x : half_lo_u16x;
     return high_quarter ? svunpkhi_u32(half_u16x) : svunpklo_u32(half_u16x);
 }
@@ -239,9 +238,9 @@ STRINGZILLA_HELPER_INLINE svuint32_t sz_utf8_rune_quarter_words_sve2_(svuint16_t
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
  *      resume cursor delta).
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_sve2_( //
-    svuint8_t bytes_u8x, svuint8_t peek_u8x,                  //
-    svbool_t emit_starts_b8x, svuint8_t flags_u8x,            //
+STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_sve2_( //
+    svuint8_t bytes_u8x, svuint8_t peek_u8x,           //
+    svbool_t emit_starts_b8x, svuint8_t flags_u8x,     //
     sz_rune_t *runes, sz_size_t capacity, sz_size_t *consumed_bytes) {
 
     svbool_t const all_b32x = svptrue_b32();
@@ -316,7 +315,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_sve2_( //
  *  @return Number of runes emitted; sets @p consumed_bytes to the byte span they cover (the
  *      resume cursor delta).
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(                          //
+STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(                                 //
     svuint8_t cp_lo_u8x, svuint8_t cp_hi_u8x, svuint8_t length_u8x, svbool_t emit_starts_b8x, //
     sz_rune_t *runes, sz_size_t capacity, sz_size_t full_consumed, sz_size_t *consumed_bytes) {
 
@@ -375,13 +374,13 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_rune_drain_packed_sve2_(            
  *  maximal-subpart coverage carries across the edge in the value domain. The decode is total: clean
  *  and dirty bytes are handled in-vector, one U+FFFD per maximal ill-formed subpart (Unicode 17.0
  *  §3.9 / W3C), bit-exact with @ref sz_utf8_decode_serial. Only a start whose declared sequence
- *  crosses the window edge defers to the next call; the step declines (`*runes_unpacked == 0`,
- *  cursor unchanged) only when that happens on the very first lead (a boundary truncation), which
- *  the public entry finalizes without a serial re-decode. */
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
-    sz_cptr_t text, sz_size_t length,                          //
-    sz_rune_t *runes, sz_size_t runes_capacity,                //
-    sz_size_t *runes_unpacked) {
+ *  crosses the window edge defers to the next call; the step declines (`*runes_count == 0`, cursor
+ *  unchanged) only when that happens on the very first lead (a boundary truncation), which the
+ *  public entry finalizes without a serial re-decode. */
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_rune_t *runes, sz_size_t runes_capacity,         //
+    sz_size_t *runes_count) {
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const vector_bytes = svcntb();
@@ -807,7 +806,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
         if (decodable_end < chunk_span) break; // the deferred sequence resumes as the next call's first lead
         chunk_base += chunk_bytes;
     }
-    *runes_unpacked = produced_total;
+    *runes_count = produced_total;
     return text + consumed_total;
 }
 
@@ -817,10 +816,10 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_decode_once_sve2_( //
  *  resumable truncation breaks and awaits more bytes; a bad/overlong truncated lead at the edge
  *  finalizes to one U+FFFD over its maximal ill-formed subpart - a bounded <=3-byte finalize, never
  *  a serial window re-decode. */
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
-    sz_cptr_t text, sz_size_t length,                   //
-    sz_rune_t *runes, sz_size_t runes_capacity,         //
-    sz_size_t *runes_unpacked) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_sve2_( //
+    sz_cptr_t text, sz_size_t length,              //
+    sz_rune_t *runes, sz_size_t runes_capacity,    //
+    sz_size_t *runes_count) {
 
     sz_cptr_t cursor = text;
     sz_cptr_t const end = text + length;
@@ -838,7 +837,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
         runes[runes_written++] = (sz_rune_t)sz_rune_replacement_k;
         cursor += sz_utf8_maximal_subpart_(cursor, end);
     }
-    *runes_unpacked = runes_written;
+    *runes_count = runes_written;
     sz_assert_(sz_utf8_batch_consistent_(length, runes_capacity, runes_written, (sz_size_t)(cursor - text),
                                          STRINGZILLA_NULL, STRINGZILLA_NULL, 3, sz_false_k));
     return cursor;
@@ -846,12 +845,38 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_decode_sve2( //
 
 #pragma endregion Codepoint unpack
 
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *count = sz_utf8_count_sve2_(text, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
+                                              void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *position = sz_utf8_seek_sve2_(text, length, n);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_decode_sve2( //
+    sz_cptr_t text, sz_size_t length,            //
+    sz_rune_t *runes, sz_size_t runes_capacity,  //
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *bytes_consumed = (sz_size_t)(sz_utf8_decode_sve2_(text, length, runes, runes_capacity, runes_count) - text);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_SVE2
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }

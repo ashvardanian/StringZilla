@@ -46,7 +46,7 @@ extern "C" {
  *  The second half only runs when more than sixteen cold starts are present. Every other lane keeps
  *  its prior value.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
+STRINGZILLA_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( //
     __m512i classes_u8x64, __m512i high_bytes_u8x64, __m512i low_bytes_u8x64, sz_u64_t cold_starts) {
     __mmask64 const cold_start_mask_m64 = _cvtu64_mask64(cold_starts);
     __m512i const high_packed_u8x64 = _mm512_maskz_compress_epi8(cold_start_mask_m64, high_bytes_u8x64);
@@ -97,7 +97,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_cold_compact_icelake_( 
  *      0x10000 astral test.
  *  @param[in] codepoint_starts_m64 Lanes that begin any codepoint, non-continuation and in range.
  */
-STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                       //
+STRINGZILLA_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake_(                              //
     __m512i raw_window_u8x64, __m512i raw_next1_u8x64, __m512i raw_next2_u8x64, __m512i raw_next3_u8x64, //
     __m512i high_u8x64, __m512i low_u8x64,                                                               //
     __mmask64 four_byte_starts_m64, __mmask64 codepoint_starts_m64) {
@@ -254,7 +254,7 @@ STRINGZILLA_HELPER_INLINE __m512i sz_utf8_sentence_break_classify_window_icelake
  *  algebra is intrinsic-free and shared verbatim with serial and Haswell. Force-inlined so the
  *  24-byte window result stays in registers instead of spilling through an @c sret.
  */
-STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
+STRINGZILLA_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_block_breaks_( //
     __m512i classes_u8x64, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t frame;
@@ -270,9 +270,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break
 
 #pragma region Sentence_Break forward driver
 
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_icelake_( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,    //
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_icelake_(     //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -462,16 +462,17 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_icelake_( //
     return sentences;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_icelake( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
-    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_sentences_icelake_(text, length, sentence_starts, sentence_lengths,
-                                                                sentences_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, segments_count,
+STRINGZILLA_API sz_status_t sz_utf8_sentences_icelake(                                     //
+    sz_cptr_t text, sz_size_t length,                                                      //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, sz_size_t sentences_capacity, //
+    sz_size_t *sentences_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *sentences_count = sz_utf8_sentences_icelake_(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                                  bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, *sentences_count,
                                          bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
                                          0, sz_true_k));
-    return segments_count;
+    return sz_success_k;
 }
 
 #pragma endregion Sentence_Break forward driver

@@ -31,7 +31,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_HASWELL
+#if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt,lzcnt"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -47,8 +47,8 @@ extern "C" {
  *  = cp & 0xFF. The @c bmp_page_lut_ page LUT selects one of the 57 distinct 256-byte pages, then
  *  @c flat_bmp_ is fetched by @c vpgatherdd. Bit-exact with
  *  @c sz_rune_sentence_break_property over the whole BMP. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32,
-                                                                            __m256i low_bytes_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m256i high_bytes_u8x32,
+                                                                     __m256i low_bytes_u8x32) {
     return sz_utf8_rune_flat_lookup_haswell_(sz_utf8_sentence_break_bmp_page_lut_, sz_utf8_sentence_break_flat_bmp_,
                                              high_bytes_u8x32, low_bytes_u8x32);
 }
@@ -57,8 +57,8 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_bmp_class_haswell_(__m2
  *  0x10000 with a 5-nibble cascade. Per-lane bytes: @p plane_u8x32 = (offset >> 16) & 0xFF with
  *  only the low nibble meaningful, @p high_u8x32 = (offset >> 8) & 0xFF, @p low_u8x32 = offset &
  *  0xFF. Bit-exact with @c sz_rune_sentence_break_property over all of the astral planes. */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
-                                                                               __m256i low_u8x32) {
+STRINGZILLA_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(__m256i plane_u8x32, __m256i high_u8x32,
+                                                                        __m256i low_u8x32) {
     __m256i const low_nibble_mask_u8x32 = _mm256_set1_epi8(0x0F);
     __m256i const n4_u8x32 = _mm256_and_si256(plane_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
@@ -104,7 +104,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_astral_class_haswell_(_
  *  non-codepoint-start lanes is irrelevant, as the dense compaction only reads start lanes, so
  *  those lanes are never selected.
  */
-STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
+STRINGZILLA_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_( //
     __m256i window_high_u8x32, __m256i window_low_u8x32, __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32,
     __m256i next3_u8x32, sz_u32_t four_byte_bits) {
     __m256i const low_two_bits_u8x32 = _mm256_set1_epi8(0x03);
@@ -187,7 +187,7 @@ STRINGZILLA_HELPER_INLINE __m256i sz_utf8_sentence_break_classify_half_haswell_(
  *  Used by the sentence driver so a truncated trailing multi-byte lead reads its missing
  *  continuations as zero, exactly like serial and Ice Lake, with no mod-64 wrap aliasing.
  */
-STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
+STRINGZILLA_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
     __m256i raw_u8x32, __m256i next1_u8x32, __m256i next2_u8x32, sz_u32_t two_byte_bits, sz_u32_t three_byte_bits,
     __m256i *out_high_u8x32, __m256i *out_low_u8x32) {
     __m256i const low_two_bits_u8x32 = _mm256_set1_epi8(0x03);
@@ -219,8 +219,8 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_bmp_highlow_haswell_( //
 /** Third forward neighbour `next3[i] = window[i+3]` over all 64 lanes with mod-64 wrap, the
  *  AVX2 twin of the Ice Lake `_mm512_permutexvar_epi8(lane_identity+3)`, the idiom of the
  *  substrate @c forward_neighbours_. */
-STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
-                                                                     __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
+STRINGZILLA_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i window_lo_u8x32, __m256i window_hi_u8x32,
+                                                              __m256i *next3_lo_u8x32, __m256i *next3_hi_u8x32) {
     __m256i const low_successor_u8x32 = _mm256_permute2x128_si256(window_lo_u8x32, window_hi_u8x32, 0x21);
     *next3_lo_u8x32 = _mm256_alignr_epi8(low_successor_u8x32, window_lo_u8x32, 3);
     __m256i const high_successor_u8x32 = _mm256_permute2x128_si256(window_hi_u8x32, window_lo_u8x32, 0x21);
@@ -235,8 +235,8 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_sentence_break_next3_haswell_(__m256i win
  *  each class is one @c vpcmpeqb per 32-lane half OR-combined to a u64, the AVX2 twin of the Ice
  *  Lake build of fifteen @c vpcmpeqb with no scalar pass. The dense stream is at most 64 lanes,
  *  held as two @c __m256i. */
-STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_(
-    sz_u8_t const *dense_classes, sz_u64_t valid) {
+STRINGZILLA_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_frame_haswell_(sz_u8_t const *dense_classes,
+                                                                                        sz_u64_t valid) {
     __m256i const dense_lo_u8x32 = _mm256_loadu_si256((__m256i const *)(dense_classes + 0));
     __m256i const dense_hi_u8x32 = _mm256_loadu_si256((__m256i const *)(dense_classes + 32));
     sz_utf8_sentence_break_frame_t frame;
@@ -251,7 +251,7 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_frame_t sz_utf8_sentence_break_
 
 /** Runs the portable rule engine over a dense class stream, building the frame with
  *  AVX2 compares first. */
-STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_haswell_( //
+STRINGZILLA_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break_decide_dense_haswell_( //
     sz_u8_t const *dense_classes, sz_size_t count, sz_utf8_sentence_break_carry_t *carry, sz_bool_t more_text) {
     sz_u64_t const valid = (count >= 64) ? ~0ull : ((1ull << count) - 1);
     sz_utf8_sentence_break_frame_t const frame = sz_utf8_sentence_break_frame_haswell_(dense_classes, valid);
@@ -261,9 +261,9 @@ STRINGZILLA_HELPER_INLINE sz_utf8_sentence_break_window_t sz_utf8_sentence_break
 /** Largest byte prefix of the window whose codepoints are all fully loaded, the AVX2 twin
  *  of the Ice Lake driver's effective-window trim below 64 bytes. Never below 1 when the
  *  window is non-empty. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
-                                                                                   sz_u8_t const *bytes_after,
-                                                                                   sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswell_(sz_utf8_rune_window_haswell_t window,
+                                                                            sz_u8_t const *bytes_after,
+                                                                            sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -293,9 +293,9 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentence_break_complete_limit_haswel
  *  classify, and dense-compaction front-end feeds the shared portable rule engine
  *  @ref sz_utf8_sentence_break_decide_block_, whose dense breaks are scattered back
  *  to byte lanes. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_haswell_( //
-    sz_cptr_t text, sz_size_t length,                           //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,    //
+STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_(     //
+    sz_cptr_t text, sz_size_t length,                        //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, //
     sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
 
     sz_size_t sentences = 0;
@@ -475,27 +475,33 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_sentences_haswell_( //
     return sentences;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_sentences_haswell( //
-    sz_cptr_t text, sz_size_t length,                         //
-    sz_size_t *sentence_starts, sz_size_t *sentence_lengths,  //
-    sz_size_t sentences_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_sentences_haswell_(text, length, sentence_starts, sentence_lengths,
-                                                                sentences_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, segments_count,
-                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
-                                         0, sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 29 Sentence Boundaries forward kernel
+
+#if STRINGZILLA_TARGET_HASWELL
+
+STRINGZILLA_API sz_status_t sz_utf8_sentences_haswell(                                     //
+    sz_cptr_t text, sz_size_t length,                                                      //
+    sz_size_t *sentence_starts, sz_size_t *sentence_lengths, sz_size_t sentences_capacity, //
+    sz_size_t *sentences_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *sentences_count = sz_utf8_sentences_haswell_(text, length, sentence_starts, sentence_lengths, sentences_capacity,
+                                                  bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, sentences_capacity, *sentences_count,
+                                         bytes_consumed ? *bytes_consumed : length, sentence_starts, sentence_lengths,
+                                         0, sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_HASWELL
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_HASWELL
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_
 
 #ifdef __cplusplus
 }

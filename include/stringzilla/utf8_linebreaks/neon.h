@@ -28,7 +28,7 @@ extern "C" {
  *  @c sz_line_break_classify_astral_neon_ cascade and its 62-entry palette, a different index
  *  space, so its resolved bytes blend over the valid 4-byte lanes after the expansion,
  *  bit-identical to the icelake and haswell blend. */
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -48,7 +48,7 @@ extern "C" {
  *  @c __m256i. Inverse of @c movemask16_neon_: route the right mask byte to each lane, isolate its
  *  bit, then @c vceqq.
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
+STRINGZILLA_INLINE uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_u64_t bits) {
     static sz_u8_t const byte_router_lanes[16] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1};
     static sz_u8_t const bit_select_lanes[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
     uint8x16_t const broadcast_u8x16 = vreinterpretq_u8_u16(vdupq_n_u16((sz_u16_t)bits));
@@ -68,8 +68,7 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_byte_mask_from_bits_neon_(sz_
  *  over the whole BMP once @c flat_palette_ expands the index. Operates on one quarter; the caller
  *  iterates the four.
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8x16,
-                                                                   uint8x16_t low_bytes_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t high_bytes_u8x16, uint8x16_t low_bytes_u8x16) {
     return sz_utf8_rune_flat_lookup_neon_(sz_utf8_line_break_bmp_page_lut_, sz_utf8_line_break_flat_bmp_,
                                           (int)sz_utf8_line_break_flat_pages_k, high_bytes_u8x16, low_bytes_u8x16);
 }
@@ -82,8 +81,8 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_bmp_index_neon_(uint8x16_t hi
  *  bytes: @p plane_u8x16 holds (offset >> 16) & 0xFF with only the low nibble meaningful,
  *  @p high_u8x16 holds (offset >> 8) & 0xFF, and @p low_u8x16 holds offset & 0xFF.
  */
-STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
-                                                                         uint8x16_t low_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_line_break_classify_astral_neon_(uint8x16_t plane_u8x16, uint8x16_t high_u8x16,
+                                                                  uint8x16_t low_u8x16) {
     uint8x16_t const low_nibble_mask_u8x16 = vdupq_n_u8(0x0F);
     uint8x16_t const n4_u8x16 = vandq_u8(plane_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const n3_u8x16 = vandq_u8(vshrq_n_u8(high_u8x16, 4), low_nibble_mask_u8x16);
@@ -126,9 +125,9 @@ STRINGZILLA_HELPER_INLINE uint8x16_t sz_line_break_classify_astral_neon_(uint8x1
  *  in the flat leaf, so it is always below 56 and lands inside the four resident quads, never in
  *  the @c vqtbl4q zero-fill.
  */
-STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_descriptors_neon_(uint8x16_t palette_indices_u8x16,
-                                                                            uint8x16_t *descriptor_low_bytes_u8x16,
-                                                                            uint8x16_t *descriptor_high_bytes_u8x16) {
+STRINGZILLA_INLINE void sz_line_break_flat_palette_descriptors_neon_(uint8x16_t palette_indices_u8x16,
+                                                                     uint8x16_t *descriptor_low_bytes_u8x16,
+                                                                     uint8x16_t *descriptor_high_bytes_u8x16) {
     sz_u8_t const *palette_bytes = (sz_u8_t const *)sz_utf8_line_break_flat_palette_;
     uint8x16x2_t const words_first_u8x16x2 = vld2q_u8(palette_bytes + 0);
     uint8x16x2_t const words_second_u8x16x2 = vld2q_u8(palette_bytes + 32);
@@ -153,10 +152,10 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_descriptors_neon_(uint
  *  serial resolution aliasing (SA → AL/CM, AI/SG/XX → AL, CJ → NS); the RI and ZWJ side bits come
  *  from the raw class, the mark side bit from the resolved class.
  */
-STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_neon_(uint8x16_t palette_indices_u8x16,
-                                                                       uint8x16_t *classes_out_u8x16,
-                                                                       uint8x16_t *side_out_u8x16,
-                                                                       uint8x16_t *dotted_select_out_u8x16) {
+STRINGZILLA_INLINE void sz_line_break_flat_palette_unpack_neon_(uint8x16_t palette_indices_u8x16,
+                                                                uint8x16_t *classes_out_u8x16,
+                                                                uint8x16_t *side_out_u8x16,
+                                                                uint8x16_t *dotted_select_out_u8x16) {
     uint8x16_t descriptor_low_bytes_u8x16, descriptor_high_bytes_u8x16;
     sz_line_break_flat_palette_descriptors_neon_(palette_indices_u8x16, &descriptor_low_bytes_u8x16,
                                                  &descriptor_high_bytes_u8x16);
@@ -198,8 +197,8 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_flat_palette_unpack_neon_(uint8x16_
 }
 
 /** A 64-bit "(byte & @p mask) == @p pattern" lane mask over the four window quarters. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_match_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t mask,
-                                                                  sz_u8_t pattern) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_byte_match_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t mask,
+                                                           sz_u8_t pattern) {
     uint8x16_t const m_u8x16 = vdupq_n_u8(mask), p_u8x16 = vdupq_n_u8(pattern);
     return sz_utf8_mask_combine_neon_(vceqq_u8(vandq_u8(quarters_u8x16[0], m_u8x16), p_u8x16),
                                       vceqq_u8(vandq_u8(quarters_u8x16[1], m_u8x16), p_u8x16),
@@ -208,7 +207,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_match_neon_(uint8x16_t con
 }
 
 /** A 64-bit "byte == @p value" lane mask over the four window quarters. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t value) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_byte_equal_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t value) {
     uint8x16_t const v_u8x16 = vdupq_n_u8(value);
     return sz_utf8_mask_combine_neon_(vceqq_u8(quarters_u8x16[0], v_u8x16), vceqq_u8(quarters_u8x16[1], v_u8x16),
                                       vceqq_u8(quarters_u8x16[2], v_u8x16), vceqq_u8(quarters_u8x16[3], v_u8x16));
@@ -216,7 +215,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_equal_neon_(uint8x16_t con
 
 /** A 64-bit unsigned "byte ≥ @p bound" lane mask over the four window quarters, as
  *  @c vcgeq_u8 is native. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t bound) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_byte_ge_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t bound) {
     uint8x16_t const bound_u8x16 = vdupq_n_u8(bound);
     return sz_utf8_mask_combine_neon_(
         vcgeq_u8(quarters_u8x16[0], bound_u8x16), vcgeq_u8(quarters_u8x16[1], bound_u8x16),
@@ -225,7 +224,7 @@ STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_ge_neon_(uint8x16_t const 
 
 /** A 64-bit unsigned "byte < @p bound" lane mask over the four window quarters, as
  *  @c vcltq_u8 is native. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_byte_lt_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t bound) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_byte_lt_neon_(uint8x16_t const *quarters_u8x16, sz_u8_t bound) {
     uint8x16_t const bound_u8x16 = vdupq_n_u8(bound);
     return sz_utf8_mask_combine_neon_(
         vcltq_u8(quarters_u8x16[0], bound_u8x16), vcltq_u8(quarters_u8x16[1], bound_u8x16),
@@ -263,8 +262,8 @@ typedef struct sz_line_break_classified_neon_t {
  *  through the precomputed palette tables; @c lut256_neon_ reads each 256-byte-padded table by
  *  @p index_u8x16. Serves only the astral cascade, as the BMP path expands flat-palette descriptors
  *  via @ref sz_line_break_flat_palette_unpack_neon_ instead, a different index space. */
-STRINGZILLA_HELPER_INLINE void sz_line_break_palette_unpack_neon_(uint8x16_t index_u8x16, uint8x16_t *classes_u8x16,
-                                                                  uint8x16_t *side_u8x16, uint8x16_t *dotted_u8x16) {
+STRINGZILLA_INLINE void sz_line_break_palette_unpack_neon_(uint8x16_t index_u8x16, uint8x16_t *classes_u8x16,
+                                                           uint8x16_t *side_u8x16, uint8x16_t *dotted_u8x16) {
     *classes_u8x16 = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_class_, index_u8x16);
     *side_u8x16 = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_side_, index_u8x16);
     *dotted_u8x16 = sz_utf8_rune_lut256_neon_(sz_utf8_line_break_palette_dotted_, index_u8x16);
@@ -278,7 +277,7 @@ STRINGZILLA_HELPER_INLINE void sz_line_break_palette_unpack_neon_(uint8x16_t ind
  *  continuation, an overlong, a surrogate, or an out-of-range lead each become one single-byte
  *  U+FFFD unit of class AL.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
+STRINGZILLA_INLINE sz_line_break_classified_neon_t sz_line_break_classify_window_neon_(
     sz_utf8_rune_window_neon_t window) {
     sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(window.loaded);
     sz_u64_t const continuation = window.continuation & loaded_mask;
@@ -439,13 +438,13 @@ STRINGZILLA_HELPER_INLINE sz_line_break_classified_neon_t sz_line_break_classify
 
 /** Build a 64-bit "lane class == @p cls" mask over the four class quarters: four @c vceqq_u8 and
  *  a mask combine. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_class_mask_neon_(uint8x16_t const *classes_u8x16, sz_u8_t cls) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_class_mask_neon_(uint8x16_t const *classes_u8x16, sz_u8_t cls) {
     return sz_line_break_byte_equal_neon_(classes_u8x16, cls);
 }
 
 /** Build a 64-bit "lane (side & @p bit) ≠ 0" mask over the four side quarters, as
  *  @c vtstq_u8 is native. */
-STRINGZILLA_HELPER_INLINE sz_u64_t sz_line_break_side_mask_neon_(uint8x16_t const *side_u8x16, sz_u8_t bit) {
+STRINGZILLA_INLINE sz_u64_t sz_line_break_side_mask_neon_(uint8x16_t const *side_u8x16, sz_u8_t bit) {
     uint8x16_t const m_u8x16 = vdupq_n_u8(bit);
     return sz_utf8_mask_combine_neon_(vtstq_u8(side_u8x16[0], m_u8x16), vtstq_u8(side_u8x16[1], m_u8x16),
                                       vtstq_u8(side_u8x16[2], m_u8x16), vtstq_u8(side_u8x16[3], m_u8x16));
@@ -471,7 +470,7 @@ typedef struct sz_line_break_byte_frame_neon_t {
     sz_u64_t lone_mark;
 } sz_line_break_byte_frame_neon_t;
 
-STRINGZILLA_HELPER_INLINE sz_line_break_byte_frame_neon_t sz_line_break_byte_frame_neon_(
+STRINGZILLA_INLINE sz_line_break_byte_frame_neon_t sz_line_break_byte_frame_neon_(
     sz_line_break_classified_neon_t classified) {
     sz_u64_t const starts = classified.starts, non_start = classified.non_start;
     uint8x16_t const *classes_u8x16 = classified.classes_u8x16s;
@@ -513,8 +512,9 @@ STRINGZILLA_HELPER_INLINE sz_line_break_byte_frame_neon_t sz_line_break_byte_fra
  *  reclassify, the raw ZWJ and five side-bit masks, and the per-lane class and side bytes, four
  *  @c vst1q_u8 quarters each.
  */
-STRINGZILLA_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_neon_(
-    sz_line_break_classified_neon_t classified, sz_u8_t *effective_class_byte_out, sz_u8_t *side_byte_out) {
+STRINGZILLA_INLINE sz_line_break_frame_t sz_line_break_build_frame_neon_(sz_line_break_classified_neon_t classified,
+                                                                         sz_u8_t *effective_class_byte_out,
+                                                                         sz_u8_t *side_byte_out) {
     sz_line_break_byte_frame_neon_t const byte_frame = sz_line_break_byte_frame_neon_(classified);
     uint8x16_t const *classes_u8x16 = byte_frame.classes_u8x16s;
     //  LB10 reclassify carries the side bits with it: zero the side byte on lone-mark lanes (serial zeros the
@@ -559,9 +559,11 @@ STRINGZILLA_HELPER_INLINE sz_line_break_frame_t sz_line_break_build_frame_neon_(
 
 /** Byte-level UAX-14 rule engine, NEON entry: extract the portable frame in-register, then delegate
  *  every LB1-LB31 decision to the portable @ref sz_line_break_decide_window_. */
-STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_neon_(
-    sz_line_break_classified_neon_t classified, sz_line_break_carry_t carry, sz_line_break_carry_t *carry_out,
-    sz_size_t complete_limit, sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_line_break_window_t sz_line_break_decide_window_neon_(sz_line_break_classified_neon_t classified,
+                                                                            sz_line_break_carry_t carry,
+                                                                            sz_line_break_carry_t *carry_out,
+                                                                            sz_size_t complete_limit,
+                                                                            sz_bool_t more_text) {
     sz_u8_t effective_class_byte[64], side_byte[64];
     sz_line_break_frame_t const frame = sz_line_break_build_frame_neon_(classified, effective_class_byte, side_byte);
     return sz_line_break_decide_window_(&frame, effective_class_byte, side_byte, carry, carry_out, complete_limit,
@@ -574,8 +576,8 @@ STRINGZILLA_HELPER_INLINE sz_line_break_window_t sz_line_break_decide_window_neo
 
 /** Largest byte prefix of the window whose codepoints are all fully loaded, never below 1: the NEON
  *  twin of @ref sz_line_break_complete_limit_haswell_ over the NEON window struct. */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
-                                                                       sz_bool_t more_text) {
+STRINGZILLA_INLINE sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_rune_window_neon_t window,
+                                                                sz_bool_t more_text) {
     sz_size_t const loaded = window.loaded;
     if (!more_text) return loaded;
     sz_u64_t const valid = sz_u64_mask_until_serial_(loaded);
@@ -591,12 +593,11 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_line_break_complete_limit_neon_(sz_utf8_r
     return limit > 0 ? limit : loaded;
 }
 
-/** Byte-level zero-scalar forward UAX-14 kernel for NEON AArch64: the overlap-free advancing
- *  driver, mirroring @ref sz_utf8_linebreaks_haswell_bytes_ over the NEON window, classify
- *  and drain leaves. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon_bytes_( //
-    sz_cptr_t text, sz_size_t length,                              //
-    sz_size_t *starts, sz_size_t *lengths,                         //
+/** Byte-level zero-scalar forward UAX-14 kernel for NEON AArch64: the overlap-free advancing driver
+ *  mirroring @ref sz_utf8_linebreaks_haswell_ over the NEON window, classify and drain leaves. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_neon_( //
+    sz_cptr_t text, sz_size_t length,                  //
+    sz_size_t *starts, sz_size_t *lengths,             //
     sz_size_t capacity, sz_size_t *bytes_consumed) {
 
     if (length == 0 || capacity == 0) {
@@ -636,29 +637,34 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon_bytes_( //
     return produced;
 }
 
-/** Forward UAX-14 line-break-opportunity kernel for NEON AArch64. Bit-exact with
- *  @c sz_utf8_linebreaks_serial, @c sz_utf8_linebreaks_haswell, and
- *  @c sz_utf8_linebreaks_icelake. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_linebreaks_neon( //
-    sz_cptr_t text, sz_size_t length,                       //
-    sz_size_t *starts, sz_size_t *lengths,                  //
-    sz_size_t capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_linebreaks_neon_bytes_(text, length, starts, lengths, capacity,
-                                                                    bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, capacity, segments_count, bytes_consumed ? *bytes_consumed : length,
-                                         starts, lengths, 0, sz_true_k));
-    return segments_count;
-}
-
 #pragma endregion Forward driver
 
 #pragma endregion UAX 14 Line Boundaries forward kernel
+
+#if STRINGZILLA_TARGET_NEON
+
+/** Forward UAX-14 line-break-opportunity kernel for NEON AArch64. Bit-exact with
+ *  @c sz_utf8_linebreaks_serial, @c sz_utf8_linebreaks_haswell, and
+ *  @c sz_utf8_linebreaks_icelake. */
+STRINGZILLA_API sz_status_t sz_utf8_linebreaks_neon(           //
+    sz_cptr_t text, sz_size_t length,                          //
+    sz_size_t *starts, sz_size_t *lengths, sz_size_t capacity, //
+    sz_size_t *lines_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *lines_count = sz_utf8_linebreaks_neon_(text, length, starts, lengths, capacity, bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, capacity, *lines_count, bytes_consumed ? *bytes_consumed : length,
+                                         starts, lengths, 0, sz_true_k));
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_NEON
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }

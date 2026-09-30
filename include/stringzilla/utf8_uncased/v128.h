@@ -9,7 +9,8 @@
 #ifndef STRINGZILLA_UTF8_UNCASED_V128_H_
 #define STRINGZILLA_UTF8_UNCASED_V128_H_
 
-#include "stringzilla/find/v128.h"              // `sz_find_v128`
+#include "stringzilla/types.h"
+#include "stringzilla/find/v128.h"              // `sz_find_v128_`
 #include "stringzilla/utf8_uncased_fold/v128.h" //
 #include "stringzilla/utf8_uncased/serial.h"
 
@@ -30,7 +31,7 @@ extern "C" {
  *  have seen. Matches the Ice Lake, NEON, and RVV SIMD backends exactly; those may differ from the
  *  serial folded-rune scanner on a few expanding-needle ties, a cross-backend property that is not
  *  specific to WebAssembly. */
-#if STRINGZILLA_TARGET_V128
+#if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
@@ -39,33 +40,33 @@ extern "C" {
 
 /** Slide-up carrying a real predecessor across windows: `result[0] = carry` and
  *  `result[i] = vector[i - 1]`. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector_u8x16, sz_u8_t carry) {
+STRINGZILLA_INLINE v128_t sz_utf8_uncased_slide1up_v128_(v128_t vector_u8x16, sz_u8_t carry) {
     return wasm_i8x16_shuffle(vector_u8x16, wasm_i8x16_splat((sz_i8_t)carry), 16, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
                               12, 13, 14);
 }
 
 /** 0/1 byte (not 0xFF): 1 where `bytes == value`. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes_u8x16, sz_u8_t value) {
+STRINGZILLA_INLINE v128_t sz_utf8_uncased_eq01_v128_(v128_t bytes_u8x16, sz_u8_t value) {
     return wasm_v128_and(wasm_i8x16_eq(bytes_u8x16, wasm_i8x16_splat((sz_i8_t)value)), wasm_i8x16_splat(1));
 }
 
 /** 0/1 byte: 1 where @p bytes_u8x16 lies in `[start, start + length)`. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
+STRINGZILLA_INLINE v128_t sz_utf8_uncased_inrange01_v128_(v128_t bytes_u8x16, sz_u8_t start, sz_u8_t length) {
     return wasm_v128_and(sz_utf8_in_range_v128_(bytes_u8x16, start, length), wasm_i8x16_splat(1));
 }
 
 /** Zero a scratch buffer then copy @p length bytes, so strip kernels can read one byte past. */
-STRINGZILLA_HELPER_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length,
-                                                                           sz_u8_t *buffer, sz_size_t buffer_capacity) {
+STRINGZILLA_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_v128_(sz_cptr_t source, sz_size_t length, sz_u8_t *buffer,
+                                                                    sz_size_t buffer_capacity) {
     for (sz_size_t byte_index = 0; byte_index < buffer_capacity; ++byte_index) buffer[byte_index] = 0;
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return buffer;
 }
 
 /** C4/C5/C6 +1 parity delta for the continuation byte's low 6 bits, irregular flag kept. */
-STRINGZILLA_HELPER_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
-                                                                   v128_t after_c5_u8x16, v128_t after_c6_u8x16,
-                                                                   v128_t is_continuation_u8x16) {
+STRINGZILLA_INLINE v128_t sz_utf8_uncased_latin_delta_v128_(v128_t source_u8x16, v128_t after_c4_u8x16,
+                                                            v128_t after_c5_u8x16, v128_t after_c6_u8x16,
+                                                            v128_t is_continuation_u8x16) {
     v128_t low6_u8x16 = wasm_v128_and(source_u8x16, wasm_i8x16_splat(0x3F));
     v128_t c4_u8x16 = sz_utf8_gather64_v128_(wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[0]),
                                              wasm_v128_load(&sz_utf8_fold_latin_c4_deltas_v128_[16]),
@@ -94,8 +95,7 @@ typedef struct {
 } sz_utf8_uncased_window_v128_t;
 
 /** Loads the fold window at `src + pos`, reading one byte on each side for cross-window folds. */
-STRINGZILLA_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_(sz_u8_t const *src,
-                                                                                          sz_size_t pos) {
+STRINGZILLA_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_window_v128_(sz_u8_t const *src, sz_size_t pos) {
     sz_utf8_uncased_window_v128_t window;
     window.source_u8x16 = wasm_v128_load(src + pos);
     window.previous_u8x16 = sz_utf8_uncased_slide1up_v128_(window.source_u8x16, pos > 0 ? src[pos - 1] : 0);
@@ -107,17 +107,16 @@ STRINGZILLA_HELPER_INLINE sz_utf8_uncased_window_v128_t sz_utf8_uncased_load_win
 
 #pragma region Per script fold strips
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                        sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_ascii_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                  sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_store_partial_v128_((sz_ptr_t)(dst + pos), sz_ascii_fold_v128_(wasm_v128_load(src + pos)), window);
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src,
-                                                                                 sz_size_t vector_length,
-                                                                                 sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_western_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                           sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -138,9 +137,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_western_europe_strip_v128_
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src,
-                                                                                 sz_size_t vector_length,
-                                                                                 sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_central_europe_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                           sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -163,8 +161,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_central_europe_strip_v128_
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                           sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                     sz_u8_t *dst) {
     static sz_align_(16) sz_u8_t const offsets[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     v128_t offsets_lut_u8x16 = wasm_v128_load(offsets);
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
@@ -185,8 +183,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_cyrillic_strip_v128_(sz_u8
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                        sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                  sz_u8_t *dst) {
     // Greek monotonic second-byte deltas after a CE lead, indexed by `text & 0x3F`.
     static sz_align_(16) sz_u8_t const ce_deltas[64] = {
         0,    0,    0,    0,    0,    0,    0x26, 0,    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
@@ -246,8 +244,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_greek_strip_v128_(sz_u8_t 
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
-                                                                           sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                     sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         sz_utf8_uncased_window_v128_t chunk = sz_utf8_uncased_load_window_v128_(src, pos);
@@ -271,8 +269,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_armenian_strip_v128_(sz_u8
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src,
-                                                                             sz_size_t vector_length, sz_u8_t *dst) {
+STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length,
+                                                                       sz_u8_t *dst) {
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
         v128_t source_u8x16 = wasm_v128_load(src + pos);
@@ -307,8 +305,8 @@ STRINGZILLA_HELPER_NOINLINE void sz_utf8_uncased_fold_vietnamese_strip_v128_(sz_
 #pragma region Per script alarm strips
 
 /** Fold the first lead-danger from a window's 0/1 second-byte danger vector into `*best` (min). */
-STRINGZILLA_HELPER_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos,
-                                                             sz_size_t window, long *best) {
+STRINGZILLA_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_second_u8x16, sz_size_t pos, sz_size_t window,
+                                                      long *best) {
     sz_u32_t bits = (sz_u32_t)wasm_i8x16_bitmask(wasm_i8x16_ne(danger_second_u8x16, wasm_i8x16_splat(0)));
     if (window < 16) bits &= ((sz_u32_t)1 << window) - 1;
     while (bits) {
@@ -322,8 +320,8 @@ STRINGZILLA_HELPER_INLINE void sz_utf8_uncased_alarm_window_(v128_t danger_secon
     }
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const *src,
-                                                                                  sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_western_europe_strip_v128_(sz_u8_t const *src,
+                                                                            sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -353,8 +351,8 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_western_europe_strip_v128
     return best;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const *src,
-                                                                                  sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_central_europe_strip_v128_(sz_u8_t const *src,
+                                                                            sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -383,8 +381,7 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_central_europe_strip_v128
     return best;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const *src,
-                                                                            sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -399,7 +396,7 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_cyrillic_strip_v128_(sz_u
     return best;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1, blanket = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -437,8 +434,7 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_greek_strip_v128_(sz_u8_t
     return best < blanket ? best : blanket;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src,
-                                                                            sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -454,8 +450,7 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_armenian_strip_v128_(sz_u
     return best;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src,
-                                                                              sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -488,8 +483,7 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_vietnamese_strip_v128_(sz
     return best;
 }
 
-STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src,
-                                                                            sz_size_t vector_length) {
+STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u8_t const *src, sz_size_t vector_length) {
     long best = -1;
     for (sz_size_t pos = 0; pos < vector_length; pos += 16) {
         sz_size_t window = vector_length - pos < 16 ? vector_length - pos : 16;
@@ -512,13 +506,13 @@ STRINGZILLA_HELPER_NOINLINE long sz_utf8_uncased_alarm_georgian_strip_v128_(sz_u
 
 #pragma region Scripted driver
 
-typedef void (*sz_utf8_uncased_fold_strip_v128_t)(sz_u8_t const *, sz_size_t, sz_u8_t *);
-typedef long (*sz_utf8_uncased_alarm_strip_v128_t)(sz_u8_t const *, sz_size_t);
+typedef void (*sz_utf8_uncased_fold_strip_v128_t_)(sz_u8_t const *, sz_size_t, sz_u8_t *);
+typedef long (*sz_utf8_uncased_alarm_strip_v128_t_)(sz_u8_t const *, sz_size_t);
 
-STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                    //
-    sz_utf8_uncased_fold_strip_v128_t fold, sz_utf8_uncased_alarm_strip_v128_t alarm,         //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(                           //
+    sz_utf8_uncased_fold_strip_v128_t_ fold, sz_utf8_uncased_alarm_strip_v128_t_ alarm,       //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length, //
-    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *matched_length) {
+    sz_utf8_uncased_needle_metadata_t const *needle_metadata, sz_size_t *match_length) {
 
     sz_size_t const folded_window_length = needle_metadata->folded_slice_length;
     sz_cptr_t const haystack_end = haystack + haystack_length;
@@ -554,7 +548,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(      
             if (alarm(source, chunk_size) >= 0) {
                 sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
                     haystack, haystack_length, needle, needle_length, haystack_ptr, chunk_size,
-                    needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, matched_length);
+                    needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, match_length);
                 if (match) return match;
                 haystack_ptr += step;
                 continue;
@@ -593,7 +587,7 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(      
                     (sz_size_t)(haystack_ptr - haystack) + candidate_offset, folded_window_length,
                     needle_metadata->offset_in_unfolded,
                     needle_length - needle_metadata->offset_in_unfolded - needle_metadata->length_in_unfolded,
-                    matched_length);
+                    match_length);
                 if (match) return match;
             }
         }
@@ -603,92 +597,25 @@ STRINGZILLA_HELPER_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_v128_(      
     if (alarm && haystack_ptr < haystack_end) {
         sz_cptr_t match = sz_utf8_uncased_search_in_danger_zone_( //
             haystack, haystack_length, needle, needle_length, haystack_ptr, (sz_size_t)(haystack_end - haystack_ptr),
-            needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, matched_length);
+            needle_first_safe_folded_rune, needle_metadata->offset_in_unfolded, match_length);
         if (match) return match;
     }
+    *match_length = 0;
     return STRINGZILLA_NULL_CHAR;
 }
 
 #pragma endregion Scripted driver
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length);
-
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_uncased_search_v128( //
-    sz_cptr_t haystack, sz_size_t haystack_length,              //
-    sz_cptr_t needle, sz_size_t needle_length,                  //
-    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *matched_length) {
-
-    if (needle_length == 0) {
-        *matched_length = 0;
-        return haystack;
-    }
-
-    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
-    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
-    if (known_agnostic || (is_unknown && sz_utf8_find_cased_v128(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
-        sz_cptr_t result = sz_find_v128(haystack, haystack_length, needle, needle_length);
-        *matched_length = result ? needle_length : 0;
-        return result;
-    }
-
-    if (is_unknown) {
-        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
-        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
-            return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                                 matched_length);
-    }
-
-    switch (needle_metadata->kernel_id) {
-    case sz_utf8_uncased_rune_ascii_invariant_k:
-        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, STRINGZILLA_NULL, haystack,
-                                                     haystack_length, needle, needle_length, needle_metadata,
-                                                     matched_length);
-    case sz_utf8_uncased_rune_safe_western_europe_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_western_europe_strip_v128_, sz_utf8_uncased_alarm_western_europe_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_central_europe_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_central_europe_strip_v128_, sz_utf8_uncased_alarm_central_europe_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_cyrillic_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_cyrillic_strip_v128_, sz_utf8_uncased_alarm_cyrillic_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_greek_k:
-        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_,
-                                                     sz_utf8_uncased_alarm_greek_strip_v128_, haystack, haystack_length,
-                                                     needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_armenian_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_armenian_strip_v128_, sz_utf8_uncased_alarm_armenian_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_vietnamese_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_vietnamese_strip_v128_, sz_utf8_uncased_alarm_vietnamese_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    case sz_utf8_uncased_rune_safe_georgian_k:
-        return sz_utf8_uncased_search_scripted_v128_(
-            sz_utf8_uncased_fold_ascii_strip_v128_, sz_utf8_uncased_alarm_georgian_strip_v128_, haystack,
-            haystack_length, needle, needle_length, needle_metadata, matched_length);
-    default: break;
-    }
-
-    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
-    return sz_utf8_uncased_search_serial(haystack, haystack_length, needle, needle_length, needle_metadata,
-                                         matched_length);
-}
-
 #pragma region Case Invariance
 
 /** 32-bit movemask of two 16-byte registers: bit @c i is lane @c i of @p low_u8x16, and bit 16 + i
  *  is lane @c i of @p high_u8x16. */
-STRINGZILLA_HELPER_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low_u8x16, v128_t high_u8x16) {
+STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_movemask_v128x2_(v128_t low_u8x16, v128_t high_u8x16) {
     return (sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(low_u8x16) |
            ((sz_u32_t)(sz_u16_t)wasm_i8x16_bitmask(high_u8x16) << 16);
 }
 
-STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_size_t length) {
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_v128_(sz_cptr_t str, sz_size_t length) {
     sz_u8_t const *text_cursor = (sz_u8_t const *)str;
     while (length) {
         sz_size_t block_length = length < 29 ? length : 29;
@@ -704,7 +631,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
                                                              sz_utf8_in_range_v128_(high_u8x16, 'A', 26));
         sz_u32_t is_lower = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 'a', 26),
                                                              sz_utf8_in_range_v128_(high_u8x16, 'a', 26));
-        if (is_upper | is_lower) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+        if (is_upper | is_lower) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
 
         v128_t x80_u8x16 = wasm_i8x16_splat((sz_i8_t)0x80);
         sz_u32_t is_non_ascii = sz_utf8_uncased_movemask_v128x2_(wasm_u8x16_ge(low_u8x16, x80_u8x16),
@@ -733,7 +660,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
                     hit |= sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, second_u8x16),
                                                             wasm_i8x16_eq(high_u8x16, second_u8x16));
                 }
-                if ((is_four << 1) & hit) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if ((is_four << 1) & hit) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
             }
             if (is_two) {
                 sz_u32_t is_bicameral = sz_utf8_uncased_movemask_v128x2_(
@@ -745,18 +672,18 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
                 if (is_c2) {
                     sz_u32_t is_b5 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xb5_u8x16),
                                                                       wasm_i8x16_eq(high_u8x16, xb5_u8x16));
-                    if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                    if ((is_c2 << 1) & is_b5) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
-                if (is_bicameral & is_two) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_bicameral & is_two) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
             }
             if (is_three) {
                 v128_t xe1_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE1), xef_u8x16 = wasm_i8x16_splat((sz_i8_t)0xEF);
                 sz_u32_t is_e1 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xe1_u8x16),
                                                                   wasm_i8x16_eq(high_u8x16, xe1_u8x16));
-                if (is_e1 & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_e1 & is_three) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 sz_u32_t is_ef = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xef_u8x16),
                                                                   wasm_i8x16_eq(high_u8x16, xef_u8x16));
-                if (is_ef & is_three) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                if (is_ef & is_three) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 v128_t xe2_u8x16 = wasm_i8x16_splat((sz_i8_t)0xE2);
                 sz_u32_t is_e2 = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xe2_u8x16),
                                                                   wasm_i8x16_eq(high_u8x16, xe2_u8x16)) &
@@ -764,7 +691,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
                 if (is_e2) {
                     sz_u32_t e2_safe = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 0x80, 0x04),
                                                                         sz_utf8_in_range_v128_(high_u8x16, 0x80, 0x04));
-                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                    if ((is_e2 << 1) & ~e2_safe) return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
                 v128_t xea_u8x16 = wasm_i8x16_splat((sz_i8_t)0xEA);
                 sz_u32_t is_ea = sz_utf8_uncased_movemask_v128x2_(wasm_i8x16_eq(low_u8x16, xea_u8x16),
@@ -776,7 +703,7 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
                     sz_u32_t is_ac = sz_utf8_uncased_movemask_v128x2_(sz_utf8_in_range_v128_(low_u8x16, 0xAC, 0x03),
                                                                       sz_utf8_in_range_v128_(high_u8x16, 0xAC, 0x03));
                     if ((is_ea << 1) & (is_99 | is_ac))
-                        return sz_utf8_find_cased_serial((sz_cptr_t)text_cursor, length);
+                        return sz_utf8_find_cased_serial_((sz_cptr_t)text_cursor, length);
                 }
             }
         }
@@ -788,15 +715,104 @@ STRINGZILLA_API_COMPTIME sz_cptr_t sz_utf8_find_cased_v128(sz_cptr_t str, sz_siz
 
 #pragma endregion Case Invariance
 
-STRINGZILLA_API_COMPTIME sz_ordering_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                  sz_size_t b_length) {
-    return sz_utf8_uncased_order_serial(a, a_length, b, b_length);
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_v128_( //
+    sz_cptr_t haystack, sz_size_t haystack_length,         //
+    sz_cptr_t needle, sz_size_t needle_length,             //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata, sz_size_t *match_length) {
+
+    if (needle_length == 0) {
+        *match_length = 0;
+        return haystack;
+    }
+
+    int const is_unknown = needle_metadata->kernel_id == sz_utf8_uncased_rune_unknown_k;
+    int const known_agnostic = needle_metadata->kernel_id == sz_utf8_uncased_rune_invariant_k;
+    if (known_agnostic || (is_unknown && sz_utf8_find_cased_v128_(needle, needle_length) == STRINGZILLA_NULL_CHAR)) {
+        sz_cptr_t result = sz_find_v128_(haystack, haystack_length, needle, needle_length);
+        *match_length = result ? needle_length : 0;
+        return result;
+    }
+
+    if (is_unknown) {
+        sz_utf8_uncased_needle_metadata_(needle, needle_length, needle_metadata);
+        if (needle_metadata->kernel_id == sz_utf8_uncased_rune_fallback_serial_k)
+            return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                                  match_length);
+    }
+
+    switch (needle_metadata->kernel_id) {
+    case sz_utf8_uncased_rune_ascii_invariant_k:
+        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_ascii_strip_v128_, STRINGZILLA_NULL, haystack,
+                                                     haystack_length, needle, needle_length, needle_metadata,
+                                                     match_length);
+    case sz_utf8_uncased_rune_safe_western_europe_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_western_europe_strip_v128_, sz_utf8_uncased_alarm_western_europe_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_central_europe_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_central_europe_strip_v128_, sz_utf8_uncased_alarm_central_europe_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_cyrillic_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_cyrillic_strip_v128_, sz_utf8_uncased_alarm_cyrillic_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_greek_k:
+        return sz_utf8_uncased_search_scripted_v128_(sz_utf8_uncased_fold_greek_strip_v128_,
+                                                     sz_utf8_uncased_alarm_greek_strip_v128_, haystack, haystack_length,
+                                                     needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_armenian_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_armenian_strip_v128_, sz_utf8_uncased_alarm_armenian_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_vietnamese_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_vietnamese_strip_v128_, sz_utf8_uncased_alarm_vietnamese_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    case sz_utf8_uncased_rune_safe_georgian_k:
+        return sz_utf8_uncased_search_scripted_v128_(
+            sz_utf8_uncased_fold_ascii_strip_v128_, sz_utf8_uncased_alarm_georgian_strip_v128_, haystack,
+            haystack_length, needle, needle_length, needle_metadata, match_length);
+    default: break;
+    }
+
+    needle_metadata->kernel_id = sz_utf8_uncased_rune_fallback_serial_k;
+    return sz_utf8_uncased_search_serial_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                          match_length);
 }
+
+#if STRINGZILLA_TARGET_V128
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128( //
+    sz_cptr_t haystack, sz_size_t haystack_length,       //
+    sz_cptr_t needle, sz_size_t needle_length,           //
+    sz_utf8_uncased_needle_metadata_t *needle_metadata,  //
+    sz_cptr_t *match, sz_size_t *match_length, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_uncased_search_v128_(haystack, haystack_length, needle, needle_length, needle_metadata,
+                                          match_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
+                                                       sz_ordering_t *ordering, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *ordering = sz_utf8_uncased_order_serial_(a, a_length, b, b_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *match = sz_utf8_find_cased_v128_(text, length);
+    return sz_success_k;
+}
+
+#endif // STRINGZILLA_TARGET_V128
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
-#endif // STRINGZILLA_TARGET_V128
+#endif // STRINGZILLA_ARCH_WASM_V128_
 
 #ifdef __cplusplus
 }

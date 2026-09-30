@@ -662,7 +662,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
 #pragma endregion Grapheme_Break tables
 
 #pragma region Haswell AVX2 nibble cascade descriptor tables
-#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
 
 /**
  *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break
@@ -896,21 +896,20 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage4_groups_[2816] 
     0,  0,  0,
 };
 
-#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
 #pragma endregion Haswell AVX2 nibble cascade descriptor tables
 
 #pragma region Flat BMP classifier tables
-#if STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
 // clang-format off
 
 /**
  *  @brief Flat Grapheme_Cluster_Break classifier table: `bmp_page_lut_[cp >> 8]` selects one of 54
  *      distinct 256-byte pages, then `flat_bmp_[page * 256 + (cp & 0xFF)]` is the descriptor.
  *
- *  One indexed lookup per codepoint, read by @c vpgatherdd on x86, @c svld1_gather on SVE2, and a
- *  bounded scalar leaf walk on NEON, which has no gather. The page LUT is @c bmp_page_lut_ itself,
- *  reused rather than duplicated. Bit-exact with @c sz_rune_grapheme_break_property across the BMP
- *  by construction. Derived by:
+ *  One indexed lookup per codepoint, read by @c vpgatherdd on x86 and @c svld1_gather on SVE2. The
+ *  page LUT is @c bmp_page_lut_ itself, reused rather than duplicated. Bit-exact with
+ *  @c sz_rune_grapheme_break_property across the BMP by construction. Derived by:
  *
  *  @code{.py}
  *  # desc[cp] = sz_rune_grapheme_break_property(cp) for cp in range(0x110000), dumped from the serial oracle.
@@ -1804,7 +1803,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_flat_bmp_[13888] = {
 };
 
 // clang-format on
-#endif // STRINGZILLA_TARGET_HASWELL || STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
 #pragma endregion Flat BMP classifier tables
 
 #ifdef __cplusplus

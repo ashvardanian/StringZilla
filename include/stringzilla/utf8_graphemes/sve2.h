@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_SVE2
+#if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -27,11 +27,11 @@ extern "C" {
 #pragma region Grapheme Cluster Break classifier
 
 /** Packed descriptor byte for one chunk of astral codepoints over offset = cp - 0x10000 with a
- *  5-nibble cascade, the SVE2 twin of @ref sz_grapheme_astral_descriptor_neon_. Per-lane bytes:
+ *  5-nibble cascade over the Haswell astral stage tables. Per-lane bytes:
  *  @p plane = (offset >> 16) & 0xFF with only the low nibble meaningful, @p high = (offset >> 8)
  *  & 0xFF, @p low = offset & 0xFF. Bit-exact. */
-STRINGZILLA_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
-                                                                        svuint8_t low_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane_u8x, svuint8_t high_u8x,
+                                                                 svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
@@ -65,9 +65,9 @@ STRINGZILLA_HELPER_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_
 }
 
 /** Predicate of lanes whose BMP codepoint `(high << 8) | low` lies in the inclusive range from
- *  @p lo to @p hi, the SVE2 twin of @ref sz_grapheme_cp_in_range_neon_ confined to one chunk. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
-                                                                 sz_u16_t hi) {
+ *  @p lo to @p hi, confined to one chunk. */
+STRINGZILLA_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_u8x, svuint8_t low_u8x, sz_u16_t lo,
+                                                          sz_u16_t hi) {
     svbool_t const all_b8x = svptrue_b8();
     sz_u8_t const lo_high = (sz_u8_t)(lo >> 8), lo_low = (sz_u8_t)(lo & 0xFF);
     sz_u8_t const hi_high = (sz_u8_t)(hi >> 8), hi_low = (sz_u8_t)(hi & 0xFF);
@@ -83,9 +83,8 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cp_in_range_sve2_(svuint8_t high_
 }
 
 /** Lanes whose BMP codepoint resolves uniformly to GCB=Other via the CJK and Kana arithmetic
- *  ranges, the SVE2 twin of @ref sz_grapheme_cjk_other_neon_. Such lanes need no cold cascade,
- *  as their descriptor is 0. */
-STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
+ *  ranges. Such lanes need no cold cascade, as their descriptor is 0. */
+STRINGZILLA_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8x, svuint8_t low_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const run_a_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0x3000, 0xA66E);
     svbool_t const run_b_b8x = sz_grapheme_cp_in_range_sve2_(high_u8x, low_u8x, 0xD7FC, 0xFB1D);
@@ -122,10 +121,15 @@ STRINGZILLA_HELPER_INLINE svbool_t sz_grapheme_cjk_other_sve2_(svuint8_t high_u8
  *  claimed by a lead's declared length, retrying unclamped otherwise: classify work stays
  *  proportional to what the caller can consume.
  */
-STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
-    sz_cptr_t text, sz_size_t length,                        //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths,   //
+STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_(      //
+    sz_cptr_t text, sz_size_t length,                      //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
     sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
+
+    // Graviton 5 at 128 bits: serial leads each corpus, mixed 185 vs 101 MiB/s, Chinese 298 vs 106.
+    if (svcntb() <= 16)
+        return sz_utf8_graphemes_serial_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
+                                         bytes_consumed);
 
     sz_size_t clusters = 0;
     if (length == 0 || clusters_capacity == 0) {
@@ -312,7 +316,7 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
                 return clusters;
             }
             if (clusters > clusters_before) {
-                bytes_per_cluster = (byte_span + (clusters - clusters_before) - 1) / (clusters - clusters_before);
+                bytes_per_cluster = sz_size_divide_round_up(byte_span, clusters - clusters_before);
                 if (bytes_per_cluster < 1) bytes_per_cluster = 1;
                 if (bytes_per_cluster > 8) bytes_per_cluster = 8;
             }
@@ -328,26 +332,31 @@ STRINGZILLA_HELPER_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
     return clusters;
 }
 
-STRINGZILLA_API_COMPTIME sz_size_t sz_utf8_graphemes_sve2( //
-    sz_cptr_t text, sz_size_t length,                      //
-    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, //
-    sz_size_t clusters_capacity, sz_size_t *bytes_consumed) {
-    sz_size_t const segments_count = sz_utf8_graphemes_sve2_(text, length, cluster_starts, cluster_lengths,
-                                                             clusters_capacity, bytes_consumed);
-    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, segments_count,
+#pragma endregion Grapheme forward driver
+
+#if STRINGZILLA_TARGET_SVE2
+
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(                                     //
+    sz_cptr_t text, sz_size_t length,                                                   //
+    sz_size_t *cluster_starts, sz_size_t *cluster_lengths, sz_size_t clusters_capacity, //
+    sz_size_t *clusters_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *clusters_count = sz_utf8_graphemes_sve2_(text, length, cluster_starts, cluster_lengths, clusters_capacity,
+                                              bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, clusters_capacity, *clusters_count,
                                          bytes_consumed ? *bytes_consumed : length, cluster_starts, cluster_lengths, 0,
                                          sz_true_k));
-    return segments_count;
+    return sz_success_k;
 }
 
-#pragma endregion Grapheme forward driver
+#endif // STRINGZILLA_TARGET_SVE2
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_SVE2
+#endif // STRINGZILLA_ARCH_ARM64_SVE2_
 
 #ifdef __cplusplus
 }
