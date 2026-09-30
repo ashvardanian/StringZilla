@@ -29,7 +29,7 @@ Reach for it from your language of choice:
 
 - 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
 - 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
-- 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with the `_init_gpu` engines in CUDA C++ 20
+- 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
 - 🐍 __[Python](#python):__ Upgrade your `str` to faster `Str`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
@@ -132,7 +132,8 @@ Its C surface comes in 2 shapes:
 1. Single-string kernels, taking a pointer and a length, and answering with an offset, a digest, or an order.
 2. Stateful engines, preparing a batch of queries once and scoring it against many batches of candidates.
 
-An engine is prepared for one residency and one tier — `_init_cpu` or `_init_gpu` — and every later round runs there, so choosing a device is choosing a constructor rather than flipping a global.
+An engine is prepared by `sz_<engine>_engine_init(engine, …, capabilities, ordinal, allocator, stream)` for one device, and every later round runs there, so choosing a device is choosing the mask an engine is built with rather than flipping a global.
+Each round is a single verb, like `sz_levenshtein_distances`, taking a trailing stream: null on the CPU, and on a GPU the stream it enqueues on before returning for the caller to join.
 Both shapes are designed to be extremely portable:
 
 - [x] across both little-endian and big-endian architectures.
@@ -405,7 +406,7 @@ The last approach is the one StringZilla takes, and the one the great [RapidFuzz
 It's less known, than the others, derived from the Baeza-Yates-Gonnet algorithm, extended to bounded edit-distance search by Manber and Wu in 1990s, and further extended by Gene Myers in 1999 and Heikki Hyyro between 2002 and 2004.
 Every query is packed into match masks 64 symbols to a machine word once per batch, and every candidate then streams one symbol per step against all of them, so the preparation a one-shot distance repeats per pair is paid exactly once and the register width buys candidates per step rather than cells per step.
 
-The anti-diagonal traversal covers the one case the bit-parallel recurrence cannot: a single pair too long for it, scored on a device by `sz_levenshtein_distance_tiled_cuda`.
+The anti-diagonal traversal covers the one case the bit-parallel recurrence cannot: a single pair too long for it, scored on a device by `sz_levenshtein_distance_tiled_best`.
 It doesn't change the number of trivial operations, but performs them in a different order, removing the data dependency, that occurs when computing the insertion costs.
 It __evaluates diagonals instead of rows__, exploiting the fact that all cells within a diagonal are independent, and can be computed in parallel.
 We'll store 3 diagonals instead of the 2 rows, and each consecutive diagonal will be computed from the previous two.
@@ -675,9 +676,9 @@ The implementation lives in `include/stringzilla/overlap.h` and the backends bes
 
 On the GPU a candidate's recurrence is a dependency chain, so it stays on one thread, and the parallelism comes from the candidates on `blockIdx.x` and from the queries on `blockIdx.y`.
 The verticals live in the thread's own registers while the match masks are read-only and shared, every thread indexing the same plane by the class of the byte it is stepping, so the rows stay hot in cache instead of being rebuilt per candidate.
-Myers is add-with-carry and bitwise operations over 64-bit words, all of which the device runs at its integer rate, so this family has one GPU tier rather than a ladder of them.
-A pair too long for the recurrence falls to `sz_levenshtein_distance_tiled_cuda`, whose wavefront parallelizes over the long text's tile-columns instead.
-The kernels live in `include/stringzilla/levenshtein/cuda.cuh`.
+Myers is add-with-carry and bitwise operations over 64-bit words, all of which the device runs at its integer rate, so each vendor has one GPU tier rather than a ladder of them: `cuda`, `rocm` and `metal`.
+A pair too long for the recurrence falls to `sz_levenshtein_distance_tiled_best`, whose wavefront parallelizes over the long text's tile-columns instead, on CUDA and ROCm.
+The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, compiled into the library by `c/nvidia/cuda.cu` and `c/amd/rocm.hip`, and the Metal ones live beside them in `simt.h` and `simt.metal`, compiled by `c/apple/metal.c`.
 
 ## Dynamic Dispatch
 

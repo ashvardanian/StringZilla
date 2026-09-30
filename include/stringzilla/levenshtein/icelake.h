@@ -78,9 +78,8 @@ enum {
  *  one per step. */
 enum { sz_levenshtein_icelake_u8x64_positions_per_flush_k = 64 };
 
-/** Packs a query of at most eight symbols into one byte per class, the table @c VPERMB indexes. */
-STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_pack_icelake(sz_levenshtein_query_t const *query,
-                                                                sz_levenshtein_u8x64_query_icelake_t *packed) {
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_pack_icelake_(sz_levenshtein_query_t const *query,
+                                                           sz_levenshtein_u8x64_query_icelake_t *packed) {
     sz_u512_vec_t masks_vec;
     masks_vec.zmm = _mm512_setzero_si512();
     for (sz_size_t class_id = 0; class_id != query->classes; ++class_id)
@@ -89,29 +88,41 @@ STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_pack_icelake(sz_levenshtein_q
     packed->last_symbol_bit_vec.zmm = _mm512_set1_epi8((char)sz_levenshtein_last_symbol_bit_(query->length));
 }
 
-/** Starts sixty-four candidates: no score movement yet, and the vertical at the top boundary. */
-STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_init_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
-                                                                sz_levenshtein_u8x64_vertical_icelake_t *vertical) {
+/** Packs a query of at most eight symbols into one byte per class, the table @c VPERMB indexes. */
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_pack_icelake(sz_levenshtein_query_t const *query,
+                                                          sz_levenshtein_u8x64_query_icelake_t *packed) {
+    sz_levenshtein_u8x64_pack_icelake_(query, packed);
+}
+
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_init_icelake_(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                           sz_levenshtein_u8x64_vertical_icelake_t *vertical) {
     state->deltas_vec.zmm = _mm512_setzero_si512();
     vertical->positive_vec.zmm = _mm512_set1_epi8((char)-1);
     vertical->negative_vec.zmm = _mm512_setzero_si512();
 }
 
-/** Sixty-four byte-wide class ids, as the byte transpose emits them, already the indices the
- *  mask table takes. */
-STRINGZILLA_API_COMPTIME sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake(sz_u8_t const *classes) {
+/** Starts sixty-four candidates: no score movement yet, and the vertical at the top boundary. */
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_init_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                          sz_levenshtein_u8x64_vertical_icelake_t *vertical) {
+    sz_levenshtein_u8x64_init_icelake_(state, vertical);
+}
+
+STRINGZILLA_INLINE sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake_(sz_u8_t const *classes) {
     sz_u512_vec_t classes_vec;
     classes_vec.zmm = _mm512_loadu_si512((void const *)classes);
     return classes_vec;
 }
 
-/** Advances sixty-four candidates one symbol through one byte-wide Myers word, the masks read by a
- *  single permute. A candidate past its text keeps stepping whatever class the transpose emits; its
- *  score is read where its text ends. */
-STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
-                                                                sz_levenshtein_u8x64_vertical_icelake_t *vertical,
-                                                                sz_levenshtein_u8x64_query_icelake_t const *packed,
-                                                                sz_u512_vec_t classes_vec) {
+/** Sixty-four byte-wide class ids, as the byte transpose emits them, already the indices the
+ *  mask table takes. */
+STRINGZILLA_INLINE sz_u512_vec_t sz_levenshtein_u8x64_classes_u8_icelake(sz_u8_t const *classes) {
+    return sz_levenshtein_u8x64_classes_u8_icelake_(classes);
+}
+
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_step_icelake_(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                           sz_levenshtein_u8x64_vertical_icelake_t *vertical,
+                                                           sz_levenshtein_u8x64_query_icelake_t const *packed,
+                                                           sz_u512_vec_t classes_vec) {
     enum { ternary_xor_or_k = 0xBE, ternary_or_nor_k = 0xF1 };
     __m512i const ones_u8x64 = _mm512_set1_epi8((char)-1);
     __m512i const equality_u8x64 = _mm512_permutexvar_epi8(classes_vec.zmm, packed->masks_vec.zmm);
@@ -136,10 +147,18 @@ STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u
     vertical->negative_vec.zmm = _mm512_and_si512(shifted_positive_u8x64, vertical_carry_u8x64);
 }
 
-/** Folds the byte-lane deltas into @p scores and clears them, so every candidate's score
- *  is exact again. */
-STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
-                                                                 sz_size_t *scores) {
+/** Advances sixty-four candidates one symbol through one byte-wide Myers word, the masks read by a
+ *  single permute. A candidate past its text keeps stepping whatever class the transpose emits; its
+ *  score is read where its text ends. */
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                          sz_levenshtein_u8x64_vertical_icelake_t *vertical,
+                                                          sz_levenshtein_u8x64_query_icelake_t const *packed,
+                                                          sz_u512_vec_t classes_vec) {
+    sz_levenshtein_u8x64_step_icelake_(state, vertical, packed, classes_vec);
+}
+
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_flush_icelake_(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                            sz_size_t *scores) {
     enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
     sz_u512_vec_t const deltas_vec = state->deltas_vec;
     for (sz_size_t candidate = 0; candidate != lanes_k; ++candidate)
@@ -147,14 +166,19 @@ STRINGZILLA_API_COMPTIME void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_
     state->deltas_vec.zmm = _mm512_setzero_si512();
 }
 
-/** The byte transpose for sixty-four candidates, transposed as every transpose is: position @c p of
- *  candidate @c c lands at @c p * 64 + c. The bytes are staged first and classed a whole position
- *  at a time, so a class id costs a lane of a permute rather than a scalar load; a lane past its
- *  text pads with a zero byte, classed like any other. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u8x64_transpose_icelake(
-    sz_levenshtein_query_t const *query, sz_cptr_t const *texts, sz_u64_t const *byte_counts, sz_size_t candidates,
-    sz_size_t *cursors, sz_u64_t *symbol_counts, sz_size_t transpose_start, sz_size_t positions,
-    void *transpose_classes) {
+/** Folds the byte-lane deltas into @p scores and clears them, so every candidate's score
+ *  is exact again. */
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_flush_icelake(sz_levenshtein_u8x64_state_icelake_t *state,
+                                                           sz_size_t *scores) {
+    sz_levenshtein_u8x64_flush_icelake_(state, scores);
+}
+
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x64_transpose_icelake_(sz_levenshtein_query_t const *query,
+                                                                     sz_cptr_t const *texts,
+                                                                     sz_u64_t const *byte_counts, sz_size_t candidates,
+                                                                     sz_size_t *cursors, sz_u64_t *symbol_counts,
+                                                                     sz_size_t transpose_start, sz_size_t positions,
+                                                                     void *transpose_classes) {
     enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
     sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
@@ -187,12 +211,25 @@ STRINGZILLA_API_COMPTIME sz_size_t sz_levenshtein_u8x64_transpose_icelake(
     return filled;
 }
 
+/** The byte transpose for sixty-four candidates, transposed as every transpose is: position @c p of
+ *  candidate @c c lands at @c p * 64 + c. The bytes are staged first and classed a whole position
+ *  at a time, so a class id costs a lane of a permute rather than a scalar load; a lane past its
+ *  text pads with a zero byte, classed like any other. */
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x64_transpose_icelake(sz_levenshtein_query_t const *query,
+                                                                    sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                    sz_size_t candidates, sz_size_t *cursors,
+                                                                    sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                                    sz_size_t positions, void *transpose_classes) {
+    return sz_levenshtein_u8x64_transpose_icelake_(query, texts, byte_counts, candidates, cursors, symbol_counts,
+                                                   transpose_start, positions, transpose_classes);
+}
+
 /** Sweeps sixty-four candidates of a query of at most eight symbols through every transpose.
  *  Between a retirement and a flush the step loop carries no scalar work, so a run of positions
  *  costs only its permutes and logic. */
-STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t const *shared_query,
-                                                                   sz_cptr_t const *texts, sz_u64_t const *byte_counts,
-                                                                   sz_size_t sweep_count, sz_size_t *distances) {
+STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t const *shared_query,
+                                                            sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                            sz_size_t sweep_count, sz_size_t *distances) {
     enum {
         candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k,
         positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k,
@@ -201,7 +238,7 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtei
     // A local copy: nothing stored through the transpose can alias it, so the step keeps the packed query in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
     sz_levenshtein_u8x64_query_icelake_t packed;
-    sz_levenshtein_u8x64_pack_icelake(&local_query, &packed);
+    sz_levenshtein_u8x64_pack_icelake_(&local_query, &packed);
     sz_size_t cursors[candidates_per_position_k] = {0};
     sz_size_t scores[candidates_per_position_k];
     for (sz_size_t candidate = 0; candidate != candidates_per_position_k; ++candidate)
@@ -210,14 +247,14 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtei
                                                                : ((sz_u64_t)1 << sweep_count) - (sz_u64_t)1;
     sz_levenshtein_u8x64_state_icelake_t state;
     sz_levenshtein_u8x64_vertical_icelake_t vertical;
-    sz_levenshtein_u8x64_init_icelake(&state, &vertical);
+    sz_levenshtein_u8x64_init_icelake_(&state, &vertical);
     sz_size_t positions_since_flush = 0;
     sz_u8_t transpose_classes[positions_per_transpose_k][candidates_per_position_k];
     for (sz_size_t transpose_start = 0, filled = positions_per_transpose_k; filled == positions_per_transpose_k;
          transpose_start += filled) {
-        filled = sz_levenshtein_u8x64_transpose_icelake(&local_query, texts, byte_counts, candidates_per_position_k,
-                                                        cursors, STRINGZILLA_NULL, transpose_start,
-                                                        positions_per_transpose_k, &transpose_classes[0][0]);
+        filled = sz_levenshtein_u8x64_transpose_icelake_(&local_query, texts, byte_counts, candidates_per_position_k,
+                                                         cursors, STRINGZILLA_NULL, transpose_start,
+                                                         positions_per_transpose_k, &transpose_classes[0][0]);
         // When scores must next be read, and whose, so a position costs one compare and retiring costs no test.
         sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(unread, byte_counts);
         for (sz_size_t position = 0; position != filled;) {
@@ -225,11 +262,11 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtei
                 sz_min_of_two(filled - position, positions_per_flush_k - positions_since_flush),
                 deadline.position - (transpose_start + position));
             for (sz_size_t taken = 0; taken != run_length; ++taken, ++position)
-                sz_levenshtein_u8x64_step_icelake(&state, &vertical, &packed,
-                                                  sz_levenshtein_u8x64_classes_u8_icelake(transpose_classes[position]));
+                sz_levenshtein_u8x64_step_icelake_(
+                    &state, &vertical, &packed, sz_levenshtein_u8x64_classes_u8_icelake_(transpose_classes[position]));
             positions_since_flush += run_length;
             if (positions_since_flush == positions_per_flush_k || transpose_start + position == deadline.position)
-                sz_levenshtein_u8x64_flush_icelake(&state, scores), positions_since_flush = 0;
+                sz_levenshtein_u8x64_flush_icelake_(&state, scores), positions_since_flush = 0;
             if (transpose_start + position != deadline.position) continue;
             for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
                 sz_size_t const candidate = (sz_size_t)_tzcnt_u64(ending);
@@ -240,7 +277,7 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtei
         }
     }
     // Candidates as long as the sweep itself end at the position the transposes never reached.
-    sz_levenshtein_u8x64_flush_icelake(&state, scores);
+    sz_levenshtein_u8x64_flush_icelake_(&state, scores);
     for (; unread; unread &= unread - 1) {
         sz_size_t const candidate = (sz_size_t)_tzcnt_u64(unread);
         distances[candidate] = scores[candidate];
@@ -249,9 +286,8 @@ STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtei
 
 /** Streams every candidate through a prepared byte @p query of at most eight symbols, sixty-four
  *  at a time. */
-STRINGZILLA_HELPER_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_query_t const *query,
-                                                                       sz_sequence_t const *candidates,
-                                                                       sz_size_t *distances) {
+STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_query_t const *query,
+                                                                sz_sequence_t const *candidates, sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
         sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
@@ -279,22 +315,29 @@ typedef enum sz_levenshtein_lanes_icelake_t {
 
 /** The narrowest lanes @p length symbols fit, so the shortest queries advance the most
  *  candidates per step. */
-STRINGZILLA_HELPER_AUTO sz_levenshtein_lanes_icelake_t sz_levenshtein_lanes_icelake(sz_size_t length) {
+STRINGZILLA_CONSTEXPR sz_levenshtein_lanes_icelake_t sz_levenshtein_lanes_icelake(sz_size_t length) {
     return length <= 8 ? sz_levenshtein_lanes_u8x64_k : sz_levenshtein_lanes_u64x8_k;
 }
 
 #pragma endregion Narrow Lanes
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
-                                                                      sz_sequence_t const *candidates,
-                                                                      sz_size_t *distances,
-                                                                      sz_size_t distances_stride) {
-    sz_assert_((engine->capability & sz_caps_cpus_k) != 0 &&
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_icelake(sz_levenshtein_engine_t *engine,
+                                                               sz_sequence_t const *queries,
+                                                               sz_levenshtein_symbol_t symbol, sz_size_t ordinal,
+                                                               sz_memory_allocator_t *allocator, void *stream) {
+    return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_icelake_k, ordinal, allocator, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
+                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_size_t distances_stride, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
     // The byte lanes read one word of one class row, so a rune batch is Skylake's whole and not one query at a time.
     if (engine->symbol != sz_levenshtein_bytes_k)
-        return sz_levenshtein_distances_skylake(engine, candidates, distances, distances_stride);
+        return sz_levenshtein_distances_skylake_(engine, candidates, distances, distances_stride);
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     // Only a query short enough for a byte lane is this tier's own; every wider one keeps the Skylake verticals.
     sz_status_t const grown = sz_levenshtein_engine_scratch_(
@@ -314,7 +357,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_levenshtein_distances_icelake(sz_levensh
         if (sz_levenshtein_lanes_icelake(query.length) == sz_levenshtein_lanes_u8x64_k)
             sz_levenshtein_icelake_u8x64_distances_(&query, candidates, row);
         else
-            sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake,
+            sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake_,
                                                     sz_levenshtein_classes_u8_k, verticals, row);
     }
     return sz_success_k;

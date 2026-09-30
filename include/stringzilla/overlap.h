@@ -17,10 +17,12 @@
  *
  *  @section overlap_api Public API
  *
- *  - @ref sz_overlap_engine_init_cpu → prepares a batch of queries on the host and fixes the tier;
- *  - @ref sz_overlap_engine_init_gpu → prepares the same batch on a device, on the caller's stream;
- *  - @ref sz_overlap_scores → the @b [queries,candidates,widths] shares of one round;
- *  - @ref sz_overlap_engine_free → returns both of the engine's blocks.
+ *  - @ref sz_overlap_engine_init → prepares a batch of queries for the best capability of a mask,
+ *    on the host or on one device;
+ *  - @ref sz_overlap_scores → the @b [queries,candidates,widths] shares of one round, on the
+ *    capability its engine was prepared for;
+ *  - @ref sz_overlap_engine_free → returns both of the engine's blocks;
+ *  - @ref sz_overlap_find_kernel → the kernel either would run, for a caller that keeps it.
  *
  *  Every register-level step behind these - the prefix chain, the window hashing, the key sort and
  *  the B-tree probe - is public per backend in @c overlap/serial.h and its SIMD backends, named by
@@ -32,11 +34,10 @@
 #define STRINGZILLA_OVERLAP_H_
 
 #include "stringzilla/types.h"
-
-#include "stringzilla/overlap/serial.h"
-#include "stringzilla/overlap/haswell.h"
-#include "stringzilla/overlap/skylake.h"
-#include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/types.cuh"      // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
+#include "stringzilla/metal.h"
+#include "stringzilla/overlap/serial.h" // `sz_overlap_engine_t`
 
 #ifdef __cplusplus
 extern "C" {
@@ -45,76 +46,64 @@ extern "C" {
 #pragma region Core API
 
 /**
- *  @brief Prepares @p queries on the host into one block from @p alloc, resolving the tier once.
+ *  @brief Prepares @p queries into one block from @p allocator, for the best capability of
+ *      @p capabilities that has an init kernel.
  *
  *  Every width's window hashes of one query share that query's B-tree, so its sort runs once per
  *  batch rather than once per round, and the probe depth grows only logarithmically as widths are
  *  added to the batch.
  *
+ *  @param[out] engine Left untouched unless the call succeeds.
  *  @param[in] queries The texts whose windows are sorted into the forest; read on the host.
  *  @param[in] window_widths Window widths in bytes; a width past a text scores zero for its pairs.
  *  @param[in] window_widths_count Number of widths, which is the last axis of every output.
- *  @param[in] alloc Source of the forest's block, or @c STRINGZILLA_NULL for the default host
- *      allocator; stored by value, so @ref sz_overlap_engine_free needs no allocator of its own.
- *  @param[out] engine Left untouched unless the call succeeds.
- *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for zero widths, or @c sz_bad_alloc_k
- *      when the forest's block cannot be taken.
- *  @note Selects the fastest implementation at compile- or run-time based on
- *      @c STRINGZILLA_RUNTIME_DISPATCH, and records it, so a round never resolves a tier again.
- *  @sa sz_overlap_engine_init_serial, sz_overlap_engine_init_haswell
- *  @sa sz_overlap_engine_init_skylake
- */
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_engine_init_cpu(sz_sequence_t const *queries,
-                                                               sz_size_t const *window_widths,
-                                                               sz_size_t window_widths_count,
-                                                               sz_memory_allocator_t *alloc,
-                                                               sz_overlap_engine_t *engine);
-
-/**
- *  @brief Prepares @p queries on @p stream 's device, resolving the launch geometry once.
- *
- *  @param[in] alloc Unified and device-reachable, or @c STRINGZILLA_NULL to derive
- *      one from context.
- *  @param[in] stream A @c cudaStream_t the caller owns and keeps, or zero for the default stream.
- *  @param[out] engine Left untouched unless the call succeeds.
- *  @return @c sz_success_k; @c sz_unexpected_dimensions_k for zero widths or a width the device
- *      ring cannot hold; @c sz_device_memory_mismatch_k when @p alloc hands back memory the device
- *      cannot reach; or @c sz_device_code_mismatch_k when no GPU runtime is compiled in.
- *
- *  The device backend's per-thread ring bounds the widths, see @ref sz_overlap_cuda_widest_window_k
- *  and @ref sz_overlap_cuda_widths_max_k.
- *
+ *  @param[in] candidates_budget Candidates one round may carry, for a backend whose rounds keep
+ *      state per candidate, zero asking for its default; one that keeps none ignores it.
+ *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled or
+ *      @c sz_metal_capabilities_enabled report; its group picks the CPU or a GPU vendor.
+ *  @param[in] ordinal The device of that vendor, as its runtime numbers them, or zero on the CPU.
+ *  @param[in] allocator Source of the forest's block, or @c STRINGZILLA_NULL for the default one of
+ *      that device; stored by value, so @ref sz_overlap_engine_free needs no allocator of its own.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on, which on Metal
+ *      is the @ref sz_metal_device_t opened on it.
+ *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
+ *      @c sz_unexpected_dimensions_k for zero widths, or on a device a width its ring cannot hold;
+ *      @c sz_bad_alloc_k when the forest's block cannot be taken; or on a device
+ *      @c sz_device_memory_mismatch_k for memory or a @p stream it cannot use, @c sz_missing_gpu_k
+ *      when it doesn't answer, or @c sz_device_code_mismatch_k when a kernel fails to build.
  *  @note May join @p stream; no scoring verb ever does.
- *  @sa sz_overlap_engine_init_cuda
  */
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_engine_init_gpu(sz_sequence_t const *queries,
-                                                               sz_size_t const *window_widths,
-                                                               sz_size_t window_widths_count,
-                                                               sz_memory_allocator_t *alloc, void *stream,
-                                                               sz_overlap_engine_t *engine);
+STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                   sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                   sz_size_t candidates_budget, sz_capability_t capabilities,
+                                                   sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream);
 
 /** Returns both of @p engine 's blocks to the allocator that built them, and leaves it empty. */
-STRINGZILLA_API_RUNTIME void sz_overlap_engine_free(sz_overlap_engine_t *engine);
+STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine);
 
 /**
- *  @brief Window overlap of every prepared query with every candidate, at every width of the batch.
+ *  @brief Window overlap of every prepared query with every candidate, at every width of the batch,
+ *      by the kernel of the capability @p engine was prepared for.
  *
- *  @param[in] engine A batch prepared by @ref sz_overlap_engine_init_cpu or
- *      @ref sz_overlap_engine_init_gpu, which also picked the tier this runs on; its round block
- *      grows here and is never shrunk.
- *  @param[in] candidates The texts whose windows are probed against the forest's.
+ *  @param[in] engine The prepared forest; a host round block grows here and is never shrunk. A
+ *      device engine keeps no stream, so on CUDA any number of streams may score it at once; on
+ *      Metal its one round block orders the rounds on the device's one queue.
+ *  @param[in] candidates The texts whose windows are probed against the forest's, on the residency
+ *      the engine was built for.
  *  @param[out] scores Shares in [0, 1] with a unit-strided width axis, laid out as shown below.
  *  @param[in] scores_query_stride Entries from one query's plane to the next, at least the
  *      candidates times @p scores_candidate_stride.
  *  @param[in] scores_candidate_stride Entries between candidate rows, at least the engine's widths.
- *  @return @c sz_success_k, @c sz_unexpected_dimensions_k when either stride is under the axis it
- *      spans, or @c sz_bad_alloc_k when the round's block cannot be grown.
+ *  @param[in] stream Null on the CPU, or the GPU stream of the engine's device to queue on,
+ *      which on Metal is the engine's own @ref sz_metal_device_t.
+ *  @return @c sz_success_k, on a device once enqueued; @c sz_unexpected_dimensions_k when either
+ *      stride is under the axis it spans; @c sz_bad_alloc_k when a host round's block cannot be
+ *      grown; @c sz_missing_kernel_k for an empty engine; or on a device
+ *      @c sz_device_memory_mismatch_k for an output, a sequence or a @p stream it cannot use, and
+ *      @c sz_device_code_mismatch_k for a launch it refused.
  *  @note Asymmetric: a candidate's window occurrences count against a query's distinct windows, so
  *      swapping sides changes the score when either repeats a window.
- *  @note On a device engine this enqueues and returns; the caller joins the stream before reading
- *      @p scores.
- *  @sa sz_overlap_scores_serial, sz_overlap_scores_haswell, sz_overlap_scores_skylake
- *  @sa sz_overlap_scores_cuda
+ *  @note Never joins, so the caller joins @p stream before reading @p scores.
  *
  *  The share of query q, candidate c and width w sits at:
  *
@@ -122,67 +111,130 @@ STRINGZILLA_API_RUNTIME void sz_overlap_engine_free(sz_overlap_engine_t *engine)
  *  scores[q * scores_query_stride + c * scores_candidate_stride + w]
  *  @endverbatim
  */
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                              sz_f32_t *scores, sz_size_t scores_query_stride,
+                                              sz_size_t scores_candidate_stride, void *stream);
+
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                          sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                          sz_size_t candidates_budget, sz_size_t ordinal,
+                                                          sz_memory_allocator_t *allocator, void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                     sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                     sz_size_t scores_candidate_stride, void *stream);
+
+#if STRINGZILLA_TARGET_HASWELL
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_haswell(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                           sz_size_t const *window_widths,
+                                                           sz_size_t window_widths_count, sz_size_t candidates_budget,
+                                                           sz_size_t ordinal, sz_memory_allocator_t *allocator,
+                                                           void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                       sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride);
+                                                      sz_size_t scores_candidate_stride, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_SKYLAKE
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                           sz_size_t const *window_widths,
+                                                           sz_size_t window_widths_count, sz_size_t candidates_budget,
+                                                           sz_size_t ordinal, sz_memory_allocator_t *allocator,
+                                                           void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                      sz_size_t scores_candidate_stride, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_CUDA
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                        sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                        sz_size_t candidates_budget, sz_size_t ordinal,
+                                                        sz_memory_allocator_t *allocator, void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                   sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                   sz_size_t scores_candidate_stride, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_ROCM
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                        sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                        sz_size_t candidates_budget, sz_size_t ordinal,
+                                                        sz_memory_allocator_t *allocator, void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                   sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                   sz_size_t scores_candidate_stride, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_METAL
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                         sz_size_t candidates_budget, sz_size_t ordinal,
+                                                         sz_memory_allocator_t *allocator, void *stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                    sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                    sz_size_t scores_candidate_stride, void *stream);
+#endif
+
+/**
+ *  @brief Finds the overlap kernel of @p kind, from the best of @p capabilities.
+ *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
+ *  @param[out] capability The capability the kernel belongs to, or zero.
+ *  @return @c sz_success_k, @c sz_missing_kernel_k, or @c sz_missing_library_k when header-only.
+ */
+STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                   sz_kernel_punned_t *kernel, sz_capability_t *capability);
 
 #pragma endregion Core API
 
-/*  Pick the right implementation for the window overlap algorithms. To override this behavior and
- *  precompile all backends - set @c STRINGZILLA_RUNTIME_DISPATCH to 1. */
-#pragma region Compile Time Dispatching
-#if !STRINGZILLA_RUNTIME_DISPATCH
+#if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/overlap/haswell.h"
+#include "stringzilla/overlap/skylake.h"
+#include "stringzilla/overlap/simt.h"
+#include "stringzilla/overlap/simt.cuh"
+#endif // STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_engine_init_cpu(sz_sequence_t const *queries,
-                                                               sz_size_t const *window_widths,
-                                                               sz_size_t window_widths_count,
-                                                               sz_memory_allocator_t *alloc,
-                                                               sz_overlap_engine_t *engine) {
-#if STRINGZILLA_TARGET_SKYLAKE
-    return sz_overlap_engine_init_skylake(queries, window_widths, window_widths_count, alloc, engine);
-#elif STRINGZILLA_TARGET_HASWELL
-    return sz_overlap_engine_init_haswell(queries, window_widths, window_widths_count, alloc, engine);
-#else
-    return sz_overlap_engine_init_serial(queries, window_widths, window_widths_count, alloc, engine);
-#endif
+#if STRINGZILLA_HEADER_ONLY
+
+STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                   sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                   sz_size_t candidates_budget, sz_capability_t capabilities,
+                                                   sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream) {
+    sz_unused_(engine), sz_unused_(queries), sz_unused_(window_widths), sz_unused_(window_widths_count),
+        sz_unused_(candidates_budget), sz_unused_(capabilities), sz_unused_(ordinal), sz_unused_(allocator),
+        sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_engine_init_gpu(sz_sequence_t const *queries,
-                                                               sz_size_t const *window_widths,
-                                                               sz_size_t window_widths_count,
-                                                               sz_memory_allocator_t *alloc, void *stream,
-                                                               sz_overlap_engine_t *engine) {
-#if STRINGZILLA_TARGET_CUDA
-    return sz_overlap_engine_init_cuda(queries, window_widths, window_widths_count, alloc, stream, engine);
-#else
-    sz_unused_(queries), sz_unused_(window_widths), sz_unused_(window_widths_count);
-    sz_unused_(alloc), sz_unused_(stream), sz_unused_(engine);
-    return sz_device_code_mismatch_k;
-#endif
+STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine) { sz_overlap_engine_close_(engine); }
+
+STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                              sz_f32_t *scores, sz_size_t scores_query_stride,
+                                              sz_size_t scores_candidate_stride, void *stream) {
+    sz_unused_(engine), sz_unused_(candidates), sz_unused_(scores), sz_unused_(scores_query_stride),
+        sz_unused_(scores_candidate_stride), sz_unused_(stream);
+    return sz_missing_library_k;
 }
 
-STRINGZILLA_API_RUNTIME void sz_overlap_engine_free(sz_overlap_engine_t *engine) { sz_overlap_engine_close_(engine); }
-
-STRINGZILLA_API_RUNTIME sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
-                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride) {
-#if STRINGZILLA_TARGET_CUDA
-    if (engine->capability & sz_caps_cuda_k)
-        return sz_overlap_scores_cuda(engine, candidates, scores, scores_query_stride, scores_candidate_stride);
-#endif
-#if STRINGZILLA_TARGET_SKYLAKE
-    if (engine->capability & sz_cap_skylake_k)
-        return sz_overlap_scores_skylake(engine, candidates, scores, scores_query_stride, scores_candidate_stride);
-#endif
-#if STRINGZILLA_TARGET_HASWELL
-    if (engine->capability & sz_cap_haswell_k)
-        return sz_overlap_scores_haswell(engine, candidates, scores, scores_query_stride, scores_candidate_stride);
-#endif
-    return sz_overlap_scores_serial(engine, candidates, scores, scores_query_stride, scores_candidate_stride);
+STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
+                                                   sz_kernel_punned_t *kernel, sz_capability_t *capability) {
+    sz_unused_(kind), sz_unused_(capabilities);
+    *kernel = STRINGZILLA_NULL, *capability = 0;
+    return sz_missing_library_k;
 }
 
-#endif // !STRINGZILLA_RUNTIME_DISPATCH
-#pragma endregion Compile Time Dispatching
+#endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 }

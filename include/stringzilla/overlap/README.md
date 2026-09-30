@@ -1,17 +1,19 @@
 # Overlap: Window Hashing and Prepared-Query Match Counting
 
-This directory holds the kernels behind `sz_overlap_engine_init_cpu`, `sz_overlap_engine_init_gpu` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
-Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, and a CUDA backend on the device.
-The engine resolves its tier once, when the batch of queries is prepared, and every later round scores on that tier alone.
+This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
+Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, and `cuda`, `rocm` and `metal` backends on the device.
+The CUDA and ROCm kernels share `simt.cuh`, which `c/nvidia/cuda.cu` and `c/amd/rocm.hip` compile into the library, and the Metal ones live in `simt.h` with the `simt.metal` shaders, which `c/apple/metal.c` compiles.
+The init picks the best capability of a mask once, when the batch of queries is prepared on one device, and every later round scores with that capability's kernel alone.
 
 ## Methodology
 
-Numbers are throughput in windows per second, rendered as Mwin/s, one window per byte offset at the scored width, measured with `bench/overlap.cpp` over the `xlsum.csv` corpus on one pinned core, reporting the median of repeated runs.
+Numbers are throughput in windows per second, rendered as Mwin/s, one window per byte offset at the scored width, measured with the kernel rows of `bench/cross.hpp` over the `xlsum.csv` corpus on one pinned core, the verb in `stringzilla_cpu_bench` and the stages in the header-only `stringzilla_cpu_header_bench`, reporting the median of repeated runs.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one stage.
 Token length decides whether the query's B-tree fits L1, so results are split into a Short Words table (tokens averaging 9 bytes) and a Long Lines table (tokens averaging 3 KB).
 Preparation is the query's key sort and tree layout, paid once per batch, and Window lookups is a candidate's whole read side — its chain, its window hashes, then the walk over each one — so the probe alone is that column against Window hashes.
 The `sz_overlap_scores` column times the round alone: the engine is built before the timing starts, because that is how it is meant to be used — one forest per batch of queries, many rounds of candidates against it.
-The GPU rows come from `bench/overlap.cu` and score one residency wave of one candidate per thread, one query per block row.
+The CUDA and ROCm rows come from `bench/cross_simt.cuh`, run as `stringzilla_cuda_bench` and `stringzilla_rocm_bench`, and score one residency wave of one candidate per thread, one query per block row.
+The Metal backend is timed by `bench/cross_metal.cpp`, run as `stringzilla_metal_bench`.
 A `…` cell is genuinely-missing data, on a backend not yet measured on hardware that runs it.
 
 ## Short Words

@@ -51,11 +51,22 @@ Each family can also be included on its own when you only need a slice of the AP
 ```
 
 The three engine families prepare a batch of queries once and score it against many batches of candidates, writing into a strided block the caller supplies rather than allocating one per round.
+Each init takes the mask, the device ordinal, the allocator and a stream last, and each round is a single verb with no `_best` twin, as the engine already holds the capability its init picked:
+
+```c
+sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
+                                       sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
+                                       sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream);
+sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
+                                     sz_size_t *distances, sz_size_t distances_stride, void *stream);
+void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine);
+```
+
 Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](levenshtein/README.md), [`overlap/README.md`](overlap/README.md), and [`substrings/README.md`](substrings/README.md).
 
-### CMake, Header Only
+### CMake, Precompiled Library
 
-With CMake 3.14 or newer, pull the project in with `FetchContent` and link the interface target `stringzilla::header`, which only adds `include/` to your search path.
+With CMake 3.14 or newer, pull the project in with `FetchContent` and link the static target `stringzilla::static`, which compiles every capability the toolchain can build.
 
 ```cmake
 include(FetchContent)
@@ -141,9 +152,19 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 
 GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
-NVCC with CUDA 12 builds the device backends of the engine families, reached through the `_init_gpu` constructors.
+NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_cuda_capabilities_enabled` reports for a device.
+HIP-Clang builds the same sources for AMD GPUs, reached through `sz_rocm_capabilities_enabled`.
+With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
-StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1` with `-msimd128 -mrelaxed-simd`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
+A device round reads memory the device reaches, so the library exports what builds it, each CUDA call with a `sz_rocm_*` twin:
+
+- `sz_cuda_memory_allocator_init_unified`, `_device` and `_pinned` fill a `sz_memory_allocator_t` handing back memory on one device ordinal: shared with the host, device-only, or page-locked on the host.
+- `sz_cuda_memory_reaches_device` says whether a kernel can dereference a pointer.
+- `sz_cuda_sequence_from_string_views` wraps device-reachable views of device-reachable text in a `sz_sequence_t` the kernels can walk.
+
+On Metal, `sz_metal_device_init(ordinal, arena_bytes, &device)` opens one GPU with an arena of that many bytes reserved, the engines take the `sz_metal_device_t *` where a stream would go, `sz_metal_device_synchronize` waits for the work committed since the last call, and `sz_metal_device_free` releases it.
+
+StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD kit, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
 ## Types
 

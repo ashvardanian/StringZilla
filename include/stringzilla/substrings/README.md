@@ -1,6 +1,6 @@
 # Substrings: Multi-Pattern Search Over One Automaton
 
-This directory holds the kernels behind `sz_substrings_engine_init_cpu`, `sz_substrings_engine_init_gpu`, `sz_substrings_counts`, `sz_substrings_find`, `sz_substrings_replace` and `sz_substrings_bm25_scores`.
+This directory holds the kernels behind `sz_substrings_engine_init`, `sz_substrings_counts`, `sz_substrings_find`, `sz_substrings_replace` and `sz_substrings_bm25_scores`, on the host and on the device alike.
 One engine owns the compiled vocabulary, the overlap policy it was sized for, the round's arena and the report every verb writes, so a compute verb allocates nothing and joins nothing.
 A vocabulary of needles compiles once into a byte-level Aho-Corasick automaton, and every haystack then streams through it in one pass whatever the needle count, since the alternative is one search per needle per haystack.
 Nothing here assumes what the bytes mean: the same automaton serves nucleotides, binary records and multilingual UTF-8, and adapts to each through the classes its own vocabulary spells.
@@ -38,15 +38,21 @@ The NEON tier is cross-compiled but not yet measured on hardware.
 
 ## The Device
 
-The CUDA backend parallelizes over haystack __chunks__ rather than over haystacks, so a corpus of one long document and a corpus of a million short ones fill the device the same way.
+The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh` and which `c/nvidia/cuda.cu` and `c/amd/rocm.hip` compile into the library, and `metal`, whose kernels live in `simt.h` with the `simt.metal` shaders, which `c/apple/metal.c` compiles.
+All three parallelize over haystack __chunks__ rather than over haystacks, so a corpus of one long document and a corpus of a million short ones fill the device the same way.
 A chunk reports every match ending inside it and primes itself from the bytes before its own start, clamped to its own haystack, so every match is found exactly once.
 A leftmost cover is settled after the walk instead, since inside it would cost every thread a ring wide enough for the longest match.
-Each block stages the class map and as much of the hot tier as fits beside its own scratch into shared memory.
+On CUDA and ROCm each block stages the class map and as much of the hot tier as fits beside its own scratch into shared memory.
 BM25 gives each block one haystack and a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, and sums in fixed point so thread order cannot move a score.
+A device engine's arena is sized once, by `sz_substrings_engine_init` from `matches_budget` and `haystacks_budget`, so a round carrying more haystacks is refused with `sz_unexpected_dimensions_k` and matches past the budget surface as the report's `shortfall`.
+Every round of one engine shares that arena and its report, so the caller orders them, on one stream or with events between two, and reads the report only after joining the round that wrote it.
+A device round over no haystacks returns at once and leaves the report as the round before it wrote it.
+On Metal a round is one command buffer on the device's queue, nothing is staged in threadgroup memory, and BM25 runs on 64 threadgroups whose tallies hold 2048 needles before hashing, its terms computed in `f32`, as Apple GPUs have no `f64`.
+A case-insensitive vocabulary is refused there at init with `sz_device_code_mismatch_k`, since its walk folds through Unicode tables that have no Metal port.
 
 ## Methodology
 
-Numbers are haystack throughput in MiB/s, measured with `bench/substrings.cpp` and `bench/substrings.cu` over lines of two corpora.
+Numbers are haystack throughput in MiB/s, measured with `stringzilla_cpu_bench` from the kernel rows of `bench/cross.hpp`, and with `stringzilla_cuda_bench` and `stringzilla_rocm_bench` from `bench/cross_simt.cuh`, over lines of two corpora.
 - __Text:__ the first 64 MiB of `xlsum.csv`, 128 MiB for the device, multilingual news in many scripts.
 - __Nucleotides:__ 64 MiB of uniformly random `ACGT` in 4,096-byte lines, 256 MiB for the device.
 

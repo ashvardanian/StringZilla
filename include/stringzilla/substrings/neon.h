@@ -15,14 +15,14 @@
 
 #include "stringzilla/types.h"
 
-#include "stringzilla/find/neon.h" // `sz_find_byteset_neon`
+#include "stringzilla/find/neon.h" // `sz_find_byteset_neon_`
 #include "stringzilla/substrings/serial.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if STRINGZILLA_TARGET_NEON
+#if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
 #elif defined(__GNUC__)
@@ -32,62 +32,92 @@ extern "C" {
 
 #pragma region NEON
 
-/** Overlapping count of one haystack, skipping from the root wherever live bytes are sparse. */
-STRINGZILLA_API_COMPTIME sz_size_t sz_substrings_count_bytes_neon(sz_substrings_engine_t const *engine,
-                                                                  sz_cptr_t haystack, sz_size_t length) {
+STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_neon_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                             sz_size_t length) {
     if (sz_substrings_skipping_pays_(engine, haystack, length))
-        return sz_substrings_count_skipping_(engine, haystack, length, &sz_find_byteset_neon);
-    return sz_substrings_count_bytes_serial(engine, haystack, length);
+        return sz_substrings_count_skipping_(engine, haystack, length, &sz_find_byteset_neon_);
+    return sz_substrings_count_bytes_serial_(engine, haystack, length);
+}
+
+/** Overlapping count of one haystack, skipping from the root wherever live bytes are sparse. */
+STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_neon(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                            sz_size_t length) {
+    return sz_substrings_count_bytes_neon_(engine, haystack, length);
+}
+
+STRINGZILLA_INLINE void sz_substrings_find_bytes_neon_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                       sz_size_t length, sz_substrings_report_order_t order,
+                                                       sz_substrings_reporter_t reporter, void *context) {
+    // One chain reports in ascending end order, which satisfies either order a consumer asks for.
+    if (sz_substrings_skipping_pays_(engine, haystack, length))
+        sz_substrings_find_skipping_(engine, haystack, length, reporter, context, &sz_find_byteset_neon_);
+    else sz_substrings_find_bytes_serial_(engine, haystack, length, order, reporter, context);
 }
 
 /** Overlapping reports of one haystack, skipping from the root wherever live bytes are sparse. */
-STRINGZILLA_API_COMPTIME void sz_substrings_find_bytes_neon(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
-                                                            sz_size_t length, sz_substrings_report_order_t order,
-                                                            sz_substrings_reporter_t reporter, void *context) {
-    // One chain reports in ascending end order, which satisfies either order a consumer asks for.
-    if (sz_substrings_skipping_pays_(engine, haystack, length))
-        sz_substrings_find_skipping_(engine, haystack, length, reporter, context, &sz_find_byteset_neon);
-    else sz_substrings_find_bytes_serial(engine, haystack, length, order, reporter, context);
+STRINGZILLA_INLINE void sz_substrings_find_bytes_neon(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                      sz_size_t length, sz_substrings_report_order_t order,
+                                                      sz_substrings_reporter_t reporter, void *context) {
+    sz_substrings_find_bytes_neon_(engine, haystack, length, order, reporter, context);
 }
 
 /** The NEON stages. */
-STRINGZILLA_API_COMPTIME sz_substrings_walks_t sz_substrings_walks_neon_(void) {
+STRINGZILLA_INLINE sz_substrings_walks_t sz_substrings_walks_neon_(void) {
     sz_substrings_walks_t walks;
-    walks.count_bytes = &sz_substrings_count_bytes_neon;
-    walks.find_bytes = &sz_substrings_find_bytes_neon;
+    walks.count_bytes = &sz_substrings_count_bytes_neon_;
+    walks.find_bytes = &sz_substrings_find_bytes_neon_;
     return walks;
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine,
-                                                               sz_sequence_t const *haystacks, sz_size_t *counts,
-                                                               sz_size_t counts_stride) {
+#if STRINGZILLA_TARGET_NEON
+
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_neon(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
+                                                           sz_substrings_case_sensitivity_t case_sensitivity,
+                                                           sz_substrings_overlap_policy_t overlap_policy,
+                                                           sz_size_t hot_states, sz_size_t matches_budget,
+                                                           sz_size_t haystacks_budget, sz_size_t ordinal,
+                                                           sz_memory_allocator_t *allocator, void *stream) {
+    sz_unused_(haystacks_budget);
+    return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
+                                          sz_cap_neon_k, ordinal, allocator, stream);
+}
+
+STRINGZILLA_API sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                      sz_size_t *counts, sz_size_t counts_stride, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_counts_with_(engine, &walks, haystacks, counts, counts_stride);
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engine,
-                                                             sz_sequence_t const *haystacks,
-                                                             sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                             sz_size_t *matches_offsets) {
+STRINGZILLA_API sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                    sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                    sz_size_t *matches_offsets, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_replace_neon(sz_substrings_engine_t *engine,
-                                                                sz_sequence_t const *haystacks,
-                                                                sz_sequence_t const *replacements, sz_ptr_t tape,
-                                                                sz_size_t tape_capacity, sz_size_t *offsets) {
+STRINGZILLA_API sz_status_t sz_substrings_replace_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                       sz_sequence_t const *replacements, sz_ptr_t target,
+                                                       sz_size_t target_capacity, sz_size_t *offsets, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
-    return sz_substrings_replace_with_(engine, &walks, haystacks, replacements, tape, tape_capacity, offsets);
+    return sz_substrings_replace_with_(engine, &walks, haystacks, replacements, target, target_capacity, offsets);
 }
 
-STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_neon(
-    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
-    sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride) {
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_neon(sz_substrings_engine_t *engine,
+                                                           sz_sequence_t const *haystacks,
+                                                           sz_f32_t const *document_lengths,
+                                                           sz_substrings_bm25_t const *parameters,
+                                                           sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                           sz_size_t scores_stride, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_bm25_scores_with_(engine, &walks, haystacks, document_lengths, parameters, needle_weights,
                                            scores, scores_stride);
 }
+
+#endif // STRINGZILLA_TARGET_NEON
 
 #pragma endregion NEON
 
@@ -96,7 +126,7 @@ STRINGZILLA_API_COMPTIME sz_status_t sz_substrings_bm25_scores_neon(
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_NEON
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
 
 #ifdef __cplusplus
 }
