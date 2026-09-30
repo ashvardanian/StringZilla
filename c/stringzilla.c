@@ -3,15 +3,12 @@
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief The library's cross-family exports: versions, statuses, capability queries, the kernel
- *      finder, the device exports of the GPU vendors it lacks, and the LibC @c mem* overrides.
+ *      finder, and the device exports of the GPU vendors it lacks.
  *
  *  Each family's dispatch points live in its own unit under `c/dispatch/`, each capability's
  *  kernels in its own unit under `c/cpu/`, and each GPU vendor's kernels and device exports in
  *  `c/nvidia/cuda.cu`, `c/amd/rocm.hip` and `c/apple/metal.c`.
  */
-#if !defined(STRINGZILLA_OVERRIDE_LIBC)
-#define STRINGZILLA_OVERRIDE_LIBC (!STRINGZILLA_WITH_LIBC)
-#endif
 #include <stringzilla/stringzilla.h> // `sz_cpu_capabilities_detected_` and its twins, the family finders
 #include <stringzilla/types.cuh>     // The device exports of the GPU vendors this library lacks
 
@@ -258,125 +255,3 @@ STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t device, sz_c
 }
 
 #pragma endregion Devices
-
-/*  Overrides for the LibC `mem*` functions, each resolving its kernel for the enabled capabilities
- *  on first use. Racing threads resolve and store the same kernel, and resolving reaches no `mem*`:
- *  detection reads CPUID or the ID registers, and the finder only walks its lists.
- *
- *  MSVC rejects @c STRINGZILLA_API here with C2375, a linkage conflict with the CRT's @c dllimport
- *  declarations, so these are exported with linker flags instead. A 32-bit build prefixes the
- *  exported name with an underscore, because that is how MSVC decorates @c __cdecl functions:
- *  https://stackoverflow.com/questions/62753691 */
-#pragma region LibC Overrides
-#if STRINGZILLA_OVERRIDE_LIBC && !defined(__CYGWIN__)
-
-#if !STRINGZILLA_WITH_LIBC
-#ifdef _MSC_VER
-typedef sz_size_t size_t; // Reuse the type definition we've inferred from `stringzilla.h`
-#else
-typedef __SIZE_TYPE__ size_t; // For GCC/Clang
-#endif
-#endif
-
-static sz_kernel_punned_t sz_libc_kernel_(sz_kernel_kind_t kind, _Atomic(sz_kernel_punned_t) *cache) {
-    sz_kernel_punned_t kernel = atomic_load_explicit(cache, memory_order_relaxed);
-    if (kernel) return kernel;
-    sz_capability_t capabilities, capability;
-    sz_cpu_capabilities_enabled(&capabilities);
-    sz_find_kernel_punned(kind, capabilities, &kernel, &capability);
-    atomic_store_explicit(cache, kernel, memory_order_relaxed);
-    return kernel;
-}
-
-#if defined(_MSC_VER)
-#if defined(_WIN64)
-#pragma comment(linker, "/export:memcpy")
-#else
-#pragma comment(linker, "/export:_memcpy")
-#endif
-void *__cdecl memcpy(void *target, void const *source, size_t length) {
-#else
-STRINGZILLA_API void *memcpy(void *target, void const *source, size_t length) {
-#endif
-    static _Atomic(sz_kernel_punned_t) cache;
-    ((sz_kernel_copy_t)sz_libc_kernel_(sz_kernel_copy_k, &cache))(target, source, length, STRINGZILLA_NULL);
-    return target;
-}
-
-#if defined(_MSC_VER)
-#if defined(_WIN64)
-#pragma comment(linker, "/export:memmove")
-#else
-#pragma comment(linker, "/export:_memmove")
-#endif
-void *__cdecl memmove(void *target, void const *source, size_t length) {
-#else
-STRINGZILLA_API void *memmove(void *target, void const *source, size_t length) {
-#endif
-    static _Atomic(sz_kernel_punned_t) cache;
-    ((sz_kernel_move_t)sz_libc_kernel_(sz_kernel_move_k, &cache))(target, source, length, STRINGZILLA_NULL);
-    return target;
-}
-
-#if defined(_MSC_VER)
-#if defined(_WIN64)
-#pragma comment(linker, "/export:memset")
-#else
-#pragma comment(linker, "/export:_memset")
-#endif
-void *__cdecl memset(void *target, int value, size_t length) {
-#else
-STRINGZILLA_API void *memset(void *target, int value, size_t length) {
-#endif
-    static _Atomic(sz_kernel_punned_t) cache;
-    ((sz_kernel_fill_t)sz_libc_kernel_(sz_kernel_fill_k, &cache))(target, length, (sz_u8_t)value, STRINGZILLA_NULL);
-    return target;
-}
-
-#if defined(_MSC_VER)
-#if defined(_WIN64)
-#pragma comment(linker, "/export:memchr")
-#else
-#pragma comment(linker, "/export:_memchr")
-#endif
-void *__cdecl memchr(void const *haystack, int character_wide, size_t length) {
-#else
-STRINGZILLA_API void *memchr(void const *haystack, int character_wide, size_t length) {
-#endif
-    static _Atomic(sz_kernel_punned_t) cache;
-    sz_u8_t const character = (sz_u8_t)character_wide;
-    sz_cptr_t match;
-    ((sz_kernel_find_byte_t)sz_libc_kernel_(sz_kernel_find_byte_k, &cache))(
-        (sz_cptr_t)haystack, length, (sz_cptr_t)&character, &match, STRINGZILLA_NULL);
-    return (void *)match;
-}
-
-#if !defined(_MSC_VER)
-
-STRINGZILLA_API void *memmem(void const *haystack, size_t haystack_length, void const *needle, size_t needle_length) {
-    static _Atomic(sz_kernel_punned_t) cache;
-    sz_cptr_t match;
-    ((sz_kernel_find_t)sz_libc_kernel_(sz_kernel_find_k, &cache))(
-        (sz_cptr_t)haystack, haystack_length, (sz_cptr_t)needle, needle_length, &match, STRINGZILLA_NULL);
-    return (void *)match;
-}
-
-STRINGZILLA_API void *memrchr(void const *haystack, int character_wide, size_t length) {
-    static _Atomic(sz_kernel_punned_t) cache;
-    sz_u8_t const character = (sz_u8_t)character_wide;
-    sz_cptr_t match;
-    ((sz_kernel_find_byte_t)sz_libc_kernel_(sz_kernel_rfind_byte_k, &cache))(
-        (sz_cptr_t)haystack, length, (sz_cptr_t)&character, &match, STRINGZILLA_NULL);
-    return (void *)match;
-}
-
-STRINGZILLA_API void memfrob(void *target, size_t length) {
-    static _Atomic(sz_kernel_punned_t) cache;
-    static sz_u64_t nonce = 42;
-    ((sz_kernel_fill_random_t)sz_libc_kernel_(sz_kernel_fill_random_k, &cache))((sz_ptr_t)target, length, nonce++,
-                                                                                STRINGZILLA_NULL);
-}
-
-#endif // !defined(_MSC_VER)
-#endif // STRINGZILLA_OVERRIDE_LIBC && !defined(__CYGWIN__)
-#pragma endregion LibC Overrides

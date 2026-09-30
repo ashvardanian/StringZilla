@@ -116,8 +116,6 @@ jobs:
           }
       - name: Test C++
         run: ctest --preset release
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake --preset release_shared
@@ -238,8 +236,6 @@ jobs:
           }
       - name: Test C++
         run: ctest --preset release
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
         run: |
           cmake --preset release_shared
@@ -393,8 +389,6 @@ jobs:
           }
       - name: Test C++
         run: ctest --preset cuda -R '^stringzilla_test_cpp20$'
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_cuda/libstringzilla_bare.so | grep '.so')"
 
   test_ubuntu_swift:
     name: Swift on Linux ${{ matrix.arch }}
@@ -570,7 +564,6 @@ jobs:
 
       - name: Verify ${{ matrix.target_arch }} binaries
         run: |
-          test -e build_release/libstringzilla_bare.so
           test -e build_release/libstringzilla_shared.so
           test -e build_release/stringzilla_test_cpp20
           file build_release/stringzilla_test_cpp20 | grep -q "${{ matrix.file_id }}"
@@ -908,9 +901,6 @@ jobs:
           )
       - name: Test C++
         run: ctest --preset release
-      - name: Check stringzilla_bare is built correctly
-        shell: cmd
-        run: dumpbin /nologo /dependents .\build_release\stringzilla_bare.dll | findstr /r "[a-zA-Z0-9]\.dll" | findstr /r /v "KERNEL32.dll stringzilla" && exit /b 1 || exit /b 0
       - name: Test on Real World Data
         run: |
           .\build_release\stringzilla_bench_find_cpp20.exe ${DATASET_PATH}      # for substring search
@@ -980,8 +970,6 @@ jobs:
           cmake --build --preset release
       - name: Test C++
         run: ctest --preset release
-      - name: Check stringzilla_bare is built correctly
-        run: test -z "$(ldd build_release/libstringzilla_bare.so | grep '.so' | grep '=>')"
 
         # Python
       - name: Build Python
@@ -1092,10 +1080,6 @@ jobs:
           project(consumer C CXX)
           set(STRINGZILLA_BUILD_SHARED ON CACHE BOOL "" FORCE)
           add_subdirectory($GITHUB_WORKSPACE stringzilla_build)
-          # `bare` is libc-free and overrides libc symbols, so it is checked rather than linked in.
-          if (NOT TARGET stringzilla::bare)
-              message(FATAL_ERROR "stringzilla::bare alias is missing")
-          endif ()
           add_executable(consumer main.c)
           target_link_libraries(consumer PRIVATE stringzilla::header stringzilla::shared)
           EOF

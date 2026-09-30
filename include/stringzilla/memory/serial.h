@@ -25,9 +25,6 @@ STRINGZILLA_INLINE void sz_lookup_serial_(sz_ptr_t target, sz_cptr_t source, sz_
     for (; source_u8 != source_end; ++source_u8, ++target_u8) *target_u8 = lut_u8[*source_u8];
 }
 
-#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
-#pragma optimize("", off)
-#endif
 STRINGZILLA_INLINE void sz_fill_serial_(sz_ptr_t target, sz_size_t length, sz_u8_t value) {
     sz_ptr_t end = target + length;
     // Dealing with short strings, a single sequential pass would be faster.
@@ -44,9 +41,6 @@ STRINGZILLA_INLINE void sz_fill_serial_(sz_ptr_t target, sz_size_t length, sz_u8
         while (target != end) *(target++) = value;
     }
 }
-#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
-#pragma optimize("", on)
-#endif
 
 STRINGZILLA_INLINE void sz_copy_serial_(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
@@ -90,17 +84,11 @@ STRINGZILLA_API sz_status_t sz_lookup_serial(sz_ptr_t target, sz_cptr_t source, 
     return sz_success_k;
 }
 
-#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
-#pragma optimize("", off)
-#endif
 STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_serial_(target, length, value);
     return sz_success_k;
 }
-#if defined(_MSC_VER) && defined(STRINGZILLA_OVERRIDE_LIBC) && STRINGZILLA_OVERRIDE_LIBC
-#pragma optimize("", on)
-#endif
 
 STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);

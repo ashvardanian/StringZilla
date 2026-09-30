@@ -17,9 +17,6 @@ set(stringzilla_static_FOUND TRUE)
 if (TARGET stringzilla::shared)
     set(stringzilla_shared_FOUND TRUE)
 endif ()
-if (TARGET stringzilla::bare)
-    set(stringzilla_bare_FOUND TRUE)
-endif ()
 
 # No `stringzilla_VERSION` here: `find_package` sets it from the version file before loading this one, and
 # `configure_package_config_file` never defines `PACKAGE_VERSION`, so assigning it here overwrote it with nothing.

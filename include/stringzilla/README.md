@@ -91,7 +91,6 @@ target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
 Either library's dispatch points pick a capability by the mask each call passes, so one artifact runs optimally on any CPU.
-On Linux a libc-free variant `stringzilla::bare` is built alongside the shared one with `STRINGZILLA_WITH_LIBC=0`.
 
 ### CMake, Header Only
 
@@ -114,7 +113,7 @@ find_package(stringzilla REQUIRED)
 target_link_libraries(your_app PRIVATE stringzilla::shared)
 ```
 
-`stringzilla::shared` and `stringzilla::bare` join the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
+`stringzilla::shared` joins the package whenever `STRINGZILLA_BUILD_SHARED` was on for the install.
 `stringzilla::header` always does, as it needs no submodules and compiles nothing, so it works straight out of a release tarball.
 
 A shared-library install also writes `lib/pkgconfig/stringzilla.pc`, for build systems that read pkg-config rather than CMake:
@@ -1187,16 +1186,10 @@ __`STRINGZILLA_ALLOW_MISALIGNED_LOADS`__:
 > When enabled, many byte-level operations use word-sized loads, which can significantly accelerate the serial (SWAR) backend.
 > Consider enabling it explicitly if you are targeting platforms that support fast unaligned loads.
 
-__`STRINGZILLA_WITH_LIBC`__ and __`STRINGZILLA_OVERRIDE_LIBC`__:
+__`STRINGZILLA_WITH_LIBC`__:
 
 > Both the library and the C headers can be built without LibC.
-> This may affect the type resolution system on obscure hardware platforms. 
-> Moreover, one may let `stringzilla` override the common symbols like the `memcpy` and `memset` with its own implementations.
-> In that case you can use the [`LD_PRELOAD` trick][ld-preload-trick] to prioritize its symbols over the ones from the LibC and accelerate existing string-heavy applications without recompiling them.
-> It also adds a layer of security, as the `stringzilla` isn't [undefined for NULL inputs][redhat-memcpy-ub] like `memcpy(NULL, NULL, 0)`.
-
-[ld-preload-trick]: https://ashvardanian.com/posts/ld-preload-libsee
-[redhat-memcpy-ub]: https://developers.redhat.com/articles/2024/12/11/making-memcpynull-null-0-well-defined
+> This may affect the type resolution system on obscure hardware platforms.
 
 __`STRINGZILLA_WITH_STL`__:
 

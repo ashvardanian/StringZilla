@@ -11,7 +11,7 @@ Depending on the type of contribution, you may need to follow different steps.
 ```
 include/stringzilla/      C and C++ headers — one .h per kernel family declaring its dispatch points, kernels and finder, stringzilla.hpp for C++
 include/stringzilla/*/    Kernels, one file per CPU capability — serial, haswell, neon, rvv, etc. — plus the engines' GPU simt.* sources
-c/stringzilla.c           Library exports shared by every family — versions, statuses, capability queries, the kernel finder, LibC overrides
+c/stringzilla.c           Library exports shared by every family — versions, statuses, capability queries, the kernel finder
 c/cpu/                    Library units, one per CPU capability, each defining that capability's kernels once
 c/dispatch/               Library units, one per kernel family, with its capability lists, dispatch points and finder
 c/dispatch.h              The capability lists' shape and the kernel pick the dispatch units share, internal to the library

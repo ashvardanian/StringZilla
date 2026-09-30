@@ -2467,8 +2467,8 @@ check_call_result_not_indexed() {
         "$staged_path indexes through a call or a cast; index the owning container, or bind a named local:"
 }
 
-# Rejects a LibC string or memory call in include/stringzilla, because StringZilla supersedes LibC and cannot
-# share a translation unit with the builtins it lowers to; types.h keeps the sanctioned allocator and assert.
+# Rejects a LibC string or memory call in include/stringzilla, because the headers must also compile without LibC,
+# under `STRINGZILLA_WITH_LIBC=0`; types.h keeps the sanctioned allocator and assert.
 check_libc_absent_from_library() {
     [ "$staged_path" != include/stringzilla/types.h ] || return 0
     local calls

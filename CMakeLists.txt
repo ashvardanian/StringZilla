@@ -6,14 +6,13 @@
 # * stringzilla_static: A static library with dynamic SIMD dispatch, and the GPU backends STRINGZILLA_BUILD_CUDA,
 #   STRINGZILLA_BUILD_ROCM and STRINGZILLA_BUILD_METAL ask for, side by side.
 # * stringzilla_shared: The same as a shared library.
-# * stringzilla_bare: A shared library with the StringZilla headers, but without linking the standard C library.
 # * stringzilla_python: The CPython extension over `stringzilla_static`, with STRINGZILLA_BUILD_PYTHON.
 # * stringzilla_node: The Node addon over `stringzilla_static`, with STRINGZILLA_BUILD_NODE, which cmake-js sets.
 # * stringzilla_swift: `stringzilla_static` packaged for SwiftPM, with STRINGZILLA_BUILD_SWIFT.
 #
 # Consumers link the same namespaced spellings whether pulled in with `add_subdirectory` or found with `find_package`:
 #
-# * stringzilla::header, stringzilla::static, stringzilla::shared, stringzilla::bare.
+# * stringzilla::header, stringzilla::static, stringzilla::shared.
 #
 # Tests:
 #
@@ -349,9 +348,9 @@ target_include_directories(
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
 
-# The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder and the
-# LibC overrides), each `c/cpu/<capability>.c` defines that capability's kernels once, and each
-# `c/dispatch/<family>.c` holds its family's lists, dispatch points and finder. Globbed, so a new unit needs no entry.
+# The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
+# `c/cpu/<capability>.c` defines that capability's kernels once, and each `c/dispatch/<family>.c` holds its family's
+# lists, dispatch points and finder. Globbed, so a new unit needs no entry.
 file(
     GLOB STRINGZILLA_LIBRARY_UNITS_ CONFIGURE_DEPENDS
     RELATIVE ${PROJECT_SOURCE_DIR}
@@ -359,8 +358,8 @@ file(
 )
 set(STRINGZILLA_SHIM_SOURCES c/stringzilla.c ${STRINGZILLA_LIBRARY_UNITS_})
 
-# Helper function used for the `stringzilla_shared`, `stringzilla_bare`, and `stringzilla_static` targets, which compile
-# the sources that follow with the compiler `compiler_id` names
+# Helper function used for the `stringzilla_shared` and `stringzilla_static` targets, which compile the sources that
+# follow with the compiler `compiler_id` names
 function (define_stringzilla_library target public_name library_type compiler_id)
     add_library(${target} ${library_type} ${ARGN})
 
@@ -416,10 +415,6 @@ else ()
     set(STRINGZILLA_LIBRARIES_ stringzilla_static)
 endif ()
 
-# The shim units default `STRINGZILLA_OVERRIDE_LIBC` to `!STRINGZILLA_WITH_LIBC`, so these libraries export no `memcpy` of
-# their own and interpose nothing. That is what lets anything link them - the tests, a consumer's program - without ELF
-# redirecting `libstdc++`'s internal calls into StringZilla. `stringzilla_bare` is the artifact that replaces LibC, and
-# it still does.
 foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
     target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${STRINGZILLA_WITH_LIBC_}")
     target_include_directories(
@@ -450,8 +445,7 @@ string(REPLACE "=1" "=0" STRINGZILLA_SERIAL_DEFINITIONS_ "${sz_compile_definitio
 
 # Adds one GPU vendor's unit, like `c/nvidia/cuda.cu`, to the archive and the shared library: compiled as `language`,
 # without the CPU kits, and linked with the runtime libraries that follow. Both the unit and the libraries' host units
-# see `definition`, so the dispatch lists name the unit's kernels. The bare library stays without them, as every GPU
-# runtime needs the LibC it replaces.
+# see `definition`, so the dispatch lists name the unit's kernels.
 function (sz_add_gpu_unit_ source language definition)
     get_filename_component(unit_ "${source}" NAME_WE)
     add_library(stringzilla_${unit_}_ OBJECT ${source})
@@ -488,32 +482,6 @@ if (STRINGZILLA_BUILD_ROCM)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
     sz_add_gpu_unit_(c/apple/metal.c C "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
-endif ()
-
-if (STRINGZILLA_BUILD_SHARED)
-    # Try compiling a version without linking the LibC ! This is only for Linux/MSVC, as on modern Arm-based MacOS
-    # machines ! We can't legally access Arm's "feature registers" without `sysctl` or `sysctlbyname`.
-    if (NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
-        define_stringzilla_library(stringzilla_bare bare SHARED "${CMAKE_CXX_COMPILER_ID}" ${STRINGZILLA_SHIM_SOURCES})
-        target_compile_definitions(stringzilla_bare PRIVATE "STRINGZILLA_WITH_LIBC=0")
-        target_compile_definitions(stringzilla_bare PRIVATE "STRINGZILLA_OVERRIDE_LIBC=1")
-        target_include_directories(
-            stringzilla_bare PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-                                    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        )
-
-        # For stringzilla_bare, enforce strict standard conformance with `-pedantic`, so the bare build stays free of
-        # the POSIX and GNU extensions a LibC would otherwise lend it.
-        if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID MATCHES "Clang")
-            target_compile_options(stringzilla_bare PRIVATE "-pedantic")
-        endif ()
-
-        # Avoid built-ins
-        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-fno-builtin;-nostdlib>")
-        target_compile_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/Oi-;/GS->")
-        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:GNU,Clang>:-nostdlib>")
-        target_link_options(stringzilla_bare PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/NODEFAULTLIB>")
-    endif ()
 endif ()
 
 # The `stringzilla` extension module, which scikit-build-core builds and packages from `pyproject.toml`, installed at the
@@ -784,9 +752,6 @@ if (STRINGZILLA_INSTALL)
     install(TARGETS stringzilla_header stringzilla_static EXPORT stringzillaTargets)
     if (TARGET stringzilla_shared)
         install(TARGETS stringzilla_shared EXPORT stringzillaTargets)
-    endif ()
-    if (TARGET stringzilla_bare)
-        install(TARGETS stringzilla_bare EXPORT stringzillaTargets)
     endif ()
 
     install(

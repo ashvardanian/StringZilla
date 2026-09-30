@@ -513,129 +513,6 @@ jobs:
       - name: Publish to NPM
         run: npm publish --provenance --access public
 
-  create_linux_deb_package:
-    name: Create Debian Package for ${{ matrix.arch }}
-    # The oldest runner still offered: the shipped `.so` needs no newer glibc than the one it was linked against
-    runs-on: ubuntu-22.04
-    needs: versioning
-    env:
-      CC: clang-16
-      CXX: clang++-16
-      AR: llvm-ar
-      NM: llvm-nm
-      RANLIB: llvm-ranlib
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            target: x86_64-linux-gnu
-          - arch: arm64
-            target: aarch64-linux-gnu
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          ref: "main"
-
-      - name: Get version
-        id: set_version
-        run: |
-          version=$(cat VERSION)
-          echo "version=$version" >> $GITHUB_OUTPUT
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build build-essential crossbuild-essential-arm64 crossbuild-essential-armhf libjemalloc-dev
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 16
-
-      - name: Build C/C++
-        run: |
-          # Configure and build the project
-          cmake --preset release_shared \
-            -D CMAKE_C_COMPILER_TARGET=${{ matrix.target }} \
-            -D CMAKE_CXX_COMPILER_TARGET=${{ matrix.target }} \
-            -D CMAKE_SYSTEM_NAME=Linux \
-            -D CMAKE_SYSTEM_PROCESSOR=${{ matrix.arch }}
-
-          cmake --build --preset release_shared
-
-          cp build_release_shared/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}.so"
-          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN"
-          touch "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          mkdir -p "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib"
-          mkdir "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include"
-          cp include/stringzilla/stringzilla.h "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/include/"
-          cp build_release_shared/libstringzilla_bare.so "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/usr/local/lib/"
-          echo -e "Package: stringzilla\nVersion: ${{ steps.set_version.outputs.version }}\nMaintainer: Ash Vardanian\nArchitecture: ${{ matrix.arch }}\nDescription: Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU" > "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}/DEBIAN/control"
-          dpkg-deb --build "stringzilla_bare_linux_${{ matrix.arch }}_${{ steps.set_version.outputs.version }}"
-
-      - name: Upload library
-        uses: xresloader/upload-to-github-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          file: "*.so"
-          update_latest_release: true
-
-      - name: Upload archive
-        uses: xresloader/upload-to-github-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          file: "*.deb"
-          update_latest_release: true
-
-  create_windows_dll_library:
-    name: Create Dll Library for Windows ${{ matrix.arch }}
-    runs-on: windows-2022
-    needs: versioning
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            target: x64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          ref: "main"
-
-      - name: Set up MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
-
-      - name: Get version
-        id: set_version
-        shell: cmd
-        run: |
-          set /p version=<VERSION
-          echo version=%version% >> %GITHUB_OUTPUT%
-
-      - name: Build library
-        shell: cmd
-        run: |
-          cmake --preset release_shared
-          cmake --build --preset release_shared
-          tar -cvf "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar" "build_release_shared\stringzilla_bare.dll" "build_release_shared\stringzilla_bare.lib" ".\include\stringzilla\stringzilla.h"
-
-      - name: Upload archive
-        uses: xresloader/upload-to-github-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          file: "stringzilla_bare_windows_${{ matrix.target }}_${{ steps.set_version.outputs.version }}.tar"
-          update_latest_release: true
-
   create_macos_library:
     name: Create Library for MacOS ${{ matrix.arch }}
     runs-on: macos-15
@@ -678,7 +555,6 @@ jobs:
       - build_wheels_stringzilla_linux_x86
       - build_wheels_stringzilla_linux_arm
       - build_wheels_stringzilla_linux_emulated
-      - create_linux_deb_package
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     steps:
@@ -688,11 +564,9 @@ jobs:
           echo "build_wheels_stringzilla_linux_x86: ${{ needs.build_wheels_stringzilla_linux_x86.result }}"
           echo "build_wheels_stringzilla_linux_arm: ${{ needs.build_wheels_stringzilla_linux_arm.result }}"
           echo "build_wheels_stringzilla_linux_emulated: ${{ needs.build_wheels_stringzilla_linux_emulated.result }}"
-          echo "create_linux_deb_package: ${{ needs.create_linux_deb_package.result }}"
           if [ "${{ needs.build_wheels_stringzilla_linux_x86.result }}" != "success" ] || \
              [ "${{ needs.build_wheels_stringzilla_linux_arm.result }}" != "success" ] || \
-             [ "${{ needs.build_wheels_stringzilla_linux_emulated.result }}" != "success" ] || \
-             [ "${{ needs.create_linux_deb_package.result }}" != "success" ]; then
+             [ "${{ needs.build_wheels_stringzilla_linux_emulated.result }}" != "success" ]; then
             echo "One or more Linux dependencies failed.";
             exit 1;
           fi
@@ -702,7 +576,6 @@ jobs:
     needs:
       - build_wheels_stringzilla_windows_x86
       - build_wheels_stringzilla_windows_arm
-      - create_windows_dll_library
     if: ${{ always() }}
     runs-on: ubuntu-26.04
     steps:
@@ -711,10 +584,8 @@ jobs:
           echo "Windows job results:"
           echo "build_wheels_stringzilla_windows_x86: ${{ needs.build_wheels_stringzilla_windows_x86.result }}"
           echo "build_wheels_stringzilla_windows_arm: ${{ needs.build_wheels_stringzilla_windows_arm.result }}"
-          echo "create_windows_dll_library: ${{ needs.create_windows_dll_library.result }}"
           if [ "${{ needs.build_wheels_stringzilla_windows_x86.result }}" != "success" ] || \
-             [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ] || \
-             [ "${{ needs.create_windows_dll_library.result }}" != "success" ]; then
+             [ "${{ needs.build_wheels_stringzilla_windows_arm.result }}" != "success" ]; then
             echo "One or more Windows dependencies failed.";
             exit 1;
           fi
