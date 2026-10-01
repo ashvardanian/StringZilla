@@ -1,50 +1,48 @@
 {
   "[c]": {
-    "editor.insertSpaces": true,
-    "editor.tabSize": 4
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
   },
-  "[javascript]": {
-    "editor.defaultFormatter": "vscode.typescript-language-features",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 4
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
+  },
+  "[cuda-cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
   },
   "[json]": {
-    "editor.defaultFormatter": "dprint.dprint"
+    "editor.defaultFormatter": "dprint.dprint",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
   },
   "[jsonc]": {
-    "editor.defaultFormatter": "dprint.dprint"
+    "editor.defaultFormatter": "dprint.dprint",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "yzhang.markdown-all-in-one",
+    "editor.formatOnSave": false,
+    "editor.rulers": [120]
   },
   "[python]": {
-    "editor.defaultFormatter": "ms-python.black-formatter",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 4
-  },
-  "[typescript]": {
-    "editor.defaultFormatter": "vscode.typescript-language-features",
-    "editor.insertSpaces": true,
-    "editor.tabSize": 4
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
   },
   "[yaml]": {
-    "editor.defaultFormatter": "dprint.dprint"
+    "editor.defaultFormatter": "dprint.dprint",
+    "editor.formatOnSave": true,
+    "editor.rulers": [120]
   },
-  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  "C_Cpp.dimInactiveRegions": false,
-  // This may cause overheating.
-  // https://github.com/microsoft/vscode-cpptools/issues/1816
-  "C_Cpp.workspaceParsingPriority": "low",
-  "cmake.buildDirectory": "${workspaceRoot}/build",
-  "cmake.configureOnOpen": true,
-  // https://github.com/microsoft/vscode-cpptools/issues/2456#issuecomment-439295153
-  "cmake.debugConfig": {
-    "logging": {
-      "engineLogging": true,
-      "trace": true,
-      "traceResponse": true
-    },
-    "MIMode": "lldb",
-    "stopAtEntry": false
-  },
-  "cmake.sourceDirectory": "${workspaceRoot}",
+  "clangd.arguments": [
+    "--background-index",
+    "--header-insertion=never"
+  ],
   "cSpell.words": [
     "ACGT",
     "ACGU",
@@ -262,14 +260,10 @@
     "Zilla",
     "Zillable"
   ],
-  "editor.detectIndentation": false,
-  "editor.formatOnSave": true,
-  "editor.insertSpaces": true,
-  "editor.rulers": [
-    120
-  ],
-  "editor.tabSize": 4,
   "files.associations": {
+    "*.gyp": "json",
+    "*.metal": "cpp",
+    "*.tcc": "cpp",
     "__availability": "cpp",
     "__bit_reference": "cpp",
     "__bits": "cpp",
@@ -291,9 +285,6 @@
     "__tree": "cpp",
     "__tuple": "cpp",
     "__verbose_abort": "cpp",
-    "*.gyp": "json",
-    "*.metal": "cpp",
-    "*.tcc": "cpp",
     "algorithm": "cpp",
     "any": "cpp",
     "array": "cpp",
@@ -406,22 +397,5 @@
     "xtr1common": "cpp",
     "xtree": "cpp",
     "xutility": "cpp"
-  },
-  "notebook.formatOnSave.enabled": true,
-  "rust-analyzer.assist.emitMustUse": false,
-  "rust-analyzer.cachePriming.enable": false,
-  "rust-analyzer.cargo.allFeatures": false,
-  "rust-analyzer.cargo.buildScripts.enable": false,
-  "rust-analyzer.checkOnSave.allTargets": false,
-  // Rust analyzer memory optimizations
-  "rust-analyzer.checkOnSave.enable": true,
-  "rust-analyzer.completion.autoimport.enable": false,
-  "rust-analyzer.diagnostics.enable": true,
-  "rust-analyzer.diagnostics.experimental.enable": false,
-  "rust-analyzer.files.watcher": "client",
-  "rust-analyzer.hover.actions.enable": false,
-  "rust-analyzer.inlayHints.enable": false,
-  "rust-analyzer.lens.enable": false,
-  "rust-analyzer.procMacro.enable": false,
-  "rust-analyzer.updates.channel": "stable"
+  }
 }

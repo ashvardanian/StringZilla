@@ -1,0 +1,4 @@
+# Repo-local, so it applies in a multi-root workspace too; machine-specific overrides belong in the user
+# config at `~/.config/clangd/config.yaml`, which clangd merges on top of this.
+CompileFlags:
+  CompilationDatabase: build_debug

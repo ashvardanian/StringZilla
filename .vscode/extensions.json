@@ -1,13 +1,23 @@
 {
   "recommendations": [
-    "aaron-bond.better-comments",
+    "charliermarsh.ruff",
     "cheshirekow.cmake-format",
     "dprint.dprint",
-    "esbenp.prettier-vscode",
-    "ms-python.black-formatter",
+    "golang.go",
+    "llvm-vs-code-extensions.vscode-clangd",
+    "ms-dotnettools.csharp",
     "ms-python.python",
     "ms-vscode.cmake-tools",
-    "ms-vscode.cpptools-themes",
+    "redhat.java",
+    "rust-lang.rust-analyzer",
+    "swiftlang.swift-vscode",
+    "tamasfe.even-better-toml",
     "yzhang.markdown-all-in-one"
+  ],
+  "unwantedRecommendations": [
+    "ms-python.black-formatter",
+    "ms-vscode.cpptools",
+    "ms-vscode.cpptools-extension-pack",
+    "xaver.clang-format"
   ]
 }

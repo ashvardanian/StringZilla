@@ -302,7 +302,7 @@ endif ()
 # `language`, which its sources' extension spells, for the architectures the library's vendor unit carries.
 function (define_gpu_launcher exec_name language)
     add_executable(${exec_name} ${ARGN})
-    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}" "${CMAKE_${language}_COMPILER_ID}")
+    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
     set_target_properties(
         ${exec_name}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
@@ -321,7 +321,7 @@ endfunction ()
 # the dispatch points (SERIAL).
 function (define_cpu_launcher exec_name library verdicts)
     add_executable(${exec_name} ${ARGN})
-    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}" "${CMAKE_CXX_COMPILER_ID}")
+    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
     if (verdicts STREQUAL "SERIAL")
         target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_})
     elseif (library STREQUAL "stringzilla_header")
@@ -358,9 +358,8 @@ file(
 )
 set(STRINGZILLA_SHIM_SOURCES c/stringzilla.c ${STRINGZILLA_LIBRARY_UNITS_})
 
-# Helper function used for the `stringzilla_shared` and `stringzilla_static` targets, which compile the sources that
-# follow with the compiler `compiler_id` names
-function (define_stringzilla_library target public_name library_type compiler_id)
+# Defines `stringzilla_shared` or `stringzilla_static` over the sources that follow.
+function (define_stringzilla_library target public_name library_type)
     add_library(${target} ${library_type} ${ARGN})
 
     # The library, unlike the headers, may use C11: `c/stringzilla.c` caches detection in a <stdatomic.h> atomic, which
@@ -394,7 +393,7 @@ function (define_stringzilla_library target public_name library_type compiler_id
     )
 
     # Set the baseline architecture; the dispatch points pick each SIMD capability by the mask each call passes.
-    set_baseline_architecture_flags(${target} "${compiler_id}")
+    set_baseline_architecture_flags(${target})
 
     # Enable every capability the toolchain can compile; `sz_cpu_capabilities_enabled` masks what the CPU lacks.
     set_architecture_simd_definitions(${target})
@@ -404,12 +403,12 @@ endfunction ()
 # The dispatch core as an archive, which the tests, the benchmarks, and the Go and Python bindings link - the
 # cross-compiled test runs are `-static` executables, which cannot take a `.so` at all - and as a shared library. A
 # parent project builds the archive only if it links it.
-define_stringzilla_library(stringzilla_static static STATIC "${CMAKE_CXX_COMPILER_ID}" ${STRINGZILLA_SHIM_SOURCES})
+define_stringzilla_library(stringzilla_static static STATIC ${STRINGZILLA_SHIM_SOURCES})
 if (NOT STRINGZILLA_IS_MAIN_PROJECT)
     set_target_properties(stringzilla_static PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 if (STRINGZILLA_BUILD_SHARED)
-    define_stringzilla_library(stringzilla_shared shared SHARED "${CMAKE_CXX_COMPILER_ID}" ${STRINGZILLA_SHIM_SOURCES})
+    define_stringzilla_library(stringzilla_shared shared SHARED ${STRINGZILLA_SHIM_SOURCES})
     set(STRINGZILLA_LIBRARIES_ stringzilla_static stringzilla_shared)
 else ()
     set(STRINGZILLA_LIBRARIES_ stringzilla_static)
@@ -443,10 +442,10 @@ endforeach ()
 # CPU tests of the dispatch points alone.
 string(REPLACE "=1" "=0" STRINGZILLA_SERIAL_DEFINITIONS_ "${sz_compile_definitions_}")
 
-# Adds one GPU vendor's unit, like `c/nvidia/cuda.cu`, to the archive and the shared library: compiled as `language`,
-# without the CPU kits, and linked with the runtime libraries that follow. Both the unit and the libraries' host units
-# see `definition`, so the dispatch lists name the unit's kernels.
-function (sz_add_gpu_unit_ source language definition)
+# Adds one GPU vendor's unit, like `c/nvidia/cuda.cu`, to the archive and the shared library: compiled without the CPU
+# kits, and linked with the runtime libraries that follow. Both the unit and the libraries' host units see `definition`,
+# so the dispatch lists name the unit's kernels.
+function (sz_add_gpu_unit_ source definition)
     get_filename_component(unit_ "${source}" NAME_WE)
     add_library(stringzilla_${unit_}_ OBJECT ${source})
     target_include_directories(stringzilla_${unit_}_ PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/c)
@@ -462,7 +461,7 @@ function (sz_add_gpu_unit_ source language definition)
                    CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES};90-virtual"
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
     )
-    set_compiler_flags(stringzilla_${unit_}_ "" "" "${CMAKE_${language}_COMPILER_ID}")
+    set_compiler_flags(stringzilla_${unit_}_ "" "")
     target_compile_definitions(
         stringzilla_${unit_}_ PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_} "STRINGZILLA_WITH_LIBC=1" "${definition}"
     )
@@ -475,13 +474,13 @@ function (sz_add_gpu_unit_ source language definition)
 endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
-    sz_add_gpu_unit_(c/nvidia/cuda.cu CUDA "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
+    sz_add_gpu_unit_(c/nvidia/cuda.cu "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
 endif ()
 if (STRINGZILLA_BUILD_ROCM)
-    sz_add_gpu_unit_(c/amd/rocm.hip HIP "STRINGZILLA_ARCH_ROCM_=1" hip::host)
+    sz_add_gpu_unit_(c/amd/rocm.hip "STRINGZILLA_ARCH_ROCM_=1" hip::host)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
-    sz_add_gpu_unit_(c/apple/metal.c C "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
+    sz_add_gpu_unit_(c/apple/metal.c "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
 endif ()
 
 # The `stringzilla` extension module, which scikit-build-core builds and packages from `pyproject.toml`, installed at the

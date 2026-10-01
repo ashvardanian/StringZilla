@@ -266,6 +266,80 @@ assert_accepts "free-standing Doxygen command" include/numkong/probe.h <<'FIXTUR
 int probe(int value);
 FIXTURE
 
+assert_rejects "C library and C++ headers in one group" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+#include <cstdint>
+#include <vector>
+FIXTURE
+
+assert_accepts "include groups in order, a blank line apart" include/numkong/probe.h <<FIXTURE
+#include <cstdint>
+
+#include <sys/types.h>
+
+#include <vector>
+
+#include <fmt/core.h>
+
+#include <usearch/index.hpp>
+
+#include "$project_directory/probe_internal.h"
+FIXTURE
+
+assert_rejects "own header in angle brackets" "is an own header" include/numkong/probe.h <<FIXTURE
+#include <$project_directory/probe_internal.h>
+FIXTURE
+
+assert_rejects "sibling header in quotes" "is a sibling header" include/numkong/probe.h <<'FIXTURE'
+#include "usearch/index.hpp"
+FIXTURE
+
+assert_rejects "quoted header that is not in the repository" "is not in this repository" include/numkong/probe.h <<'FIXTURE'
+#include "probe_internal.h"
+FIXTURE
+
+stage_fixture_with_header bench/probe.cpp <<'FIXTURE'
+#include <vector>
+
+#include "harness.h"
+FIXTURE
+stage_sibling_with_header bench/harness.h <<'FIXTURE'
+int harness(void);
+FIXTURE
+run_precommit
+expect_acceptance "quoted header beside the including file"
+
+stage_fixture_with_header include/$project_directory/probe.h <<'FIXTURE'
+#include "probe_internal.h"
+FIXTURE
+stage_sibling_with_header include/$project_directory/probe_internal.h <<'FIXTURE'
+int probe_internal(void);
+FIXTURE
+run_precommit
+expect_rejection "public header quoted without the prefix" "is a public header"
+
+assert_accepts "misordered includes under an #if" include/numkong/probe.h <<'FIXTURE'
+#include <vector>
+#if defined(PROBE_EXTRAS)
+#include <cstdint>
+#endif
+FIXTURE
+
+assert_rejects "misordered includes after an #endif" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+#if defined(PROBE_EXTRAS)
+#include <windows.h>
+#endif
+#include <vector>
+#include <cstdint>
+FIXTURE
+
+assert_rejects "misordered includes inside an include guard" "misgroups its includes" include/numkong/probe.h <<'FIXTURE'
+#ifndef PROBE_H_
+#define PROBE_H_
+#include <vector>
+#include <cstdint>
+#endif
+FIXTURE
+
 assert_rejects "@see naming an identifier" "mixes the cross-reference tags" include/numkong/probe.h <<'FIXTURE'
 /**
  *  @brief Probes a value.
@@ -876,6 +950,11 @@ assert_rejects "pipe table" "draws a pipe table" include/numkong/probe.h <<'FIXT
 int probe(void);
 FIXTURE
 
+assert_rejects "pipe table in a Python comment" "draws a pipe table" python/probe.py <<'FIXTURE'
+# | Kernel | Notes |
+# | dots | Inner products |
+FIXTURE
+
 assert_accepts "aligned plain table" include/numkong/probe.h <<'FIXTURE'
 /**
  *  @brief Lists the instructions.
@@ -1460,9 +1539,38 @@ FIXTURE
 
 # region All File Fixtures
 
-assert_rejects "banner ruler" "decorative banner ruler" scripts/probe.sh <<'FIXTURE'
+assert_rejects "banner ruler" "adds a banner ruler" scripts/probe.sh <<'FIXTURE'
 # ----
 echo probe
+FIXTURE
+
+assert_rejects "label between rulers" "adds a banner ruler" scripts/probe.sh <<'FIXTURE'
+# ==== Probes ====
+echo probe
+FIXTURE
+
+assert_rejects "box-drawing banner in TOML" "adds a banner ruler" probe.toml <<'FIXTURE'
+# ── Probes ──────────────────
+[probe]
+name = "probe"
+FIXTURE
+
+assert_rejects "box-drawing banner in Python" "adds a banner ruler" python/probe.py <<'FIXTURE'
+# ════════════════════════════
+FIXTURE
+
+assert_accepts "YAML document marker" config/probe.yml <<'FIXTURE'
+---
+probe: key -> slot
+FIXTURE
+
+assert_accepts "region marker and arrows beside rulers" include/probe.hpp <<'FIXTURE'
+#pragma region Probes
+
+/** Maps a key → its slot. */
+inline int probe(int key) noexcept { return key; }
+
+#pragma endregion Probes
 FIXTURE
 
 assert_accepts "ruler in Markdown" docs/probe.md <<'FIXTURE'
@@ -2375,7 +2483,7 @@ def scale_iterations(count):
     return count
 FIXTURE
 
-assert_accepts "Python scaffolding in its helpers" test/helpers.py <<'FIXTURE'
+assert_accepts "Python scaffolding in its helpers" test/base.py <<'FIXTURE'
 
 def scale_iterations(count):
     return count
@@ -2399,7 +2507,7 @@ FIXTURE
 
 assert_accepts "seed values and a scaled fuzz loop" test/probe.py <<'FIXTURE'
 import pytest
-from test.helpers import SEED_VALUES, scale_iterations
+from base import SEED_VALUES, scale_iterations
 
 
 @pytest.mark.parametrize("seed_value", SEED_VALUES)

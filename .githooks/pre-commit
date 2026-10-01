@@ -20,10 +20,12 @@ rejection_count=0
 # region Project Settings
 
 # The only lines that differ between the NumKong, ForkUnion, SmashTable, StringZilla and USearch hooks
-# outside their own project region: whose hook this is, which namespace its harnesses open, which sibling
-# names a comment may not cite as a justification, and which abbreviations this codebase refuses.
+# outside their own project region: whose hook this is, which prefix its own headers sit under, which
+# namespace its harnesses open, which sibling names a comment may not cite as a justification, and which
+# abbreviations this codebase refuses.
 project_name="StringZilla"
 project_namespace="ashvardanian::stringzilla"
+project_include_prefix="stringzilla"
 sibling_projects='numkong|usearch|forkunion|smashtable|simsimd|smallfield|stringtape'
 abbreviations_refused="hi lo bot acc accum tmp temp res bcast ext idx cnt buf len str val obj elem iter"
 rustfmt_command="cargo fmt"
@@ -43,22 +45,13 @@ reject_with_reason() { # reject_with_reason <matches> <message-line>...
     rejection_count=$((rejection_count + 1))
 }
 
-# The line numbers a staged file gained, read off the `@@ -a,b +c,d @@` headers of a zero-context diff.
-staged_added_line_numbers() { # staged_added_line_numbers <path>
-    git diff --cached --unified=0 -- "$1" | awk '
-        /^@@/ {
-            split($3, range, ",")
-            start = substr(range[1], 2) + 0
-            count = (range[2] == "") ? 1 : range[2] + 0
-            for (line = start; line < start + count; ++line) print line
-        }'
-}
-
 # Line classes over `staged_added_text`, whose lines keep the diff's leading `+`: any comment marker, a
 # documentation line that is `/**`, a docblock body line or `//`, and a docblock line alone.
 added_comment_line_pattern='^\+[[:space:]]*(\*|/\*|//)'
 added_documentation_line_pattern='^\+[[:space:]]*(/\*\*|\*([[:space:]]|$)|//)'
 added_docblock_line_pattern='^\+[[:space:]]*(/\*\*|\*([[:space:]]|$))'
+# Matches added text with a comment marker anywhere, which every rule behind it needs before it can fire.
+added_comment_marker_regex=$'(^|\n)\\+[[:space:]]*\\*|//|/\\*'
 
 # Predicates over one source line, available to every program `scan_staged_file_marking_added_lines` runs.
 comment_structure_awk='
@@ -99,8 +92,7 @@ paragraph_room_awk='
 # Runs an awk program over the staged file with `added[line]` preloaded, so a structural check sees the
 # whole file as context and still reports only what this commit added.
 scan_staged_file_marking_added_lines() { # scan_staged_file_marking_added_lines <awk-program>
-    awk "$comment_structure_awk"'NR == FNR { added[$1 + 0]; next } '"$1" \
-        <(printf '%s\n' "$staged_added_line_numbers_list") <(printf '%s\n' "$staged_file_text")
+    awk "$comment_structure_awk"'NR == FNR { added[$1 + 0]; next } '"$1" "$staged_lines_path" "$staged_text_path"
 }
 
 # Blanks C-family comments to spaces, keeping every line and column in place, so a code check never fires
@@ -852,14 +844,14 @@ check_fields_on_labelled_lines() {
         "$staged_path separates fields with pipes; give each field its own Label: value line:"
 }
 
-# Rejects a Markdown pipe table in a comment, because a table reads best as plain columns aligned with spaces
-# and indented 4 past the prose, with no rules or pipes to keep in step.
+# Rejects a pipe-table row in a comment of a code file, because a header table is plain columns aligned with
+# spaces, which reads the same in an editor, a terminal and a diff; pipe tables belong only in Markdown files.
 check_tables_aligned_not_piped() {
     local piped
-    piped=$(printf '%s\n' "$staged_added_text" | grep -E '^\+[[:space:]]*(\*|//)[[:space:]]+\|.*\|[[:space:]]*$' || true)
+    piped=$(printf '%s\n' "$staged_added_text" | grep -E '^\+[[:space:]]*(\*|//[/!]?|#)[[:space:]]+\|.*\|[[:space:]]*$' || true)
     [ -z "$piped" ] || reject_with_reason "$piped" \
-        "$staged_path draws a pipe table in a comment; align plain columns with spaces instead," \
-        "            indented 4 past the prose, as in \`*      Instruction   Notes\`:"
+        "$staged_path draws a pipe table in a comment; pipe tables belong only in Markdown, so align plain" \
+        "            columns with spaces, indented 4 past the prose, as in \`*      Instruction   Notes\`:"
 }
 
 # Rejects a docblock line or a whole-line `//` comment wider than 100 columns, because prose reads at 100
@@ -1051,6 +1043,74 @@ check_include_comment_above() {
         { previous = $0 }')
     [ -z "$trailing" ] || reject_with_reason "$trailing" \
         "$staged_path puts a comment below an #include; move it above the include it describes:"
+}
+
+# Includes form groups in a fixed order with a blank line between them: the C library, the platform's own
+# headers, the C++ standard library, external libraries, sibling projects, then this project's own headers.
+# Only headers in this repository are quoted, found beside the including file or anywhere in the index, and
+# public ones under `include/` always with the `project_include_prefix`. Includes under an `#if` keep their
+# quoting but sit outside the grouping; an include guard is not such an `#if`.
+check_include_groups() {
+    local misgrouped
+    misgrouped=$(awk -v project="$project_include_prefix" -v file="$staged_path" '
+        BEGIN {
+            split("cassert cctype cerrno cfenv cfloat cinttypes climits clocale cmath csetjmp csignal cstdarg " \
+                  "cstddef cstdint cstdio cstdlib cstring ctime cuchar cwchar cwctype", names, " ")
+            for (n in names) clibrary[names[n]] = 1
+            split("dirent.h dlfcn.h errno.h fcntl.h ftw.h poll.h pthread.h sched.h signal.h stdio.h stdlib.h " \
+                  "string.h time.h unistd.h io.h windows.h bcrypt.h malloc.h", names, " ")
+            for (n in names) platform[names[n]] = 1
+            split("forkunion numkong smashtable stringzilla uform usearch ustore", names, " ")
+            for (n in names) sibling[names[n]] = 1
+            split("C-library platform C++-standard external sibling own", labels, " ")
+        }
+        NR == FNR { added[$1 + 0]; next }
+        guard != "" && NF {
+            if ($1 == "#define" && $2 == guard) { --depth; counted[level] = 0 }
+            guard = ""
+        }
+        /^[[:space:]]*#[[:space:]]*if/ { ++depth; counted[++level] = 1; guard = ($1 == "#ifndef") ? $2 : "" }
+        /^[[:space:]]*#[[:space:]]*endif/ { depth -= counted[level--] }
+        {
+            if ($0 ~ /^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]/) {
+                header = $0
+                quoted = ($0 ~ /include[[:space:]]*"/)
+                sub(/^[^<"]*[<"]/, "", header); sub(/[>"].*$/, "", header)
+                root = header; sub(/[\/.].*$/, "", root)
+                touched = (FNR in added)
+                if (root == project) rank = 6
+                else if (header in clibrary) rank = 1
+                else if ((header in platform) || header ~ /^(sys|linux|arpa|netinet|asm)\//) rank = 2
+                else if (header !~ /[\/.]/) rank = 3
+                else if (root in sibling) rank = 5
+                else rank = 4
+                if (quoted && rank != 5 && rank != 6) {
+                    directory = file; sub(/[^\/]*$/, "", directory); found = ""
+                    search = "git ls-files \":(glob)**/" header "\""
+                    if (touched && !system("git cat-file -e \":" directory header "\" 2>/dev/null")) found = directory header
+                    else if (touched) { search | getline found; close(search) }
+                    if (touched && found == "")
+                        printf "line %d: \"%s\" is not in this repository - write <%s>\n", FNR, header, header
+                    if (index(found, "include/" project "/") == 1)
+                        printf "line %d: \"%s\" is a public header - write \"%s\"\n", FNR, header, substr(found, 9)
+                    rank = 6
+                }
+                if (touched && quoted && rank != 6)
+                    printf "line %d: \"%s\" is a %s header - write <%s>\n", FNR, header, labels[rank], header
+                if (touched && !quoted && rank == 6)
+                    printf "line %d: <%s> is an own header - write \"%s\"\n", FNR, header, header
+                if (depth) next
+                if (touched && block && rank != block)
+                    printf "line %d: a %s header shares its group with %s ones\n", FNR, labels[rank], labels[block]
+                if (touched && !block && rank < previous)
+                    printf "line %d: a %s group follows a %s group\n", FNR, labels[rank], labels[previous]
+                if (!block) block = rank
+            }
+            else if ($0 !~ /^[[:space:]]*#/) { if (block) previous = block; block = 0 }
+        }' "$staged_lines_path" "$staged_text_path")
+    [ -z "$misgrouped" ] || reject_with_reason "$misgrouped" \
+        "$staged_path misgroups its includes - C library, platform, C++ standard, external, <sibling/...>," \
+        "            then \"$project_include_prefix/...\", each group separated by a blank line:"
 }
 
 # Rejects a backtick code span broken across two comment lines, because a wrapped expression reads as two
@@ -1283,6 +1343,13 @@ binding_prose_text() {
 # helpers for the comment body, fenced code, and character width shared by every binding check.
 scan_binding_prose() { # scan_binding_prose <awk-program>
     local marker
+    local prose_path=$staged_text_path
+    case "$staged_path" in
+    python/*.c)
+        prose_path=$results_directory/$ordinal.prose
+        [ -f "$prose_path" ] || binding_prose_text > "$prose_path"
+        ;;
+    esac
     marker=$(binding_comment_marker "$staged_path")
     [ -n "$marker" ] || return 0
     awk -v marker="$marker" '
@@ -1293,7 +1360,7 @@ scan_binding_prose() { # scan_binding_prose <awk-program>
         { commented = is_comment($0); body = commented ? comment_body($0) : ""
           if (commented && body ~ /^[[:space:]]*```/) { in_fence = !in_fence; fence_edge = 1 } else fence_edge = 0
           if (!commented) in_fence = 0 }
-        '"$1" <(printf '%s\n' "$staged_added_line_numbers_list") <(binding_prose_text)
+        '"$1" "$staged_lines_path" "$prose_path"
 }
 
 # Rejects a binding-doc code fence that opens without a language, because a renderer then guesses; name
@@ -1896,10 +1963,12 @@ check_split_string_literal_pinned() {
 # reader nothing. Name the states in an enum, ideally a scoped one backed by `bool`.
 check_boolean_parameters() {
     local switches
-    # A single-argument `explicit` constructor wraps a boolean VALUE rather than selecting behaviour.
+    # A single-argument `explicit` constructor wraps a boolean VALUE rather than selecting behaviour,
+    # and so does a `fallback`, the value a reader returns when its setting is unset.
     switches=$(printf '%s\n' "$staged_added_text" |
         grep -E '\b(bool)[[:space:]]+[a-z_][a-z_0-9]*[[:space:]]*[,)]' |
         grep -vE '\b(is|has|was|can|should|contains|empty|equals)_?' |
+        grep -vE '\bbool[[:space:]]+fallback[[:space:]]*[,)]' |
         grep -vE 'explicit[[:space:]]+[a-z_][a-z_0-9]*\([[:space:]]*bool[[:space:]]+[a-z_][a-z_0-9]*\)' || true)
     [ -z "$switches" ] || reject_with_reason "$switches" \
         "$staged_path takes a bool parameter that selects behaviour - name the states in an enum:"
@@ -1949,10 +2018,10 @@ check_type_suffixes() {
 # since; the header records the one fact git cannot show without archaeology.
 check_header_date() {
     local rewritten
-    rewritten=$(git diff --cached -U0 -- "$staged_path" | awk '
+    rewritten=$(awk '
         /^-[^-].*@date/ { value = $0; sub(/^.*@date[[:space:]]+/, "", value); removed[value] = $0 }
         /^\+[^+].*@date/ { value = $0; sub(/^.*@date[[:space:]]+/, "", value); added[value] = 1 }
-        END { for (value in removed) if (!(value in added)) print removed[value] }' || true)
+        END { for (value in removed) if (!(value in added)) print removed[value] }' "$staged_diff_path" || true)
     [ -z "$rewritten" ] || reject_with_reason "$rewritten" \
         "$staged_path rewrites the @date in its header - that is the creation date, and git holds the edits:"
 }
@@ -2111,25 +2180,14 @@ check_memcpy_qualified() {
 
 # region Formatters
 
-# Rejects clang-format drift on the staged hunks of C, C++, CUDA, HIP and Metal files, because
-# `.clang-format` is the law; `git clang-format --staged` leaves untouched lines alone.
+# Rejects clang-format drift on the staged hunks of a C, C++, CUDA, HIP or Metal file, because `.clang-format` is
+# the law; like `git clang-format --staged`, it leaves untouched lines alone.
 check_clang_format_on_changed_lines() {
-    command -v git-clang-format > /dev/null 2>&1 && command -v clang-format > /dev/null 2>&1 && [ -f .clang-format ] ||
-        return 0
-    local staged_c_family_paths drift
-    staged_c_family_paths=$(git diff --cached --name-only --diff-filter=ACM -- \
-        '*.c' '*.h' '*.cc' '*.cpp' '*.hpp' '*.cu' '*.cuh' '*.hip' '*.metal')
-    [ -n "$staged_c_family_paths" ] || return 0
-    # Its default extensions leave out `.hip` and `.metal`, which would otherwise pass unchecked.
-    drift=$(git clang-format --staged --diff --extensions c,h,cc,cpp,hpp,cu,cuh,hip,metal -- $staged_c_family_paths \
-        2> /dev/null)
-    case "$drift" in
-    "" | "no modified files to format" | "clang-format did not modify any files"*) ;;
-    *)
-        reject_with_reason "" "staged C, C++ or CUDA changes are not clang-format clean on their changed lines;" \
-            "            run: git clang-format --staged, or clang-format -i <file> for the whole file, then restage"
-        ;;
-    esac
+    command -v clang-format > /dev/null 2>&1 && [ -f .clang-format ] || return 0
+    clang-format --dry-run -Werror --assume-filename="$staged_path" $(< "$staged_ranges_path") \
+        < "$staged_text_path" > /dev/null 2>&1 && return 0
+    reject_with_reason "" "$staged_path is not clang-format clean on its changed lines;" \
+        "            run: git clang-format --staged, or clang-format -i $staged_path for the whole file, then restage"
 }
 
 # Rejects cmake-format drift on the whole staged file, because `.cmake-format.py` is the law.
@@ -2157,11 +2215,90 @@ check_rustfmt_clean() {
     edition=$(sed -n 's/^edition = "\(.*\)"/\1/p' Cargo.toml)
     for staged_rust_path in $(git diff --cached --name-only --diff-filter=ACM -- '*.rs'); do
         # Reading stdin, `--check` prints its diff yet exits 0, so the diff itself is the verdict.
-        [ -z "$(git show ":$staged_rust_path" | rustfmt $toolchain --edition "$edition" --config-path rustfmt.toml \
-            --check 2> /dev/null)" ] || drifted="$drifted $staged_rust_path"
+        [ -z "$(rustfmt $toolchain --edition "$edition" --config-path rustfmt.toml \
+            --check < "$results_directory/index/$staged_rust_path" 2> /dev/null)" ] || drifted="$drifted $staged_rust_path"
     done
     [ -z "$drifted" ] || reject_with_reason "" "staged Rust files are not rustfmt clean:$drifted;" \
         "            run: $rustfmt_command"
+}
+
+# Rejects Rust imports out of the standard library, external crates, own crate order, or without a blank line
+# between those groups and after the last one, which rustfmt leaves alone. It reads the whole source from stdin.
+check_rust_use_groups() { # check_rust_use_groups <own-crate> <path> < source
+    local findings
+    findings=$(awk -v own="$1" -v path="$2" -v quote="'" '
+        BEGIN { literal = "r#*\"|\"|" quote "(\\\\.|[^" quote "\\\\])" quote "|//|/\\*" }
+        function blanks(width) { return sprintf("%" width "s", "") }
+        function count(text, bracket) { return gsub(bracket, "", text) }
+        function group(root) {
+            if (root == "std" || root == "core" || root == "alloc") return 0
+            return root == own || root == "crate" || root == "self" || root == "super" ? 2 : 1
+        }
+        function blank(from, to,   line) {
+            for (line = from; line < to; ++line) if (source[line] ~ /[^[:space:]]/) return 0
+            return 1
+        }
+        {
+            source[NR] = $0
+            text = $0; masked = ""; plain = 0
+            while (text != "") {
+                if (depth) {
+                    if (!match(text, /\/\*|\*\//)) break
+                    depth += substr(text, RSTART, 2) == "/*" ? 1 : -1
+                    taken = RSTART + 1
+                } else if (closer != "" && !raw) {
+                    if (!match(text, /^([^"\\]|\\.)*"/)) break
+                    closer = ""; taken = RLENGTH
+                } else if (closer != "") {
+                    if (!(taken = index(text, closer))) break
+                    taken += length(closer) - 1; closer = ""
+                } else if (match(text, literal)) {
+                    masked = masked substr(text, 1, RSTART - 1)
+                    token = substr(text, RSTART, RLENGTH); text = substr(text, RSTART); taken = RLENGTH
+                    if (token == "//") break
+                    if (token == "/*") depth = 1
+                    else if (token ~ /"$/) { raw = token ~ /^r/; closer = "\"" substr(token, 2, RLENGTH - 2) }
+                } else { plain = 1; break }
+                masked = masked blanks(taken); text = substr(text, taken + 1)
+            }
+            code[NR] = masked (plain ? text : blanks(length(text)))
+        }
+        END {
+            for (line = 1; line <= NR; ++line) {
+                if (!match(code[line], /^ *(pub(\([^)]*\))? +)?use +(::)?[A-Za-z0-9_]+/)) continue
+                head = substr(code[line], 1, RLENGTH); rest = substr(code[line], RLENGTH + 1)
+                root = head; sub(/^.*[ :]/, "", root)
+                for (end = line; !index(rest, ";") && end < NR; rest = code[++end]) {}
+                start = line
+                while (start > 1 && code[start - 1] ~ /\][[:space:]]*$/) {
+                    candidate = start; nesting = 0
+                    while (candidate > 1) {
+                        --candidate
+                        nesting += count(code[candidate], "]") - count(code[candidate], "\\[")
+                        if (nesting == 0) break
+                    }
+                    if (code[candidate] !~ /^[[:space:]]*#\[/) break
+                    start = candidate
+                }
+                match(head, /^ */)
+                ++uses; starts[uses] = start; ends[uses] = end; indents[uses] = RLENGTH; roots[uses] = root
+            }
+            for (use = 1; use <= uses; ++use) {
+                category = group(roots[use]); after = source[ends[use] + 1]; gsub(/^[[:space:]]+|[[:space:]]+$/, "", after)
+                if (use < uses && indents[use + 1] == indents[use] && blank(ends[use] + 1, starts[use + 1])) {
+                    if (group(roots[use + 1]) < category)
+                        printf "%s:%d: order imports as standard library, external crates, own crate\n", path, starts[use]
+                    if (group(roots[use + 1]) != category && ends[use] + 1 == starts[use + 1])
+                        printf "%s:%d: separate import groups with a blank line\n", path, ends[use]
+                } else if (ends[use] < NR && after != "" && after != "}")
+                    printf "%s:%d: add a blank line after the last import\n", path, ends[use]
+            }
+        }')
+    [ -z "$findings" ] && return 0
+    echo "pre-commit: $2 breaks the Rust import groups - standard library, external crates, then the own crate," \
+        "a blank line apart:"
+    printf '%s\n' "$findings" | head -5
+    return 1
 }
 
 # Rejects ruff format drift that rewrites an added line or inserts beside one, because `pyproject.toml` is the
@@ -2170,9 +2307,8 @@ check_rustfmt_clean() {
 check_ruff_format_on_added_lines() {
     command -v ruff > /dev/null 2>&1 || return 0
     local formatted drift
-    formatted=$(git show ":$staged_path" |
-        ruff format --force-exclude --stdin-filename "$staged_path" - 2> /dev/null) || return 0
-    drift=$(diff -U0 <(git show ":$staged_path") <(printf '%s\n' "$formatted") | awk '
+    formatted=$(ruff format --force-exclude --stdin-filename "$staged_path" - < "$staged_text_path" 2> /dev/null) || return 0
+    drift=$(diff -U0 "$staged_text_path" <(printf '%s\n' "$formatted") | awk '
         NR == FNR { added[$1 + 0]; next }
         /^@@/ {
             split($2, range, ",")
@@ -2181,7 +2317,7 @@ check_ruff_format_on_added_lines() {
             touching = count == 0 && (start in added || (start + 1) in added)
             for (line = start; line < start + count; ++line) if (line in added) touching = 1
         }
-        touching && /^[-+@]/' <(printf '%s\n' "$staged_added_line_numbers_list") -)
+        touching && /^[-+@]/' "$staged_lines_path" -)
     [ -z "$drift" ] || reject_with_reason "$drift" \
         "$staged_path is not ruff-format clean on its added lines; run: ruff format $staged_path," \
         "            or edit them as it would:"
@@ -2193,10 +2329,10 @@ check_ruff_format_on_added_lines() {
 check_ruff_lint_on_added_lines() {
     command -v ruff > /dev/null 2>&1 || return 0
     local findings
-    findings=$(git show ":$staged_path" |
-        ruff check --quiet --force-exclude --output-format=concise --stdin-filename "$staged_path" - 2> /dev/null |
+    findings=$(ruff check --quiet --force-exclude --output-format=concise --stdin-filename "$staged_path" - \
+        < "$staged_text_path" 2> /dev/null |
         awk -F: 'NR == FNR { added[$1 + 0]; next } ($2 + 0) in added || $4 == " invalid-syntax"' \
-            <(printf '%s\n' "$staged_added_line_numbers_list") -)
+            "$staged_lines_path" -)
     [ -z "$findings" ] || reject_with_reason "$findings" \
         "$staged_path has ruff lint findings on its added lines; run: ruff check --fix $staged_path," \
         "            or fix them by hand:"
@@ -2303,15 +2439,37 @@ check_workflow_names() {
         "            checks reference them by it, so every job and step must carry one:"
 }
 
-# Rejects a line that is only dashes, equals, slashes, or hashes outside Markdown, because decorative rulers
-# are noise; Markdown uses dashes for rules and tables and `###` for headings.
-check_banner_rulers_absent() {
+# Rejects an added banner ruler outside Markdown: a comment that opens or closes on a run of `---`, `===`, `####`,
+# `////`, `***` or horizontal box-drawing strokes, a line of such runs around an optional label, or a string literal
+# that prints one. Box corners and verticals stay free for diagrams, a `|` line for Markdown tables, and YAML keeps
+# its `---` document marker. Reads `+` lines, or a whole diff, from stdin.
+check_banners() { # check_banners <path> < added-lines
+    case "$1" in
+    *.c | *.h | *.cc | *.cpp | *.cxx | *.hpp | *.hxx | *.cu | *.cuh | *.hip | *.metal | *.pml | *.py | *.pyi | *.pyx | \
+        *.rs | *.go | *.zig | *.mojo | *.js | *.mjs | *.cjs | *.ts | *.mts | *.tsx | *.swift | *.java | *.kt | *.cs | \
+        *.toml | *.yml | *.yaml | *.cmake | *CMakeLists.txt | *.sh) ;;
+    *) return 0 ;;
+    esac
     local rulers
-    rulers=$(printf '%s\n' "$staged_added_text" |
-        grep -nE '^\+[[:space:]]*(([#]+|//)?[[:space:]]*[-=]{3,}|/{4,}|#{3,})[[:space:]]*$' || true)
-    [ -z "$rulers" ] || reject_with_reason "$rulers" \
-        "$staged_path adds a decorative banner ruler of ---, ===, //// or ###;" \
-        "            delete it, rulers are allowed only in Markdown:"
+    rulers=$(awk -v path="$1" -v quote="'" '
+        BEGIN {
+            stroke = "(─|━|┄|┅|┈|┉|╌|╍|═)"
+            run = "(---+|===+|####+|////+|\\*\\*\\*+|" stroke stroke stroke "+)"
+            marker = "^(#|//|/\\*|\\*|--|;)[!/*<]?[ \t]*"
+            printed = "(----+|====+|####+|" stroke stroke stroke "+)"
+            literal = "[\"" quote "][ \t]*" printed "|" printed "[ \t]*[\"" quote "]"
+        }
+        /^\+/ {
+            text = substr($0, 2); sub(/^[ \t]+/, "", text); sub(/[ \t\r]+$/, "", text)
+            if (text == "---" && path ~ /\.ya?ml$/) next
+            if (text ~ ("^" run "([ \t].*[ \t]" run ")?$") || text ~ (marker run "[ \t]*(\\*/)?([ \t]|$)") ||
+                (text ~ marker && text ~ ("[ \t]" run "[ \t]*(\\*/)?$")) || (text ~ literal && text !~ /\|/))
+                print
+        }')
+    [ -z "$rulers" ] && return 0
+    echo "pre-commit: $1 adds a banner ruler; name a section with #pragma region or # region, or a plain sentence:"
+    printf '%s\n' "$rulers" | head -5
+    return 1
 }
 
 # Rejects an in-band `// clang-format off|on` or `# cmake-format: off|on` line, because a file must format
@@ -2344,59 +2502,61 @@ check_single_space_between_sentences() {
 run_shared_checks() {
     case "$staged_path" in
     *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal)
-        check_param_has_direction
-        check_markdown_emphasis_absent_in_comments
-        check_markup_command_without_backticks
-        check_doxygen_command_not_glued
-        check_sa_names_identifiers_see_names_urls
-        check_cross_references_start_their_line
-        check_section_has_snake_case_identifier
-        check_section_anchor_unique
-        check_member_docs_not_trailing
-        check_member_comments_above
-        check_shape_spelled_bold_bracketed
-        check_tuple_spelled_bold_parenthesized
-        check_call_not_marked
-        check_list_leads_consistent
-        check_math_operators_spaced
-        check_par_absent
-        check_code_sample_comments_aligned
-        check_formula_not_in_backticks
-        check_formula_terms_unmarked
-        check_docblock_preceded_by_blank_line
         check_docblock_documents_a_declaration
         check_file_header_tag_order
-        check_brief_absent_on_lone_paragraph
-        check_brief_required_before_section
-        check_tag_entries_span_at_most_three_lines
-        check_tag_continuation_hanging_indent
-        check_bullet_spans_at_most_three_lines
-        check_docblock_brackets_match_content
-        check_section_surrounded_by_blank_comment_lines
-        check_blocks_set_apart
-        check_urls_behind_see
         check_enumerators_documented_individually
-        check_code_block_names_language_and_closes
-        check_prose_comment_width
-        check_tables_aligned_not_piped
-        check_tables_inside_verbatim
-        check_fields_on_labelled_lines
-        check_prose_paragraph_filled
-        check_no_orphan_last_line
         check_declaration_docs_not_line_comments
-        check_file_scope_comments_use_blocks
-        check_macro_docs_use_docblocks
-        check_include_comment_above
-        check_comment_emphasis_lowercase
-        check_qualified_names_marked
-        check_region_note_above_pragma
-        check_code_span_on_one_line
-        check_tparams_separated_from_params
-        check_tags_separated_from_body
-        check_parameter_references_use_p
+        check_include_groups
         check_split_string_literal_pinned
         check_abbreviations_spelled_out
-        check_single_token_spans_use_c
+        if [[ $staged_added_text =~ $added_comment_marker_regex ]]; then
+            check_param_has_direction
+            check_markdown_emphasis_absent_in_comments
+            check_markup_command_without_backticks
+            check_doxygen_command_not_glued
+            check_sa_names_identifiers_see_names_urls
+            check_cross_references_start_their_line
+            check_section_has_snake_case_identifier
+            check_section_anchor_unique
+            check_member_docs_not_trailing
+            check_member_comments_above
+            check_shape_spelled_bold_bracketed
+            check_tuple_spelled_bold_parenthesized
+            check_call_not_marked
+            check_list_leads_consistent
+            check_math_operators_spaced
+            check_par_absent
+            check_code_sample_comments_aligned
+            check_formula_not_in_backticks
+            check_formula_terms_unmarked
+            check_docblock_preceded_by_blank_line
+            check_brief_absent_on_lone_paragraph
+            check_brief_required_before_section
+            check_tag_entries_span_at_most_three_lines
+            check_tag_continuation_hanging_indent
+            check_bullet_spans_at_most_three_lines
+            check_docblock_brackets_match_content
+            check_section_surrounded_by_blank_comment_lines
+            check_blocks_set_apart
+            check_urls_behind_see
+            check_code_block_names_language_and_closes
+            check_prose_comment_width
+            check_tables_inside_verbatim
+            check_fields_on_labelled_lines
+            check_prose_paragraph_filled
+            check_no_orphan_last_line
+            check_file_scope_comments_use_blocks
+            check_macro_docs_use_docblocks
+            check_include_comment_above
+            check_comment_emphasis_lowercase
+            check_qualified_names_marked
+            check_region_note_above_pragma
+            check_code_span_on_one_line
+            check_tparams_separated_from_params
+            check_tags_separated_from_body
+            check_parameter_references_use_p
+            check_single_token_spans_use_c
+        fi
         ;;
     esac
     case "$staged_path" in
@@ -2453,6 +2613,8 @@ run_shared_checks() {
         check_rust_macros_absent
         check_deprecations
         check_rust_module_fields
+        check_rust_use_groups stringzilla "$staged_path" < "$staged_text_path" ||
+            rejection_count=$((rejection_count + 1))
         ;;
     *.go)
         check_go_doc_headings_hash_prefixed
@@ -2480,9 +2642,12 @@ run_shared_checks() {
     .vscode/settings.json | .vscode/extensions.json | .zed/settings.json) check_editor_settings_sorted ;;
     esac
     case "$staged_path" in
-    *.md | *.markdown | *.yml | *.yaml | .clang-tidy | .clang-format) ;;
-    *) check_banner_rulers_absent ;;
+    *.c | *.h | *.hpp | *.cpp | *.cc | *.cu | *.cuh | *.hip | *.metal | *.pml | *.py | *.pyi | *.rs | *.go | *.swift | *.zig | \
+        *.mojo | *.js | *.mjs | *.cjs | *.ts | *.mts | *.java | *.kt | *.cs | *.sh | *.cmake | CMakeLists.txt)
+        check_tables_aligned_not_piped
+        ;;
     esac
+    check_banners "$staged_path" <<< "$staged_added_text" || rejection_count=$((rejection_count + 1))
     check_formatter_toggles_absent
     check_single_space_between_sentences
 }
@@ -2490,6 +2655,7 @@ run_shared_checks() {
 # Routes one staged file through the formatter its extension calls for.
 run_shared_formatters() {
     case "$staged_path" in
+    *.c | *.h | *.cc | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.metal) check_clang_format_on_changed_lines ;;
     CMakeLists.txt | *.cmake) check_cmake_format_clean ;;
     *.go) check_gofmt_clean ;;
     *.py)
@@ -2501,7 +2667,6 @@ run_shared_formatters() {
 
 # Runs the checks that judge the staged tree as a whole rather than one file at a time.
 run_tree_checks() {
-    check_clang_format_on_changed_lines
     check_rustfmt_clean
     check_taplo_clean
     check_swift_format_clean
@@ -2722,13 +2887,13 @@ check_cpp_scaffolding_in_one_header() {
 }
 
 # Rejects a redefinition of the shared Python test scaffolding, because corpora, seeds, the iteration
-# multiplier and the backend sweep live once, in test/helpers.py, test/utf8_helpers.py and test/conftest.py.
+# multiplier and the backend sweep live once, in test/base.py, test/utf8_helpers.py and test/conftest.py.
 check_python_scaffolding_in_helpers() {
     local redefined
     redefined=$(printf '%s\n' "$staged_added_text" |
         grep -E '^\+(def (vector_width_bracketing_strings|malformed_utf8_corpus|boundary_strings|differential_bodies|get_random_string|is_equal_strings|seed_random_generators|scale_iterations|unaligned_views|run_across_backends|assert_backends_agree|run_across_engines|assert_engines_agree|device_scope_and_capabilities|generate_string_batches|capability_sweep|forced_capabilities)\(|(SEED_VALUES|ITERATIONS_MULTIPLIER)[[:space:]]*=)' || true)
     [ -z "$redefined" ] || reject_with_reason "$redefined" \
-        "$staged_path redefines shared test scaffolding; import it from test/helpers.py:"
+        "$staged_path redefines shared test scaffolding; import it from test/base.py:"
 }
 
 # Rejects a seeded test over a literal list, because SEED_VALUES carries the per-run seed and STRINGZILLA_SEED.
@@ -2736,7 +2901,7 @@ check_seed_values_parametrized() {
     local literal
     literal=$(printf '%s\n' "$staged_added_text" | grep -E 'parametrize\(.*"seed_value".*,[[:space:]]*\[' || true)
     [ -z "$literal" ] || reject_with_reason "$literal" \
-        "$staged_path parametrizes seed_value over a literal list; use test.helpers.SEED_VALUES:"
+        "$staged_path parametrizes seed_value over a literal list; use base.SEED_VALUES:"
 }
 
 # Rejects a fuzz loop with a fixed count, because every random draw scales with STRINGZILLA_SCALE.
@@ -2871,7 +3036,7 @@ run_project_checks() {
         ;;
     esac
     case "$staged_path" in
-    test/helpers.py | test/utf8_helpers.py | test/conftest.py) ;;
+    test/base.py | test/utf8_helpers.py | test/conftest.py) ;;
     test/*.py) check_python_scaffolding_in_helpers ;;
     esac
     case "$staged_path" in
@@ -2884,12 +3049,45 @@ run_project_checks() {
 
 # endregion StringZilla Rules
 
-# region Dispatch
+# region Parallel Judging
+
+# This region is identical in every hook that judges staged files one at a time; edit them all together.
 
 git rev-parse --verify HEAD > /dev/null 2>&1 || exit 0
 
 results_directory=$(mktemp -d)
 trap 'rm -rf "$results_directory"' EXIT
+
+# Splits a zero-context diff into files numbered in diff order from `ordinal + 1`: its hunks, its added lines,
+# their numbers, and the `--lines` ranges clang-format takes, where a hunk that only deletes covers one line.
+split_diff_by_path='
+    /^diff --git / {
+        close(diff); close(added); close(lines); close(ranges); ++ordinal; hunk = 0
+        diff = directory ordinal ".diff"; added = directory ordinal ".added"
+        lines = directory ordinal ".lines"; ranges = directory ordinal ".ranges"
+        next
+    }
+    /^@@/ {
+        hunk = 1
+        split($3, range, ",")
+        start = substr(range[1], 2) + 0
+        count = (range[2] == "") ? 1 : range[2] + 0
+        for (line = start; line < start + count; ++line) print line > lines
+        printf "--lines=%d:%d\n", start, start + (count ? count : 1) - 1 > ranges
+    }
+    hunk { print > diff }
+    hunk && /^\+/ { print > added }'
+
+# Lists the staged paths, writes their blobs under `index/` and splits their diff, one git process each, so
+# no check asks git again; `git diff` lists paths in the same order whether it prints names or hunks.
+read_staged_paths() {
+    staged_paths=()
+    while IFS= read -r -d '' staged_path; do staged_paths+=("$staged_path"); done \
+        < <(git diff --cached --name-only -z --diff-filter=ACM)
+    [ ${#staged_paths[@]} -eq 0 ] || printf '%s\0' "${staged_paths[@]}" |
+        git checkout-index --prefix="$results_directory/index/" -z --stdin
+    git diff --cached --unified=0 --diff-filter=ACM | awk -v directory="$results_directory/" "$split_diff_by_path"
+}
 
 # Deals the paths round-robin to one worker per core, each running `judge_path` into a numbered report, then
 # prints the reports in path order, so the output reads exactly as a serial run's would.
@@ -2903,7 +3101,7 @@ judge_paths_in_parallel() { # judge_paths_in_parallel <path>...
             for staged_path in "$@"; do
                 ordinal=$((ordinal + 1))
                 [ $(((ordinal - 1) % worker_count)) -eq "$worker" ] || continue
-                # The selftest carries one violation per rule by design.
+                # A selftest carries one violation per rule by design.
                 [ "$staged_path" = .githooks/selftest ] || judge_path > "$results_directory/$ordinal"
             done
             echo "$rejection_count" > "$results_directory/count-$worker"
@@ -2918,6 +3116,36 @@ judge_paths_in_parallel() { # judge_paths_in_parallel <path>...
     done
 }
 
+# Runs the staged-mode judging: the checks over the whole commit start first and overlap the per-path
+# workers, and still report after them.
+judge_staged_paths() {
+    read_staged_paths
+    (
+        run_tree_checks > "$results_directory/tree"
+        echo "$rejection_count" > "$results_directory/count-tree"
+    ) &
+    judge_paths_in_parallel ${staged_paths[@]+"${staged_paths[@]}"}
+    cat "$results_directory/tree"
+    rejection_count=$((rejection_count + $(cat "$results_directory/count-tree")))
+}
+
+# endregion Parallel Judging
+
+# region Dispatch
+
+# Points the checks at one path's files and loads its added lines, their numbers and its text; fails when the
+# path adds nothing. A mode without a diff judges its added lines as one.
+load_path_files() {
+    staged_diff_path=$results_directory/$ordinal.diff
+    staged_lines_path=$results_directory/$ordinal.lines
+    staged_ranges_path=$results_directory/$ordinal.ranges
+    [ -s "$results_directory/$ordinal.added" ] || return 1
+    [ -f "$staged_diff_path" ] || staged_diff_path=$results_directory/$ordinal.added
+    staged_added_text=$(< "$results_directory/$ordinal.added")
+    staged_added_line_numbers_list=$(< "$staged_lines_path")
+    staged_file_text=$(< "$staged_text_path")
+}
+
 # `--all-lines <path>...` judges whole working-tree files as though every line outside a function body were
 # added, and `--changed-lines <path>...` judges the lines they changed since HEAD; both skip the formatters
 # and the checks over the commit as a whole. With no arguments the hook judges what is staged.
@@ -2925,16 +3153,10 @@ if [ "${1:-}" = --changed-lines ]; then
     shift
     judge_path() {
         [ -f "$staged_path" ] || return 0
-        staged_added_text=$(git diff HEAD --unified=0 -- "$staged_path" | grep '^+' | grep -v '^+++' || true)
-        [ -n "$staged_added_text" ] || return 0
-        staged_added_line_numbers_list=$(git diff HEAD --unified=0 -- "$staged_path" | awk '
-            /^@@/ {
-                split($3, range, ",")
-                start = substr(range[1], 2) + 0
-                count = (range[2] == "") ? 1 : range[2] + 0
-                for (line = start; line < start + count; ++line) print line
-            }')
-        staged_file_text=$(cat -- "$staged_path")
+        git diff HEAD --unified=0 -- "$staged_path" |
+            awk -v directory="$results_directory/" -v ordinal=$((ordinal - 1)) "$split_diff_by_path"
+        staged_text_path=$staged_path
+        load_path_files || return 0
         run_shared_checks
         run_project_checks
     }
@@ -2943,11 +3165,13 @@ elif [ "${1:-}" = --all-lines ]; then
     shift
     judge_path() {
         [ -f "$staged_path" ] || return 0
-        staged_file_text=$(cat -- "$staged_path")
+        staged_file_text=$(< "$staged_path")
         [ -n "$staged_file_text" ] || return 0
-        staged_added_line_numbers_list=$(lines_outside_function_bodies)
-        staged_added_text=$(printf '%s\n' "$staged_file_text" | awk 'NR == FNR { kept[$1]; next } FNR in kept { print "+" $0 }' \
-            <(printf '%s\n' "$staged_added_line_numbers_list") -)
+        printf '%s\n' "$(lines_outside_function_bodies)" > "$results_directory/$ordinal.lines"
+        awk -v added="$results_directory/$ordinal.added" 'NR == FNR { kept[$1]; next } FNR in kept { print "+" $0 > added }' \
+            "$results_directory/$ordinal.lines" "$staged_path"
+        staged_text_path=$staged_path
+        load_path_files || return 0
         run_shared_checks
         run_project_checks
     }
@@ -2955,25 +3179,13 @@ elif [ "${1:-}" = --all-lines ]; then
 else
     judge_path() {
         check_generated_artifacts
-        staged_added_text=$(git diff --cached --unified=0 -- "$staged_path" | grep '^+' | grep -v '^+++' || true)
-        [ -n "$staged_added_text" ] || return 0
-        staged_added_line_numbers_list=$(staged_added_line_numbers "$staged_path")
-        staged_file_text=$(git show ":$staged_path")
+        staged_text_path=$results_directory/index/$staged_path
+        load_path_files || return 0
         run_shared_checks
         run_shared_formatters
         run_project_checks
     }
-    staged_paths=()
-    while IFS= read -r -d '' staged_path; do staged_paths+=("$staged_path"); done \
-        < <(git diff --cached --name-only -z --diff-filter=ACM)
-    # The checks over the whole commit overlap the per-path workers and still report after them.
-    (
-        run_tree_checks > "$results_directory/tree"
-        echo "$rejection_count" > "$results_directory/count-tree"
-    ) &
-    judge_paths_in_parallel ${staged_paths[@]+"${staged_paths[@]}"}
-    cat "$results_directory/tree"
-    rejection_count=$((rejection_count + $(cat "$results_directory/count-tree")))
+    judge_staged_paths
 fi
 
 # endregion Dispatch
