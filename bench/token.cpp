@@ -22,23 +22,6 @@
  *  For token operations, the number of operations per second are reported as the number of bytes
  *  processed or comparisons performed, depending on the specific operation being benchmarked.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
@@ -54,7 +37,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  STRINGZILLA_STRESS=1 STRINGZILLA_STRESS_TIME_LIMIT=120s STRINGZILLA_STRESS_DIR=logs
  *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
@@ -67,18 +50,16 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 #pragma region Unary Functions
 
 /** Wraps @c std::accumulate into a function object compatible with our benchmarking suite. */
 struct bytesum_from_std_t {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -93,9 +74,9 @@ struct bytesum_from_std_t {
 /** Wraps @c std::hash into a function object compatible with our benchmarking suite. */
 struct hash_from_std_t {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -108,9 +89,9 @@ struct hash_from_std_t {
 /** Baseline: hashes one token under every seed via independent @c sz_hash_best calls. */
 template <sz_kernel_hash_t func_>
 struct hash_multiseed_loop_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         auto const seeds = multiway_seeds();
@@ -125,47 +106,53 @@ struct hash_multiseed_loop_from_sz {
     }
 };
 
-void bench_checksums(environment_t const &env) {
-    auto base_call = bytesum_from_sz<cpu_best<sz_bytesum_best>> {env};
-    bench_result_t base = bench_unary(env, "sz_bytesum_best", base_call).log();
-    bench_unary(env, "bytesum<std::accumulate>", base_call, bytesum_from_std_t {env}).log(base);
+void bench_checksums(environment_t const &env, corpus_t const &corpus) {
+    auto base_call = bytesum_from_sz<cpu_best<sz_bytesum_best>> {corpus};
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_bytesum_best", base_call);
+    print(base);
+    print(bench_unary(env, corpus, "bytesum<std::accumulate>", base_call, bytesum_from_std_t {corpus}),
+          baseline_of(base));
 }
 
-void bench_hashing(environment_t const &env) {
-    bench_result_t base = bench_unary(env, "sz_hash_best", hash_from_sz<cpu_best<sz_hash_best>> {env}).log();
-    bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
+void bench_hashing(environment_t const &env, corpus_t const &corpus) {
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_hash_best",
+                                                  hash_from_sz<cpu_best<sz_hash_best>> {corpus});
+    print(base);
+    print(bench_unary(env, corpus, "std::hash", hash_from_std_t {corpus}), baseline_of(base));
 }
 
-void bench_hashing_multiseed(environment_t const &env) {
+void bench_hashing_multiseed(environment_t const &env, corpus_t const &corpus) {
 
     // Baseline is the status quo: K dispatched single-shot `sz_hash_best` calls per token, so the
     // speedup isolates the multi-seed structural win rather than a backend difference.
-    auto validator = hash_multiseed_loop_from_sz<cpu_best<sz_hash_best>> {env};
-    bench_result_t base = bench_unary(env, "sz_hash_best_loop", validator).log();
-    bench_unary(env, "sz_hash_multiseed_best", validator,
-                hash_multiseed_from_sz<cpu_best<sz_hash_multiseed_best>> {env})
-        .log(base);
+    auto validator = hash_multiseed_loop_from_sz<cpu_best<sz_hash_best>> {corpus};
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_hash_best_loop", validator);
+    print(base);
+    print(bench_unary(env, corpus, "sz_hash_multiseed_best", validator,
+                      hash_multiseed_from_sz<cpu_best<sz_hash_multiseed_best>> {corpus}),
+          baseline_of(base));
 }
 
-void bench_stream_hashing(environment_t const &env) {
+void bench_stream_hashing(environment_t const &env, corpus_t const &corpus) {
     using best_t = hash_stream_from_sz<cpu_best<sz_hash_state_init_best>, cpu_best<sz_hash_state_update_best>,
                                        cpu_best<sz_hash_state_digest_best>>;
-    bench_result_t base = bench_unary(env, "sz_hash_stream_best", best_t {env}).log();
-    bench_unary(env, "std::hash", hash_from_std_t {env}).log(base);
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_hash_stream_best", best_t {corpus});
+    print(base);
+    print(bench_unary(env, corpus, "std::hash", hash_from_std_t {corpus}), baseline_of(base));
 }
 
 /** Baseline: digests a batch of tokens through independent single-state SHA256 calls. */
 template <typename lanes_>
 struct sha256_multistate_loop_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
         sz_sha256_state_t states[multistate_lanes_k];
         sz_u8_t digests[multistate_lanes_k * STRINGZILLA_SHA256_DIGEST_LENGTH];
         std::size_t bytes_passed = 0;
         sz_capability_t const capabilities = sz::default_capabilities();
         for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
-            std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            std::string_view const token = corpus.tokens[(token_index + lane_index) % corpus.tokens.size()];
             std::size_t const lane_length = lanes_::length(lane_index, token.size());
             sz_sha256_state_init_best(&states[lane_index], capabilities, nullptr);
             sz_sha256_state_update_best(&states[lane_index], token.data(), lane_length, capabilities, nullptr);
@@ -185,36 +172,37 @@ struct sha256_multistate_loop_from_sz {
         call_result_t result;
         result.bytes_passed = bytes_passed;
         result.check_value = static_cast<check_value_t>(mixed);
-        result.operations = multistate_lanes_k;
-        result.inputs_processed = multistate_lanes_k;
+        result.operations_count = multistate_lanes_k;
         return result;
     }
 };
 
 /** Runs the multi-state dispatch point against one lane-length shape. */
 template <typename lanes_>
-void bench_sha256_multistate_shape(environment_t const &env, std::string const &suffix) {
+void bench_sha256_multistate_shape(environment_t const &env, corpus_t const &corpus, std::string const &suffix) {
 
     // Baseline is the realistic status quo: one dispatched single-state hash per message, so the
     // speedup isolates the structural batch win rather than a backend difference. The baseline is
     // rebuilt per shape, so each row compares like with like.
-    auto validator = sha256_multistate_loop_from_sz<lanes_> {env};
-    bench_result_t base = bench_unary(env, "sz_sha256_multistate_loop" + suffix, validator).log();
+    auto validator = sha256_multistate_loop_from_sz<lanes_> {corpus};
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_sha256_multistate_loop" + suffix, validator);
+    print(base);
     using best_t = sha256_multistate_from_sz<cpu_best<sz_sha256_multistate_update_best>,
                                              cpu_best<sz_sha256_multistate_digest_best>, lanes_>;
-    bench_unary(env, "sz_sha256_multistate_best" + suffix, validator, best_t {env}).log(base);
+    print(bench_unary(env, corpus, "sz_sha256_multistate_best" + suffix, validator, best_t {corpus}),
+          baseline_of(base));
 }
 
-void bench_sha256_multistate(environment_t const &env) {
-    bench_sha256_multistate_shape<sha256_lanes_uniform_t>(env, sha256_lanes_uniform_t::name_k);
-    bench_sha256_multistate_shape<sha256_lanes_one_short_t>(env, sha256_lanes_one_short_t::name_k);
-    bench_sha256_multistate_shape<sha256_lanes_one_long_t>(env, sha256_lanes_one_long_t::name_k);
+void bench_sha256_multistate(environment_t const &env, corpus_t const &corpus) {
+    bench_sha256_multistate_shape<sha256_lanes_uniform_t>(env, corpus, sha256_lanes_uniform_t::name_k);
+    bench_sha256_multistate_shape<sha256_lanes_one_short_t>(env, corpus, sha256_lanes_one_short_t::name_k);
+    bench_sha256_multistate_shape<sha256_lanes_one_long_t>(env, corpus, sha256_lanes_one_long_t::name_k);
 }
 
-void bench_sha256(environment_t const &env) {
+void bench_sha256(environment_t const &env, corpus_t const &corpus) {
     using best_t = sha256_stream_from_sz<cpu_best<sz_sha256_state_init_best>, cpu_best<sz_sha256_state_update_best>,
                                          cpu_best<sz_sha256_state_digest_best>>;
-    bench_unary(env, "sz_sha256_best", best_t {env}).log();
+    print(bench_unary(env, corpus, "sz_sha256_best", best_t {corpus}));
 }
 
 #pragma endregion
@@ -224,9 +212,9 @@ void bench_sha256(environment_t const &env) {
 /** Wraps LibC's string equality check for potentially different length inputs. */
 struct equality_from_memcmp_t {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(corpus.tokens[token_index], corpus.tokens[corpus.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -247,9 +235,9 @@ struct equality_from_memcmp_t {
 /** Wraps LibC's string order-checking for potentially different length inputs. */
 struct ordering_from_memcmp_t {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(corpus.tokens[token_index], corpus.tokens[corpus.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -274,35 +262,39 @@ struct ordering_from_memcmp_t {
     }
 };
 
-void bench_comparing_equality(environment_t const &env) {
-    auto base_call = equality_from_sz<cpu_best<sz_equal_best>> {env};
-    bench_result_t base = bench_unary(env, "sz_equal_best", base_call).log();
-    bench_unary(env, "equal<std::memcmp>", base_call, equality_from_memcmp_t {env}).log(base);
+void bench_comparing_equality(environment_t const &env, corpus_t const &corpus) {
+    auto base_call = equality_from_sz<cpu_best<sz_equal_best>> {corpus};
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_equal_best", base_call);
+    print(base);
+    print(bench_unary(env, corpus, "equal<std::memcmp>", base_call, equality_from_memcmp_t {corpus}),
+          baseline_of(base));
 }
 
-void bench_comparing_order(environment_t const &env) {
-    auto base_call = ordering_from_sz<cpu_best<sz_order_best>> {env};
-    bench_result_t base = bench_unary(env, "sz_order_best", base_call).log();
-    bench_unary(env, "order<std::memcmp>", base_call, ordering_from_memcmp_t {env}).log(base);
+void bench_comparing_order(environment_t const &env, corpus_t const &corpus) {
+    auto base_call = ordering_from_sz<cpu_best<sz_order_best>> {corpus};
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_order_best", base_call);
+    print(base);
+    print(bench_unary(env, corpus, "order<std::memcmp>", base_call, ordering_from_memcmp_t {corpus}),
+          baseline_of(base));
 }
 
 #pragma endregion
 
-} // namespace
-
-void bench_token(corpora_t &corpora) {
-    environment_t const &env = corpora.lines();
+void bench_token(environment_t &env) {
+    corpus_t const &corpus = env.corpora.lines();
     fmt::println("Starting individual token-level benchmarks...");
 
     // Unary operations
-    bench_checksums(env);
-    bench_hashing(env);
-    bench_hashing_multiseed(env);
-    bench_stream_hashing(env);
-    bench_sha256(env);
-    bench_sha256_multistate(env);
+    bench_checksums(env, corpus);
+    bench_hashing(env, corpus);
+    bench_hashing_multiseed(env, corpus);
+    bench_stream_hashing(env, corpus);
+    bench_sha256(env, corpus);
+    bench_sha256_multistate(env, corpus);
 
     // Binary operations
-    bench_comparing_equality(env);
-    bench_comparing_order(env);
+    bench_comparing_equality(env, corpus);
+    bench_comparing_order(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

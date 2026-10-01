@@ -3,8 +3,9 @@
 //! File: rust/stringzilla/utf8_norm.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Normalizes a UTF-8 string to the requested Unicode Normal Form, writing the result to a
 /// target buffer.

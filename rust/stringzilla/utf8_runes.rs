@@ -3,8 +3,9 @@
 //! File: rust/stringzilla/utf8_runes.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Unpacks a UTF-8 byte sequence into UTF-32 codepoints.
 ///

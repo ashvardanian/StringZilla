@@ -12,23 +12,6 @@
  *  Memory-bound: the copy, move, and fill primitives are pure bandwidth, so it reads the whole file
  *  by default and a larger buffer measures throughput truer.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
@@ -44,7 +27,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  STRINGZILLA_STRESS=1 STRINGZILLA_STRESS_TIME_LIMIT=120s STRINGZILLA_STRESS_DIR=logs
  *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
@@ -58,9 +41,7 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 #pragma region MemCpy
 
@@ -79,16 +60,20 @@ sz_status_t memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, v
  *  Multiple calls to the provided functions even with the same arguments won't change the input or
  *  output. So the dispatch point can be compared against the baseline @c memcpy function.
  */
-void bench_copy(environment_t const &env) {
-    dataset_copy_t output(env);
+void bench_copy(environment_t const &env, corpus_t const &corpus) {
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
 
-    bench_result_t align = bench_unary(env, "sz_copy_best(align)", copy_from_sz<cpu_best<sz_copy_best>> {env, o}).log();
-    bench_result_t shift =
-        bench_unary(env, "sz_copy_best(shift)", copy_from_sz<cpu_best<sz_copy_best>, 1> {env, o}).log(align);
+    std::optional<row_t> const align = bench_unary(env, corpus, "sz_copy_best(align)",
+                                                   copy_from_sz<cpu_best<sz_copy_best>> {corpus, o});
+    print(align);
+    std::optional<row_t> const shift = bench_unary(env, corpus, "sz_copy_best(shift)",
+                                                   copy_from_sz<cpu_best<sz_copy_best>, 1> {corpus, o});
+    print(shift, baseline_of(align));
 
-    bench_unary(env, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {env, o}).log(align);
-    bench_unary(env, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {env, o}).log(align, shift);
+    print(bench_unary(env, corpus, "std::memcpy(align)", copy_from_sz<memcpy_like_sz> {corpus, o}), baseline_of(align));
+    print(bench_unary(env, corpus, "std::memcpy(shift)", copy_from_sz<memcpy_like_sz, 1> {corpus, o}),
+          baseline_of(shift));
 }
 
 #pragma endregion MemCpy
@@ -107,17 +92,22 @@ sz_status_t memmove_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, 
  *  output. This is achieved by performing a combination of a forward and a backward move. So the
  *  dispatch point can be compared against the baseline @c memmove function.
  */
-void bench_move(environment_t const &env) {
-    dataset_copy_t output(env);
+void bench_move(environment_t const &env, corpus_t const &corpus) {
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
 
     // Shift forward by a single byte or a single cache line
-    bench_result_t byte = bench_unary(env, "sz_move_best(by1)", move_from_sz<cpu_best<sz_move_best>, 1> {env, o}).log();
-    bench_result_t page =
-        bench_unary(env, "sz_move_best(by64)", move_from_sz<cpu_best<sz_move_best>, 64> {env, o}).log(byte);
+    std::optional<row_t> const byte = bench_unary(env, corpus, "sz_move_best(by1)",
+                                                  move_from_sz<cpu_best<sz_move_best>, 1> {corpus, o});
+    print(byte);
+    std::optional<row_t> const page = bench_unary(env, corpus, "sz_move_best(by64)",
+                                                  move_from_sz<cpu_best<sz_move_best>, 64> {corpus, o});
+    print(page, baseline_of(byte));
 
-    bench_unary(env, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {env, o}).log(byte);
-    bench_unary(env, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {env, o}).log(byte, page);
+    print(bench_unary(env, corpus, "std::memmove(by1)", move_from_sz<memmove_like_sz, 1> {corpus, o}),
+          baseline_of(byte));
+    print(bench_unary(env, corpus, "std::memmove(by64)", move_from_sz<memmove_like_sz, 64> {corpus, o}),
+          baseline_of(page));
 }
 
 #pragma endregion MemMove
@@ -150,17 +140,21 @@ sz_status_t generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce, 
  *  Multiple calls to the provided functions even with the same arguments won't change the input or
  *  output. So the dispatch points can be compared against the baseline @c memset function.
  */
-void bench_fill(environment_t const &env) {
-    dataset_copy_t output(env);
+void bench_fill(environment_t const &env, corpus_t const &corpus) {
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
 
-    bench_result_t zeros = bench_unary(env, "sz_fill_best", fill_from_sz<cpu_best<sz_fill_best>> {env, o}).log();
-    bench_result_t random =
-        bench_unary(env, "sz_fill_random_best", fill_random_from_sz<cpu_best<sz_fill_random_best>> {env, o}).log(zeros);
+    std::optional<row_t> const zeros = bench_unary(env, corpus, "sz_fill_best",
+                                                   fill_from_sz<cpu_best<sz_fill_best>> {corpus, o});
+    print(zeros);
+    std::optional<row_t> const random = bench_unary(env, corpus, "sz_fill_random_best",
+                                                    fill_random_from_sz<cpu_best<sz_fill_random_best>> {corpus, o});
+    print(random, baseline_of(zeros));
 
     // The generators differ, so the random baseline is timed but never validated.
-    bench_unary(env, "fill<std::memset>", fill_from_sz<memset_like_sz> {env, o}).log(zeros);
-    bench_unary(env, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {env, o}).log(zeros, random);
+    print(bench_unary(env, corpus, "fill<std::memset>", fill_from_sz<memset_like_sz> {corpus, o}), baseline_of(zeros));
+    print(bench_unary(env, corpus, "fill<std::random_device>", fill_random_from_sz<generate_like_sz> {corpus, o}),
+          baseline_of(random));
 }
 
 #pragma endregion Broadcasting Constants with MemSet
@@ -178,25 +172,28 @@ sz_status_t transform_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length
  *  Performs a simple cyclical rotation of the alphabet, to test the performance of the different
  *  "look-up table"-based transformations.
  */
-void bench_lookup(environment_t const &env) {
-    dataset_copy_t output(env);
+void bench_lookup(environment_t const &env, corpus_t const &corpus) {
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
-    sz_cptr_t lut = rotated_alphabet();
+    std::array<unsigned char, 256> const alphabet = rotated_alphabet();
+    sz_cptr_t lut = reinterpret_cast<sz_cptr_t>(alphabet.data());
 
-    bench_result_t zeros =
-        bench_unary(env, "sz_lookup_best", lookup_from_sz<cpu_best<sz_lookup_best>> {env, o, lut}).log();
-    bench_unary(env, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {env, o, lut}).log(zeros);
+    std::optional<row_t> const zeros = bench_unary(env, corpus, "sz_lookup_best",
+                                                   lookup_from_sz<cpu_best<sz_lookup_best>> {corpus, o, lut});
+    print(zeros);
+    print(bench_unary(env, corpus, "lookup<std::transform>", lookup_from_sz<transform_like_sz> {corpus, o, lut}),
+          baseline_of(zeros));
 }
 
 #pragma endregion Lookup Transformations
 
-} // namespace
-
-void bench_memory(corpora_t &corpora) {
-    environment_t const &env = corpora.lines();
+void bench_memory(environment_t &env) {
+    corpus_t const &corpus = env.corpora.lines();
     fmt::println("Starting low-level memory-operation benchmarks...");
-    bench_copy(env);
-    bench_move(env);
-    bench_fill(env);
-    bench_lookup(env);
+    bench_copy(env, corpus);
+    bench_move(env, corpus);
+    bench_fill(env, corpus);
+    bench_lookup(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

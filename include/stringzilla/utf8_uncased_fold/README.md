@@ -16,9 +16,9 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at 
 
 | Backend          | `sz_utf8_uncased_fold_best` |
 | :--------------- | --------------------------: |
-| Serial @ Xeon4   |                  104.2 MB/s |
-| Haswell @ Xeon4  |                   59.8 MB/s |
-| Ice Lake @ Xeon4 |                  106.6 MB/s |
+| Serial @ Xeon4   |                  99.37 MB/s |
+| Haswell @ Xeon4  |                   57.0 MB/s |
+| Ice Lake @ Xeon4 |                  101.7 MB/s |
 | NEON @ Graviton4 |                           … |
 | SVE2 @ Graviton4 |                           … |
 | SVE @ Graviton3  |                           … |
@@ -29,9 +29,9 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at 
 
 | Backend          | `sz_utf8_uncased_fold_best` |
 | :--------------- | --------------------------: |
-| Serial @ Xeon4   |                  176.5 MB/s |
-| Haswell @ Xeon4  |                  466.6 MB/s |
-| Ice Lake @ Xeon4 |                  901.9 MB/s |
+| Serial @ Xeon4   |                  168.3 MB/s |
+| Haswell @ Xeon4  |                  445.0 MB/s |
+| Ice Lake @ Xeon4 |                  860.1 MB/s |
 | NEON @ Graviton4 |                           … |
 | SVE2 @ Graviton4 |                           … |
 | SVE @ Graviton3  |                           … |
@@ -42,9 +42,9 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at 
 
 | Backend          | `sz_utf8_uncased_fold_best` |
 | :--------------- | --------------------------: |
-| Serial @ Xeon4   |                  341.7 MB/s |
-| Haswell @ Xeon4  |                  913.8 MB/s |
-| Ice Lake @ Xeon4 |                 1352.0 MB/s |
+| Serial @ Xeon4   |                  325.9 MB/s |
+| Haswell @ Xeon4  |                  871.5 MB/s |
+| Ice Lake @ Xeon4 |                 1289.4 MB/s |
 | NEON @ Graviton4 |                           … |
 | SVE2 @ Graviton4 |                           … |
 | SVE @ Graviton3  |                           … |

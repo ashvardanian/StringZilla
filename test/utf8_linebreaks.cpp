@@ -23,7 +23,7 @@
 
 #include "cross.hpp" // `check_utf8_linebreaks_unit_` and the shared segmentation harness
 
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 /** The line-break dispatch point in the shape of a segmentation backend. */
 static utf8_segment_backend_t const utf8_linebreaks_dispatched = {"dispatched", cpu_best<sz_utf8_linebreaks_best>};
@@ -74,3 +74,5 @@ void test_utf8_linebreaks_all(test_context_t &context) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

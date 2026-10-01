@@ -30,8 +30,7 @@
 #include "cross.hpp"   // `substrings_tier_t`, `check_substrings_unit_`, `check_substrings_equivalence_`
 #include "harness.hpp" // `random_string`, `refusing_allocator_`, `test_context_t`, `verify`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 #pragma region Helpers
 
@@ -247,3 +246,5 @@ void test_substrings_safety(test_context_t &context) {
 void test_substrings_all(test_context_t &context) { check_substrings_equivalence_(context, substrings_dispatched); }
 
 #pragma endregion Unit Cases
+
+} // namespace ashvardanian::stringzilla::test

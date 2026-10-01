@@ -31,8 +31,7 @@
 #include "cross.hpp"   // `overlap_backend_t`, `check_overlap_equivalence_`, `check_overlap_safety_`
 #include "harness.hpp" // `sequence_from_`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 #pragma region Helpers
 
@@ -153,3 +152,5 @@ void test_overlap_safety(test_context_t &) { check_overlap_safety_(overlap_dispa
 void test_overlap_all(test_context_t &context) { check_overlap_equivalence_(context, overlap_dispatched); }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

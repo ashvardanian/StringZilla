@@ -305,7 +305,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
                                                     sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    // At 128 bits NEON leads: 53 vs 43 MiB/s on Graviton 5 words, with serial at 50.
+    // At 128 bits NEON leads: 53 vs 43 MB/s on Graviton 5 words, with serial at 50.
     if (svcntb() <= 16) return sz_sequence_argsort_neon_(sequence, allocator, order, top_count, reverse);
 
     sz_size_t count = sequence->count;

@@ -39,7 +39,7 @@
  *  counter, never at random, unless a fresh key accompanies each message.
  *
  *  @b Data @b volume has a ceiling that counter-mode constructions inherit from the 128-bit block.
- *  TLS caps a connection at roughly 2^24.5 records of 16 KiB for exactly this reason, and callers
+ *  TLS caps a connection at roughly 2^24.5 records of 16 KB for exactly this reason, and callers
  *  moving more than a few hundred gigabytes under one key should rekey instead. One Galois/counter
  *  mode nonce seals at most 2^36 - 32 bytes, past which its 32-bit block counter would wrap.
  *

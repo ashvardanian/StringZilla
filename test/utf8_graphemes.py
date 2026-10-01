@@ -21,26 +21,21 @@ Author: Ash Vardanian
 Date: June 20, 2026
 """
 
-from random import Random, choice, randint
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
-    vector_width_bracketing_strings,
-    SEED_VALUES,
-    scale_iterations,
-    seed_random_generators,
-    run_across_backends,
+from base import (
+    StreamKey,
     assert_backends_agree,
+    baseline_grapheme_boundaries,
     get_random_string,
     malformed_utf8_corpus,
     representatives_by_class,
-    baseline_grapheme_boundaries,
+    run_across_backends,
+    scale_iterations,
+    vector_width_bracketing_strings,
 )
-from test.utf8_helpers import (
+from utf8_helpers import (
     SEGMENTATION_PALETTE,
     adversarial_utf8_inputs,
     assert_segments_tile,
@@ -51,6 +46,9 @@ from test.utf8_helpers import (
     icu_unicode_at_least,
     window_seam_lengths,
 )
+
+import stringzilla as sz
+from stringzilla import Str
 
 _byte_boundaries = byte_boundaries
 _SEGMENTATION_PALETTE = SEGMENTATION_PALETTE
@@ -115,24 +113,20 @@ def test_utf8_graphemes_str_method():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_grapheme_safety(seed_value: int):
+def test_utf8_grapheme_safety(rng: Random):
     """Adversarial-byte safety: the grapheme iterator must survive the malformed battery and still tile its input.
 
     Feeds named malformed shapes, the astral fixtures, all 256 single bytes, every UTF-8 lead-class byte pair,
     and random garbage; each output must reconstruct the exact input bytes with no dropped, duplicated, or
     out-of-bounds span.
     """
-    rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
         assert_segments_tile(sz.utf8_graphemes(raw), raw)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_grapheme_seam(seed_value: int):
+def test_utf8_grapheme_seam(rng: Random):
     """Window-seam sweep: inputs sized to land on 63/64/65/127/128/129/… byte boundaries relative to the
     kernel's 64-byte SIMD window must tile and stay bit-exact against ICU, catching off-by-one seam bugs."""
-    rng = Random(seed_value)
     icu_graphemes = icu_segmenter("grapheme")
     icu_current = icu_unicode_at_least("17")  # ICU-exact only when its Unicode matches our 17.0 tables
     for length in window_seam_lengths():
@@ -228,28 +222,24 @@ def test_utf8_grapheme_class_adjacency(grapheme_break_props):
 # region Oracles
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_grapheme_boundary_fuzz(seed_value: int, grapheme_break_props):
+def test_utf8_grapheme_boundary_fuzz(seed: StreamKey, rng: Random, grapheme_break_props):
     """Fuzz: compare the C grapheme iterator vs the pure-Python UAX-29 baseline."""
-    seed_random_generators(seed_value)
     for _ in range(scale_iterations(200)):
-        text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 100)))
+        text = "".join(rng.choice(_SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
         try:
             expected = baseline_grapheme_boundaries(text, grapheme_break_props)
         except Exception:
             continue
         sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
-        assert (
-            sz_boundaries == expected
-        ), "Grapheme boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
-            seed_value, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
+        assert sz_boundaries == expected, (
+            "Grapheme boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
+                seed, " ".join(f"{ord(c):04X}" for c in text), expected, sz_boundaries
+            )
         )
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_grapheme_differential_grapheme(seed_value: int):
+def test_utf8_grapheme_differential_grapheme(rng: Random):
     """Differential fuzz against an independent grapheme library (``grapheme`` / ``uniseg``)."""
-    seed_random_generators(seed_value)
     try:
         graphemes_fn = pytest.importorskip("grapheme", reason="grapheme not installed").graphemes
     except Exception:
@@ -258,7 +248,7 @@ def test_utf8_grapheme_differential_grapheme(seed_value: int):
 
     failures = []
     for _ in range(scale_iterations(2000)):
-        text = "".join(choice(_SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
+        text = "".join(rng.choice(_SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 24)))
         sz_boundaries = _byte_boundaries(sz.utf8_graphemes(text))
         ref_boundaries = _byte_boundaries(graphemes_fn(text))
         if sz_boundaries != ref_boundaries:
@@ -270,8 +260,7 @@ def test_utf8_grapheme_differential_grapheme(seed_value: int):
     )
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_grapheme_differential_icu(seed_value: int):
+def test_utf8_grapheme_differential_icu(rng: Random):
     """Differential against ICU's `createCharacterInstance` (extended grapheme clusters == UAX-29 GraphemeBreakTest).
 
     Bit-exact when the local PyICU is at our Unicode version (≥17), since the palette measured 0/4000 divergence;
@@ -280,7 +269,6 @@ def test_utf8_grapheme_differential_icu(seed_value: int):
     GraphemeBreakTest (`test_utf8_grapheme_boundary_official_conformance`), version-pinned to UNICODE_VERSION."""
     icu_graphemes = icu_segmenter("grapheme")
     icu_current = icu_unicode_at_least("17")
-    rng = Random(seed_value)
     iterations = scale_iterations(2000)
     failures = []
     for _ in range(iterations):
@@ -304,12 +292,12 @@ def test_utf8_grapheme_differential_icu(seed_value: int):
 
 def test_utf8_graphemes_prose():
     """Realistic multi-script paragraphs: grapheme count matches the ICU root oracle; clusters != codepoints."""
-    from test.utf8_helpers import (
-        PROSE_PRIDE_CAPTION,
-        PROSE_DEVANAGARI_TIP,
+    from utf8_helpers import (
         PROSE_CONCERT_POST,
-        PROSE_RTL_SCRIPTS,
+        PROSE_DEVANAGARI_TIP,
         PROSE_MICRO_PREPEND,
+        PROSE_PRIDE_CAPTION,
+        PROSE_RTL_SCRIPTS,
         assert_segments_tile,
         icu_segmenter,
     )
@@ -380,11 +368,9 @@ def test_utf8_graphemes_backend_differential_malformed(raw):
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_graphemes_backend_differential_random(seed_value):
+def test_utf8_graphemes_backend_differential_random(rng: Random):
     """Random ASCII corpora, one cluster per byte, must segment identically across every SIMD backend."""
-    seed_random_generators(seed_value)
-    text = get_random_string()
+    text = get_random_string(rng)
     results = run_across_backends(lambda: _grapheme_segment_bytes(text))
     assert_backends_agree(results, format_inputs=lambda: repr(text))
 

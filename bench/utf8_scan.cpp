@@ -9,26 +9,12 @@
  *  timed and validated (via a per-call checksum) against the serial ones by the `cross_<arch>.cpp`
  *  files, through the adapters in `cross.hpp`.
  *
- *  Compute-bound: per-codepoint class scanning branches heavily, so a 64 MiB slice hits each path.
+ *  Compute-bound: per-codepoint class scanning branches heavily, so a 64 MB slice hits each path.
  *
  *  Benchmarks include:
  *  - Newline enumeration - @b utf8_newlines.
  *  - Whitespace enumeration - @b utf8_whitespaces (Unicode White_Space property).
  *  - Delimiter enumeration - @b utf8_delimiters (punctuation/symbol/separator/whitespace).
- *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or [1:200] for
- *    N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -45,30 +31,29 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
+namespace ashvardanian::stringzilla::bench {
 
-namespace {
-
-void bench_utf8_newlines(environment_t const &env) {
-    bench_unary(env, "sz_utf8_newlines_best", utf8_enumerate_delimiters<cpu_best<sz_utf8_newlines_best>> {env}).log();
+void bench_utf8_newlines(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_newlines_best",
+                      utf8_enumerate_delimiters<cpu_best<sz_utf8_newlines_best>> {corpus}));
 }
 
-void bench_utf8_whitespaces(environment_t const &env) {
-    bench_unary(env, "sz_utf8_whitespaces_best", utf8_enumerate_delimiters<cpu_best<sz_utf8_whitespaces_best>> {env})
-        .log();
+void bench_utf8_whitespaces(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_whitespaces_best",
+                      utf8_enumerate_delimiters<cpu_best<sz_utf8_whitespaces_best>> {corpus}));
 }
 
-void bench_utf8_delimiters(environment_t const &env) {
-    bench_unary(env, "sz_utf8_delimiters_best", utf8_enumerate_delimiters<cpu_best<sz_utf8_delimiters_best>> {env})
-        .log();
+void bench_utf8_delimiters(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_delimiters_best",
+                      utf8_enumerate_delimiters<cpu_best<sz_utf8_delimiters_best>> {corpus}));
 }
 
-} // namespace
-
-void bench_utf8_scan(corpora_t &corpora) {
-    environment_t const &env = corpora.multilingual_slice();
+void bench_utf8_scan(environment_t &env) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
     fmt::println("Starting UTF-8 class-scan benchmarks...");
-    bench_utf8_newlines(env);
-    bench_utf8_whitespaces(env);
-    bench_utf8_delimiters(env);
+    bench_utf8_newlines(env, corpus);
+    bench_utf8_whitespaces(env, corpus);
+    bench_utf8_delimiters(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

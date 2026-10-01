@@ -9,16 +9,16 @@
  *  timed against the serial ones by the `cross_<arch>.cpp` files.
  *
  *  Compute-bound: Myers' algorithm costs one word-step per query word per candidate byte, so a 64
- *  MiB slice exercises every path while each call samples only what it needs.
+ *  MB slice exercises every path while each call samples only what it needs.
  *
  *  Three shapes are measured, byte-level and rune-level alike, every candidate at its own length:
  *  - @c sz_levenshtein_engine_init plus one round over a single pair, which is what a caller
  *    scoring one pair pays: a batch of one, prepared and released around the round;
  *  - @c sz_levenshtein_distances from a prepared batch of queries against the next
- *    @c STRINGWARS_BATCH tokens - by default as many median tokens as fill a 32 KiB L1 - at two
- *    query lengths, the slice's median and the 1024 bytes whose match masks fill that L1, on every
- *    compiled backend. The batch is prepared once per arm, so what the arm times is the sweep and
- *    not the preparation the engine exists to hoist;
+ *    @c STRINGWARS_BATCH_PER_CORE tokens - by default as many median tokens as fill a 32 KB L1 - at
+ *    two query lengths, the slice's median and the 1024 bytes whose match masks fill that L1, on
+ *    every compiled backend. The batch is prepared once per arm, so what the arm times is the sweep
+ *    and not the preparation the engine exists to hoist;
  *  - the exported building blocks one at a time, so the query's preparation, the staging of
  *    candidate bytes into class ids, and the word-steps over those ids each get a number.
  *
@@ -26,23 +26,6 @@
  *  Per Second @b (CUPS): the query's length times the candidates' lengths. The building blocks
  *  count what each of them does instead: query bytes prepared, class ids staged, word-steps taken -
  *  so the ops/s column of one arm is read beside the next rather than against a shared denominator.
- *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or an integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
  *
  *  Here are a few build & run commands:
  *
@@ -61,9 +44,7 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
 sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
@@ -78,7 +59,7 @@ sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_seq
 struct levenshtein_pair_from_sz {
 
     /** The tokens the pair is drawn from. */
-    environment_t const &env;
+    corpus_t const &corpus;
 
     /** Bytes the query is clamped to. */
     std::size_t query_bytes;
@@ -86,12 +67,12 @@ struct levenshtein_pair_from_sz {
     /** Whether the distance counts bytes or runes. */
     sz_levenshtein_symbol_t symbol;
 
-    levenshtein_pair_from_sz(environment_t const &env, std::size_t query_bytes, sz_levenshtein_symbol_t symbol)
-        : env(env), query_bytes(query_bytes), symbol(symbol) {}
+    levenshtein_pair_from_sz(corpus_t const &corpus, std::size_t query_bytes, sz_levenshtein_symbol_t symbol)
+        : corpus(corpus), query_bytes(query_bytes), symbol(symbol) {}
 
     call_result_t operator()(std::size_t token_index) {
-        std::string_view const query = std::string_view(env.tokens[token_index]).substr(0, query_bytes);
-        std::string_view const candidate = env.tokens[(token_index + 1) % env.tokens.size()];
+        std::string_view const query = std::string_view(corpus.tokens[token_index]).substr(0, query_bytes);
+        std::string_view const candidate = corpus.tokens[(token_index + 1) % corpus.tokens.size()];
         sz_string_view_t const query_view {query.data(), query.size()};
         sz_string_view_t const candidate_view {candidate.data(), candidate.size()};
         sz_sequence_t queries, candidates;
@@ -111,14 +92,12 @@ struct levenshtein_pair_from_sz {
 };
 
 /** One-pair shape on the dispatched entry alone, as one pair fills one candidate on any backend. */
-void bench_levenshtein_one_pair(environment_t const &env, std::size_t query_bytes) {
+void bench_levenshtein_one_pair(environment_t const &env, corpus_t const &corpus, std::size_t query_bytes) {
     std::string const suffix = ":q" + std::to_string(query_bytes);
-    bench_unary(env, "sz_levenshtein_distances:pair" + suffix,
-                levenshtein_pair_from_sz {env, query_bytes, sz_levenshtein_bytes_k})
-        .log();
-    bench_unary(env, "sz_levenshtein_distances:pair:utf8" + suffix,
-                levenshtein_pair_from_sz {env, query_bytes, sz_levenshtein_runes_k})
-        .log();
+    print(bench_unary(env, corpus, "sz_levenshtein_distances:pair" + suffix,
+                      levenshtein_pair_from_sz {corpus, query_bytes, sz_levenshtein_bytes_k}));
+    print(bench_unary(env, corpus, "sz_levenshtein_distances:pair:utf8" + suffix,
+                      levenshtein_pair_from_sz {corpus, query_bytes, sz_levenshtein_runes_k}));
 }
 
 #pragma endregion
@@ -126,27 +105,28 @@ void bench_levenshtein_one_pair(environment_t const &env, std::size_t query_byte
 #pragma region Cross Product
 
 /** Cross-product verbs at one query length, over bytes and runes, on the engine's kernel. */
-void bench_levenshtein_cross_product(environment_t const &env, std::size_t query_bytes, std::size_t candidates) {
+void bench_levenshtein_cross_product(environment_t const &env, corpus_t const &corpus, std::size_t query_bytes,
+                                     std::size_t candidates) {
     using verbs_t = levenshtein_distances_from_sz<levenshtein_engine_init_cpu_, sz_levenshtein_distances>;
     std::string const suffix = ":q" + std::to_string(query_bytes);
-    bench_result_t base = bench_unary(env, "sz_levenshtein_distances" + suffix,
-                                      verbs_t {env, query_bytes, candidates, sz_levenshtein_bytes_k})
-                              .log();
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_levenshtein_distances" + suffix,
+                                                  verbs_t {corpus, query_bytes, candidates, sz_levenshtein_bytes_k});
+    print(base);
     // The rune rows decode every candidate byte, so their cost over the byte rows is the decoder's.
-    bench_unary(env, "sz_levenshtein_distances:utf8" + suffix,
-                verbs_t {env, query_bytes, candidates, sz_levenshtein_runes_k})
-        .log(base);
+    print(bench_unary(env, corpus, "sz_levenshtein_distances:utf8" + suffix,
+                      verbs_t {corpus, query_bytes, candidates, sz_levenshtein_runes_k}),
+          baseline_of(base));
 }
 
 #pragma endregion
 
-} // namespace
-
-void bench_levenshtein(corpora_t &corpora) {
-    environment_t const &env = corpora.multilingual_lines();
-    std::size_t const candidates = candidates_per_call(env);
+void bench_levenshtein(environment_t &env) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    std::size_t const candidates = candidates_per_call(env, corpus);
     fmt::println("Starting Levenshtein benchmarks...");
-    bench_levenshtein_one_pair(env, median_token_bytes(env));
-    for (std::size_t const query_bytes : levenshtein_query_lengths(env))
-        bench_levenshtein_cross_product(env, query_bytes, candidates);
+    bench_levenshtein_one_pair(env, corpus, median_token_bytes(corpus));
+    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus))
+        bench_levenshtein_cross_product(env, corpus, query_bytes, candidates);
 }
+
+} // namespace ashvardanian::stringzilla::bench

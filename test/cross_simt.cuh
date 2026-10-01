@@ -1183,17 +1183,14 @@ inline void check_simt_backend_(cross_section_t &check, simt_backend_t const &ba
     check("test_substrings_safety_" + suffix, [&] { test_substrings_simt_safety(backend); });
 }
 
-} // namespace ashvardanian::stringzilla::test
-
 /** The dispatching entry points, over the capabilities of the device the checks launch on, and the
  *  refusals and asynchrony only a dispatch point's engine init promises. */
-std::size_t test_cross_dispatch(test_environment_t const &environment) {
-    using namespace ashvardanian::stringzilla::test;
+std::size_t test_cross_dispatch(environment_t const &env) {
     simt_backend_t const dispatched {
         "dispatched",          sz_levenshtein_distances, gpu_best<sz_levenshtein_distance_tiled_best>,
         sz_overlap_scores,     sz_substrings_counts,     sz_substrings_find,
         sz_substrings_replace, sz_substrings_bm25_scores};
-    cross_section_t check(environment);
+    cross_section_t check(env);
     check.detected = gpu_capabilities();
     check.section("Cross Dispatch", gpu_baseline_k);
     check_simt_backend_(check, dispatched);
@@ -1208,5 +1205,7 @@ std::size_t test_cross_dispatch(test_environment_t const &environment) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test
 
 #endif // STRINGZILLA_TEST_CROSS_SIMT_CUH

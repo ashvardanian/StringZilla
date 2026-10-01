@@ -5,9 +5,10 @@
 //! File: rust/stringzilla/utf8_tokens.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::marker::PhantomData;
+
+use super::*;
 
 /// A zero-sized selector of a UTF-8 kernel reporting separator runs. Each implementor binds one
 /// FFI tokenizer, so the shared [`Utf8Split`] iterator monomorphizes to a direct, branch-free call

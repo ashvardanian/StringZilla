@@ -9,8 +9,8 @@
  *  through the adapters in `cross.hpp`.
  *
  *  Memory-bound: substring search is bandwidth-limited, so it reads the whole file by default and a
- *  larger haystack measures throughput truer; shrink the read with @c STRINGWARS_DATASET_LIMIT only
- *  when it has to be smaller.
+ *  larger haystack measures throughput truer; shrink the read with @c STRINGWARS_BYTES only when it
+ *  has to be smaller.
  *
  *  Benchmarks include:
  *  - Substring search: find all inclusions of a token in the dataset - @b find & @b rfind.
@@ -27,23 +27,6 @@
  *  - "</>&'\"=[]": 9 html
  *  - "0123456789": 10 digits
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
@@ -58,7 +41,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  STRINGZILLA_STRESS=1 STRINGZILLA_STRESS_TIME_LIMIT=120s STRINGZILLA_STRESS_DIR=logs
  *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
@@ -71,29 +54,41 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 #pragma region Substring Search
 
-static std::string strstr_needle_copy_ {}; //! Reuse the same memory for all needles, potentially causing allocations
-
 /** Wraps the LibC functionality for finding the next occurrence of a NULL-terminated string into
- *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view. */
+ *  something similar to @c sz::matcher_find and compatible with @c sz::find_matches_view.
+ *  The @p needle must be followed by a NUL byte. */
 struct matcher_strstr_t {
     using size_type = std::size_t;
+    std::string_view needle_;
 
-    inline matcher_strstr_t(std::string_view needle = {}) noexcept(false) { strstr_needle_copy_ = needle; }
-    inline size_type needle_length() const noexcept { return strstr_needle_copy_.size(); }
+    inline matcher_strstr_t(std::string_view needle = {}) noexcept : needle_(needle) {}
+    inline size_type needle_length() const noexcept { return needle_.size(); }
     inline size_type operator()(std::string_view haystack) const noexcept {
-        auto match_pointer = (char *)strstr(haystack.data(), strstr_needle_copy_.c_str());
+        auto match_pointer = (char *)strstr(haystack.data(), needle_.data());
         do_not_optimize(match_pointer);
         if (!match_pointer) return std::string_view::npos; // No match found
         return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
 };
+
+/** Like @c callable_for_substring_search, but hands LibC NUL-terminated copies of the tokens,
+ *  made once, so the timed calls never allocate. */
+auto callable_for_strstr(corpus_t const &corpus) {
+    std::vector<std::string> needles(corpus.tokens.begin(), corpus.tokens.end());
+    return [&corpus, needles = std::move(needles)](std::size_t token_index) -> call_result_t {
+        std::string_view haystack = corpus.dataset;
+        std::string_view needle = needles[token_index];
+        sz::find_matches_view<std::string_view, matcher_strstr_t> matches(haystack, matcher_strstr_t(needle));
+        std::size_t count_matches = matches.size();
+        do_not_optimize(count_matches);
+        return call_result_t {haystack.size(), count_matches, haystack.size() * needle.size()};
+    };
+}
 
 #if defined(_GNU_SOURCE)
 
@@ -165,29 +160,29 @@ struct rmatcher_from_std_search {
 #endif
 
 /** Find all inclusions of each given token in the dataset, using various search backends. */
-void bench_substring_search(environment_t const &env) {
+void bench_substring_search(environment_t const &env, corpus_t const &corpus) {
 
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     auto base_call = callable_for_substring_search<sz::find_matches_view, matcher_from_sz_find<cpu_best<sz_find_best>>>(
-        env);
-    bench_result_t base = bench_unary(env, "sz_find_best", base_call).log();
-    bench_result_t base_reverse =
-        bench_unary(
-            env, "sz_rfind_best",
-            callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<cpu_best<sz_rfind_best>>>(env))
-            .log();
+        corpus);
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_find_best", base_call);
+    print(base);
+    std::optional<row_t> const base_reverse = bench_unary(
+        env, corpus, "sz_rfind_best",
+        callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<cpu_best<sz_rfind_best>>>(corpus));
+    print(base_reverse);
 
     // Include LibC functionality
     // ! Despite taking string views, these functions assume null-terminated strings.
-    bench_unary(env, "find<std::strstr>", base_call, //
-                callable_for_substring_search<sz::find_matches_view, matcher_strstr_t>(env))
-        .log(base);
+    print(bench_unary(env, corpus, "find<std::strstr>", base_call, //
+                      callable_for_strstr(corpus)),
+          baseline_of(base));
 
     // Include POSIX functionality
 #if defined(_GNU_SOURCE)
-    bench_unary(env, "find<memmem>", base_call, //
-                callable_for_substring_search<sz::find_matches_view, matcher_memmem_t>(env))
-        .log(base);
+    print(bench_unary(env, corpus, "find<memmem>", base_call, //
+                      callable_for_substring_search<sz::find_matches_view, matcher_memmem_t>(corpus)),
+          baseline_of(base));
 #endif
 
     // Include STL functionality
@@ -197,18 +192,18 @@ void bench_substring_search(environment_t const &env) {
     using rmatcher_bm_t = rmatcher_from_std_search<std::boyer_moore_searcher<std::string_view::const_reverse_iterator>>;
     using rmatcher_bmh_t =
         rmatcher_from_std_search<std::boyer_moore_horspool_searcher<std::string_view::const_reverse_iterator>>;
-    bench_unary(env, "find<std::boyer_moore>", base_call,
-                callable_for_substring_search<sz::find_matches_view, matcher_bm_t>(env))
-        .log(base);
-    bench_unary(env, "rfind<std::boyer_moore>", base_call,
-                callable_for_substring_search<sz::rfind_matches_view, rmatcher_bm_t>(env))
-        .log(base_reverse);
-    bench_unary(env, "find<std::boyer_moore_horspool>", base_call,
-                callable_for_substring_search<sz::find_matches_view, matcher_bmh_t>(env))
-        .log(base);
-    bench_unary(env, "rfind<std::boyer_moore_horspool>", base_call,
-                callable_for_substring_search<sz::rfind_matches_view, rmatcher_bmh_t>(env))
-        .log(base_reverse);
+    print(bench_unary(env, corpus, "find<std::boyer_moore>", base_call,
+                      callable_for_substring_search<sz::find_matches_view, matcher_bm_t>(corpus)),
+          baseline_of(base));
+    print(bench_unary(env, corpus, "rfind<std::boyer_moore>", base_call,
+                      callable_for_substring_search<sz::rfind_matches_view, rmatcher_bm_t>(corpus)),
+          baseline_of(base_reverse));
+    print(bench_unary(env, corpus, "find<std::boyer_moore_horspool>", base_call,
+                      callable_for_substring_search<sz::find_matches_view, matcher_bmh_t>(corpus)),
+          baseline_of(base));
+    print(bench_unary(env, corpus, "rfind<std::boyer_moore_horspool>", base_call,
+                      callable_for_substring_search<sz::rfind_matches_view, rmatcher_bmh_t>(corpus)),
+          baseline_of(base_reverse));
 #endif
 }
 
@@ -227,7 +222,8 @@ struct matcher_strchr_t {
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match_pointer = (char *)strchr(haystack.data(), needle_);
         do_not_optimize(match_pointer);
-        if (!match_pointer) return std::string_view::npos; // No match found
+        // Tokens aren't NUL-terminated, so `strchr` can run on into the following tokens
+        if (!match_pointer || match_pointer >= haystack.data() + haystack.size()) return std::string_view::npos;
         return (size_type)(match_pointer - haystack.data());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -261,6 +257,7 @@ struct matcher_from_std_find {
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = std::find(haystack.begin(), haystack.end(), needle_);
         do_not_optimize(match);
+        if (match == haystack.end()) return std::string_view::npos;
         return (size_type)(match - haystack.begin());
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -271,28 +268,29 @@ struct matcher_from_std_find {
  *  @warning Notice, the roles differ from @c bench_substring_search: each individual token is now
  *      treated as a haystack.
  */
-void bench_byte_search(environment_t const &env) {
+void bench_byte_search(environment_t const &env, corpus_t const &corpus) {
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     auto base_call =
-        callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<cpu_best<sz_find_byte_best>>>(env);
-    bench_result_t base = bench_unary(env, "sz_find_byte_best", base_call).log();
-    bench_unary(
-        env, "sz_rfind_byte_best",
-        callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<cpu_best<sz_rfind_byte_best>>>(env))
-        .log();
+        callable_for_byte_search<sz::find_matches_view, matcher_from_sz_find_byte<cpu_best<sz_find_byte_best>>>(corpus);
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_find_byte_best", base_call);
+    print(base);
+    print(bench_unary(
+        env, corpus, "sz_rfind_byte_best",
+        callable_for_byte_search<sz::rfind_matches_view, matcher_from_sz_find_byte<cpu_best<sz_rfind_byte_best>>>(
+            corpus)));
 
     // Include LibC functionality
-    bench_unary(env, "find_byte<std::strchr>", base_call, //
-                callable_for_byte_search<sz::find_matches_view, matcher_strchr_t>(env))
-        .log(base);
-    bench_unary(env, "find_byte<std::memchr>", base_call, //
-                callable_for_byte_search<sz::find_matches_view, matcher_memchr_t>(env))
-        .log(base);
+    print(bench_unary(env, corpus, "find_byte<std::strchr>", base_call, //
+                      callable_for_byte_search<sz::find_matches_view, matcher_strchr_t>(corpus)),
+          baseline_of(base));
+    print(bench_unary(env, corpus, "find_byte<std::memchr>", base_call, //
+                      callable_for_byte_search<sz::find_matches_view, matcher_memchr_t>(corpus)),
+          baseline_of(base));
 
     // Include STL functionality
-    bench_unary(env, "find_byte<std::find>", base_call, //
-                callable_for_byte_search<sz::find_matches_view, matcher_from_std_find>(env))
-        .log(base);
+    print(bench_unary(env, corpus, "find_byte<std::find>", base_call, //
+                      callable_for_byte_search<sz::find_matches_view, matcher_from_std_find>(corpus)),
+          baseline_of(base));
 }
 
 #pragma endregion Byte Search
@@ -310,7 +308,8 @@ struct matcher_strcspn_t {
     inline size_type operator()(std::string_view haystack) const noexcept {
         auto match = strcspn(haystack.data(), needles_.data());
         do_not_optimize(match);
-        if (match == haystack.size()) return std::string_view::npos; // No match found
+        // Tokens aren't NUL-terminated, so `strcspn` can run on into the following tokens
+        if (match >= haystack.size()) return std::string_view::npos;
         return match;
     }
     constexpr size_type skip_length() const noexcept { return 1; }
@@ -347,39 +346,40 @@ struct matcher_std_string_last_of_t {
  *  @warning Notice, the roles differ from @c bench_substring_search: each individual token is now
  *      treated as a haystack.
  */
-void bench_byteset_search(environment_t const &env) {
+void bench_byteset_search(environment_t const &env, corpus_t const &corpus) {
 
     // The "check value" for normal and reverse search is the same - simply the number of matches.
     using best_t = matcher_from_sz_find_byteset<cpu_best<sz_find_byteset_best>>;
     using rbest_t = matcher_from_sz_find_byteset<cpu_best<sz_rfind_byteset_best>>;
-    auto base_call = callable_for_byteset_search<sz::find_matches_view, best_t>(env);
-    bench_result_t base = bench_unary(env, "sz_find_byteset_best", base_call).log();
-    bench_result_t base_reverse = bench_unary(env, "sz_rfind_byteset_best",
-                                              callable_for_byteset_search<sz::rfind_matches_view, rbest_t>(env))
-                                      .log();
+    auto base_call = callable_for_byteset_search<sz::find_matches_view, best_t>(corpus);
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_find_byteset_best", base_call);
+    print(base);
+    std::optional<row_t> const base_reverse = bench_unary(
+        env, corpus, "sz_rfind_byteset_best", callable_for_byteset_search<sz::rfind_matches_view, rbest_t>(corpus));
+    print(base_reverse);
 
     // Include LibC functionality
-    bench_unary(env, "find_byteset<std::strcspn>", base_call,
-                callable_for_byteset_search<sz::find_matches_view, matcher_strcspn_t>(env))
-        .log(base);
+    print(bench_unary(env, corpus, "find_byteset<std::strcspn>", base_call,
+                      callable_for_byteset_search<sz::find_matches_view, matcher_strcspn_t>(corpus)),
+          baseline_of(base));
 
     // Include STL functionality
-    bench_unary(env, "find_byteset<std::string_view::find_first_of>", base_call,
-                callable_for_byteset_search<sz::find_matches_view, matcher_std_string_first_of_t>(env))
-        .log(base);
-    bench_unary(env, "rfind_byteset<std::string_view::find_last_of>", base_call,
-                callable_for_byteset_search<sz::rfind_matches_view, matcher_std_string_last_of_t>(env))
-        .log(base_reverse);
+    print(bench_unary(env, corpus, "find_byteset<std::string_view::find_first_of>", base_call,
+                      callable_for_byteset_search<sz::find_matches_view, matcher_std_string_first_of_t>(corpus)),
+          baseline_of(base));
+    print(bench_unary(env, corpus, "rfind_byteset<std::string_view::find_last_of>", base_call,
+                      callable_for_byteset_search<sz::rfind_matches_view, matcher_std_string_last_of_t>(corpus)),
+          baseline_of(base_reverse));
 }
 
 #pragma endregion Byteset Search
 
-} // namespace
-
-void bench_find(corpora_t &corpora) {
-    environment_t const &env = corpora.words();
+void bench_find(environment_t &env) {
+    corpus_t const &corpus = env.corpora.words();
     fmt::println("Starting search benchmarks...");
-    bench_substring_search(env);
-    bench_byte_search(env);
-    bench_byteset_search(env);
+    bench_substring_search(env, corpus);
+    bench_byte_search(env, corpus);
+    bench_byteset_search(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

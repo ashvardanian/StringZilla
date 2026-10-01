@@ -179,7 +179,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_sve2_( //
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const step = svcntb();
-    // Graviton 5 at 128 bits: the load-view NEON scan leads the mixed corpus, 737 vs 663 MiB/s.
+    // Graviton 5 at 128 bits: the load-view NEON scan leads the mixed corpus, 737 vs 663 MB/s.
     if (step <= 16)
         return sz_utf8_whitespaces_neon_(text, length, match_offsets, match_lengths, matches_capacity, bytes_consumed);
 

@@ -887,9 +887,11 @@ Every kernel exists in a serial form plus one or more per-ISA forms, named with 
 Each verb also has a dispatch point, like `sz_find_best` or `sz_hash_best`, taking the kernels' arguments plus a capability mask before the trailing stream, and running the best capability the mask shares with the verb's list, `serial` first on the CPU.
 It returns `sz_missing_kernel_k` when no capability in the mask has the kernel, as a GPU-only mask does for a CPU-only verb.
 
-- __Library builds, `STRINGZILLA_HEADER_ONLY=0`, the default.__ Every capability the toolchain builds is compiled into one binary, and the dispatch points pick among them by the mask each call passes.
+- __Library builds, `STRINGZILLA_HEADER_ONLY=0`, the default.__
+  Every capability the toolchain builds is compiled into one binary, and the dispatch points pick among them by the mask each call passes.
   This is how the prebuilt libraries ship, so a single binary runs optimally on any CPU, and it is what `stringzilla.hpp` links against.
-- __Header-only builds, `STRINGZILLA_HEADER_ONLY=1`.__ The kernels your compiler flags enable inline into your translation unit, so calling one of them by name, like `sz_find_haswell`, costs no indirection at all.
+- __Header-only builds, `STRINGZILLA_HEADER_ONLY=1`.__
+  The kernels your compiler flags enable inline into your translation unit, so calling one of them by name, like `sz_find_haswell`, costs no indirection at all.
   The dispatch points and finders compile to stubs returning `sz_missing_library_k`, so this mode serves C alone, and C++ requires the library.
 
 Capabilities are introspectable at both compile and run time.

@@ -49,8 +49,7 @@
 #include "cross.hpp"   // `sort_backend_t`, `check_sort_unit_`, `check_intersect_unit_`
 #include "harness.hpp" // `random_string`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 using sz::literals::operator""_bs; // for `sz::byteset_t`
 
@@ -428,3 +427,5 @@ void test_sort_safety() { check_sort_safety_(sort_dispatched); }
 void test_sort_all(test_context_t &context) { check_sort_equivalence_(context, sort_dispatched); }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

@@ -39,8 +39,7 @@
 
 #include "cross.hpp" // `check_utf8_tokens_unit_`, `check_utf8_delimiters_unit_`, `utf8_tokens_backend_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 
 /** The dispatch points in the shape of a count/newline/whitespace backend. */
@@ -337,3 +336,5 @@ void test_utf8_delimiters_all(test_context_t &context) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

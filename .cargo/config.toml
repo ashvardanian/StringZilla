@@ -11,7 +11,7 @@
 # (We intentionally do not hardcode the SDK path here so the config stays portable.)
 
 [target.wasm32-wasip1]
-runner = "wasmtime -W relaxed-simd=y --dir ."
+runner = "wasmtime -W relaxed-simd=y -S inherit-env=y --dir ."
 
 [target.wasm32-wasip1-threads]
-runner = "wasmtime -W relaxed-simd=y -S threads=y --dir ."
+runner = "wasmtime -W relaxed-simd=y -S threads=y,inherit-env=y --dir ."

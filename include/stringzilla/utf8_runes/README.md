@@ -14,9 +14,9 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 
 | Backend          | `sz_utf8_count_best` | `sz_utf8_decode_best` | `sz_utf8_seek_best` |
 | :--------------- | -------------------: | --------------------: | ------------------: |
-| Serial @ Xeon4   |           172.5 MB/s |            223.1 MB/s |          102.3 MB/s |
-| Haswell @ Xeon4  |           210.3 MB/s |            144.6 MB/s |          119.5 MB/s |
-| Ice Lake @ Xeon4 |           248.8 MB/s |            256.0 MB/s |          131.7 MB/s |
+| Serial @ Xeon4   |           164.5 MB/s |            212.8 MB/s |          97.56 MB/s |
+| Haswell @ Xeon4  |           200.6 MB/s |            137.9 MB/s |          114.0 MB/s |
+| Ice Lake @ Xeon4 |           237.3 MB/s |            244.1 MB/s |          125.6 MB/s |
 | NEON @ Graviton4 |                    … |                     … |                   … |
 | SVE2 @ Graviton4 |                    … |                     … |                   … |
 | SVE @ Graviton3  |                    … |                     … |                   … |
@@ -27,9 +27,9 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 
 | Backend          | `sz_utf8_count_best` | `sz_utf8_decode_best` | `sz_utf8_seek_best` |
 | :--------------- | -------------------: | --------------------: | ------------------: |
-| Serial @ Xeon4   |            1.18 GB/s |             0.41 GB/s |           0.55 GB/s |
-| Haswell @ Xeon4  |            6.36 GB/s |             0.57 GB/s |           5.57 GB/s |
-| Ice Lake @ Xeon4 |            5.22 GB/s |             1.60 GB/s |           5.55 GB/s |
+| Serial @ Xeon4   |            1.10 GB/s |             0.38 GB/s |           0.51 GB/s |
+| Haswell @ Xeon4  |            5.92 GB/s |             0.53 GB/s |           5.19 GB/s |
+| Ice Lake @ Xeon4 |            4.86 GB/s |             1.49 GB/s |           5.17 GB/s |
 | NEON @ Graviton4 |                    … |                     … |                   … |
 | SVE2 @ Graviton4 |                    … |                     … |                   … |
 | SVE @ Graviton3  |                    … |                     … |                   … |

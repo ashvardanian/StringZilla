@@ -22,6 +22,7 @@ Date: December 1, 2024
 import hashlib
 import hmac
 from array import array
+from random import Random
 
 import pytest
 
@@ -35,53 +36,49 @@ try:
 except:  # noqa: E722
     pass
 
-from test.helpers import (
-    SEED_VALUES,
-    seed_random_generators,
+from base import (
+    VECTOR_WIDTH_LENGTHS,
+    StreamKey,
+    assert_backends_agree,
+    capability_sweep,
+    differential_bodies,
+    forced_capabilities,
     get_random_string,
     run_across_backends,
-    assert_backends_agree,
-    forced_capabilities,
-    capability_sweep,
-    VECTOR_WIDTH_LENGTHS,
-    differential_bodies,
 )
 
 # region Unit
 
 
 @pytest.mark.parametrize("body", ["", "hello", "world", "abcdefg", "a" * 32])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_hash_basic_equivalence(body: str, seed_value: int):
+def test_hash_basic_equivalence(body: str, seed: StreamKey):
     """The standalone `sz.hash` and the `Str.hash` method return the same seeded digest for the same body."""
-    hash_seeded = sz.hash(body, seed=seed_value)
-    hash_member = sz.Str(body).hash(seed=seed_value)
+    hash_seeded = sz.hash(body, seed=seed)
+    hash_member = sz.Str(body).hash(seed=seed)
     assert hash_seeded == hash_member
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_hasher_incremental_vs_one_shot(seed_value: int):
+def test_hasher_incremental_vs_one_shot(seed: StreamKey):
     """The incremental Hasher digest equals the one-shot sz.hash of the concatenated input."""
     data_full = b"hello world"
     data_prefix = b"hello "
     data_suffix = b"world"
 
-    hasher = sz.Hasher(seed=seed_value)
+    hasher = sz.Hasher(seed=seed)
     hasher.update(data_prefix)
     hasher.update(data_suffix)
     streamed_hash = hasher.digest()
 
-    expected_hash = sz.hash(data_full, seed=seed_value)
+    expected_hash = sz.hash(data_full, seed=seed)
     assert isinstance(streamed_hash, int)
     assert streamed_hash == expected_hash
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_hasher_reset_and_hexdigest(seed_value: int):
+def test_hasher_reset_and_hexdigest(seed: StreamKey):
     """`Hasher.hexdigest()` matches `format(digest, "016x")`, and `reset()` followed by the same update
     reproduces the same digest."""
     data = b"some test payload"
-    hasher = sz.Hasher(seed=seed_value)
+    hasher = sz.Hasher(seed=seed)
     hasher.update(data)
     streamed_hash = hasher.digest()
     streamed_hex = hasher.hexdigest()
@@ -129,12 +126,10 @@ def test_hash_multiseed_errors():
 
 
 @pytest.mark.parametrize("length", [0, 1, 3, 7, 15, 31, 63, 64, 65, 127, 128, 129, 255, 256, 1000, 4096, 10000])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_sha256(length: int, seed_value: int):
+def test_sha256(length: int, rng: Random):
     """One-shot, progressive, reset, and copied `sz.Sha256` all match `hashlib.sha256` for the same input."""
 
-    seed_random_generators(seed_value)
-    text = get_random_string(length=length)
+    text = get_random_string(rng, length=length)
     expected = hashlib.sha256(text.encode()).digest()
 
     # One-shot: standalone function
@@ -175,15 +170,13 @@ def test_sha256(length: int, seed_value: int):
 
 
 @pytest.mark.parametrize("lanes_count", [0, 1, 7, 8, 9, 15, 16, 17, 33])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_sha256_lanes(lanes_count: int, seed_value: int):
+def test_sha256_lanes(lanes_count: int, rng: Random):
     """`sz.Sha256s` matches per-message `hashlib.sha256` across lane counts, ragged lengths and streaming."""
 
-    seed_random_generators(seed_value)
 
     # Lengths span empty lanes, sub-block lanes, block-boundary straddles and multi-block lanes
     lengths = [(index * 137) % 4096 for index in range(lanes_count)]
-    messages = [get_random_string(length=length).encode() for length in lengths]
+    messages = [get_random_string(rng, length=length).encode() for length in lengths]
     expected = [hashlib.sha256(message).digest() for message in messages]
 
     lanes = sz.Sha256s(lanes_count)
@@ -221,12 +214,10 @@ def test_sha256_lanes(lanes_count: int, seed_value: int):
 
 
 @pytest.mark.parametrize("lanes_count", [0, 1, 8, 17])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_sha256_lanes_strs(lanes_count: int, seed_value: int):
+def test_sha256_lanes_strs(lanes_count: int, rng: Random):
     """`sz.Sha256s.update` reads a `Strs` in place, in both its tape and reordered layouts."""
 
-    seed_random_generators(seed_value)
-    messages = [get_random_string(length=(index * 137) % 4096) for index in range(lanes_count)]
+    messages = [get_random_string(rng, length=(index * 137) % 4096) for index in range(lanes_count)]
 
     for texts in (sz.Strs(messages), sz.Strs(messages).shuffled()):
         expected = [hashlib.sha256(str(text).encode()).digest() for text in texts]
@@ -283,27 +274,23 @@ def test_sha256_lanes_errors():
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS + [4096, 100000])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_bytesum_random(length: int, seed_value: int):
+def test_bytesum_random(length: int, rng: Random):
     """`sz.bytesum` matches a plain Python sum of byte values for random bodies."""
 
     def sum_bytes(body: str) -> int:
         return sum([ord(c) for c in body])
 
-    seed_random_generators(seed_value)
-    body = get_random_string(length=length)
+    body = get_random_string(rng, length=length)
     assert sum_bytes(body) == sz.bytesum(body)
 
 
 @pytest.mark.parametrize("key_length", [0, 1, 16, 32, 64, 65, 128])
 @pytest.mark.parametrize("message_length", [0, 1, 63, 64, 65, 127, 128, 1000])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_hmac_sha256(key_length: int, message_length: int, seed_value: int):
+def test_hmac_sha256(key_length: int, message_length: int, rng: Random):
     """`sz.hmac_sha256` matches `hmac.new(key, message, hashlib.sha256)` for both bytes and string inputs."""
 
-    seed_random_generators(seed_value)
-    key = get_random_string(length=key_length).encode()
-    message = get_random_string(length=message_length).encode()
+    key = get_random_string(rng, length=key_length).encode()
+    message = get_random_string(rng, length=message_length).encode()
 
     # Test against Python's hmac module
     expected = hmac.new(key, message, hashlib.sha256).digest()
@@ -319,13 +306,11 @@ def test_hmac_sha256(key_length: int, message_length: int, seed_value: int):
 
 @pytest.mark.parametrize("messages_count", [0, 1, 8, 17, 129])
 @pytest.mark.parametrize("key_length", [16, 65])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_hmac_sha256_many(messages_count: int, key_length: int, seed_value: int):
+def test_hmac_sha256_many(messages_count: int, key_length: int, rng: Random):
     """`sz.hmac_sha256` authenticates many messages under one key, matching the one-at-a-time result."""
 
-    seed_random_generators(seed_value)
-    key = get_random_string(length=key_length).encode()
-    messages = [get_random_string(length=(index * 37) % 512) for index in range(messages_count)]
+    key = get_random_string(rng, length=key_length).encode()
+    messages = [get_random_string(rng, length=(index * 37) % 512) for index in range(messages_count)]
     expected = [hmac.new(key, message.encode(), hashlib.sha256).digest() for message in messages]
 
     # Both a plain sequence and a `Strs`, whose tape is read in place
@@ -399,26 +384,24 @@ def test_hmac_sha256_kwargs():
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_bytesum(length, seed_value):
+def test_unit_backend_differential_bytesum(length: int, rng: Random):
     """`sz.bytesum` must agree across every backend and match a plain Python byte-sum oracle."""
-    for body in differential_bodies(length, seed_value):
+    for body in differential_bodies(length, rng):
         oracle = sum(body.encode())
         assert_backends_agree(run_across_backends(lambda body=body: sz.bytesum(body)), oracle=oracle)
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_hash(length, seed_value):
+def test_unit_backend_differential_hash(length: int, seed: StreamKey, rng: Random):
     """`sz.hash` has no Python-native oracle, so every backend must at least agree with every other one,
     for the standalone function and the `Str` method alike, across random/tiled/all-same-char bodies."""
-    for body in differential_bodies(length, seed_value):
-        assert_backends_agree(run_across_backends(lambda body=body: sz.hash(body, seed=seed_value)))
-        assert_backends_agree(run_across_backends(lambda body=body: Str(body).hash(seed=seed_value)))
+    for body in differential_bodies(length, rng):
+        assert_backends_agree(run_across_backends(lambda body=body: sz.hash(body, seed=seed)))
+        assert_backends_agree(run_across_backends(lambda body=body: Str(body).hash(seed=seed)))
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_hash_multiseed(length):
+def test_unit_backend_differential_hash_multiseed(length: int, rng: Random):
     """`sz.hash_multiseed` (both the tuple-returning and output-buffer forms) must agree across every
     backend, for random/tiled/all-same-char bodies."""
     from array import array
@@ -426,7 +409,7 @@ def test_unit_backend_differential_hash_multiseed(length):
     seeds_list = [0, 1, 42, 314159, 7, 8, 9, 10, 11]  # > 4 to exercise the 4-wide tail handling
     seeds = array("Q", seeds_list)
 
-    for body in differential_bodies(length, seed_value=length):
+    for body in differential_bodies(length, rng):
         assert_backends_agree(run_across_backends(lambda body=body: sz.hash_multiseed(body, seeds)))
 
         def filled(body=body):
@@ -452,13 +435,11 @@ def test_unit_backend_differential_fill_random(length, nonce):
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_sha256(length, seed_value):
+def test_unit_backend_differential_sha256(length: int, rng: Random):
     """`sz.sha256`, the `Str.sha256()` method, and the incremental `sz.Sha256` class must all match
     `hashlib.sha256` under every individual backend config, not merely agree with each other, since
     SHA-256 has a fully independent, standard-library oracle."""
-    seed_random_generators(seed_value)
-    text = get_random_string(length=length)
+    text = get_random_string(rng, length=length)
     expected_digest = hashlib.sha256(text.encode()).digest()
     expected_hex = expected_digest.hex()
 
@@ -475,12 +456,10 @@ def test_unit_backend_differential_sha256(length, seed_value):
 
 
 @pytest.mark.parametrize("length", [0, 1, 31, 32, 33, 64, 65, 128, 257, 1024])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_sha256_chunked(length, seed_value):
+def test_unit_backend_differential_sha256_chunked(length: int, rng: Random):
     """Chunked `sz.Sha256.update()`, `.reset()`, and `.copy()` must reach the oracle digest under every
     backend config, exercising the streaming state machine rather than just the one-shot entry point."""
-    seed_random_generators(seed_value)
-    text = get_random_string(length=length)
+    text = get_random_string(rng, length=length)
     expected_digest = hashlib.sha256(text.encode()).digest()
 
     for config in capability_sweep():

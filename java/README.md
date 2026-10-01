@@ -77,7 +77,7 @@ for (int segment = 0; segment < count; segment++) {
 ```
 
 Codepoints count scalar values, not bytes or UTF-16 chars.
-Segmentation *tiles* the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
+Segmentation _tiles_ the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
 
 ```java
 StringZilla.countRunes("你好世界".getBytes(UTF_8)); // 4 codepoints
@@ -153,7 +153,7 @@ Every operation accepts an on-heap `byte[]` or any `MemorySegment`.
 Whether the input is read in place or copied once is determined by what the native kernel returns, not by the binding.
 
 Value- and offset-returning operations are always zero-copy, on heap or off-heap.
-They are linked with the FFM *critical* option, so the JVM lets the kernel read the array in place with no thread-state transition.
+They are linked with the FFM _critical_ option, so the JVM lets the kernel read the array in place with no thread-state transition.
 This covers `hash`, `byteSum`, `equal`, `compare`, and the `Hasher`; codepoints (`runes`, `decode`); segmentation (`words`, `graphemes`, `sentences`, `lineBreaks`) and the separator-token splits (`splitNewlines`, `splitWhitespaces`, `splitDelimiters`); `caseFold` and `normalize`; and `argSort` / `intersect`.
 
 Pointer-returning search copies an on-heap input once.

@@ -65,12 +65,13 @@ provider = "scikit_build_core.metadata.regex"
 regex = "(?P<value>.+)"
 
 [tool.pytest.ini_options]
-minversion = "6.0"
-# `test/` is a package (test/__init__.py) so the prefix-less modules namespace as `test.string` etc. and
-# never shadow stdlib modules (e.g. `string`); `python_files` collects the `test_`-free filenames.
-addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
-markers = ["thread_unsafe: runs on one thread under pytest-run-parallel's --parallel-threads"]
+# `test/` is flat modules that pytest imports by basename, so none may share a stdlib module's name, like
+# `string`; `python_files` collects the `test_`-free filenames.
+# `-p no:randomly` keeps `<PROJECT>_SEED` in charge wherever pytest-randomly happens to be installed.
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config", "-p", "no:randomly"]
 filterwarnings = ["error"]
+markers = ["thread_unsafe: runs on one thread under pytest-run-parallel's --parallel-threads"]
+minversion = "8.0"
 python_files = ["*.py"]
 testpaths = ["test"]
 xfail_strict = true
@@ -79,22 +80,26 @@ xfail_strict = true
 # groups, so they are development tooling: never published in wheel metadata, never installed by anyone
 # consuming StringZilla, and reachable only through `pip install --group <name>`, which the CI jobs run
 # rather than repeating the names. Rust spells the same idea as `[dev-dependencies]` in `Cargo.toml`.
-# Deliberately kept out of `[tool.cibuildwheel] test-requires`, which installs on QEMU-emulated
+# `test-oracles` stays out of `[tool.cibuildwheel] test-groups`, which installs on QEMU-emulated
 # aarch64, ppc64le and s390x, where a missing wheel means compiling the oracle's own C under emulation.
 # `pycryptodome` and `pyahocorasick` each ship their own C, so they are independent witnesses to the
 # OpenSSL and the multi-pattern walk the C++ suite already compares against. `cupy` is not an oracle but
 # a producer, sourcing `__cuda_array_interface__` buffers that are not the module's own `unified_array`.
 [dependency-groups]
-tests-oracles = ["pycryptodome", "pyahocorasick"]
-tests-cuda = ["cupy-cuda12x"]
+lint = ["ruff>=0.15.8"]
+test = ["numpy>=1.21", "pytest>=8", "pytest-repeat>=0.9.4"]
+# Free-threaded builds only report a race if several threads actually enter the extension at once.
+test-parallel = ["pytest-run-parallel>=0.7"]
+test-oracles = ["pycryptodome", "pyahocorasick", "pyarrow"]
+test-cuda = ["cupy-cuda12x"]
 
 [tool.black]
 line-length = 120
 
 [tool.cibuildwheel]
 build-verbosity = 0
-test-command = "python -m pytest -s -x {project}/test"
-test-requires = ["numpy", "pytest", "pytest-repeat", "pytest-run-parallel"]
+test-command = "python -X faulthandler -m pytest -x {project}/test"
+test-groups = ["test"]
 
 # We need to build for all platforms:
 # - on Linux: x86_64, aarch64, i686, ppc64le, s390x
@@ -171,12 +176,22 @@ select = "*-macos*"
 # Doctests sit out, asserting against a process-wide stdout capture that threads interleave.
 [[tool.cibuildwheel.overrides]]
 select = "cp3*t-*"
-test-command = "python -m pytest -s -x --parallel-threads=4 --ignore={project}/test/doctests.py {project}/test"
+test-command = "python -X faulthandler -m pytest -x --parallel-threads=4 --ignore={project}/test/doctests.py {project}/test"
+test-groups = ["test", "test-parallel"]
 
 [tool.ruff]
 extend-select = [
   "E", # pycodestyle errors
   "F", # pyflakes
+  "I", # isort
+  "TID", # flake8-tidy-imports
 ]
 line-length = 120
 target-version = "py310"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["stringzilla"]
+combine-as-imports = true

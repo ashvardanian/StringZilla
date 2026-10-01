@@ -39,10 +39,9 @@
 
 #include <fmt/format.h>
 
-#include "harness.hpp" // `read_test_environment`, `run_test`
+#include "harness.hpp" // `read_settings`, `run_test`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+using namespace ashvardanian::stringzilla::test;
 
 /*  Instantiate all the templates to make the symbols visible and also check for weird compilation
  *  errors on uncommon paths. */
@@ -61,7 +60,11 @@ template class std::unordered_map<sz::string_t, int>;
 template class std::vector<sz::string_view_t>;
 template class std::map<sz::string_view_t, int>;
 template class std::unordered_map<sz::string_view_t, int>;
+#endif // !STRINGZILLA_HEADER_ONLY
 
+namespace ashvardanian::stringzilla::test {
+
+#if !STRINGZILLA_HEADER_ONLY
 /** The CPU device answers as the C queries do and prepares its own threads, while every kind
  *  refuses the ordinal past its last device and a GPU refuses to configure a CPU thread. */
 void test_device_unit() {
@@ -207,133 +210,136 @@ void test_find_kernel_unit() {
     }
 }
 
+} // namespace ashvardanian::stringzilla::test
+
 int main(int, char const **argv) {
-    test_environment_t const environment = read_test_environment(argv[0]);
-    install_test_signal_handlers(); // Backtrace on fatal signals + line-buffered stdout for crash localization.
-    log_environment();
-    print_test_environment(environment);
+    install_test_signal_handlers();
+    environment_t const env {read_settings(argv[0]), probe_machine()};
+    print(env.machine);
+    print(env.settings);
 
     std::size_t failures = 0;
-    failures += run_test(environment, "test_find_kernel_unit", test_find_kernel_unit);
+    failures += run_test(env.settings, "test_find_kernel_unit", test_find_kernel_unit);
 
 #if STRINGZILLA_HEADER_ONLY
-    failures += run_test(environment, "test_dispatch_stubs_unit", test_dispatch_stubs_unit);
+    failures += run_test(env.settings, "test_dispatch_stubs_unit", test_dispatch_stubs_unit);
 #else
-    failures += run_test(environment, "test_device_unit", test_device_unit);
-    failures += run_test(environment, "test_arithmetic_unit", test_arithmetic_unit);
-    failures += run_test(environment, "test_sequence_unit", test_sequence_unit);
-    failures += run_test(environment, "test_strings_tape_assign_unit", test_strings_tape_assign_unit);
-    failures += run_test(environment, "test_strings_tape_overflow_unit", test_strings_tape_overflow_unit);
-    failures += run_test(environment, "test_allocator_unit", test_allocator_unit);
-    failures += run_test(environment, "test_byteset_unit", test_byteset_unit);
+    failures += run_test(env.settings, "test_device_unit", test_device_unit);
+    failures += run_test(env.settings, "test_arithmetic_unit", test_arithmetic_unit);
+    failures += run_test(env.settings, "test_sequence_unit", test_sequence_unit);
+    failures += run_test(env.settings, "test_strings_tape_assign_unit", test_strings_tape_assign_unit);
+    failures += run_test(env.settings, "test_strings_tape_overflow_unit", test_strings_tape_overflow_unit);
+    failures += run_test(env.settings, "test_allocator_unit", test_allocator_unit);
+    failures += run_test(env.settings, "test_byteset_unit", test_byteset_unit);
 
-    failures += run_test(environment, "test_hash_unit", test_hash_unit);
-    failures += run_test(environment, "test_hash_all", test_hash_all);
-    failures += run_test(environment, "test_hash_multiseed_all", test_hash_multiseed_all);
-    failures += run_test(environment, "test_hash_safety", test_hash_safety);
+    failures += run_test(env.settings, "test_hash_unit", test_hash_unit);
+    failures += run_test(env.settings, "test_hash_all", test_hash_all);
+    failures += run_test(env.settings, "test_hash_multiseed_all", test_hash_multiseed_all);
+    failures += run_test(env.settings, "test_hash_safety", test_hash_safety);
 
-    failures += run_test(environment, "test_cipher_unit", test_cipher_unit);
-    failures += run_test(environment, "test_cipher_safety", test_cipher_safety);
-    failures += run_test(environment, "test_cipher_all", test_cipher_all);
+    failures += run_test(env.settings, "test_cipher_unit", test_cipher_unit);
+    failures += run_test(env.settings, "test_cipher_safety", test_cipher_safety);
+    failures += run_test(env.settings, "test_cipher_all", test_cipher_all);
 
-    failures += run_test(environment, "test_sort_unit", test_sort_unit);
-    failures += run_test(environment, "test_sort_reference_equivalence", test_sort_reference_equivalence);
-    failures += run_test(environment, "test_sort_all", test_sort_all);
-    failures += run_test(environment, "test_sort_safety", test_sort_safety);
-    failures += run_test(environment, "test_intersect_unit", test_intersect_unit);
-    failures += run_test(environment, "test_intersect_equivalence", test_intersect_equivalence);
+    failures += run_test(env.settings, "test_sort_unit", test_sort_unit);
+    failures += run_test(env.settings, "test_sort_reference_equivalence", test_sort_reference_equivalence);
+    failures += run_test(env.settings, "test_sort_all", test_sort_all);
+    failures += run_test(env.settings, "test_sort_safety", test_sort_safety);
+    failures += run_test(env.settings, "test_intersect_unit", test_intersect_unit);
+    failures += run_test(env.settings, "test_intersect_equivalence", test_intersect_equivalence);
 
-    failures += run_test(environment, "test_levenshtein_unit", test_levenshtein_unit);
-    failures += run_test(environment, "test_levenshtein_all", test_levenshtein_all);
-    failures += run_test(environment, "test_levenshtein_safety", test_levenshtein_safety);
-    failures += run_test(environment, "test_overlap_unit", test_overlap_unit);
-    failures += run_test(environment, "test_overlap_all", test_overlap_all);
-    failures += run_test(environment, "test_overlap_safety", test_overlap_safety);
-    failures += run_test(environment, "test_substrings_unit", test_substrings_unit);
-    failures += run_test(environment, "test_substrings_all", test_substrings_all);
-    failures += run_test(environment, "test_substrings_safety", test_substrings_safety);
+    failures += run_test(env.settings, "test_levenshtein_unit", test_levenshtein_unit);
+    failures += run_test(env.settings, "test_levenshtein_all", test_levenshtein_all);
+    failures += run_test(env.settings, "test_levenshtein_safety", test_levenshtein_safety);
+    failures += run_test(env.settings, "test_overlap_unit", test_overlap_unit);
+    failures += run_test(env.settings, "test_overlap_all", test_overlap_all);
+    failures += run_test(env.settings, "test_overlap_safety", test_overlap_safety);
+    failures += run_test(env.settings, "test_substrings_unit", test_substrings_unit);
+    failures += run_test(env.settings, "test_substrings_all", test_substrings_all);
+    failures += run_test(env.settings, "test_substrings_safety", test_substrings_safety);
 
-    failures += run_test(environment, "test_ascii_unit<sz::string_t>", test_ascii_unit<sz::string_t>);
-    failures += run_test(environment, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
-    failures += run_test(environment, "test_memory_unit", test_memory_unit);
-    failures += run_test(environment, "test_memory_all", test_memory_all);
-    failures += run_test(environment, "test_memory_safety", test_memory_safety);
-    failures += run_test(environment, "test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
-    failures += run_test(environment, "test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
-    failures += run_test(environment, "test_stl_reads_unit<sz::string_view_t>", test_stl_reads_unit<sz::string_view_t>);
-    failures += run_test(environment, "test_stl_reads_unit<sz::string_t>", test_stl_reads_unit<sz::string_t>);
-    failures += run_test(environment, "test_stl_updates_unit<std::string>", test_stl_updates_unit<std::string>);
-    failures += run_test(environment, "test_stl_updates_unit<sz::string_t>", test_stl_updates_unit<sz::string_t>);
-    failures += run_test(environment, "test_stl_conversions_unit", test_stl_conversions_unit);
-    failures += run_test(environment, "test_stl_containers_unit", test_stl_containers_unit);
-    failures += run_test(environment, "test_extensions_reads_unit<sz::string_view_t>",
+    failures += run_test(env.settings, "test_ascii_unit<sz::string_t>", test_ascii_unit<sz::string_t>);
+    failures += run_test(env.settings, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
+    failures += run_test(env.settings, "test_memory_unit", test_memory_unit);
+    failures += run_test(env.settings, "test_memory_all", test_memory_all);
+    failures += run_test(env.settings, "test_memory_safety", test_memory_safety);
+    failures += run_test(env.settings, "test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
+    failures += run_test(env.settings, "test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
+    failures += run_test(env.settings, "test_stl_reads_unit<sz::string_view_t>",
+                         test_stl_reads_unit<sz::string_view_t>);
+    failures += run_test(env.settings, "test_stl_reads_unit<sz::string_t>", test_stl_reads_unit<sz::string_t>);
+    failures += run_test(env.settings, "test_stl_updates_unit<std::string>", test_stl_updates_unit<std::string>);
+    failures += run_test(env.settings, "test_stl_updates_unit<sz::string_t>", test_stl_updates_unit<sz::string_t>);
+    failures += run_test(env.settings, "test_stl_conversions_unit", test_stl_conversions_unit);
+    failures += run_test(env.settings, "test_stl_containers_unit", test_stl_containers_unit);
+    failures += run_test(env.settings, "test_extensions_reads_unit<sz::string_view_t>",
                          test_extensions_reads_unit<sz::string_view_t>);
-    failures += run_test(environment, "test_extensions_reads_unit<sz::string_t>",
+    failures += run_test(env.settings, "test_extensions_reads_unit<sz::string_t>",
                          test_extensions_reads_unit<sz::string_t>);
-    failures += run_test(environment, "test_extensions_updates_unit", test_extensions_updates_unit);
-    failures += run_test(environment, "test_extensions_ranges_unit", test_extensions_ranges_unit);
-    failures += run_test(environment, "test_string_constructors_unit", test_string_constructors_unit);
-    failures += run_test(environment, "test_string_reserve_unit", test_string_reserve_unit);
-    failures += run_test(environment, "test_memory_stability_equivalence_1024",
+    failures += run_test(env.settings, "test_extensions_updates_unit", test_extensions_updates_unit);
+    failures += run_test(env.settings, "test_extensions_ranges_unit", test_extensions_ranges_unit);
+    failures += run_test(env.settings, "test_string_constructors_unit", test_string_constructors_unit);
+    failures += run_test(env.settings, "test_string_reserve_unit", test_string_reserve_unit);
+    failures += run_test(env.settings, "test_memory_stability_equivalence_1024",
                          [](test_context_t &context) { test_memory_stability_equivalence(context, 1024); });
-    failures += run_test(environment, "test_memory_stability_equivalence_14",
+    failures += run_test(env.settings, "test_memory_stability_equivalence_14",
                          [](test_context_t &context) { test_memory_stability_equivalence(context, 14); });
-    failures += run_test(environment, "test_string_updates_equivalence",
+    failures += run_test(env.settings, "test_string_updates_equivalence",
                          [](test_context_t &context) { test_string_updates_equivalence(context); }); // ! Defaulted
 
-    failures += run_test(environment, "test_compare_unit", test_compare_unit);
-    failures += run_test(environment, "test_find_unit", test_find_unit);
-    failures += run_test(environment, "test_find_all", test_find_all);
-    failures += run_test(environment, "test_find_safety", test_find_safety);
-    failures += run_test(environment, "test_lookup_equivalence",
+    failures += run_test(env.settings, "test_compare_unit", test_compare_unit);
+    failures += run_test(env.settings, "test_find_unit", test_find_unit);
+    failures += run_test(env.settings, "test_find_all", test_find_all);
+    failures += run_test(env.settings, "test_find_safety", test_find_safety);
+    failures += run_test(env.settings, "test_lookup_equivalence",
                          [](test_context_t &context) { test_lookup_equivalence(context); }); // ! Defaulted args
-    failures += run_test(environment, "test_find_misaligned_equivalence", test_find_misaligned_equivalence);
+    failures += run_test(env.settings, "test_find_misaligned_equivalence", test_find_misaligned_equivalence);
 
-    failures += run_test(environment, "test_utf8_runes_unit", test_utf8_runes_unit);
-    failures += run_test(environment, "test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);
-    failures += run_test(environment, "test_utf8_runes_safety", test_utf8_runes_safety);
-    failures += run_test(environment, "test_utf8_runes_all", test_utf8_runes_all);
-    failures += run_test(environment, "test_utf8_tokens_unit", test_utf8_tokens_unit);
-    failures += run_test(environment, "test_utf8_tokens_scripts_unit", test_utf8_tokens_scripts_unit);
-    failures += run_test(environment, "test_utf8_tokens_safety", test_utf8_tokens_safety);
-    failures += run_test(environment, "test_utf8_tokens_all", test_utf8_tokens_all);
-    failures += run_test(environment, "test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
-    failures += run_test(environment, "test_utf8_wordbreaks_rules", test_utf8_wordbreaks_rules);
-    failures += run_test(environment, "test_utf8_wordbreaks_safety", test_utf8_wordbreaks_safety);
-    failures += run_test(environment, "test_utf8_wordbreaks_all", test_utf8_wordbreaks_all);
-    failures += run_test(environment, "test_utf8_graphemes_unit", test_utf8_graphemes_unit);
-    failures += run_test(environment, "test_utf8_graphemes_rules", test_utf8_graphemes_rules);
-    failures += run_test(environment, "test_utf8_graphemes_safety", test_utf8_graphemes_safety);
-    failures += run_test(environment, "test_utf8_graphemes_all", test_utf8_graphemes_all);
-    failures += run_test(environment, "test_utf8_sentences_unit", test_utf8_sentences_unit);
-    failures += run_test(environment, "test_utf8_sentences_rules", test_utf8_sentences_rules);
-    failures += run_test(environment, "test_utf8_sentences_safety", test_utf8_sentences_safety);
-    failures += run_test(environment, "test_utf8_sentences_all", test_utf8_sentences_all);
-    failures += run_test(environment, "test_utf8_linebreaks_unit", test_utf8_linebreaks_unit);
-    failures += run_test(environment, "test_utf8_linebreaks_rules", test_utf8_linebreaks_rules);
-    failures += run_test(environment, "test_utf8_linebreaks_safety", test_utf8_linebreaks_safety);
-    failures += run_test(environment, "test_utf8_linebreaks_all", test_utf8_linebreaks_all);
-    failures += run_test(environment, "test_utf8_delimiters_unit", test_utf8_delimiters_unit);
-    failures += run_test(environment, "test_utf8_delimiters_safety", test_utf8_delimiters_safety);
-    failures += run_test(environment, "test_utf8_delimiters_all", test_utf8_delimiters_all);
+    failures += run_test(env.settings, "test_utf8_runes_unit", test_utf8_runes_unit);
+    failures += run_test(env.settings, "test_utf8_runes_scripts_unit", test_utf8_runes_scripts_unit);
+    failures += run_test(env.settings, "test_utf8_runes_safety", test_utf8_runes_safety);
+    failures += run_test(env.settings, "test_utf8_runes_all", test_utf8_runes_all);
+    failures += run_test(env.settings, "test_utf8_tokens_unit", test_utf8_tokens_unit);
+    failures += run_test(env.settings, "test_utf8_tokens_scripts_unit", test_utf8_tokens_scripts_unit);
+    failures += run_test(env.settings, "test_utf8_tokens_safety", test_utf8_tokens_safety);
+    failures += run_test(env.settings, "test_utf8_tokens_all", test_utf8_tokens_all);
+    failures += run_test(env.settings, "test_utf8_wordbreaks_unit", test_utf8_wordbreaks_unit);
+    failures += run_test(env.settings, "test_utf8_wordbreaks_rules", test_utf8_wordbreaks_rules);
+    failures += run_test(env.settings, "test_utf8_wordbreaks_safety", test_utf8_wordbreaks_safety);
+    failures += run_test(env.settings, "test_utf8_wordbreaks_all", test_utf8_wordbreaks_all);
+    failures += run_test(env.settings, "test_utf8_graphemes_unit", test_utf8_graphemes_unit);
+    failures += run_test(env.settings, "test_utf8_graphemes_rules", test_utf8_graphemes_rules);
+    failures += run_test(env.settings, "test_utf8_graphemes_safety", test_utf8_graphemes_safety);
+    failures += run_test(env.settings, "test_utf8_graphemes_all", test_utf8_graphemes_all);
+    failures += run_test(env.settings, "test_utf8_sentences_unit", test_utf8_sentences_unit);
+    failures += run_test(env.settings, "test_utf8_sentences_rules", test_utf8_sentences_rules);
+    failures += run_test(env.settings, "test_utf8_sentences_safety", test_utf8_sentences_safety);
+    failures += run_test(env.settings, "test_utf8_sentences_all", test_utf8_sentences_all);
+    failures += run_test(env.settings, "test_utf8_linebreaks_unit", test_utf8_linebreaks_unit);
+    failures += run_test(env.settings, "test_utf8_linebreaks_rules", test_utf8_linebreaks_rules);
+    failures += run_test(env.settings, "test_utf8_linebreaks_safety", test_utf8_linebreaks_safety);
+    failures += run_test(env.settings, "test_utf8_linebreaks_all", test_utf8_linebreaks_all);
+    failures += run_test(env.settings, "test_utf8_delimiters_unit", test_utf8_delimiters_unit);
+    failures += run_test(env.settings, "test_utf8_delimiters_safety", test_utf8_delimiters_safety);
+    failures += run_test(env.settings, "test_utf8_delimiters_all", test_utf8_delimiters_all);
 
-    failures += run_test(environment, "test_utf8_norm_unit", test_utf8_norm_unit);
-    failures += run_test(environment, "test_utf8_norm_safety", test_utf8_norm_safety);
-    failures += run_test(environment, "test_utf8_norm_all", test_utf8_norm_all);
-    failures += run_test(environment, "test_utf8_uncased_unit", test_utf8_uncased_unit);
-    failures += run_test(environment, "test_utf8_uncased_scripts_unit", test_utf8_uncased_scripts_unit);
-    failures += run_test(environment, "test_utf8_uncased_regressions_unit", test_utf8_uncased_regressions_unit);
-    failures += run_test(environment, "test_utf8_uncased_all", test_utf8_uncased_all);
-    failures += run_test(environment, "test_utf8_uncased_safety", test_utf8_uncased_safety);
+    failures += run_test(env.settings, "test_utf8_norm_unit", test_utf8_norm_unit);
+    failures += run_test(env.settings, "test_utf8_norm_safety", test_utf8_norm_safety);
+    failures += run_test(env.settings, "test_utf8_norm_all", test_utf8_norm_all);
+    failures += run_test(env.settings, "test_utf8_uncased_unit", test_utf8_uncased_unit);
+    failures += run_test(env.settings, "test_utf8_uncased_scripts_unit", test_utf8_uncased_scripts_unit);
+    failures += run_test(env.settings, "test_utf8_uncased_regressions_unit", test_utf8_uncased_regressions_unit);
+    failures += run_test(env.settings, "test_utf8_uncased_all", test_utf8_uncased_all);
+    failures += run_test(env.settings, "test_utf8_uncased_safety", test_utf8_uncased_safety);
 #endif // STRINGZILLA_HEADER_ONLY
 
-    failures += test_cross_serial(environment);
-    failures += test_cross_x8664(environment);
-    failures += test_cross_arm64(environment);
-    failures += test_cross_riscv64(environment);
-    failures += test_cross_loongarch64(environment);
-    failures += test_cross_ppc64(environment);
-    failures += test_cross_wasm(environment);
+    failures += test_cross_serial(env);
+    failures += test_cross_x8664(env);
+    failures += test_cross_arm64(env);
+    failures += test_cross_riscv64(env);
+    failures += test_cross_loongarch64(env);
+    failures += test_cross_ppc64(env);
+    failures += test_cross_wasm(env);
 
     if (failures != 0) {
         fmt::println(stderr, "\n{} test(s) failed.", failures);

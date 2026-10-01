@@ -12,12 +12,6 @@
  *  kernels take over. Every capability's kernels are timed against the serial ones by the
  *  `cross_<arch>.cpp` files, through the adapters in `cross.hpp`.
  *
- *  Use the following environment variables to control the benchmark:
- *
- *  - @c STRINGWARS_DATASET : path to the input dataset, used to size the pool of messages.
- *  - @c STRINGWARS_FILTER : regular expression selecting which kernels to run, like @c aes256.
- *  - @c STRINGWARS_MAX_SECONDS : seconds per kernel.
- *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_cpu_bench
@@ -31,31 +25,29 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
+namespace ashvardanian::stringzilla::bench {
 
-namespace {
-
-void bench_cipher_ctr(environment_t const &env) {
+void bench_cipher_ctr(environment_t const &env, corpus_t const &corpus) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
         std::string const suffix = ":" + std::to_string(message_bytes);
         using best_t = ctr_from_sz<cpu_best<sz_aes256_key_init_best>, cpu_best<sz_aes256_ctr_xor_best>>;
-        bench_unary(env, "sz_aes256_ctr_xor_best" + suffix, best_t {message_bytes, pool, target}).log();
+        print(bench_unary(env, corpus, "sz_aes256_ctr_xor_best" + suffix, best_t {message_bytes, pool, target}));
     }
 }
 
-void bench_cipher_gcm(environment_t const &env) {
+void bench_cipher_gcm(environment_t const &env, corpus_t const &corpus) {
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
         std::string const suffix = ":" + std::to_string(message_bytes);
         using best_t = gcm_from_sz<cpu_best<sz_aes256_gcm_key_init_best>, cpu_best<sz_aes256_gcm_encrypt_best>>;
-        bench_unary(env, "sz_aes256_gcm_encrypt_best" + suffix, best_t {message_bytes, pool, target}).log();
+        print(bench_unary(env, corpus, "sz_aes256_gcm_encrypt_best" + suffix, best_t {message_bytes, pool, target}));
     }
 }
 
-void bench_cipher_stream(environment_t const &env) {
+void bench_cipher_stream(environment_t const &env, corpus_t const &corpus) {
     std::size_t const message_bytes = 4096;
     for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
         std::vector<char> pool = cipher_pool();
@@ -65,16 +57,17 @@ void bench_cipher_stream(environment_t const &env) {
             gcm_stream_from_sz<cpu_best<sz_aes256_gcm_key_init_best>, cpu_best<sz_aes256_gcm_encryptor_init_best>,
                                cpu_best<sz_aes256_gcm_encryptor_update_best>,
                                cpu_best<sz_aes256_gcm_encryptor_digest_best>>;
-        bench_unary(env, "sz_aes256_gcm_stream_best" + suffix, best_t {message_bytes, chunk_bytes, pool, target}).log();
+        print(bench_unary(env, corpus, "sz_aes256_gcm_stream_best" + suffix,
+                          best_t {message_bytes, chunk_bytes, pool, target}));
     }
 }
 
-} // namespace
-
-void bench_cipher(corpora_t &corpora) {
-    environment_t const &env = corpora.lines();
+void bench_cipher(environment_t &env) {
+    corpus_t const &corpus = env.corpora.lines();
     fmt::println("Starting AES-256 cipher benchmarks...");
-    bench_cipher_ctr(env);
-    bench_cipher_gcm(env);
-    bench_cipher_stream(env);
+    bench_cipher_ctr(env, corpus);
+    bench_cipher_gcm(env, corpus);
+    bench_cipher_stream(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

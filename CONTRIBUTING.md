@@ -36,7 +36,7 @@ For minimal test coverage, check the following scripts:
 
 - `test/main_cpu.cpp` - runs the family suites over the dispatch points and the C++ wrappers, and `test/cross_<arch>.cpp` hold every capability's kernels to the serial ones, built as `stringzilla_cpu_test`, `stringzilla_cpu_shared_test` and `stringzilla_cpu_header_test`.
 - `test/main_cuda.cu`, `test/main_rocm.hip` and `test/main_metal.cpp` - each GPU vendor's kernels against the serial answers, through `test/cross_simt.cuh` and `test/cross_metal.cpp`, built as `stringzilla_cuda_test`, `stringzilla_rocm_test` and `stringzilla_metal_test`.
-- `test/*.py` - tests the Python API against native strings, split per kernel family - `string.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `helpers.py` and `utf8_helpers.py`.
+- `test/*.py` - tests the Python API against native strings, split per kernel family - `string_types.py`, `find.py`, `sort.py`, `hash.py`, `cipher.py`, `uncased.py`, `utf8_*.py` - with shared helpers in `base.py` and `utf8_helpers.py`.
 - `test/main.js`.
 
 At the C++ level all benchmarks also validate the results against the serial kernels and the STL baselines, serving as tests on real-world data.
@@ -99,16 +99,16 @@ Every all-caps name starts with the full project name, `STRINGZILLA_`.
 A trailing `_` marks a name as internal: it may change in any release, and nothing outside this repository may define or test it.
 A name without it is a public contract, either a switch you may set or a value you may read.
 
-| Family                            | Form                           | Example                              |
-| :-------------------------------- | :----------------------------- | :----------------------------------- |
-| ISA tier, backend, GPU generation | `STRINGZILLA_TARGET_<TIER>`    | `STRINGZILLA_TARGET_HASWELL`         |
-| Build mode                        | `STRINGZILLA_HEADER_ONLY`      |                                      |
-| Optional feature                  | `STRINGZILLA_WITH_<FEATURE>`   | `STRINGZILLA_WITH_LIBC`              |
-| GPU runtime the build links       | `STRINGZILLA_WITH_<RUNTIME>`   | `STRINGZILLA_WITH_METAL`             |
-| Permission for a liberty          | `STRINGZILLA_ALLOW_<LIBERTY>`  | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
-| Architecture fact                 | `STRINGZILLA_ARCH_<ARCH>_`     | `STRINGZILLA_ARCH_X8664_`            |
-| Operating-system fact             | `STRINGZILLA_OS_<OS>_`         | `STRINGZILLA_OS_LINUX_`              |
-| Toolchain fact                    | `STRINGZILLA_HAS_<FEATURE>_`   | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
+| Family                            | Form                          | Example                              |
+| :-------------------------------- | :---------------------------- | :----------------------------------- |
+| ISA tier, backend, GPU generation | `STRINGZILLA_TARGET_<TIER>`   | `STRINGZILLA_TARGET_HASWELL`         |
+| Build mode                        | `STRINGZILLA_HEADER_ONLY`     |                                      |
+| Optional feature                  | `STRINGZILLA_WITH_<FEATURE>`  | `STRINGZILLA_WITH_LIBC`              |
+| GPU runtime the build links       | `STRINGZILLA_WITH_<RUNTIME>`  | `STRINGZILLA_WITH_METAL`             |
+| Permission for a liberty          | `STRINGZILLA_ALLOW_<LIBERTY>` | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
+| Architecture fact                 | `STRINGZILLA_ARCH_<ARCH>_`    | `STRINGZILLA_ARCH_X8664_`            |
+| Operating-system fact             | `STRINGZILLA_OS_<OS>_`        | `STRINGZILLA_OS_LINUX_`              |
+| Toolchain fact                    | `STRINGZILLA_HAS_<FEATURE>_`  | `STRINGZILLA_HAS_CLANG_EVEX512_`     |
 
 Architectures are spelled as one token each, `X8664`, `X8632`, `ARM64`, `RISCV64`, `PPC64`, `LOONGARCH64`, `S390X` and `WASM`, and GPU platforms `CUDA` and `ROCM`.
 A GPU platform holds beside the host's architecture in both compiler passes, so it never follows a CPU architecture in an `#elif` chain.
@@ -230,7 +230,7 @@ Do not invent a fifth one - fold the new case into whichever tier already owns t
 | :-------- | :--------------------------------------------------------------------------------------- | :------------------ |
 | `_unit`   | hand-written literal expectations only                                                   | no                  |
 | `_rules`  | one motif per spec rule id, plus a coverage gate asserting every required rule was hit   | no                  |
-| `_safety` | survival only - in bounds, `bytes_consumed <= length`, no crash on malformed input       | yes                 |
+| `_safety` | survival only - in bounds, `bytes_consumed` ≤ `length`, no crash on malformed input      | yes                 |
 | `_all`    | the serial-vs-ISA differential, plus invariants that hold independently of any reference | yes                 |
 
 The load-bearing rule is that `_unit` may never derive its expectations by calling another backend.
@@ -243,16 +243,15 @@ Registration order is `_unit`, then `_rules` where it applies, then `_safety`, t
 
 The C++ and Python test suites support environment variables for reproducible stress testing and CI fuzzing:
 
-| Variable             | Description                                                                     |                         Default |
-| :------------------- | :------------------------------------------------------------------------------ | ------------------------------: |
-| `STRINGZILLA_SEED`   | Seed for the random number generator; `random` draws one, and the run prints it | C++ 42, Python 42, 0, 1, 314159 |
-| `STRINGZILLA_SCALE`  | Scales all baseline iteration counts proportionally                             |                             1.0 |
-| `STRINGZILLA_FILTER` | ECMAScript regex over C++ test names; only matches run                          |                           (all) |
+| Variable             | Default | Meaning                                                                      |
+| :------------------- | :------ | :--------------------------------------------------------------------------- |
+| `STRINGZILLA_SEED`   | `42`    | Seed for every random generator, or `random` to draw one, which a run prints |
+| `STRINGZILLA_SCALE`  | `1`     | Multiplier for every baseline iteration count, like `0.1` or `10`            |
+| `STRINGZILLA_FILTER` | unset   | ECMAScript regex over C++ test names or pytest node ids                      |
 
 A value that does not parse stops the run with a message naming the variable, in both suites.
 A `STRINGZILLA_FILTER` that does not compile as a regex matches as a plain substring.
-Python runs each seeded test once per seed, so a numeric `STRINGZILLA_SEED` narrows the four defaults to one, `random` adds a drawn fifth, and pytest prints the list in its header.
-Python ignores `STRINGZILLA_FILTER`; select its tests with `pytest -k` instead.
+Python matches `STRINGZILLA_FILTER` against pytest node ids, alongside `pytest -k`.
 
 Each test has its own baseline iteration count tuned for its operation complexity.
 `STRINGZILLA_SCALE` is the suite's only tuning knob, and two members of the `test_context_t` a test takes put work under it.
@@ -280,11 +279,9 @@ STRINGZILLA_SCALE=10 build_debug/stringzilla_cpu_test
 # Combine both for CI fuzzing
 STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 build_debug/stringzilla_cpu_test
 
-# Python tests also respect STRINGZILLA_SEED and STRINGZILLA_SCALE
-STRINGZILLA_SEED=random pytest test/ -v
-
-# Python ignores STRINGZILLA_FILTER, so select its tests by name instead
-pytest test/ -k utf8
+# Python tests also respect STRINGZILLA_SEED, STRINGZILLA_SCALE and STRINGZILLA_FILTER
+STRINGZILLA_SEED=random pytest test/
+STRINGZILLA_FILTER=utf8 pytest test/
 ```
 
 When a C++ test fails a `verify` or throws, the harness prints a `rerun:` line to stderr under the failure, naming the seed, a filter that selects only that test, and the binary, then moves on to the next test:
@@ -389,38 +386,39 @@ STRINGWARS_FILTER="sz_levenshtein_distances" STRINGWARS_DATASET="acgt_1k.txt" bu
 STRINGWARS_FILTER="sz_levenshtein_distances" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_cuda_bench
 
 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q[0-9]+:w" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_cuda_bench
-STRINGWARS_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_cuda_bench
+STRINGZILLA_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_cuda_bench
 ```
 
 The benchmark harness reads these environment variables:
 
-| Variable                     | Description                                                                                  |                Default |
-| :--------------------------- | :------------------------------------------------------------------------------------------- | ---------------------: |
-| `STRINGWARS_DATASET`         | Path to the input corpus                                                                     |               required |
-| `STRINGWARS_DATASET_LIMIT`   | Byte cap on the dataset read, e.g. `64mb`; `0` reads the whole file                          |         0 (whole file) |
-| `STRINGWARS_TOKENS`          | Tokenization mode: `file`, `lines`, `words`, or a positive integer for N-grams               |          per-benchmark |
-| `STRINGWARS_UNIQUE`          | `1` sorts the tokenized set and drops duplicates before benchmarking                         |                    off |
-| `STRINGWARS_FILTER`          | Regex over benchmark names; only matching backends run                                       |                  (all) |
-| `STRINGWARS_MAX_SECONDS`     | Whole seconds per benchmark (longer = steadier numbers)                                      |   1 debug / 10 release |
-| `STRINGWARS_SEED`            | A positive integer shuffles the tokens with that seed; unset keeps their order               |        unset, in order |
-| `STRINGWARS_BATCH`           | Comma-separated batch-size override, which skips the largest sweep                           |        backend default |
-| `STRINGWARS_STRESS`          | Run the correctness stress phase, `0` to skip while timing                                   |                     on |
-| `STRINGWARS_STRESS_DURATION` | Whole seconds per stress-test                                                                |   1 debug / 10 release |
-| `STRINGWARS_STRESS_DIR`      | Directory for stress-test failure logs                                                       |                   .tmp |
-| `STRINGWARS_STRESS_LIMIT`    | Number of stress-test failures tolerated before aborting                                     |                      1 |
+| Variable                        | Default     | Meaning                                                                              |
+| :------------------------------ | :---------- | :----------------------------------------------------------------------------------- |
+| `STRINGWARS_DATASET`            | per corpus  | Corpus file, instead of `leipzig1M.txt` or `xlsum.csv`                               |
+| `STRINGWARS_TOKENS`             | per corpus  | `file`, `lines`, `words`, or an N-gram length like `64`                              |
+| `STRINGWARS_BYTES`              | whole file  | Bytes read from the corpus, like `4096`, `64KB` or `1GB`; UTF-8 families read `64MB` |
+| `STRINGWARS_UNIQUE`             | `0`         | Sorts the tokens and drops duplicates first                                          |
+| `STRINGWARS_FILTER`             | unset       | ECMAScript regex over benchmark names, or a substring when it does not compile       |
+| `STRINGWARS_SEED`               | `42`        | Seed for every random generator, or `random` to draw one, which a run prints         |
+| `STRINGWARS_WARMUP`             | `1s`        | Untimed run before each benchmark, like `200ms` or `1s`                              |
+| `STRINGWARS_TIME_LIMIT`         | `10s`       | Timed run of each benchmark, like `200ms` or `10s`; `1s` in debug builds             |
+| `STRINGWARS_BATCH_PER_CORE`     | per backend | Candidates per call per CPU core, CUDA or ROCm multiprocessor, or Metal GPU core     |
+| `STRINGZILLA_STRESS`            | `1`         | Checks each backend against its baseline before timing                               |
+| `STRINGZILLA_STRESS_TIME_LIMIT` | time limit  | Time of each stress check, like `200ms` or `10s`                                     |
+| `STRINGZILLA_STRESS_DIR`        | `.tmp`      | Directory for stress-check failure logs                                              |
+| `STRINGZILLA_STRESS_LIMIT`      | `2`         | The stress-check failure that stops the run, so `1` stops at the first               |
 
 For a fast inner loop, scope to one backend on a small dataset, cap the dataset size, skip the stress phase, and use short runs:
 
 ```bash
 STRINGWARS_FILTER='sz_find' STRINGWARS_DATASET=leipzig1M.txt \
-    STRINGWARS_DATASET_LIMIT=65536 STRINGWARS_BATCH=1024 \
-    STRINGWARS_STRESS=0 STRINGWARS_MAX_SECONDS=1 \
+    STRINGWARS_BYTES=64KB STRINGWARS_BATCH_PER_CORE=1024 \
+    STRINGZILLA_STRESS=0 STRINGWARS_TIME_LIMIT=1s \
     build_release/stringzilla_cpu_bench
 ```
 
-Throughput is a time-bounded measurement: absolute GiB/s drifts ±10-15% on a loaded machine, while the ratio between two backends in the _same_ run stays stable.
-Compare A/B within one run; raise `STRINGWARS_MAX_SECONDS` and use a quiet machine when you need stable absolute numbers.
-The work itself is deterministic: without `STRINGWARS_SEED` the tokens keep their order, and a given seed always shuffles them the same way.
+Throughput is a time-bounded measurement: absolute GB/s drifts ±10-15% on a loaded machine, while the ratio between two backends in the _same_ run stays stable.
+Compare A/B within one run; raise `STRINGWARS_TIME_LIMIT` and use a quiet machine when you need stable absolute numbers.
+The work itself is deterministic: the tokens keep their file order, and a given `STRINGWARS_SEED` always draws the same samples from them.
 
 Each family's benchmarks live in an identically named file in the `bench/` directory, and their kernel adapters in `bench/cross.hpp`.
 All of them feature file-level documentation, and are designed to be self-explanatory.
@@ -710,9 +708,8 @@ uv run --no-project flake8 test/*.py --max-line-length=120
 For testing we use PyTest, which may not be installed on your system.
 
 ```bash
-uv pip install pytest pytest-repeat numpy pyarrow                # for repeated fuzzy tests
-uv run --no-project python -m pytest test/                       # default settings
-uv run --no-project python -m pytest test/ -s -x -p no:warnings  # custom settings
+uv pip install --group test --group test-oracles                # the suite, NumPy and the oracles
+uv run --no-project python -X faulthandler -m pytest -x          # how the CI runs it
 uv run --no-project python -m pytest test/doctests.py            # to run the docstring examples
 uv run --no-project python -c 'from stringzilla import hash as sz_hash; print(sz_hash("abc", 100))'
 ```
@@ -756,7 +753,7 @@ sudo $(which cibuildwheel) --platform linux
 ```
 
 To avoid QEMU issues on SVE, tell the PyTest suite that it runs emulated, and it masks out the SVE capabilities.
-`STRINGZILLA_IN_QEMU` set to anything but `0` or `false` turns that on:
+`STRINGZILLA_IN_QEMU=1` or `true` turns that on:
 
 ```bash
 STRINGZILLA_IN_QEMU=1 sudo $(which cibuildwheel) --platform linux --archs s390x

@@ -27,8 +27,7 @@
 
 #include "cross.hpp" // `check_utf8_uncased_unit_`, `check_utf8_uncased_equivalence_`, `check_utf8_uncased_safety_`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 /** The uncased dispatch points, in the shape of one backend's kernels. */
 static utf8_uncased_kernels_t const utf8_uncased_dispatched {
@@ -1013,3 +1012,5 @@ void test_utf8_uncased_all(test_context_t &context) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

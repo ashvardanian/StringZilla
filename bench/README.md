@@ -53,12 +53,8 @@ Each device gets its own executable, timing the engines' device-resident rounds 
 ## Configuration
 
 `harness.hpp` is the common harness, and `main.cpp` runs the families and then the cross files.
-All benchmarks read environment variables for configuration — dataset, backend filter, batch size, and stress mode — documented in each file's header.
 Each family runs on its own corpus: English words or lines of `leipzig1M.txt`, or multilingual lines of `xlsum.csv`, each loaded on first use.
-`STRINGWARS_DATASET` points every corpus at one file, and `STRINGWARS_DATASET_LIMIT` bounds the read, which keeps a short run short.
-`STRINGWARS_FILTER` is a regex over benchmark names, and every backend runs when it is unset.
-`STRINGWARS_SEED` shuffles the tokens when set to a positive integer, and leaves them in order when unset, which is the default.
-`CONTRIBUTING.md` lists the rest, with their defaults.
+The environment variables are listed with their defaults in the header of `harness.hpp` and in `CONTRIBUTING.md`.
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release

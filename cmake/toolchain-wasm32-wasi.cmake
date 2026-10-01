@@ -75,14 +75,14 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT
 )
 
 # Choose the runtime that CTest invokes on each cross binary. Datasets live in the source tree, so map it into the
-# guest via `--dir`; Wasmtime also inherits the environment the test presets set.
+# guest via `--dir`; both runtimes also inherit the environment the test presets set.
 set(STRINGZILLA_WASM_RUNTIME
     "wasmtime"
     CACHE STRING "WASM runtime used to run tests via CTest (wasmtime or wasmer)"
 )
 if (STRINGZILLA_WASM_RUNTIME STREQUAL "wasmer")
     find_program(STRINGZILLA_WASMER wasmer PATHS "$ENV{HOME}/.cargo/bin" "$ENV{HOME}/.wasmer/bin")
-    set(CMAKE_CROSSCOMPILING_EMULATOR "${STRINGZILLA_WASMER};run;--dir;${CMAKE_CURRENT_LIST_DIR}/..")
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${STRINGZILLA_WASMER};run;--forward-host-env;--dir;${CMAKE_CURRENT_LIST_DIR}/..")
 else ()
     find_program(STRINGZILLA_WASMTIME wasmtime PATHS "$ENV{HOME}/.wasmtime/bin")
     set(CMAKE_CROSSCOMPILING_EMULATOR

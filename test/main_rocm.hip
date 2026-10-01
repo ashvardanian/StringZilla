@@ -12,18 +12,20 @@
 
 #include <stringzilla/stringzilla.h> // Primary C API
 
-#include "harness.hpp" // `run_test`, `log_cuda_device`
+#include "harness.hpp" // `run_test`
 
 using namespace ashvardanian::stringzilla::test;
 
+namespace ashvardanian::stringzilla::test {
+
 /** Every ROCm kernel this build compiled, from @c test/cross_rocm.hip. */
-std::size_t test_cross_rocm(test_environment_t const &environment);
+std::size_t test_cross_rocm(environment_t const &env);
 
 /** The dispatching entry points, from @c test/cross_simt.cuh. */
-std::size_t test_cross_dispatch(test_environment_t const &environment);
+std::size_t test_cross_dispatch(environment_t const &env);
 
 /** The first device reports the ROCm baseline, and one past the last reports none. */
-static void test_rocm_capabilities_unit() {
+void test_rocm_capabilities_unit() {
     sz_size_t devices = 0;
     verify(sz_rocm_count_devices(&devices) == sz_success_k && devices != 0);
     sz_capability_t reported = 0;
@@ -32,17 +34,19 @@ static void test_rocm_capabilities_unit() {
     verify(sz_rocm_capabilities_detected(devices, &reported) == sz_missing_gpu_k);
 }
 
+} // namespace ashvardanian::stringzilla::test
+
 int main(int, char const **argv) {
-    test_environment_t const environment = read_test_environment(argv[0]);
+    environment_t const env {read_settings(argv[0]), probe_machine()};
     install_test_signal_handlers(); // Backtrace on fatal signals + line-buffered stdout for crash localization.
-    log_environment();
-    print_test_environment(environment);
-    if (!log_cuda_device()) return 0; // ? A build machine or CI runner need not have a device, so none is a skip
+    print(env.machine);
+    print(env.settings);
+    if (env.machine.device_name.empty()) return 0; // ? A build machine or CI runner need not have a device
 
     std::size_t failures = 0;
-    failures += run_test(environment, "test_rocm_capabilities_unit", test_rocm_capabilities_unit);
-    failures += test_cross_rocm(environment);
-    failures += test_cross_dispatch(environment);
+    failures += run_test(env.settings, "test_rocm_capabilities_unit", test_rocm_capabilities_unit);
+    failures += test_cross_rocm(env);
+    failures += test_cross_dispatch(env);
 
     if (failures != 0) {
         fmt::println(stderr, "\n{} test(s) failed.", failures);

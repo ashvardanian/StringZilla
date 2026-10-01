@@ -29,8 +29,7 @@
 #include "cross.hpp"   // `hash_backend_t`, `check_hash_equivalence_`, `check_sha256_unit_`
 #include "harness.hpp" // `randomize_string`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 #pragma region Helpers
 
@@ -159,3 +158,5 @@ void test_hash_multiseed_all(test_context_t &context) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

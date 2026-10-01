@@ -3,9 +3,10 @@
 //! File: rust/stringzilla/compare.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::cmp::Ordering;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Lexicographic byte-order comparison of two strings, SIMD-accelerated.
 ///

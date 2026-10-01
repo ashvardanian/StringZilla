@@ -24,6 +24,7 @@ import platform
 import sys
 
 import pytest
+
 import stringzilla as sz
 
 cpu = sz.Device.cpu()

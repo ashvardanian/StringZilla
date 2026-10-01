@@ -40,8 +40,7 @@
 #include "cross.hpp"   // `check_find_unit_`, `check_compare_unit_`, `find_backend_t`
 #include "harness.hpp" // `randomize_string`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 using sz::literals::operator""_bs; // for `sz::byteset_t`
 
@@ -399,3 +398,5 @@ void test_find_safety() { check_find_safety_(find_dispatched); }
 void test_find_all(test_context_t &context) { check_find_equivalence_(context, find_dispatched); }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

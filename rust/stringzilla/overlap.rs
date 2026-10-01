@@ -3,9 +3,10 @@
 //! File: rust/stringzilla/overlap.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
+
+use super::*;
 
 /// A forest of prepared query trees, probed by as many batches of candidates as a caller has.
 ///

@@ -5,9 +5,10 @@
 //! File: rust/stringzilla/find.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::marker::PhantomData;
+
+use super::*;
 
 /// Locates the first matching substring within `haystack` that equals `needle`.
 /// This function is similar to the `memmem()` function in LibC, but, unlike `strstr()`,

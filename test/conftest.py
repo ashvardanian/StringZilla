@@ -1,23 +1,24 @@
 """
 Shared pytest configuration for the StringZilla per-family test modules.
 
-Hosts the session-wide environment banner and the QEMU capability mask so every split test file
-(string.py, find.py, utf8_wordbreaks.py, …) inherits them without importing anything. The
-seeded-RNG helpers and `SEED_VALUES` live in `test.helpers` and are imported by each module directly.
+Hosts the settings header, the `STRINGZILLA_FILTER` hook, the `seed`/`rng` fixtures and the QEMU
+capability mask, so every split test file (string_types.py, find.py, utf8_wordbreaks.py, …) inherits them
+without importing anything. The settings themselves are parsed once into `SETTINGS` in `base`.
 
 File: test/conftest.py
 Author: Ash Vardanian
 Date: August 30, 2025
 """
 
-import os
+from __future__ import annotations
+
 import platform
+import random
 
 import pytest
-
-from test.helpers import (
-    ITERATIONS_MULTIPLIER,
-    SEED_VALUES,
+from base import (
+    SETTINGS,
+    StreamKey,
     UnicodeDataDownloadError,
     get_combining_classes,
     get_extended_pictographic,
@@ -34,6 +35,7 @@ from test.helpers import (
     get_word_break_test_cases,
     numpy_available,
     pyarrow_available,
+    stream_key,
 )
 
 import stringzilla as sz
@@ -44,43 +46,65 @@ if pyarrow_available:
     import pyarrow as pa
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Masks out SVE and SVE2 under QEMU, whose emulation of them is flaky."""
+    if not SETTINGS.in_qemu:
+        return
+    sve_like = sz.Capability.SVE | sz.Capability.SVE2 | sz.Capability.SVE2AES
+    current = sz.Device.cpu().capabilities_enabled()
+    sz.Device.cpu().capabilities_enable(current & ~sve_like)
+
+
 def pytest_report_header() -> list[str]:
-    """Prints the seeds and scale in pytest's own header, which shows without `-s`."""
-    header = [f"seeds: {SEED_VALUES}, pin one with STRINGZILLA_SEED"]
-    if ITERATIONS_MULTIPLIER != 1.0:
-        header.append(f"scale: {ITERATIONS_MULTIPLIER}")
-    return header
+    """What this run exercises, printed where pytest prints its own header, which shows without `-s`."""
+    return [
+        f"- Platform: {platform.platform()}",
+        f"- Architecture: {platform.machine()}",
+        f"- Python: {platform.python_version()}",
+        f"- StringZilla: {sz.__version__}",
+        f"- Capabilities: {sz.Device.cpu().capabilities_enabled()!r}",
+        f"- NumPy: {np.__version__ if numpy_available else 'none'}",
+        f"- PyArrow: {pa.__version__ if pyarrow_available else 'none'}",
+        f"- Seed: {SETTINGS.seed}",
+        f"- Filter: {SETTINGS.filter or 'none'}",
+        f"- Scale: {SETTINGS.scale}",
+        f"- In QEMU: {str(SETTINGS.in_qemu).lower()}",
+    ]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def log_test_environment():
-    """Automatically log environment info before running any tests."""
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Keeps only the tests whose node id `STRINGZILLA_FILTER` selects, on top of any `-k`.
 
-    print()  # New line for better readability
-    print("StringZilla Test Environment")
-    print(f"Platform: {platform.platform()}")
-    print(f"Architecture: {platform.machine()}")
-    print(f"Processor: {platform.processor()}")
-    print(f"Python: {platform.python_version()}")
-    print(f"StringZilla version: {sz.__version__}")
-    print(f"StringZilla capabilities: {sz.Device.cpu().capabilities_enabled()!r}")
-    print(f"NumPy available: {numpy_available}")
-    if numpy_available:
-        print(f"NumPy version: {np.__version__}")
-    print(f"PyArrow available: {pyarrow_available}")
-    if pyarrow_available:
-        print(f"PyArrow version: {pa.__version__}")
+    Tests drawing from `rng` or `np_rng` run on one thread, as `--parallel-threads` hands every thread the
+    same generator, and interleaved draws would not replay from the seed.
+    """
+    deselected = [item for item in items if not SETTINGS.selects(item.nodeid)]
+    if deselected:
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = [item for item in items if SETTINGS.selects(item.nodeid)]
+    for item in items:
+        if {"rng", "np_rng"} & set(getattr(item, "fixturenames", ())):
+            item.add_marker(pytest.mark.thread_unsafe(reason="draws from a generator its threads would share"))
 
-    # If QEMU is indicated via env (e.g., set by pyproject), mask out SVE/SVE2 to avoid emulation flakiness.
-    is_qemu = os.environ.get("STRINGZILLA_IN_QEMU", "") not in ("", "0", "false")
-    if is_qemu:
-        sve_like = sz.Capability.SVE | sz.Capability.SVE2 | sz.Capability.SVE2AES
-        current = sz.Device.cpu().capabilities_enabled()
-        if current & sve_like:
-            print(f"QEMU env detected; disabling {sve_like!r} for stability")
-            sz.Device.cpu().capabilities_enable(current & ~sve_like)
 
-    print()  # New line for better readability
+@pytest.fixture
+def seed(request: pytest.FixtureRequest) -> StreamKey:
+    """This test's key: the run seed mixed with its name, parameters and repeat step, as in C++."""
+    return stream_key(SETTINGS.seed, request.node.name)
+
+
+@pytest.fixture
+def rng(seed: StreamKey) -> random.Random:
+    """A generator private to this test, so a neighbour's draws cannot shift this one's."""
+    return random.Random(seed)
+
+
+@pytest.fixture
+def np_rng(seed: StreamKey) -> np.random.Generator:
+    """A NumPy generator private to this test, so a neighbour's draws cannot shift this one's."""
+    numpy = pytest.importorskip("numpy")
+    generator: np.random.Generator = numpy.random.default_rng(seed)
+    return generator
 
 
 # Unicode property tables and conformance corpora shared across the segmentation families,

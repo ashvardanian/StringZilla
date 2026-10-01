@@ -12,19 +12,6 @@
  *  Memory-bound: associative build and probe are latency-limited over the whole key set, so it
  *  reads the whole file by default.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
@@ -52,34 +39,34 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 /** Times lookups through the dispatch points against the default STL comparison and hashes. The
  *  containers fill lazily inside each run, so none of them can check another's lookups. */
-void bench_associative_lookups_with_different_simd_backends(environment_t const &env) {
+void bench_associative_lookups_with_different_simd_backends(environment_t const &env, corpus_t const &corpus) {
     using map_best_t = std::map<std::string_view, unsigned, less_from_sz<cpu_best<sz_order_best>>>;
     using umap_best_t = std::unordered_map<std::string_view, unsigned, hasher_from_sz<cpu_best<sz_hash_best>>,
                                            equal_to_from_sz<cpu_best<sz_equal_best>>>;
-    bench_result_t base_map, base_umap;
+    std::optional<row_t> base_map, base_umap;
     {
-        auto callable_map = callable_for_associative_lookups<map_best_t>(env);
-        base_map = bench_unary(env, "map<sz_order_best>::find", callable_no_op_t(), callable_map,
-                               callable_map.preprocessor())
-                       .log();
-        auto callable_umap = callable_for_associative_lookups<umap_best_t>(env);
-        base_umap = bench_unary(env, "unordered_map<sz_hash_best, sz_equal_best>::find", callable_no_op_t(),
-                                callable_umap, callable_umap.preprocessor())
-                        .log();
+        auto callable_map = callable_for_associative_lookups<map_best_t>(corpus);
+        base_map = bench_unary(env, corpus, "map<sz_order_best>::find", callable_no_op_t(), callable_map,
+                               callable_map.preprocessor());
+        print(base_map);
+        auto callable_umap = callable_for_associative_lookups<umap_best_t>(corpus);
+        base_umap = bench_unary(env, corpus, "unordered_map<sz_hash_best, sz_equal_best>::find", callable_no_op_t(),
+                                callable_umap, callable_umap.preprocessor());
+        print(base_umap);
     }
 
     {
-        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(env);
-        bench_unary(env, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()).log(base_map);
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(env);
-        bench_unary(env, "unordered_map::find", callable_no_op_t(), callable_umap, callable_umap.preprocessor())
-            .log(base_umap);
+        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(corpus);
+        print(bench_unary(env, corpus, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()),
+              baseline_of(base_map));
+        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(corpus);
+        print(bench_unary(env, corpus, "unordered_map::find", callable_no_op_t(), callable_umap,
+                          callable_umap.preprocessor()),
+              baseline_of(base_umap));
     }
 }
 
@@ -107,64 +94,69 @@ struct equal_to_through_std_t {
     }
 };
 
-void bench_associative_lookups_with_different_key_classes(environment_t const &env) {
+void bench_associative_lookups_with_different_key_classes(environment_t const &env, corpus_t const &corpus) {
 
     // First, benchmark the default STL equality comparison and hashes for `std::string_view` keys
-    bench_result_t base_map, base_umap;
+    std::optional<row_t> base_map, base_umap;
     {
-        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(env);
-        base_map = bench_unary(env, "map<std::string_view>::find", callable_no_op_t(), callable_map,
-                               callable_map.preprocessor())
-                       .log();
-        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(env);
-        base_umap = bench_unary(env, "unordered_map<std::string_view>::find", callable_no_op_t(), callable_umap,
-                                callable_umap.preprocessor())
-                        .log();
+        auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(corpus);
+        base_map = bench_unary(env, corpus, "map<std::string_view>::find", callable_no_op_t(), callable_map,
+                               callable_map.preprocessor());
+        print(base_map);
+        auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(corpus);
+        base_umap = bench_unary(env, corpus, "unordered_map<std::string_view>::find", callable_no_op_t(), callable_umap,
+                                callable_umap.preprocessor());
+        print(base_umap);
     }
 
     // Compare that to using `std::string` for keys
     {
-        auto callable_map = callable_for_associative_lookups<std::map<std::string, unsigned, less_through_std_t>>(env);
-        bench_unary(env, "map<std::string>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
+        auto callable_map = callable_for_associative_lookups<std::map<std::string, unsigned, less_through_std_t>>(
+            corpus);
+        print(bench_unary(env, corpus, "map<std::string>::find", callable_no_op_t(), callable_map,
+                          callable_map.preprocessor()),
+              baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
-            std::unordered_map<std::string, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
-        bench_unary(env, "unordered_map<std::string>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
-            .log(base_umap);
+            std::unordered_map<std::string, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
+        print(bench_unary(env, corpus, "unordered_map<std::string>::find", callable_no_op_t(), callable_umap,
+                          callable_umap.preprocessor()),
+              baseline_of(base_umap));
     }
 
     // Try using StringZilla's `sz::string_view_t` for keys
     {
         auto callable_map = callable_for_associative_lookups<std::map<sz::string_view_t, unsigned, less_through_std_t>>(
-            env);
-        bench_unary(env, "map<sz::string_view_t>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
+            corpus);
+        print(bench_unary(env, corpus, "map<sz::string_view_t>::find", callable_no_op_t(), callable_map,
+                          callable_map.preprocessor()),
+              baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
-            std::unordered_map<sz::string_view_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
-        bench_unary(env, "unordered_map<sz::string_view_t>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
-            .log(base_umap);
+            std::unordered_map<sz::string_view_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
+        print(bench_unary(env, corpus, "unordered_map<sz::string_view_t>::find", callable_no_op_t(), callable_umap,
+                          callable_umap.preprocessor()),
+              baseline_of(base_umap));
     }
 
     // Try StringZilla's "Small String Optimization" class - `sz::string_t`
     {
-        auto callable_map = callable_for_associative_lookups<std::map<sz::string_t, unsigned, less_through_std_t>>(env);
-        bench_unary(env, "map<sz::string_t>::find", callable_no_op_t(), callable_map, callable_map.preprocessor())
-            .log(base_map);
+        auto callable_map = callable_for_associative_lookups<std::map<sz::string_t, unsigned, less_through_std_t>>(
+            corpus);
+        print(bench_unary(env, corpus, "map<sz::string_t>::find", callable_no_op_t(), callable_map,
+                          callable_map.preprocessor()),
+              baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
-            std::unordered_map<sz::string_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(env);
-        bench_unary(env, "unordered_map<sz::string_t>::find", callable_no_op_t(), callable_umap,
-                    callable_umap.preprocessor())
-            .log(base_umap);
+            std::unordered_map<sz::string_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
+        print(bench_unary(env, corpus, "unordered_map<sz::string_t>::find", callable_no_op_t(), callable_umap,
+                          callable_umap.preprocessor()),
+              baseline_of(base_umap));
     }
 }
 
-} // namespace
-
-void bench_container(corpora_t &corpora) {
-    environment_t const &env = corpora.words();
+void bench_container(environment_t &env) {
+    corpus_t const &corpus = env.corpora.words();
     fmt::println("Starting associative STL container benchmarks...");
-    bench_associative_lookups_with_different_simd_backends(env);
-    bench_associative_lookups_with_different_key_classes(env);
+    bench_associative_lookups_with_different_simd_backends(env, corpus);
+    bench_associative_lookups_with_different_key_classes(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

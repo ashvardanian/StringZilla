@@ -25,24 +25,19 @@ Date: November 30, 2025
 """
 
 import itertools
-from random import Random, choice, randint
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
-    SEED_VALUES,
-    scale_iterations,
+from base import (
+    StreamKey,
     assert_backends_agree,
     malformed_utf8_corpus,
     representatives_by_class,
     run_across_backends,
-    seed_random_generators,
+    scale_iterations,
     vector_width_bracketing_strings,
 )
-from test.utf8_helpers import (
+from utf8_helpers import (
     adversarial_utf8_inputs,
     assert_segments_tile,
     byte_boundaries,
@@ -50,6 +45,9 @@ from test.utf8_helpers import (
     corpus_of_byte_length,
     window_seam_lengths,
 )
+
+import stringzilla as sz
+from stringzilla import Str
 
 # region Unit
 
@@ -174,21 +172,17 @@ def test_utf8_wordbreaks_str_method():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_word_safety(seed_value: int):
+def test_utf8_word_safety(rng: Random):
     """Adversarial-byte safety: the word iterator must survive the malformed battery and still tile its input
     (named malformed shapes, astral fixtures, all single bytes, every lead-class byte pair, random garbage)."""
-    rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
         assert_segments_tile(sz.utf8_wordbreaks(raw), raw)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_word_seam(seed_value: int):
+def test_utf8_word_seam(rng: Random):
     """Window-seam sweep: inputs sized to land on 63/64/65/127/128/129/… byte boundaries relative to the
     kernel's 64-byte SIMD window must still tile, catching segments dropped or duplicated at the seam.
     The WordBreakTest and uniseg differentials separately check bit-exact boundary placement."""
-    rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
         assert_segments_tile(sz.utf8_wordbreaks(raw), raw)
@@ -260,8 +254,7 @@ def test_utf8_word_class_adjacency(word_break_props):
 # region Oracles
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_word_boundary_differential_uniseg(seed_value: int):
+def test_utf8_word_boundary_differential_uniseg(rng: Random):
     """Differential fuzz against uniseg, an independent UAX-29 library.
 
     The official WordBreakTest.txt is finite (~1944 fixed cases) and does not cover the combinatorial
@@ -270,7 +263,6 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
     surfaces corner cases the fixed suite misses, the same gap that once let a 50%-conformant kernel
     pass CI. Any divergence is a real bug in one of the two implementations."""
     uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
-    seed_random_generators(seed_value)
 
     # Every WB category, including the historically-broken ones.
     palette = list(
@@ -310,7 +302,9 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
     # Up to ~100 codepoints so most cases cross the 64-byte window boundary (multi-window seam coverage). The
     # palette keeps ignorable runs short, so every run stays inside one window, the domain where the kernel must
     # match exactly. (Pathological >64-byte ignorable runs exceed any fixed window; serial-only, out of scope here.)
-    random_samples = ("".join(choice(palette) for _ in range(randint(1, 100))) for _ in range(scale_iterations(2000)))
+    random_samples = (
+        "".join(rng.choice(palette) for _ in range(rng.randint(1, 100))) for _ in range(scale_iterations(2000))
+    )
     for text in itertools.chain(seam_regressions, random_samples):
         sz_boundaries = boundaries(str(w) for w in sz.utf8_wordbreaks(text))
         ref_boundaries = boundaries(uniseg_wordbreak.words(text))
@@ -323,8 +317,7 @@ def test_utf8_word_boundary_differential_uniseg(seed_value: int):
     )
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_word_boundary_fuzz(seed_value: int):
+def test_utf8_word_boundary_fuzz(seed: StreamKey, rng: Random):
     """Fuzz test: compare the StringZilla word kernel against the independent ``uniseg`` UAX-29 implementation.
 
     An in-repo pure-Python TR29 reimplementation, ``baseline_word_boundaries``, is itself ~89% wrong vs
@@ -332,7 +325,6 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
     third-party reference and agrees with the official ``WordBreakTest.txt``.
     """
     uniseg_wordbreak = pytest.importorskip("uniseg.wordbreak", reason="uniseg not installed")
-    seed_random_generators(seed_value)
 
     # Generate random test strings. The charset deliberately spans every WB category, including the ones that a
     # naive kernel gets wrong: combining marks / Format / ZWJ (WB4, WB3c), emoji & symbol pictographs (WB3c),
@@ -356,8 +348,8 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
     )
 
     for _ in range(scale_iterations(200)):
-        length = randint(1, 100)
-        text = "".join(choice(test_chars) for _ in range(length))
+        length = rng.randint(1, 100)
+        text = "".join(rng.choice(test_chars) for _ in range(length))
 
         # Independent UAX-29 oracle (uniseg): cumulative byte lengths of its segments.
         expected_boundaries = [0]
@@ -370,21 +362,21 @@ def test_utf8_word_boundary_fuzz(seed_value: int):
             sz_boundaries.append(sz_boundaries[-1] + len(str(word).encode("utf-8")))
 
         # Exact boundary match required on every case.
-        assert (
-            sz_boundaries == expected_boundaries
-        ), "Word boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
-            seed_value, " ".join(f"{ord(c):04X}" for c in text), expected_boundaries, sz_boundaries
+        assert sz_boundaries == expected_boundaries, (
+            "Word boundary mismatch (seed {}):\n  text cps: {}\n  expected: {}\n  got:      {}".format(
+                seed, " ".join(f"{ord(c):04X}" for c in text), expected_boundaries, sz_boundaries
+            )
         )
 
 
 def test_utf8_wordbreaks_prose():
     """Realistic multi-script paragraphs: wordbreak count matches the uniseg UAX-29 oracle; segments tile."""
-    from test.utf8_helpers import (
-        PROSE_HOTEL_REVIEW,
-        PROSE_NEWS_LEDE,
+    from utf8_helpers import (
         PROSE_CONCERT_POST,
-        PROSE_RTL_SCRIPTS,
+        PROSE_HOTEL_REVIEW,
         PROSE_MICRO_APOSTROPHE,
+        PROSE_NEWS_LEDE,
+        PROSE_RTL_SCRIPTS,
         assert_segments_tile,
     )
 

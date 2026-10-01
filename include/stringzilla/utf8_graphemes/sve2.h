@@ -125,7 +125,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
     sz_cptr_t text, sz_size_t length,                 //
     sz_size_t *cluster_lengths, sz_size_t clusters_capacity) {
 
-    // Graviton 5 at 128 bits: serial leads each corpus, mixed 185 vs 101 MiB/s, Chinese 298 vs 106.
+    // Graviton 5 at 128 bits: serial leads each corpus, mixed 185 vs 101 MB/s, Chinese 298 vs 106.
     if (svcntb() <= 16) return sz_utf8_graphemes_serial_(text, length, cluster_lengths, clusters_capacity);
 
     sz_size_t clusters = 0;

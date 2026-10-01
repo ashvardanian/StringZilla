@@ -36,8 +36,7 @@
 
 #include "cross.hpp" // `check_utf8_runes_unit_`, `utf8_runes_backend_t`, `random_valid_utf8_`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 
 /** The dispatch points in the shape of a codepoint backend. */
@@ -345,3 +344,5 @@ void test_utf8_runes_all(test_context_t &context) {
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

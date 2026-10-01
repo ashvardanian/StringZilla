@@ -27,21 +27,17 @@ import unicodedata
 from random import Random
 
 import pytest
-
-import stringzilla as sz
-
-from test.helpers import (
-    vector_width_bracketing_strings,
-    SEED_VALUES,
-    scale_iterations,
-    seed_random_generators,
-    run_across_backends,
+from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
+    run_across_backends,
+    scale_iterations,
+    vector_width_bracketing_strings,
 )
-from test.utf8_helpers import combining_scrambles, icu_normalizer
+from utf8_helpers import combining_scrambles, icu_normalizer
 
+import stringzilla as sz
 
 # region Unit
 
@@ -179,12 +175,10 @@ def test_utf8_norm_official_conformance(normalization_cases):
     )
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_norm_canonical_ordering(seed_value: int, combining_classes):
+def test_utf8_norm_canonical_ordering(rng: Random, combining_classes):
     """Independent canonical-ordering invariant: within each combining run, NFD output must order marks by
     non-decreasing Canonical_Combining_Class. Checked over random non-canonical combining scrambles, using the
     CCC table directly and needing no external normalizer."""
-    rng = Random(seed_value)
     for text in combining_scrambles(combining_classes, rng, scale_iterations(300)):
         normalized = sz.utf8_norm(text, "NFD").decode("utf-8")
         previous_class = 0
@@ -260,13 +254,11 @@ def test_utf8_norm_hangul_syllables(form: str):
 
 
 @pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_norm_random_sequences_icu(form: str, seed_value: int):
+def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
     """Multi-codepoint normalization vs ICU: random base-letter + combining-mark sequences exercise composition
     and canonical ordering across codepoint boundaries, which the exhaustive single-codepoint sweep cannot reach."""
     icu = pytest.importorskip("icu", reason="PyICU not installed")  # noqa: F841
     normalize = icu_normalizer(form)
-    rng = Random(seed_value)
 
     # Bases + combining marks all predate Unicode 15.1, so StringZilla and any modern ICU agree on them.
     bases = "aeiounAEIOUNcsz"
@@ -288,11 +280,11 @@ def test_utf8_norm_random_sequences_icu(form: str, seed_value: int):
 
 def test_utf8_norm_prose():
     """Realistic paragraphs normalize bit-identically to ICU across all four forms; NFD content is detected."""
-    from test.utf8_helpers import (
-        PROSE_HOTEL_REVIEW,
-        PROSE_SCIENCE_ABSTRACT,
+    from utf8_helpers import (
         PROSE_DEVANAGARI_TIP,
+        PROSE_HOTEL_REVIEW,
         PROSE_RTL_SCRIPTS,
+        PROSE_SCIENCE_ABSTRACT,
         icu_normalizer,
     )
 
@@ -344,11 +336,9 @@ def test_utf8_norm_backend_differential_malformed(raw, form):
 
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_norm_backend_differential_random(seed_value, form):
+def test_utf8_norm_backend_differential_random(rng: Random, form):
     """Random ASCII corpora must normalize identically across every SIMD backend."""
-    seed_random_generators(seed_value)
-    text = get_random_string()
+    text = get_random_string(rng)
     results = run_across_backends(lambda: sz.utf8_norm(text, form))
     assert_backends_agree(results, format_inputs=lambda: f"{text!r} form={form}")
 

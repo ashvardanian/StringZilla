@@ -7,7 +7,7 @@
  *  Times the case-folding dispatch points over the multilingual lines. Every capability's kernels
  *  are timed and validated against the serial ones by the `cross_<arch>.cpp` files.
  *
- *  Compute-bound: case-folded search is table- and branch-heavy per codepoint, so a 64 MiB slice
+ *  Compute-bound: case-folded search is table- and branch-heavy per codepoint, so a 64 MB slice
  *  exercises every path.
  *
  *  Benchmarks include:
@@ -19,24 +19,6 @@
  *  @b sz_utf8_* iteration and segmentation family: codepoint counting, Nth-codepoint, newline and
  *  whitespace scanning, UAX-29 word, grapheme and sentence boundaries, UAX-14 line breaks, and
  *  transcoding between UTFs.
- *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *  - `STRINGWARS_UNIQUE=1` : Deduplicates tokens, sorting the set and dropping duplicates first.
  *
  *  Here are a few build & run commands:
  *
@@ -54,33 +36,29 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
+namespace ashvardanian::stringzilla::bench {
 
-namespace {
-
-void bench_utf8_uncased_fold(environment_t const &env) {
-    bench_unary(env, "sz_utf8_uncased_fold_best", utf8_uncased_fold_from_sz<cpu_best<sz_utf8_uncased_fold_best>> {env})
-        .log();
+void bench_utf8_uncased_fold(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_uncased_fold_best",
+                      utf8_uncased_fold_from_sz<cpu_best<sz_utf8_uncased_fold_best>> {corpus}));
 }
 
-void bench_utf8_uncased_search(environment_t const &env) {
-    bench_unary(env, "sz_utf8_uncased_search_best",
-                utf8_uncased_search_from_sz<cpu_best<sz_utf8_uncased_search_best>> {env})
-        .log();
+void bench_utf8_uncased_search(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_uncased_search_best",
+                      utf8_uncased_search_from_sz<cpu_best<sz_utf8_uncased_search_best>> {corpus}));
 }
 
-void bench_utf8_uncased_order(environment_t const &env) {
-    bench_unary(env, "sz_utf8_uncased_order_best",
-                utf8_uncased_order_from_sz<cpu_best<sz_utf8_uncased_order_best>> {env})
-        .log();
+void bench_utf8_uncased_order(environment_t const &env, corpus_t const &corpus) {
+    print(bench_unary(env, corpus, "sz_utf8_uncased_order_best",
+                      utf8_uncased_order_from_sz<cpu_best<sz_utf8_uncased_order_best>> {corpus}));
 }
 
-} // namespace
-
-void bench_utf8_uncased(corpora_t &corpora) {
-    environment_t const &env = corpora.multilingual_slice();
+void bench_utf8_uncased(environment_t &env) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
     fmt::println("Starting UTF-8 case-folding benchmarks...");
-    bench_utf8_uncased_fold(env);
-    bench_utf8_uncased_search(env);
-    bench_utf8_uncased_order(env);
+    bench_utf8_uncased_fold(env, corpus);
+    bench_utf8_uncased_search(env, corpus);
+    bench_utf8_uncased_order(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

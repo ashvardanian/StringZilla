@@ -15,9 +15,9 @@ A `↑` cell means there is no dedicated kernel at that backend, so the dispatch
 
 | Backend          | `sz_utf8_wordbreaks_best` |
 | :--------------- | ------------------------: |
-| Serial @ Xeon4   |                 72.6 MB/s |
-| Haswell @ Xeon4  |                 14.2 MB/s |
-| Ice Lake @ Xeon4 |                 36.2 MB/s |
+| Serial @ Xeon4   |                 69.2 MB/s |
+| Haswell @ Xeon4  |                 13.5 MB/s |
+| Ice Lake @ Xeon4 |                 34.5 MB/s |
 | NEON @ Graviton4 |                         … |
 | SVE2 @ Graviton4 |                         … |
 | SVE @ Graviton3  |                         … |
@@ -28,9 +28,9 @@ A `↑` cell means there is no dedicated kernel at that backend, so the dispatch
 
 | Backend          | `sz_utf8_wordbreaks_best` |
 | :--------------- | ------------------------: |
-| Serial @ Xeon4   |                 45.9 MB/s |
-| Haswell @ Xeon4  |                 43.1 MB/s |
-| Ice Lake @ Xeon4 |                115.8 MB/s |
+| Serial @ Xeon4   |                 43.8 MB/s |
+| Haswell @ Xeon4  |                 41.1 MB/s |
+| Ice Lake @ Xeon4 |                110.4 MB/s |
 | NEON @ Graviton4 |                         … |
 | SVE2 @ Graviton4 |                         … |
 | SVE @ Graviton3  |                         … |

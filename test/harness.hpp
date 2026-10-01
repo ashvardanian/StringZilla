@@ -6,17 +6,14 @@
  *
  *  @section test_environment_variables Environment Variables
  *
- *  The test infrastructure supports the following environment variables for reproducible stress
- *  testing and fuzzing:
+ *  Read once by @c read_settings, with a value that does not parse ending the run with status 1:
  *
- *  - @c STRINGZILLA_SEED : Seed for the random number generator, 42 by default; @c random draws
- *    one from @c std::random_device. The seed is printed at startup beside a rerun template, and
- *    every failure @c run_test catches prints a @c rerun line reproducing it.
- *  - @c STRINGZILLA_SCALE : Multiplier for stress-test iteration counts, 1.0 by default. It
- *    scales each test's own baseline, e.g. 0.1 for quick smoke tests, 10 for thorough CI fuzzing.
- *  - @c STRINGZILLA_FILTER : ECMAScript regex matched against test names; only matching tests run,
- *    e.g. `STRINGZILLA_FILTER=utf8`. Unset or empty runs everything, and a pattern that does not
- *    compile matches as a plain substring. Honored by @c run_test.
+ *  @verbatim
+ *  Variable            Default  Meaning
+ *  STRINGZILLA_SEED    42       Seed for every random generator, or "random" to draw one, which a run prints
+ *  STRINGZILLA_SCALE   1        Multiplier for every baseline iteration count, like 0.1 or 10
+ *  STRINGZILLA_FILTER  none     ECMAScript regex over test names, or a substring when it does not compile
+ *  @endverbatim
  *
  *  @section test_driver_tiers Driver Tiers
  *
@@ -62,14 +59,16 @@
  *  @endcode
  */
 #pragma once
+#include <cmath>   // `std::isfinite`
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstddef> // `std::ptrdiff_t`
 #include <cstdint> // `std::uintptr_t` for cache-line alignment
 #include <cstdio>  // `std::setvbuf`, `stderr`
-#include <cstdlib> // `std::getenv`, `std::strtod`, `std::abort`, `std::malloc`, `std::free`
+#include <cstdlib> // `std::getenv`, `std::strtod`, `std::exit`, `std::malloc`, `std::free`
 #include <cstring> // `std::strcmp`, `std::strlen`
 
 #include <algorithm>    // `std::copy`, `std::generate`
+#include <array>        // `std::array`
 #include <charconv>     // `std::from_chars`
 #include <chrono>       // `std::chrono::steady_clock` for per-test timing
 #include <exception>    // `std::exception`
@@ -121,6 +120,8 @@ inline hipError_t cudaMemsetAsync(void *pointer, int value, std::size_t bytes, h
     return hipMemsetAsync(pointer, value, bytes, stream);
 }
 #endif
+
+namespace sz = ashvardanian::stringzilla;
 
 #pragma region Assertion Helpers
 
@@ -387,67 +388,95 @@ struct unified_texts_t {
     span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
 };
 
-/** Reads the environment variable @p name as @p value_type_, or returns @p fallback when it is
- *  unset or empty; aborts naming the variable when the text does not parse, so a typo never becomes
- *  a silent default. */
-template <typename value_type_>
-[[nodiscard]] value_type_ env_variable(char const *name, value_type_ fallback) noexcept {
+/** A 32-bit generator seed, kept apart from counts so neither passes for the other. */
+struct seed_t {
+    std::uint32_t value = 0;
+};
+
+/** The text of the environment variable @p name, or nothing when it is unset or empty. */
+inline std::optional<std::string_view> env_text(char const *name) noexcept {
     char const *const text = std::getenv(name);
-    if (!text || !*text) return fallback;
-    if constexpr (std::is_same_v<value_type_, char const *>) return text;
-    else if constexpr (std::is_same_v<value_type_, bool>) return std::strcmp(text, "0") && std::strcmp(text, "false");
-    else {
-        value_type_ value {};
-        char *stop = nullptr;
-        if constexpr (std::is_floating_point_v<value_type_>) value = static_cast<value_type_>(std::strtod(text, &stop));
-        else {
-            auto const [end, error] = std::from_chars(text, text + std::strlen(text), value);
-            stop = error == std::errc {} ? const_cast<char *>(end) : const_cast<char *>(text);
-        }
-        if (stop != text && *stop == '\0') return value;
-        fmt::println(stderr, "{}=\"{}\" does not parse", name, text);
-        std::abort();
-    }
+    if (!text || !*text) return std::nullopt;
+    return std::string_view(text);
 }
 
-/** The run's knobs, read once by @c main and passed to every @c run_test. */
-struct test_environment_t {
-    std::uint32_t seed = 42;
-    double scale = 1.0;
+/** Parses the environment variable @p name with @p parse, or returns @p fallback when it is unset
+ *  or empty. Text that does not parse prints `NAME="text" does not parse, expected <expected>` and
+ *  exits with status 1, which leaves crash handlers quiet. */
+template <typename value_type_, typename parse_type_>
+[[nodiscard]] value_type_ env_parsed(char const *name, value_type_ fallback, parse_type_ &&parse,
+                                     char const *expected) noexcept {
+    std::optional<std::string_view> const text = env_text(name);
+    if (!text) return fallback;
+    if (std::optional<value_type_> value = parse(*text)) return *std::move(value);
+    fmt::println(stderr, "{}=\"{}\" does not parse, expected {}", name, *text, expected);
+    std::exit(1);
+}
 
-    /** Points into @c environ, alive for the whole run. */
-    char const *filter = nullptr;
+/** A 32-bit seed, or "random" for a fresh draw from @c std::random_device. */
+inline std::optional<seed_t> parse_seed(std::string_view text) noexcept {
+    if (text == "random") return seed_t {static_cast<std::uint32_t>(std::random_device {}())};
+    std::uint32_t seed = 0;
+    auto const [end, error] = std::from_chars(text.data(), text.data() + text.size(), seed);
+    if (error != std::errc {} || end != text.data() + text.size()) return std::nullopt;
+    return seed_t {seed};
+}
 
-    /** The compiled @c filter, empty when it does not compile. */
-    std::optional<std::regex> pattern;
+inline seed_t env_seed(char const *name, seed_t fallback) noexcept {
+    return env_parsed(name, fallback, parse_seed, "an unsigned integer or random");
+}
 
-    /** `argv[0]`, which closes every rerun line. */
-    char const *program = "";
+/** Every test setting, with its default as the initializer, filled once by @c read_settings. */
+struct settings_t {
 
-    /** Whether @c filter selects @p name: as a regex, or as a substring if it does not compile. */
+    /** Seed every test's generator is mixed from. */
+    seed_t seed {42};
+
+    /** Multiplier for each test's own iteration counts. */
+    double iterations_scale = 1.0;
+
+    /** Tests to run, by ECMAScript regex or else substring; points into @c environ. */
+    std::string_view filter;
+    std::optional<std::regex> filter_regex;
+
+    /** The binary's @c argv[0], which closes every rerun line. */
+    std::string_view program;
+
+    /** Whether @p name passes the filter. */
     bool selects(std::string_view name) const {
-        if (!filter) return true;
-        if (pattern) return std::regex_search(name.begin(), name.end(), *pattern);
+        if (filter.empty()) return true;
+        if (filter_regex) return std::regex_search(name.begin(), name.end(), *filter_regex);
         return name.find(filter) != std::string_view::npos;
     }
 };
 
-/** Reads @c STRINGZILLA_SEED, @c STRINGZILLA_SCALE and @c STRINGZILLA_FILTER, drawing a seed for
- *  @c random; @p program is `argv[0]`. */
-inline test_environment_t read_test_environment(char const *program) {
-    test_environment_t environment;
-    environment.program = program;
-    bool const random_seed = std::strcmp(env_variable("STRINGZILLA_SEED", ""), "random") == 0;
-    environment.seed = random_seed ? std::random_device {}() : env_variable("STRINGZILLA_SEED", environment.seed);
-    environment.scale = env_variable("STRINGZILLA_SCALE", environment.scale);
-    environment.filter = env_variable("STRINGZILLA_FILTER", environment.filter);
-    try {
-        if (environment.filter) environment.pattern.emplace(environment.filter);
+/** Reads every @c settings_t variable for the binary named @p program. */
+inline settings_t read_settings(char const *program) noexcept {
+    settings_t settings;
+    settings.program = program;
+    auto const parse_scale = [](std::string_view text) -> std::optional<double> {
+        std::string const terminated(text);
+        char *end = nullptr;
+        double const value = std::strtod(terminated.c_str(), &end);
+        if (end != terminated.c_str() + terminated.size() || !(value > 0) || !std::isfinite(value)) return std::nullopt;
+        return value;
+    };
+    settings.filter = env_text("STRINGZILLA_FILTER").value_or("");
+    if (!settings.filter.empty()) {
+#if defined(__cpp_exceptions) && __cpp_exceptions
+        try {
+            settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
+        }
+        catch (std::regex_error const &) {
+        }
+#else
+        settings.filter_regex.emplace(settings.filter.begin(), settings.filter.end());
+#endif
     }
-    catch (std::regex_error const &) {
-        // ? `selects` then matches the pattern as a plain substring
-    }
-    return environment;
+    settings.seed = env_seed("STRINGZILLA_SEED", settings.seed);
+    settings.iterations_scale = env_parsed("STRINGZILLA_SCALE", settings.iterations_scale, parse_scale,
+                                           "a positive number like 0.1 or 10");
+    return settings;
 }
 
 /**
@@ -458,8 +487,8 @@ inline test_environment_t read_test_environment(char const *program) {
  *  through the kernels it validates, and it must land on the same stream everywhere, or
  *  `STRINGZILLA_SEED=7` stops meaning the same bytes on Arm as it does on x86.
  */
-constexpr std::uint32_t mix_seed(std::uint32_t seed, std::string_view name) noexcept {
-    std::uint32_t mixed = seed ^ 2166136261u;
+constexpr std::uint32_t mix_seed(seed_t seed, std::string_view name) noexcept {
+    std::uint32_t mixed = seed.value ^ 2166136261u;
     for (char const character : name) mixed = (mixed ^ static_cast<unsigned char>(character)) * 16777619u;
     return mixed;
 }
@@ -467,11 +496,11 @@ constexpr std::uint32_t mix_seed(std::uint32_t seed, std::string_view name) noex
 /** What one test draws its inputs from and sizes its loops by, built for it by @c run_test. */
 struct test_context_t {
     std::mt19937 generator;
-    double scale = 1.0;
+    double iterations_scale = 1.0;
 
     /** Scales a @p baseline iteration count by @c STRINGZILLA_SCALE, never below 1. */
     std::size_t iterations(std::size_t baseline) const noexcept {
-        double const scaled = baseline * scale;
+        double const scaled = baseline * iterations_scale;
         return scaled < 1.0 ? 1 : static_cast<std::size_t>(scaled);
     }
 
@@ -492,7 +521,7 @@ struct test_context_t {
      *  than at the default, so a default run samples every space and a stress run covers them.
      */
     std::size_t sweep_stride(std::size_t complete) const noexcept {
-        double const coverage = scale / 10.0;
+        double const coverage = iterations_scale / 10.0;
         if (coverage >= 1.0 || complete == 0) return 1;
         std::size_t const wanted = static_cast<std::size_t>(complete * coverage);
         return wanted < 1 ? complete : complete / wanted;
@@ -743,48 +772,71 @@ inline char const *status_name(status_t s) noexcept {
     }
 }
 
-/** Prints the lines every test opens with: the version and both capability lists. */
-inline void log_environment() {
-    fmt::println("StringZilla {}.{}.{}", STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
-                 STRINGZILLA_H_VERSION_PATCH);
-    // The library already answers both questions; a wall of `STRINGZILLA_TARGET_*` echoes only repeats the first one.
-    sz_capability_t compiled = 0, detected = 0;
-    sz_cpu_capabilities_compiled(&compiled), sz_cpu_capabilities_detected(&detected);
-    char compiled_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-    sz_capabilities_name(compiled, compiled_names, sizeof(compiled_names));
-    sz_capabilities_name(detected, detected_names, sizeof(detected_names));
-    fmt::println("- Compiled for: {}", compiled_names);
-    fmt::println("- This machine: {}", detected_names);
+/** Prints each setting as "- Name: value", in the grammar it parses from, then a rerun template. */
+inline void print(settings_t const &settings) {
+    fmt::println("- Seed: {}", settings.seed.value);
+    fmt::println("- Filter: {}", settings.filter.empty() ? std::string_view("none") : settings.filter);
+    fmt::println("- Scale: {}", settings.iterations_scale);
+    fmt::println("- Rerun one test: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^<name>$' {}", settings.seed.value,
+                 settings.program);
 }
 
+/** The facts this binary and this machine report: the library version, the capabilities compiled
+ *  in and detected, and in GPU builds the first visible device. */
+struct machine_t {
+    std::array<unsigned, 3> version {STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
+                                     STRINGZILLA_H_VERSION_PATCH};
+    sz_capability_t compiled = 0;
+    sz_capability_t detected = 0;
 #if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
-/**
- *  @brief Prints the "- CUDA:" or "- ROCm:" line naming the first visible device and its
- *      architecture, or "no device" in its place.
- *  @return Whether a device is visible; without one, the GPU tests skip.
- */
-inline bool log_cuda_device() {
-    int device_count = 0;
-#if STRINGZILLA_ARCH_ROCM_
-    hipDeviceProp_t properties;
-    if (hipGetDeviceCount(&device_count) != hipSuccess || device_count == 0 ||
-        hipGetDeviceProperties(&properties, 0) != hipSuccess) {
-        fmt::println("- ROCm: no device");
-        return false;
-    }
-    fmt::println("- ROCm: {} {}", properties.name, properties.gcnArchName);
-#else
-    cudaDeviceProp properties;
-    if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0 ||
-        cudaGetDeviceProperties(&properties, 0) != cudaSuccess) {
-        fmt::println("- CUDA: no device");
-        return false;
-    }
-    fmt::println("- CUDA: {} sm_{}{}", properties.name, properties.major, properties.minor);
+    /** The first visible device and its architecture, like @c sm_90 or @c gfx942, or empty. */
+    std::string device_name;
 #endif
-    return true;
+};
+
+/** Probes the capabilities @c machine_t reports. */
+inline machine_t probe_machine() noexcept {
+    machine_t machine;
+    sz_cpu_capabilities_compiled(&machine.compiled), sz_cpu_capabilities_detected(&machine.detected);
+#if STRINGZILLA_ARCH_ROCM_
+    int device_count = 0;
+    hipDeviceProp_t properties;
+    if (hipGetDeviceCount(&device_count) == hipSuccess && device_count != 0 &&
+        hipGetDeviceProperties(&properties, 0) == hipSuccess)
+        machine.device_name = fmt::format("{} {}", properties.name, properties.gcnArchName);
+#elif STRINGZILLA_ARCH_CUDA_
+    int device_count = 0;
+    cudaDeviceProp properties;
+    if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count != 0 &&
+        cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
+        machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
+#endif
+    return machine;
 }
+
+/** Prints the version line, the capabilities as "- Compiled for:" and "- This machine:", and in
+ *  GPU builds "- CUDA:" or "- ROCm:". */
+inline void print(machine_t const &machine) {
+    char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+    sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
+    sz_capabilities_name(machine.detected, detected, sizeof(detected));
+    fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
+    fmt::println("- Compiled for: {}", compiled);
+    fmt::println("- This machine: {}", detected);
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+    fmt::println("- {}: {}", STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA",
+                 machine.device_name.empty() ? std::string_view("no device") : machine.device_name);
+#endif
+}
+
+/** Everything a test reads, built once in @c main and passed down by reference. */
+struct environment_t {
+    settings_t settings;
+    machine_t machine;
+};
+
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** The baseline capability of the GPU vendor this translation unit is compiled for. */
 inline constexpr sz_capability_t gpu_baseline_k = STRINGZILLA_ARCH_ROCM_ ? sz_cap_rocm_k : sz_cap_cuda_k;
@@ -809,30 +861,13 @@ inline constexpr auto gpu_memory_reaches_device = STRINGZILLA_ARCH_ROCM_ ? &sz_r
 
 #if STRINGZILLA_WITH_METAL
 
-/**
- *  @brief Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened.
- *  @return Whether @p device opened; without one, the GPU tests skip.
- */
-inline bool log_metal_device(sz_metal_device_t const &device) {
-    if (!device.device) {
-        fmt::println("- Metal: no device");
-        return false;
-    }
+/** Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened. */
+inline void print(sz_metal_device_t const &device) {
+    if (!device.device) return fmt::println("- Metal: no device");
     void *const name = sz_metal_get_(device.device, "name");
     fmt::println("- Metal: {}", static_cast<char const *>(sz_metal_get_(name, "UTF8String")));
-    return true;
 }
 #endif // STRINGZILLA_WITH_METAL
-
-/** Prints the run's seed, how to rerun one test under it, and its scale unless 1, below the lines
- *  of @c log_environment. */
-inline void print_test_environment(test_environment_t const &environment) noexcept {
-    fmt::println("- Seed: {}", environment.seed);
-    fmt::println("- Rerun one test: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^<name>$' {}", environment.seed,
-                 environment.program);
-    if (environment.scale != 1.0) fmt::println("- Scale: {}", environment.scale);
-    std::fflush(stdout); // Ensure output is visible even on crash
-}
 
 #pragma region Test Runner
 
@@ -877,16 +912,14 @@ inline void install_test_signal_handlers() noexcept {
  *  process, self-localizing through the installed signal handler.
  */
 template <typename function_type_>
-inline std::size_t run_test(test_environment_t const &environment, std::string_view name,
+inline std::size_t run_test(settings_t const &settings, std::string_view name,
                             function_type_ &&test_function) noexcept {
-    if (!environment.selects(name)) {
+    if (!settings.selects(name)) {
         fmt::println("- {} ... skipped (STRINGZILLA_FILTER)", name);
-        std::fflush(stdout);
         return 0;
     }
     fmt::println("- {} ...", name);
-    std::fflush(stdout);
-    test_context_t context {std::mt19937(mix_seed(environment.seed, name)), environment.scale};
+    test_context_t context {std::mt19937(mix_seed(settings.seed, name)), settings.iterations_scale};
     auto const start = std::chrono::steady_clock::now();
     try {
         if constexpr (std::is_invocable_v<function_type_ &, test_context_t &>) test_function(context);
@@ -894,13 +927,12 @@ inline std::size_t run_test(test_environment_t const &environment, std::string_v
     }
     catch (std::exception const &error) {
         fmt::println(stderr, "- {} ... FAILED: {}", name, error.what());
-        fmt::println(stderr, "  rerun: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^{}$' {}", environment.seed, name,
-                     environment.program);
+        fmt::println(stderr, "  rerun: STRINGZILLA_SEED={} STRINGZILLA_FILTER='^{}$' {}", settings.seed.value, name,
+                     settings.program);
         return 1;
     }
     double const seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     fmt::println("- {} ... ok ({:.2f} s)", name, seconds);
-    std::fflush(stdout);
     return 0;
 }
 
@@ -911,47 +943,40 @@ inline std::size_t run_test(test_environment_t const &environment, std::string_v
  *  whether this CPU runs them, announcing once a section it cannot run and skipping its checks.
  */
 struct cross_section_t {
-    test_environment_t const &environment;
-    sz_capability_t detected = 0;
+    environment_t const &env;
+    sz_capability_t detected = env.machine.detected;
     bool runnable = true;
     std::size_t failures = 0;
 
-    explicit cross_section_t(test_environment_t const &environment) noexcept : environment(environment) {
-        sz_cpu_capabilities_detected(&detected);
-    }
+    explicit cross_section_t(environment_t const &env) noexcept : env(env) {}
 
     /** Opens the section of the kernels that need @p capability. */
     void section(std::string_view title, sz_capability_t capability) noexcept {
         runnable = (detected & capability) != 0;
-        fmt::println("\n{}{}", title, runnable ? ":" : ": skipped, this CPU lacks it");
+        if (runnable) return fmt::println("\n{}:", title);
+        char missing_names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
+        sz_capabilities_name(capability & ~detected, missing_names, sizeof(missing_names));
+        fmt::println("\n{}: skipped, {} not detected", title, missing_names);
     }
 
     /** Runs @p test as @c run_test does, unless this CPU lacks the section's capability. */
     template <typename function_type_>
     void operator()(std::string_view name, function_type_ &&test) {
-        if (runnable) failures += run_test(environment, name, std::forward<function_type_>(test));
+        if (runnable) failures += run_test(env.settings, name, std::forward<function_type_>(test));
     }
 };
 
 #pragma endregion Test Runner
 
-} // namespace ashvardanian::stringzilla::test
-
-/*  Cross-translation-unit test declarations. These live at global scope to match the TU
- *  definitions; the using-declarations name the context the drawing tests take and the
- *  environment the cross files run their sections in. */
-using ashvardanian::stringzilla::test::test_context_t;
-using ashvardanian::stringzilla::test::test_environment_t;
-
 #pragma region Kernel Cross Checks
 
-std::size_t test_cross_serial(test_environment_t const &environment);
-std::size_t test_cross_x8664(test_environment_t const &environment);
-std::size_t test_cross_arm64(test_environment_t const &environment);
-std::size_t test_cross_riscv64(test_environment_t const &environment);
-std::size_t test_cross_loongarch64(test_environment_t const &environment);
-std::size_t test_cross_ppc64(test_environment_t const &environment);
-std::size_t test_cross_wasm(test_environment_t const &environment);
+std::size_t test_cross_serial(environment_t const &env);
+std::size_t test_cross_x8664(environment_t const &env);
+std::size_t test_cross_arm64(environment_t const &env);
+std::size_t test_cross_riscv64(environment_t const &env);
+std::size_t test_cross_loongarch64(environment_t const &env);
+std::size_t test_cross_ppc64(environment_t const &env);
+std::size_t test_cross_wasm(environment_t const &env);
 
 #pragma endregion Kernel Cross Checks
 
@@ -1089,3 +1114,5 @@ void test_substrings_all(test_context_t &context);
 void test_substrings_safety(test_context_t &context);
 
 #pragma endregion Sequence Algorithms
+
+} // namespace ashvardanian::stringzilla::test

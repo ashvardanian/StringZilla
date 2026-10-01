@@ -17,12 +17,12 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 
 | Backend          | `sz_find_best` | `sz_rfind_best` | `sz_find_byte_best` | `sz_rfind_byte_best` | `sz_find_byteset_best` | `sz_rfind_byteset_best` |
 | :--------------- | -------------: | --------------: | ------------------: | -------------------: | ---------------------: | ----------------------: |
-| Standard @ Xeon4 |      2.75 GB/s |       0.26 GB/s |           0.24 GB/s |            0.24 GB/s |              0.08 GB/s |               0.10 GB/s |
-| Serial @ Xeon4   |      2.67 GB/s |       0.65 GB/s |           0.35 GB/s |            0.39 GB/s |              0.28 GB/s |               0.29 GB/s |
-| Westmere @ Xeon4 |      5.33 GB/s |       4.61 GB/s |           0.24 GB/s |            0.29 GB/s |                      ↑ |                       ↑ |
-| Haswell @ Xeon4  |      5.94 GB/s |       5.24 GB/s |           0.34 GB/s |            0.30 GB/s |              0.27 GB/s |               0.28 GB/s |
-| Skylake @ Xeon4  |      9.62 GB/s |       9.23 GB/s |           0.61 GB/s |            0.66 GB/s |                      ↑ |                       ↑ |
-| Ice Lake @ Xeon4 |              ↑ |               ↑ |                   ↑ |                    ↑ |              0.28 GB/s |               0.31 GB/s |
+| Standard @ Xeon4 |      2.56 GB/s |       0.24 GB/s |           0.22 GB/s |            0.22 GB/s |              0.07 GB/s |              0.093 GB/s |
+| Serial @ Xeon4   |      2.49 GB/s |       0.61 GB/s |           0.33 GB/s |            0.36 GB/s |              0.26 GB/s |               0.27 GB/s |
+| Westmere @ Xeon4 |      4.96 GB/s |       4.29 GB/s |           0.22 GB/s |            0.27 GB/s |                      ↑ |                       ↑ |
+| Haswell @ Xeon4  |      5.53 GB/s |       4.88 GB/s |           0.32 GB/s |            0.28 GB/s |              0.25 GB/s |               0.26 GB/s |
+| Skylake @ Xeon4  |      8.96 GB/s |       8.60 GB/s |           0.57 GB/s |            0.61 GB/s |                      ↑ |                       ↑ |
+| Ice Lake @ Xeon4 |              ↑ |               ↑ |                   ↑ |                    ↑ |              0.26 GB/s |               0.29 GB/s |
 | NEON @ Graviton4 |              … |               … |                   … |                    … |                      … |                       … |
 | SVE @ Graviton3  |              … |               … |                   … |                    … |                      … |                       … |
 
@@ -32,12 +32,12 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 
 | Backend          | `sz_find_best` | `sz_rfind_best` | `sz_find_byte_best` | `sz_rfind_byte_best` | `sz_find_byteset_best` | `sz_rfind_byteset_best` |
 | :--------------- | -------------: | --------------: | ------------------: | -------------------: | ---------------------: | ----------------------: |
-| Standard @ Xeon4 |     17.74 GB/s |       6.23 GB/s |           2.07 GB/s |            2.07 GB/s |              0.25 GB/s |               0.23 GB/s |
-| Serial @ Xeon4   |      5.68 GB/s |       6.00 GB/s |           1.55 GB/s |            1.52 GB/s |              1.19 GB/s |               1.17 GB/s |
-| Westmere @ Xeon4 |     12.85 GB/s |      10.62 GB/s |           2.09 GB/s |            2.03 GB/s |                      ↑ |                       ↑ |
-| Haswell @ Xeon4  |     12.36 GB/s |      13.09 GB/s |           1.82 GB/s |            1.78 GB/s |              2.61 GB/s |               2.71 GB/s |
-| Skylake @ Xeon4  |     18.78 GB/s |      18.91 GB/s |           1.86 GB/s |            1.90 GB/s |                      ↑ |                       ↑ |
-| Ice Lake @ Xeon4 |              ↑ |               ↑ |                   ↑ |                    ↑ |              3.82 GB/s |               3.68 GB/s |
+| Standard @ Xeon4 |     16.52 GB/s |       5.80 GB/s |           1.93 GB/s |            1.93 GB/s |              0.23 GB/s |               0.21 GB/s |
+| Serial @ Xeon4   |      5.29 GB/s |       5.59 GB/s |           1.44 GB/s |            1.42 GB/s |              1.11 GB/s |               1.09 GB/s |
+| Westmere @ Xeon4 |     11.97 GB/s |      9.891 GB/s |           1.95 GB/s |            1.89 GB/s |                      ↑ |                       ↑ |
+| Haswell @ Xeon4  |     11.51 GB/s |      12.19 GB/s |           1.70 GB/s |            1.66 GB/s |              2.43 GB/s |               2.52 GB/s |
+| Skylake @ Xeon4  |     17.49 GB/s |      17.61 GB/s |           1.73 GB/s |            1.77 GB/s |                      ↑ |                       ↑ |
+| Ice Lake @ Xeon4 |              ↑ |               ↑ |                   ↑ |                    ↑ |              3.56 GB/s |               3.43 GB/s |
 | NEON @ Graviton4 |              … |               … |                   … |                    … |                      … |                       … |
 | SVE @ Graviton3  |              … |               … |                   … |                    … |                      … |                       … |
 

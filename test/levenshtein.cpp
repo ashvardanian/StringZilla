@@ -26,8 +26,7 @@
 #include "cross.hpp"   // `levenshtein_backend_t`, `check_levenshtein_unit_`, `check_levenshtein_equivalence_`
 #include "harness.hpp" // `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 #pragma region Helpers
 
@@ -56,3 +55,5 @@ void test_levenshtein_safety(test_context_t &) { check_levenshtein_safety_(leven
 
 /** Drives the oracle sweeps and the serial-versus-dispatched differential. */
 void test_levenshtein_all(test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_dispatched); }
+
+} // namespace ashvardanian::stringzilla::test

@@ -6,10 +6,10 @@
  */
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::test;
+namespace ashvardanian::stringzilla::test {
 
-std::size_t test_cross_x8664(test_environment_t const &environment) {
-    [[maybe_unused]] cross_section_t check(environment);
+std::size_t test_cross_x8664(environment_t const &env) {
+    [[maybe_unused]] cross_section_t check(env);
 
 #if STRINGZILLA_TARGET_WESTMERE
     check.section("Cross Westmere", sz_cap_westmere_k);
@@ -465,3 +465,5 @@ std::size_t test_cross_x8664(test_environment_t const &environment) {
 
     return check.failures;
 }
+
+} // namespace ashvardanian::stringzilla::test

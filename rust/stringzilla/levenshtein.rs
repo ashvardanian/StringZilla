@@ -3,9 +3,10 @@
 //! File: rust/stringzilla/levenshtein.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
+
+use super::*;
 
 /// Which symbols a batch counts, since the alphabet picks the transpose and the mask layout alike.
 ///

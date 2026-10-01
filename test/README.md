@@ -35,20 +35,20 @@ Each builds one executable over `stringzilla_static`: `stringzilla_cuda_test`, `
 ## Running
 
 - Cross-checks are named `test_<family>_<tier>_<capability>`, so `STRINGZILLA_FILTER='_haswell$'` runs one capability and `STRINGZILLA_FILTER='^test_find_'` one family across all of them.
-- `STRINGZILLA_SEED` defaults to 42 and takes `random` to draw one, `STRINGZILLA_SCALE` defaults to 1.0, and `STRINGZILLA_FILTER` is a regex over test names that runs all of them when unset and matches as a substring when it does not compile.
+- `STRINGZILLA_SEED`, `STRINGZILLA_SCALE` and `STRINGZILLA_FILTER` are listed with their defaults in the header of `harness.hpp` and in `CONTRIBUTING.md`.
 - A failing test prints `rerun: STRINGZILLA_SEED=<n> STRINGZILLA_FILTER='^<name>$' <binary>` to stderr, which reruns exactly that test, and the run moves on to the next one.
 - A crash stops the run, and the startup `- Rerun one test:` line holds the same command for the last test named.
 
 ## Python
 
-The Python modules mirror the C++ translation units one-for-one and run under pytest.
+The Python modules follow the C++ translation units, with `string_types.py` covering `string.cpp`, and run under pytest.
 
-- `find.py`, `hash.py`, `sort.py`, `string.py`, `uncased.py`, `cipher.py`, `utf8_*.py`, and `doctests.py` — per-family tests.
-- `helpers.py` and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
-- This directory is a Python package via `__init__.py`, so the prefix-less modules namespace as `test.*` and never shadow stdlib names.
-- Run the suite with `pytest test/`.
-- Each seeded test runs under the seeds 42, 0, 1 and 314159, a numeric `STRINGZILLA_SEED` replaces them with one, `random` adds a drawn one, and pytest's header prints the list.
-- `STRINGZILLA_SCALE` applies as in C++, while `STRINGZILLA_FILTER` does not; select tests with `pytest -k` instead.
+- `find.py`, `hash.py`, `sort.py`, `string_types.py`, `uncased.py`, `cipher.py`, `utf8_*.py`, and `doctests.py` — per-family tests.
+- `base.py` and `utf8_helpers.py` are shared helpers; `conftest.py` holds the pytest configuration.
+- The modules are flat and import each other by basename, as `from base import ...`, so none may share a stdlib module's name.
+- Install the `test` group and run the suite with `python -X faulthandler -m pytest -x`, as the CI does.
+- Seeded tests take the `seed` fixture: 42, a numeric `STRINGZILLA_SEED` replaces it, `random` draws one, and pytest's header prints it as `- Seed: <n>`.
+- `STRINGZILLA_SCALE` applies as in C++, and `STRINGZILLA_FILTER` keeps the tests whose node id it matches, alongside `pytest -k`.
 
 ## JavaScript
 

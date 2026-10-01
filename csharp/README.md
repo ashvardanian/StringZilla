@@ -73,7 +73,7 @@ foreach (long length in lengths[..count]) {
 ```
 
 Codepoints count scalar values, not bytes or UTF-16 chars.
-Segmentation *tiles* the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
+Segmentation _tiles_ the text — every byte belongs to exactly one segment — and a grapheme cluster can span several codepoints.
 
 ```csharp
 Sz.CountRunes("你好世界"u8);                     // 4 codepoints

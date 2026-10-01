@@ -25,8 +25,7 @@
 
 #include "harness.hpp" // `arena_vector`, `cross_section_t`, `handle_checked_heap_t`, `verify`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 /** The capabilities Metal device 0 enables, the device @c main opens, verified to exist. */
 static sz_capability_t metal_capabilities_() {
@@ -968,7 +967,7 @@ static void check_metal_backend_(cross_section_t &check, sz_metal_device_t &devi
     check("test_substrings_safety_" + suffix, [&] { test_substrings_metal_safety(device, backend); });
 }
 
-std::size_t test_cross_metal(test_environment_t const &environment, sz_metal_device_t &device) {
+std::size_t test_cross_metal(environment_t const &env, sz_metal_device_t &device) {
     metal_backend_t const metal {
         "metal",
         sz_levenshtein_distances_metal,
@@ -978,7 +977,7 @@ std::size_t test_cross_metal(test_environment_t const &environment, sz_metal_dev
         sz_substrings_replace_metal,
         sz_substrings_bm25_scores_metal,
     };
-    cross_section_t check(environment);
+    cross_section_t check(env);
     check.detected = metal_capabilities_();
     check.section("Cross Metal", sz_cap_metal_k);
     check_metal_backend_(check, device, metal);
@@ -987,12 +986,12 @@ std::size_t test_cross_metal(test_environment_t const &environment, sz_metal_dev
 
 /** The dispatching entry points on @p device, and the refusals and asynchrony only a dispatch
  *  point's engine init promises. */
-std::size_t test_cross_dispatch(test_environment_t const &environment, sz_metal_device_t &device) {
+std::size_t test_cross_dispatch(environment_t const &env, sz_metal_device_t &device) {
     metal_backend_t const dispatched {
         "dispatched",       sz_levenshtein_distances, sz_overlap_scores,         sz_substrings_counts,
         sz_substrings_find, sz_substrings_replace,    sz_substrings_bm25_scores,
     };
-    cross_section_t check(environment);
+    cross_section_t check(env);
     check.detected = metal_capabilities_();
     check.section("Cross Dispatch", sz_cap_metal_k);
     check_metal_backend_(check, device, dispatched);
@@ -1004,3 +1003,5 @@ std::size_t test_cross_dispatch(test_environment_t const &environment, sz_metal_
 }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

@@ -3402,7 +3402,7 @@ inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_
     };
 
     // Strings that shouldn't affect the control flow
-    static char const *utf8_content[] = {
+    static char const *const utf8_content[] = {
         // Various ASCII strings
         "",
         "a",
@@ -3437,7 +3437,7 @@ inline void check_utf8_tokens_equivalence_(test_context_t &context, utf8_tokens_
     };
 
     // Special characters that will affect control flow
-    static char const *special_chars[26] = {
+    static char const *const special_chars[26] = {
         "\x09",         "\x0A",         "\x0B",         "\x0C",         "\x0D",         " ", // 1-byte (6)
         "\xC2\x85",     "\xC2\xA0",     "\r\n",                                              // 2-byte (2)
         "\xE1\x9A\x80", "\xE2\x80\x80", "\xE2\x80\x81", "\xE2\x80\x82", "\xE2\x80\x83",      // 3-byte
@@ -4463,7 +4463,7 @@ inline void utf8_linebreaks_dense_mandatory_breaks_(std::string &out, std::size_
 /** OP/CL/QU/HY/BA/GL nesting cycled @p link_count times (LB13/14/15/18 adjacency), into @p out. */
 inline void utf8_linebreaks_dense_nesting_(std::string &out, std::size_t link_count) {
     out.clear();
-    static char const *cycle[] = {"(", "word", ")", "\"", "-", " ", "\xC2\xA0"}; // OP CL QU HY BA SP GL(NBSP)
+    static char const *const cycle[] = {"(", "word", ")", "\"", "-", " ", "\xC2\xA0"}; // OP CL QU HY BA SP GL(NBSP)
     for (std::size_t index = 0; index != link_count; ++index) out.append(cycle[index % 7u]);
 }
 
@@ -5228,29 +5228,25 @@ struct uncased_fold_t {
 };
 
 /**
- *  @brief Every non-identity fold in Unicode, derived once from @c sz_unicode_fold_codepoint_.
+ *  @brief Every non-identity fold in Unicode, derived from @c sz_unicode_fold_codepoint_.
  *
- *  The adversarial enumerators and the invariant closure share this table, so the whole-range scan
- *  is paid once per process rather than once per enumerator per backend.
+ *  The whole-range scan is slow, so a battery derives it once and hands it to each enumerator.
  */
-inline std::vector<uncased_fold_t> const &uncased_folds_() {
-    static std::vector<uncased_fold_t> const folds = []() {
-        std::vector<uncased_fold_t> derived;
-        for (sz_rune_t preimage = 0; preimage <= 0x10FFFF; ++preimage) {
-            if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
-            uncased_fold_t fold;
-            fold.preimage = preimage;
-            fold.folded_count = sz_unicode_fold_codepoint_(preimage, fold.folded_runes);
-            if (fold.folded_count == 1 && fold.folded_runes[0] == preimage) continue; // Identity folds are inert
-            fold.preimage_length = (std::size_t)sz_rune_encode(preimage, fold.preimage_utf8);
-            fold.folded_length = 0;
-            for (sz_size_t index = 0; index < fold.folded_count; ++index)
-                fold.folded_length += (std::size_t)sz_rune_encode(fold.folded_runes[index],
-                                                                  fold.folded_utf8 + fold.folded_length);
-            derived.push_back(fold);
-        }
-        return derived;
-    }();
+inline std::vector<uncased_fold_t> uncased_folds_() {
+    std::vector<uncased_fold_t> folds;
+    for (sz_rune_t preimage = 0; preimage <= 0x10FFFF; ++preimage) {
+        if (preimage >= 0xD800 && preimage <= 0xDFFF) continue; // Surrogates aren't valid UTF-8
+        uncased_fold_t fold;
+        fold.preimage = preimage;
+        fold.folded_count = sz_unicode_fold_codepoint_(preimage, fold.folded_runes);
+        if (fold.folded_count == 1 && fold.folded_runes[0] == preimage) continue; // Identity folds are inert
+        fold.preimage_length = (std::size_t)sz_rune_encode(preimage, fold.preimage_utf8);
+        fold.folded_length = 0;
+        for (sz_size_t index = 0; index < fold.folded_count; ++index)
+            fold.folded_length += (std::size_t)sz_rune_encode(fold.folded_runes[index],
+                                                              fold.folded_utf8 + fold.folded_length);
+        folds.push_back(fold);
+    }
     return folds;
 }
 
@@ -5265,7 +5261,8 @@ inline std::vector<uncased_fold_t> const &uncased_folds_() {
  *  built both with and without the mirroring "x" context, so the not-found path is exercised
  *  with the same adversarial shapes.
  */
-inline void check_uncased_find_preimages_(test_context_t &context, sz_kernel_utf8_uncased_search_t find_base,
+inline void check_uncased_find_preimages_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+                                          sz_kernel_utf8_uncased_search_t find_base,
                                           sz_kernel_utf8_uncased_search_t find_simd) {
     std::size_t const offsets[] = {0, 14, 15, 16, 17, 30, 31, 32, 33, 61, 62, 63, 64, 65};
     std::size_t const offsets_count = span_over(offsets).size();
@@ -5274,7 +5271,6 @@ inline void check_uncased_find_preimages_(test_context_t &context, sz_kernel_utf
     char needle[16];   // Longest folded form is 9 bytes, plus one ASCII context byte
     char haystack[96]; // Largest offset 65, plus context, plus a 4-byte preimage, plus padding
 
-    std::vector<uncased_fold_t> const &folds = uncased_folds_();
     std::size_t const preimage_stride = context.sweep_stride(folds.size());
 
     for (std::size_t fold_index = 0; fold_index < folds.size(); fold_index += preimage_stride) {
@@ -5320,10 +5316,11 @@ inline void check_uncased_find_preimages_(test_context_t &context, sz_kernel_utf
  *  from its own. Each lands within the last @c needle_window bytes (windows 4..16) of haystacks
  *  whose filler also sweeps the 64-byte SIMD chunk boundary.
  */
-inline void check_uncased_find_tails_(test_context_t &context, sz_kernel_utf8_uncased_search_t find_base,
+inline void check_uncased_find_tails_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+                                      sz_kernel_utf8_uncased_search_t find_base,
                                       sz_kernel_utf8_uncased_search_t find_simd) {
     std::vector<uncased_fold_t> expanding_preimages;
-    for (uncased_fold_t const &fold : uncased_folds_())
+    for (uncased_fold_t const &fold : folds)
         if (fold.folded_length != fold.preimage_length) // Same width → not a tail-expansion shape
             expanding_preimages.push_back(fold);
 
@@ -5385,12 +5382,13 @@ inline void check_uncased_find_tails_(test_context_t &context, sz_kernel_utf8_un
  *  join, and use that sub-run (as folded bytes) as the needle - swept across the 64-byte SIMD chunk
  *  boundary - validated against the fold-subset reference.
  */
-inline void check_uncased_find_crossing_(test_context_t &context, sz_kernel_utf8_uncased_search_t find_base,
+inline void check_uncased_find_crossing_(test_context_t &context, std::vector<uncased_fold_t> const &folds,
+                                         sz_kernel_utf8_uncased_search_t find_base,
                                          sz_kernel_utf8_uncased_search_t find_simd) {
     // Codepoints whose fold emits more than one rune, so a needle can slice through the middle of
     // their expansion - ligatures, sharp-s, decomposed accents.
     std::vector<uncased_fold_t> expanders;
-    for (uncased_fold_t const &fold : uncased_folds_())
+    for (uncased_fold_t const &fold : folds)
         if (fold.folded_count >= 2) expanders.push_back(fold);
 
     std::size_t const filler_lengths[] = {0, 1, 14, 15, 16, 17, 30, 31, 32, 33, 60, 61, 62, 63, 64, 65};
@@ -5551,9 +5549,10 @@ inline void check_uncased_find_battery_(test_context_t &context, sz_kernel_utf8_
                              sz_utf8_seek_serial, sz_utf8_count_serial, 100, 100, queries);
     check_uncased_find_fuzz_(context.generator, find_serial, find_simd, sz_utf8_uncased_fold_serial,
                              sz_utf8_seek_serial, sz_utf8_count_serial, 200, 100, queries);
-    check_uncased_find_preimages_(context, find_serial, find_simd);
-    check_uncased_find_tails_(context, find_serial, find_simd);
-    check_uncased_find_crossing_(context, find_serial, find_simd);
+    std::vector<uncased_fold_t> const folds = uncased_folds_();
+    check_uncased_find_preimages_(context, folds, find_serial, find_simd);
+    check_uncased_find_tails_(context, folds, find_serial, find_simd);
+    check_uncased_find_crossing_(context, folds, find_serial, find_simd);
     check_uncased_find_long_crossing_fuzz_(find_serial, find_simd);
 
     // A long ASCII needle (well past the 32-rune ring buffer and the 3-rune short helpers) drives
@@ -5647,7 +5646,7 @@ inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_u
     };
 
     // Test content - mix of scripts with case folding rules
-    static char const *utf8_content[] = {
+    static char const *const utf8_content[] = {
         // ASCII
         "",
         "a",

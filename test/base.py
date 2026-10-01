@@ -5,26 +5,32 @@ This module provides functions to download and cache Unicode data files
 (UCD XML, CaseFolding.txt, DerivedNormalizationProps.txt) for use in
 tests and exploration notebooks.
 
-File: test/helpers.py
+File: test/base.py
 Author: Ash Vardanian
 Date: June 18, 2023
 """
 
-import os
-import io
 import contextlib
+import io
+import math
+import os
+import re
+import secrets
 import tempfile
-import zipfile
+import threading
 import urllib.request
 import xml.etree.ElementTree as ET
-from random import choice, randint, seed
+import zipfile
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from random import Random
 from string import ascii_lowercase
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, NewType
 
 # NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises
 # a weird error that is not an `ImportError`, so the naked `except` is a necessary evil.
 try:
-    import numpy as np
+    import numpy as np  # noqa: F401
 
     numpy_available = True
 except:  # noqa: E722
@@ -37,6 +43,9 @@ try:
     pyarrow_available = True
 except:  # noqa: E722
     pyarrow_available = False
+
+if TYPE_CHECKING:
+    import stringzilla as sz
 
 
 def _write_cache_atomically(cache_path: str, payload: bytes) -> None:
@@ -120,7 +129,7 @@ def get_unicode_xml_data(version: str = UNICODE_VERSION) -> ET.Element:
     return tree.getroot()
 
 
-def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
+def get_all_codepoints(version: str = UNICODE_VERSION) -> list[int]:
     """Return all assigned/defined codepoints in Unicode."""
     root = get_unicode_xml_data(version)
     namespace = {"ucd": "http://www.unicode.org/ns/2003/ucd/1.0"}
@@ -132,7 +141,7 @@ def get_all_codepoints(version: str = UNICODE_VERSION) -> List[int]:
     return sorted(codepoints)
 
 
-def parse_uncased_folding_file(filepath: str) -> Dict[int, bytes]:
+def parse_uncased_folding_file(filepath: str) -> dict[int, bytes]:
     """Parse Unicode CaseFolding.txt into a dict: codepoint -> folded UTF-8 bytes.
 
     Uses status C (common) and F (full) mappings for full case folding.
@@ -189,7 +198,7 @@ def _download_uncased_folding_file(version: str) -> str:
     return cache_path
 
 
-def get_uncased_folding_rules(version: str = UNICODE_VERSION) -> Dict[int, bytes]:
+def get_uncased_folding_rules(version: str = UNICODE_VERSION) -> dict[int, bytes]:
     """Download and parse Unicode CaseFolding.txt, caching in temp directory.
 
     Args:
@@ -204,7 +213,7 @@ def get_uncased_folding_rules(version: str = UNICODE_VERSION) -> Dict[int, bytes
 
 def get_uncased_folding_rules_as_codepoints(
     version: str = UNICODE_VERSION,
-) -> Dict[int, List[int]]:
+) -> dict[int, list[int]]:
     """Download and parse Unicode CaseFolding.txt, returning target codepoints.
 
     Args:
@@ -236,7 +245,7 @@ def get_uncased_folding_rules_as_codepoints(
     return folds
 
 
-def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[str, str]]:
+def get_normalization_props(version: str = UNICODE_VERSION) -> dict[int, dict[str, str]]:
     """Download and parse Unicode DerivedNormalizationProps.txt, caching in temp directory.
 
     Args:
@@ -260,7 +269,7 @@ def get_normalization_props(version: str = UNICODE_VERSION) -> Dict[int, Dict[st
     else:
         print(f"Using cached Unicode {version} DerivedNormalizationProps.txt: {cache_path}")
 
-    properties: Dict[int, Dict[str, str]] = {}
+    properties: dict[int, dict[str, str]] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
@@ -317,7 +326,7 @@ def _download_word_break_property_file(version: str) -> str:
     return cache_path
 
 
-def get_word_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+def get_word_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     """Download and parse WordBreakProperty.txt.
 
     Args:
@@ -331,7 +340,7 @@ def get_word_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
     """
     cache_path = _download_word_break_property_file(version)
 
-    properties: Dict[int, str] = {}
+    properties: dict[int, str] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
@@ -377,14 +386,14 @@ def _download_word_break_test_file(version: str) -> str:
     return cache_path
 
 
-def get_word_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+def get_word_break_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     """Download and parse WordBreakTest.txt.
 
     Args:
         version: Unicode version string (e.g., "17.0.0")
 
     Returns:
-        List of tuples: (text: str, boundary_positions: List[int])
+        List of tuples: (text: str, boundary_positions: list[int])
         boundary_positions includes 0 and len(text) as TR29 specifies.
     """
     cache_path = _download_word_break_test_file(version)
@@ -426,7 +435,7 @@ def get_word_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     return test_cases
 
 
-def baseline_word_boundaries(text: str, word_break_properties: Dict[int, str] = None) -> List[int]:
+def baseline_word_boundaries(text: str, word_break_properties: dict[int, str] | None = None) -> list[int]:
     """Pure Python implementation of TR29 word boundary algorithm.
 
     This serves as a reference baseline for testing the C implementation.
@@ -667,13 +676,13 @@ def _download_break_property_file(filename: str, version: str) -> str:
     return cache_path
 
 
-def _parse_break_property_file(cache_path: str) -> Dict[int, str]:
+def _parse_break_property_file(cache_path: str) -> dict[int, str]:
     """Parse a ``codepoint(..range) ; Property`` style UCD break-property file into a dict.
 
     An empty result means a truncated cache, so it raises rather than returning a table that would
     silently make every consumer agree with a broken oracle.
     """
-    properties: Dict[int, str] = {}
+    properties: dict[int, str] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
@@ -715,7 +724,7 @@ def _download_break_test_file(filename: str, version: str) -> str:
     return cache_path
 
 
-def _parse_break_test_file(cache_path: str) -> List[tuple]:
+def _parse_break_test_file(cache_path: str) -> list[tuple]:
     """Parse a UAX break-test file (``÷`` = break, ``×`` = no break) into (text, boundary_positions)."""
     test_cases = []
     with open(cache_path, "r", encoding="utf-8") as data_file:
@@ -749,7 +758,7 @@ def _parse_break_test_file(cache_path: str) -> List[tuple]:
 # region Grapheme
 
 
-def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     """Download and parse GraphemeBreakProperty.txt.
 
     Returns a dict mapping codepoints to their Grapheme_Cluster_Break property name.
@@ -760,7 +769,7 @@ def get_grapheme_break_properties(version: str = UNICODE_VERSION) -> Dict[int, s
     return _parse_break_property_file(cache_path)
 
 
-def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     """Download and parse the Indic_Conjunct_Break (InCB) property from DerivedCoreProperties.txt.
 
     Returns a dict mapping codepoints to their InCB value ("Linker", "Consonant", or "Extend");
@@ -776,7 +785,7 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[
             print(f"Cached to {cache_path}")
         except Exception as error:
             raise UnicodeDataDownloadError(f"Could not download DerivedCoreProperties.txt from {url}: {error}")
-    indic_conjunct_breaks: Dict[int, str] = {}
+    indic_conjunct_breaks: dict[int, str] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
@@ -793,10 +802,10 @@ def get_indic_conjunct_break_properties(version: str = UNICODE_VERSION) -> Dict[
     return _parsed_or_raise(indic_conjunct_breaks, cache_path, "Indic_Conjunct_Break entries")
 
 
-def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     """Download and parse the official GraphemeBreakTest.txt.
 
-    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    Returns a list of (text: str, boundary_positions: list[int]) tuples; boundary
     positions are byte offsets and include 0 and len(text).
     """
     cache_path = _download_break_test_file("GraphemeBreakTest.txt", version)
@@ -805,10 +814,10 @@ def get_grapheme_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]
 
 def baseline_grapheme_boundaries(
     text: str,
-    properties: Dict[int, str] = None,
-    indic_conjunct_breaks: Dict[int, str] = None,
+    properties: dict[int, str] | None = None,
+    indic_conjunct_breaks: dict[int, str] | None = None,
     extended_pictographic: set = None,
-) -> List[int]:
+) -> list[int]:
     """Pure Python implementation of the UAX-29 extended grapheme cluster algorithm.
 
     Reference baseline for the C implementation. Returns byte positions of cluster boundaries.
@@ -924,7 +933,7 @@ def baseline_grapheme_boundaries(
 # region Sentence
 
 
-def get_sentence_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+def get_sentence_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     """Download and parse SentenceBreakProperty.txt.
 
     Returns a dict mapping codepoints to their Sentence_Break property name.
@@ -935,17 +944,17 @@ def get_sentence_break_properties(version: str = UNICODE_VERSION) -> Dict[int, s
     return _parse_break_property_file(cache_path)
 
 
-def get_sentence_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+def get_sentence_break_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     """Download and parse the official SentenceBreakTest.txt.
 
-    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    Returns a list of (text: str, boundary_positions: list[int]) tuples; boundary
     positions are byte offsets and include 0 and len(text).
     """
     cache_path = _download_break_test_file("SentenceBreakTest.txt", version)
     return _parse_break_test_file(cache_path)
 
 
-def baseline_sentence_boundaries(text: str, properties: Dict[int, str] = None) -> List[int]:
+def baseline_sentence_boundaries(text: str, properties: dict[int, str] | None = None) -> list[int]:
     """Pure Python implementation of the UAX-29 sentence boundary algorithm.
 
     Reference baseline for the C implementation. Returns byte positions of sentence boundaries.
@@ -1068,7 +1077,7 @@ def baseline_sentence_boundaries(text: str, properties: Dict[int, str] = None) -
 # region Line
 
 
-def get_line_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
+def get_line_break_properties(version: str = UNICODE_VERSION) -> dict[int, str]:
     """Download and parse LineBreak.txt.
 
     Returns a dict mapping codepoints to their Line_Break property name
@@ -1078,10 +1087,10 @@ def get_line_break_properties(version: str = UNICODE_VERSION) -> Dict[int, str]:
     return _parse_break_property_file(cache_path)
 
 
-def get_line_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+def get_line_break_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     """Download and parse the official LineBreakTest.txt.
 
-    Returns a list of (text: str, boundary_positions: List[int]) tuples; boundary
+    Returns a list of (text: str, boundary_positions: list[int]) tuples; boundary
     positions are byte offsets and include 0 and len(text). The test file marks only
     break opportunities, not whether they are mandatory.
     """
@@ -1089,7 +1098,7 @@ def get_line_break_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     return _parse_break_test_file(cache_path)
 
 
-def baseline_line_boundaries(text: str, properties: Dict[int, str] = None) -> List[tuple]:
+def baseline_line_boundaries(text: str, properties: dict[int, str] | None = None) -> list[tuple]:
     """Pure Python reference for UAX-14 mandatory line breaks.
 
     Rather than reimplement the full pair-table (LB1-LB31), this baseline returns the set of
@@ -1174,7 +1183,7 @@ def _download_ucd_text(filename: str, subdir: str, version: str = UNICODE_VERSIO
     return cache_path
 
 
-def get_normalization_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
+def get_normalization_test_cases(version: str = UNICODE_VERSION) -> list[tuple]:
     """Download and parse the official NormalizationTest.txt.
 
     Returns a list of (source, nfc, nfd, nfkc, nfkd) tuples, each a decoded `str`. This is the authoritative,
@@ -1202,7 +1211,7 @@ def get_normalization_test_cases(version: str = UNICODE_VERSION) -> List[tuple]:
     return cases
 
 
-def get_emoji_properties(version: str = UNICODE_VERSION) -> Dict[int, set]:
+def get_emoji_properties(version: str = UNICODE_VERSION) -> dict[int, set]:
     """Download and parse emoji-data.txt into a dict mapping codepoints to their set of emoji property names.
 
     Property names: Emoji, Emoji_Presentation, Emoji_Modifier, Emoji_Modifier_Base, Emoji_Component,
@@ -1210,7 +1219,7 @@ def get_emoji_properties(version: str = UNICODE_VERSION) -> Dict[int, set]:
     """
     cache_path = _download_ucd_text("emoji-data.txt", "ucd/emoji", version)
 
-    properties: Dict[int, set] = {}
+    properties: dict[int, set] = {}
     with open(cache_path, "r", encoding="utf-8") as data_file:
         for line in data_file:
             line = line.split("#")[0].strip()
@@ -1238,14 +1247,14 @@ def get_extended_pictographic(version: str = UNICODE_VERSION) -> set:
     return {codepoint for codepoint, names in get_emoji_properties(version).items() if "Extended_Pictographic" in names}
 
 
-def get_combining_classes(version: str = UNICODE_VERSION) -> Dict[int, int]:
+def get_combining_classes(version: str = UNICODE_VERSION) -> dict[int, int]:
     """Return a dict mapping codepoints to their Canonical_Combining_Class (from the UCD XML ``ccc`` attribute).
 
     Only non-default entries matter for normalization reordering; codepoints absent from the map are ccc=0.
     """
     root = get_unicode_xml_data(version)
     namespace = "{http://www.unicode.org/ns/2003/ucd/1.0}"
-    combining_classes: Dict[int, int] = {}
+    combining_classes: dict[int, int] = {}
     for char in root.iter(namespace + "char"):
         codepoint = char.get("cp")
         raw_combining_class = char.get("ccc")
@@ -1257,7 +1266,7 @@ def get_combining_classes(version: str = UNICODE_VERSION) -> Dict[int, int]:
     return combining_classes
 
 
-def get_decomposition_mappings(version: str = UNICODE_VERSION) -> Dict[int, tuple]:
+def get_decomposition_mappings(version: str = UNICODE_VERSION) -> dict[int, tuple]:
     """Return a dict mapping codepoints to ``(kind, [target_codepoints])`` decomposition mappings.
 
     ``kind`` is ``"canonical"`` (UCD ``dt == "can"``) or ``"compatibility"`` (any other decomposition type).
@@ -1266,7 +1275,7 @@ def get_decomposition_mappings(version: str = UNICODE_VERSION) -> Dict[int, tupl
     """
     root = get_unicode_xml_data(version)
     namespace = "{http://www.unicode.org/ns/2003/ucd/1.0}"
-    mappings: Dict[int, tuple] = {}
+    mappings: dict[int, tuple] = {}
     for char in root.iter(namespace + "char"):
         codepoint = char.get("cp")
         decomposition_mapping = char.get("dm")
@@ -1280,14 +1289,14 @@ def get_decomposition_mappings(version: str = UNICODE_VERSION) -> Dict[int, tupl
 
 
 def representatives_by_class(
-    properties: Dict[int, str], count: int = 3, bmp_only: bool = False
-) -> Dict[str, List[int]]:
+    properties: dict[int, str], count: int = 3, bmp_only: bool = False
+) -> dict[str, list[int]]:
     """Invert a ``{codepoint: class_name}`` break-property dict into ``{class_name: [first-`count` codepoints]}``.
 
     The enabler for class-adjacency corpora: with one representative codepoint per break class, a test can
     construct strings exercising every class-adjacency pair (or triple) the segmentation rules can encounter.
     """
-    representatives: Dict[str, List[int]] = {}
+    representatives: dict[str, list[int]] = {}
     for codepoint in sorted(properties):
         if 0xD800 <= codepoint <= 0xDFFF:
             continue  # surrogates are never valid in UTF-8 text
@@ -1308,72 +1317,117 @@ def representatives_by_class(
 # the Unicode data loaders above and the seeding / random-string utilities below. The NumPy /
 # PyArrow availability flags and their defensive imports live in the top import block.
 
-_random_seed_for_run = int.from_bytes(os.urandom(4), "little")
-"""A random seed generated once at import time, joining `SEED_VALUES` only under
-`STRINGZILLA_SEED=random` and printed in the pytest report header."""
 
-SEED_VALUES = [
-    42,  # Classic test seed
-    0,  # Edge case: zero seed
-    1,  # Minimal positive seed
-    314159,  # Pi digits
-]
-"""Reproducible test seeds for consistent CI runs."""
+def env_text(name: str) -> str | None:
+    """Reads `name`, or `None` when it is unset or empty."""
+    return os.environ.get(name) or None
 
-_env_seed = os.environ.get("STRINGZILLA_SEED")
-"""Appends `_random_seed_for_run` when `random`, or replaces SEED_VALUES with one integer seed."""
-if _env_seed == "random":
-    SEED_VALUES.append(_random_seed_for_run)
-elif _env_seed:
+
+def env_parsed(name: str, fallback, parse: Callable[[str], object], expected: str):
+    """Reads `name` through `parse`, or `fallback` when unset or empty; exits with status 1 if it does not parse."""
+    text = env_text(name)
+    if text is None:
+        return fallback
     try:
-        SEED_VALUES = [int(_env_seed)]
-    except ValueError:
-        raise SystemExit(f'STRINGZILLA_SEED="{_env_seed}" does not parse') from None
+        parsed = parse(text)
+    except (ValueError, TypeError):
+        parsed = None
+    if parsed is None:
+        raise SystemExit(f'{name}="{text}" does not parse, expected {expected}')
+    return parsed
 
 
-# Stress-depth knob shared with the C++ suite: STRINGZILLA_SCALE scales every fuzz baseline,
-# defaulting to 1.0 so the runtime is unchanged unless a smoke or CI run overrides it.
-def _read_iterations_multiplier() -> float:
-    raw = os.environ.get("STRINGZILLA_SCALE")
-    if not raw:
-        return 1.0
+def env_flag(name: str, fallback: bool) -> bool:
+    """Reads `0`, `1`, `true` or `false`, or `fallback` when unset or empty; exits if it does not parse."""
+    return env_parsed(name, fallback, {"0": False, "false": False, "1": True, "true": True}.get, "0, 1, true or false")
+
+
+Seed = NewType("Seed", int)  # 32-bit; derive streams from it with `stream_key`, never add to it
+StreamKey = NewType("StreamKey", int)  # 64-bit, from `stream_key`; seeds one test's generators
+
+
+def env_seed(name: str, fallback: Seed) -> Seed:
+    """Reads an unsigned 32-bit seed or `random`, or `fallback` when unset or empty."""
+    return env_parsed(name, fallback, parse_seed, "an unsigned integer or random")
+
+
+def parse_seed(text: str) -> Seed | None:
+    """Parses an unsigned 32-bit integer like `42`, or `random` to draw one from system entropy."""
+    if text == "random":
+        return Seed(secrets.randbits(32))
+    digits = re.fullmatch(r"[0-9]+", text) is not None
+    return Seed(int(text)) if digits and int(text) < 2**32 else None
+
+
+_UINT64_MASK = 2**64 - 1
+
+
+def mix(value: int) -> int:
+    """SplitMix64's finalizer, a bijection that spreads every input bit over all 64 output bits."""
+    value = ((value ^ (value >> 30)) * 0xBF58476D1CE4E5B9) & _UINT64_MASK
+    value = ((value ^ (value >> 27)) * 0x94D049BB133111EB) & _UINT64_MASK
+    return value ^ (value >> 31)
+
+
+def stream_key(seed: Seed, name: str) -> StreamKey:
+    """The key of stream `name`, `mix(mix(seed ^ fnv1a64(name)))`, bit-identical to C++ `stream_key`."""
+    hashed = 0xCBF29CE484222325
+    for byte in name.encode():
+        hashed = ((hashed ^ byte) * 0x100000001B3) & _UINT64_MASK
+    return StreamKey(mix(mix(seed ^ hashed)))
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Every `STRINGZILLA_*` variable the Python suite reads, parsed once at import."""
+
+    seed: Seed
+    filter: str
+    filter_pattern: re.Pattern | None
+    scale: float
+    in_qemu: bool
+
+    def selects(self, name: str) -> bool:
+        """Whether `STRINGZILLA_FILTER` selects the test `name`, as a regex or else as a substring."""
+        return bool(self.filter_pattern.search(name)) if self.filter_pattern else self.filter in name
+
+
+def read_settings() -> Settings:
+    """Reads every `STRINGZILLA_*` variable, exiting with status 1 on the first that does not parse."""
+    filter = env_text("STRINGZILLA_FILTER") or ""
     try:
-        return float(raw)
-    except ValueError:
-        raise SystemExit(f'STRINGZILLA_SCALE="{raw}" does not parse') from None
+        filter_pattern = re.compile(filter) if filter else None
+    except re.error:
+        filter_pattern = None
+    return Settings(
+        seed=env_seed("STRINGZILLA_SEED", Seed(42)),
+        filter=filter,
+        filter_pattern=filter_pattern,
+        # Stress depth shared with the C++ suite: scales every fuzz baseline, so CI can shrink it.
+        scale=env_parsed(
+            "STRINGZILLA_SCALE",
+            1.0,
+            lambda text: scale if 0 < (scale := float(text)) < math.inf else None,
+            "a positive number like 0.1 or 10",
+        ),
+        in_qemu=env_flag("STRINGZILLA_IN_QEMU", False),
+    )
 
 
-ITERATIONS_MULTIPLIER = _read_iterations_multiplier()
+SETTINGS = read_settings()
 
 
 def scale_iterations(baseline: int) -> int:
-    return max(1, int(baseline * ITERATIONS_MULTIPLIER))
-
-
-def seed_random_generators(seed_value: Optional[int] = None):
-    """Seed Python and NumPy RNGs for reproducibility."""
-    if seed_value is None:
-        return
-    seed(seed_value)
-    # Handle both NumPy 1.x and 2.x, and any import issues.
-    if numpy_available:
-        try:
-            np.random.seed(seed_value)
-        except (ImportError, AttributeError, Exception):
-            pass
+    return max(1, int(baseline * SETTINGS.scale))
 
 
 def get_random_string(
-    length: Optional[int] = None, variability: Optional[int] = None, alphabet: Optional[str] = None
+    rng: Random, length: int | None = None, variability: int | None = None, alphabet: str = ascii_lowercase
 ) -> str:
     """Build a random string with optional fixed `length`, `alphabet`, and alphabet `variability`."""
-    if length is None:
-        length = randint(3, 300)
-    if alphabet is None:
-        alphabet = ascii_lowercase
-    if variability is None:
-        variability = len(alphabet)
-    return "".join(choice(alphabet[:variability]) for _ in range(length))
+    length = rng.randint(3, 300) if length is None else length
+    variability = len(alphabet) if variability is None else variability
+    return "".join(rng.choice(alphabet[:variability]) for _ in range(length))
 
 
 def is_equal_strings(native_strings, big_strings):
@@ -1423,8 +1477,12 @@ def capability_sweep():
     return sweep
 
 
+_CAPABILITIES_LOCK = threading.RLock()
+"""Held while a block narrows the process-wide mask, so `--parallel-threads` can't interleave a save and a restore."""
+
+
 @contextlib.contextmanager
-def forced_capabilities(capabilities):
+def forced_capabilities(capabilities: "sz.Capability") -> "Iterator[sz.Capability]":
     """Temporarily make `capabilities` what StringZilla dispatches with, restoring the previous mask on exit.
 
     Yields the mask active inside the block, which may be smaller than requested, since
@@ -1433,11 +1491,12 @@ def forced_capabilities(capabilities):
     """
     import stringzilla as sz
 
-    previous = sz.Device.cpu().capabilities_enabled()
-    try:
-        yield sz.Device.cpu().capabilities_enable(capabilities)
-    finally:
-        sz.Device.cpu().capabilities_enable(previous)
+    with _CAPABILITIES_LOCK:
+        previous = sz.Device.cpu().capabilities_enabled()
+        try:
+            yield sz.Device.cpu().capabilities_enable(capabilities)
+        finally:
+            sz.Device.cpu().capabilities_enable(previous)
 
 
 def run_across_backends(operation) -> dict[object, object]:
@@ -1474,7 +1533,7 @@ VECTOR_WIDTH_LENGTHS = (
 and vector-boundary logic in the kernels is most likely to diverge from serial exactly at these sizes."""
 
 
-def boundary_strings(alphabet: str = "ab") -> List[str]:
+def boundary_strings(alphabet: str = "ab") -> list[str]:
     """One deterministic string per `VECTOR_WIDTH_LENGTHS`, tiled from a small `alphabet` so substring
     and byteset kernels see frequent partial and full matches straddling the vector boundaries."""
     repeated = alphabet * (max(VECTOR_WIDTH_LENGTHS) // len(alphabet) + 1)
@@ -1494,7 +1553,7 @@ def unaligned_views(text, offsets=(0, 1, 3, 7, 15)):
             yield offset, parent[offset:]
 
 
-def malformed_utf8_corpus() -> List[bytes]:
+def malformed_utf8_corpus() -> list[bytes]:
     """Byte strings that are not valid UTF-8, to feed the ``utf8_*`` kernels. Every backend must agree
     on the result and stay in-bounds without crashing, the same malformed shapes the C++ `utf8.hpp`
     safety sweep uses, ported to Python `bytes`."""
@@ -1512,7 +1571,7 @@ def malformed_utf8_corpus() -> List[bytes]:
     ]
 
 
-def vector_width_bracketing_strings() -> List[str]:
+def vector_width_bracketing_strings() -> list[str]:
     """ASCII-padded strings with a 2, 3, and 4-byte codepoint planted around the 16/32/64-byte SIMD lanes."""
     multibyte_codepoints = ["é", "中", "\U0001f600"]
     lane_widths = [16, 32, 64]
@@ -1533,11 +1592,10 @@ _BOUNDARY_STRINGS_BY_LENGTH = {
 }
 
 
-def differential_bodies(length, seed_value):
-    """Random, tiled, and all-same-character bodies of `length`; the random one seeded by `seed_value`."""
-    seed_random_generators(seed_value)
+def differential_bodies(length: int, rng: Random) -> tuple[str, str, str]:
+    """Random, tiled, and all-same-character bodies of `length`; the random one drawn from `rng`."""
     tiled_body, same_char_body = _BOUNDARY_STRINGS_BY_LENGTH[length]
-    return get_random_string(length=length), tiled_body, same_char_body
+    return get_random_string(rng, length=length), tiled_body, same_char_body
 
 
 # endregion Backend differential sweep

@@ -46,8 +46,6 @@
 
 #include "harness.hpp" // `for_each_cacheline_offset_`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-
 namespace ashvardanian::stringzilla::test {
 
 using std::literals::string_view_literals::operator""sv;

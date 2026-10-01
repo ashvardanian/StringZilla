@@ -25,8 +25,7 @@
 #include "cross.hpp"   // `check_cipher_unit_`, `check_cipher_equivalence_`
 #include "harness.hpp" // `verify`, `randomize_string`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 #pragma region Helpers
 
@@ -114,3 +113,5 @@ void test_cipher_safety(test_context_t &context) {
 void test_cipher_all(test_context_t &context) { check_cipher_equivalence_(context, ctr_dispatched, gcm_dispatched); }
 
 #pragma endregion Drivers
+
+} // namespace ashvardanian::stringzilla::test

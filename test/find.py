@@ -23,29 +23,24 @@ Author: Ash Vardanian
 Date: June 18, 2023
 """
 
-from random import randint
-from typing import Optional
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str, Strs
-
-from test.helpers import (
-    SEED_VALUES,
-    DEGENERATE_HAYSTACKS,
+from base import (
     DEGENERATE_BOUNDS,
+    DEGENERATE_HAYSTACKS,
     UNCASED_DEGENERATE_BOUNDS,
-    seed_random_generators,
+    VECTOR_WIDTH_LENGTHS,
+    assert_backends_agree,
+    boundary_strings,
     get_random_string,
     is_equal_strings,
     run_across_backends,
-    assert_backends_agree,
-    VECTOR_WIDTH_LENGTHS,
-    boundary_strings,
     unaligned_views,
 )
 
+import stringzilla as sz
+from stringzilla import Str, Strs
 
 # region Unit
 
@@ -315,14 +310,9 @@ def test_unit_empty_needle_uncased_search_degenerate_bytes(haystack, needle, sta
 def check_identical(
     native: str,
     big: Str,
-    needle: Optional[str] = None,
+    needle: str,
     check_iterators: bool = False,
-):
-    if needle is None:
-        part_offset = randint(0, len(native) - 1)
-        part_length = randint(1, len(native) - part_offset)
-        needle = native[part_offset:part_length]
-
+) -> None:
     present_in_native: bool = needle in native
     present_in_big = needle in big
     assert present_in_native == present_in_big
@@ -369,14 +359,12 @@ def test_fuzzy_repetitions(repetitions: int):
 @pytest.mark.parametrize("pattern_length", [1, 2, 3, 4, 5])
 @pytest.mark.parametrize("haystack_length", [n for n in VECTOR_WIDTH_LENGTHS if n <= 65])
 @pytest.mark.parametrize("variability", [1, 2, 4, 26])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int, seed_value: int):
+def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int, rng: Random):
     """`Str.contains` and `Str.find` match CPython `str` across random alphabets, seeds, and
     haystack/pattern lengths bracketing the SIMD vector widths."""
-    seed_random_generators(seed_value)
-    native = get_random_string(variability=variability, length=haystack_length)
+    native = get_random_string(rng, variability=variability, length=haystack_length)
     big = Str(native)
-    pattern = get_random_string(variability=variability, length=pattern_length)
+    pattern = get_random_string(rng, variability=variability, length=pattern_length)
     assert (pattern in native) == big.contains(
         pattern
     ), f"Failed to check if {pattern} at offset {native.find(pattern)} is present in {native}"
@@ -551,14 +539,12 @@ def test_unit_backend_differential_unaligned_views(needle):
 @pytest.mark.parametrize("needle_length", [0, 1, 2, 3, 5])
 @pytest.mark.parametrize("haystack_length", [0, 1, 5, 17, 33, 65])
 @pytest.mark.parametrize("variability", [1, 2, 4])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_random_fuzz(seed_value, variability, haystack_length, needle_length):
+def test_unit_backend_differential_random_fuzz(rng: Random, variability: int, haystack_length: int, needle_length: int):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for small-alphabet random haystacks and needles, which give frequent matches and overlaps, across
     every seed, haystack length, and needle length; a divergence is a kernel bug, not a binding bug."""
-    seed_random_generators(seed_value)
-    haystack = get_random_string(variability=variability, length=haystack_length)
-    needle = get_random_string(variability=variability, length=needle_length)
+    haystack = get_random_string(rng, variability=variability, length=haystack_length)
+    needle = get_random_string(rng, variability=variability, length=needle_length)
     assert_find_family_matches_oracles(haystack, needle)
 
 

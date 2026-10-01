@@ -26,19 +26,16 @@ Date: November 24, 2025
 from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
-    SEED_VALUES,
+from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
     run_across_backends,
     vector_width_bracketing_strings,
 )
-from test.utf8_helpers import adversarial_utf8_inputs
+from utf8_helpers import adversarial_utf8_inputs
 
+import stringzilla as sz
+from stringzilla import Str
 
 # region Unit
 
@@ -177,12 +174,10 @@ def test_utf8_tokens():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_tokens_safety(seed_value: int):
+def test_utf8_tokens_safety(rng: Random):
     """Adversarial-byte safety for the delimiter splitters. Unlike the boundary segmenters these drop their
     separators, so they do not tile, and the invariant is: no crash, and the kept segment bytes never exceed
     the input length nor escape its bounds."""
-    rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
         for splitter in (sz.utf8_split_whitespaces, sz.utf8_split_newlines):
             segments = list(splitter(raw))

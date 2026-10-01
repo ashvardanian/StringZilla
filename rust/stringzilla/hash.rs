@@ -3,8 +3,9 @@
 //! File: rust/stringzilla/hash.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Incremental hasher state for StringZilla's 64-bit hash.
 ///
@@ -650,6 +651,7 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use core::hash::Hasher as _;
+
     // `HashMap`/`HashSet` have no `allocator`-only equivalent (unlike `Vec`/`String`/`BTreeMap`),
     // so the handful of tests that need them stay behind `feature = "std"`; everything else
     // here runs no_std.

@@ -28,6 +28,8 @@ mod utf8_uncased;
 mod utf8_uncased_fold;
 mod utf8_wordbreaks;
 
+use core::ffi::{c_char, c_int, c_void};
+
 pub use cipher::*;
 pub use compare::*;
 pub use find::*;
@@ -48,8 +50,6 @@ pub use utf8_tokens::*;
 pub use utf8_uncased::*;
 pub use utf8_uncased_fold::*;
 pub use utf8_wordbreaks::*;
-
-use core::ffi::{c_char, c_int, c_void};
 
 // Import the functions from the StringZillable C library. Every dispatch point takes the capability
 // mask to pick a kernel from and a stream, null on the CPU, and reports an `sz_status_t`.

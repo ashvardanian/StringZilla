@@ -24,8 +24,7 @@
 
 #include "cross.hpp" // `check_utf8_norm_unit_`, `check_utf8_norm_equivalence_`, `check_utf8_norm_safety_`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 
 /** The normalization dispatch points, in the shape of one backend's kernels. */
 static utf8_norm_kernels_t const utf8_norm_dispatched {cpu_best<sz_utf8_norm_best>,
@@ -77,3 +76,5 @@ void test_utf8_norm_safety(test_context_t &context) { check_utf8_norm_safety_(co
 
 /** The normalization differential fuzz of the dispatch points against the serial kernels. */
 void test_utf8_norm_all(test_context_t &context) { check_utf8_norm_equivalence_(context, utf8_norm_dispatched); }
+
+} // namespace ashvardanian::stringzilla::test

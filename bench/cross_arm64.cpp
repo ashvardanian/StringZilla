@@ -6,9 +6,7 @@
  */
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 #if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_SVE
 #if defined(__clang__)
@@ -32,117 +30,117 @@ sz_status_t pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allo
 #endif
 #endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_SVE
 
-} // namespace
-
-void bench_cross_arm64([[maybe_unused]] corpora_t &corpora) {
+void bench_cross_arm64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_NEON
-    if (cross_section("Cross NEON", sz_cap_neon_k)) {
-        bench_find_kernels<sz_find_neon, sz_rfind_neon>(corpora, "neon");
-        bench_find_byte_kernels<sz_find_byte_neon, sz_rfind_byte_neon>(corpora, "neon");
-        bench_find_byteset_kernels<sz_find_byteset_neon, sz_rfind_byteset_neon>(corpora, "neon");
-        bench_utf8_count_kernels<sz_utf8_count_neon>(corpora, "neon");
-        bench_utf8_seek_kernels<sz_utf8_seek_neon>(corpora, "neon");
-        bench_utf8_decode_kernels<sz_utf8_decode_neon>(corpora, "neon");
-        bench_utf8_newlines_kernels<sz_utf8_newlines_neon>(corpora, "neon");
-        bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_neon>(corpora, "neon");
-        bench_utf8_delimiters_kernels<sz_utf8_delimiters_neon>(corpora, "neon");
-        bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_neon>(corpora, "neon");
-        bench_utf8_sentences_kernels<sz_utf8_sentences_neon>(corpora, "neon");
-        bench_utf8_linebreaks_kernels<sz_utf8_linebreaks_neon>(corpora, "neon");
-        bench_utf8_norm_kernels<sz_utf8_norm_neon>(corpora, "neon");
-        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_neon>(corpora, "neon");
-        bench_utf8_uncased_fold_kernels<sz_utf8_uncased_fold_neon>(corpora, "neon");
-        bench_utf8_uncased_search_kernels<sz_utf8_uncased_search_neon>(corpora, "neon");
-        bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_neon>(corpora, "neon");
-        bench_bytesum_kernels<sz_bytesum_neon>(corpora, "neon");
-        bench_equal_kernels<sz_equal_neon>(corpora, "neon");
-        bench_order_kernels<sz_order_neon>(corpora, "neon");
-        bench_copy_kernels<sz_copy_neon>(corpora, "neon");
-        bench_move_kernels<sz_move_neon>(corpora, "neon");
-        bench_fill_kernels<sz_fill_neon>(corpora, "neon");
-        bench_lookup_kernels<sz_lookup_neon>(corpora, "neon");
-        bench_map_kernels<sz_order_neon>(corpora, "neon");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon>(corpora, "neon");
+    if (section(env, "Cross NEON", sz_cap_neon_k)) {
+        bench_find_kernels<sz_find_neon, sz_rfind_neon>(env, "neon");
+        bench_find_byte_kernels<sz_find_byte_neon, sz_rfind_byte_neon>(env, "neon");
+        bench_find_byteset_kernels<sz_find_byteset_neon, sz_rfind_byteset_neon>(env, "neon");
+        bench_utf8_count_kernels<sz_utf8_count_neon>(env, "neon");
+        bench_utf8_seek_kernels<sz_utf8_seek_neon>(env, "neon");
+        bench_utf8_decode_kernels<sz_utf8_decode_neon>(env, "neon");
+        bench_utf8_newlines_kernels<sz_utf8_newlines_neon>(env, "neon");
+        bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_neon>(env, "neon");
+        bench_utf8_delimiters_kernels<sz_utf8_delimiters_neon>(env, "neon");
+        bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_neon>(env, "neon");
+        bench_utf8_sentences_kernels<sz_utf8_sentences_neon>(env, "neon");
+        bench_utf8_linebreaks_kernels<sz_utf8_linebreaks_neon>(env, "neon");
+        bench_utf8_norm_kernels<sz_utf8_norm_neon>(env, "neon");
+        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_neon>(env, "neon");
+        bench_utf8_uncased_fold_kernels<sz_utf8_uncased_fold_neon>(env, "neon");
+        bench_utf8_uncased_search_kernels<sz_utf8_uncased_search_neon>(env, "neon");
+        bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_neon>(env, "neon");
+        bench_bytesum_kernels<sz_bytesum_neon>(env, "neon");
+        bench_equal_kernels<sz_equal_neon>(env, "neon");
+        bench_order_kernels<sz_order_neon>(env, "neon");
+        bench_copy_kernels<sz_copy_neon>(env, "neon");
+        bench_move_kernels<sz_move_neon>(env, "neon");
+        bench_fill_kernels<sz_fill_neon>(env, "neon");
+        bench_lookup_kernels<sz_lookup_neon>(env, "neon");
+        bench_map_kernels<sz_order_neon>(env, "neon");
+        bench_sequence_argsort_kernels<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon>(env, "neon");
 #if !STRINGZILLA_HEADER_ONLY
         bench_substrings_kernels<sz_substrings_counts_neon, sz_substrings_find_neon, sz_substrings_replace_neon,
-                                 sz_substrings_bm25_scores_neon>(corpora, "neon");
+                                 sz_substrings_bm25_scores_neon>(env, "neon");
 #else
-        bench_pgrams_sort_kernels<sz_pgrams_sort_neon_>(corpora, "neon");
+        bench_pgrams_sort_kernels<sz_pgrams_sort_neon_>(env, "neon");
 #endif
     }
 #endif // STRINGZILLA_TARGET_NEON
 #if STRINGZILLA_TARGET_NEONAES
-    if (cross_section("Cross NEON AES", sz_cap_neonaes_k)) {
-        bench_hash_kernels<sz_hash_neonaes>(corpora, "neonaes");
-        bench_hash_multiseed_kernels<sz_hash_multiseed_neonaes>(corpora, "neonaes");
+    if (section(env, "Cross NEON AES", sz_cap_neonaes_k)) {
+        bench_hash_kernels<sz_hash_neonaes>(env, "neonaes");
+        bench_hash_multiseed_kernels<sz_hash_multiseed_neonaes>(env, "neonaes");
         bench_hash_stream_kernels<sz_hash_state_init_neonaes, sz_hash_state_update_neonaes,
-                                  sz_hash_state_digest_neonaes>(corpora, "neonaes");
-        bench_fill_random_kernels<sz_fill_random_neonaes>(corpora, "neonaes");
-        bench_aes256_ctr_kernels<sz_aes256_key_init_neonaes, sz_aes256_ctr_xor_neonaes>(corpora, "neonaes");
-        bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encrypt_neonaes>(corpora, "neonaes");
+                                  sz_hash_state_digest_neonaes>(env, "neonaes");
+        bench_fill_random_kernels<sz_fill_random_neonaes>(env, "neonaes");
+        bench_aes256_ctr_kernels<sz_aes256_key_init_neonaes, sz_aes256_ctr_xor_neonaes>(env, "neonaes");
+        bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encrypt_neonaes>(env, "neonaes");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_neonaes, sz_aes256_gcm_encryptor_init_neonaes,
                                         sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes>(
-            corpora, "neonaes");
-        bench_unordered_map_kernels<sz_hash_neonaes, sz_equal_neon>(corpora, "neonaes", "neon");
-        bench_sequence_intersect_kernels<sz_sequence_intersect_neonaes>(corpora, "neonaes");
+            env, "neonaes");
+        bench_unordered_map_kernels<sz_hash_neonaes, sz_equal_neon>(env, "neonaes", "neon");
+        bench_sequence_intersect_kernels<sz_sequence_intersect_neonaes>(env, "neonaes");
     }
 #endif // STRINGZILLA_TARGET_NEONAES
 #if STRINGZILLA_TARGET_NEONSHA
-    if (cross_section("Cross NEON SHA", sz_cap_neonsha_k)) {
+    if (section(env, "Cross NEON SHA", sz_cap_neonsha_k)) {
         bench_sha256_kernels<sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha,
-                             sz_sha256_state_digest_neonsha>(corpora, "neonsha");
+                             sz_sha256_state_digest_neonsha>(env, "neonsha");
     }
 #endif // STRINGZILLA_TARGET_NEONSHA
 #if STRINGZILLA_TARGET_SVE
-    if (cross_section("Cross SVE", sz_cap_sve_k)) {
-        bench_find_kernels<sz_find_sve, sz_rfind_sve>(corpora, "sve");
-        bench_find_byte_kernels<sz_find_byte_sve, sz_rfind_byte_sve>(corpora, "sve");
-        bench_utf8_norm_kernels<sz_utf8_norm_sve>(corpora, "sve");
-        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_sve>(corpora, "sve");
-        bench_bytesum_kernels<sz_bytesum_sve>(corpora, "sve");
-        bench_equal_kernels<sz_equal_sve>(corpora, "sve");
-        bench_order_kernels<sz_order_sve>(corpora, "sve");
-        bench_copy_kernels<sz_copy_sve>(corpora, "sve");
-        bench_move_kernels<sz_move_sve>(corpora, "sve");
-        bench_fill_kernels<sz_fill_sve>(corpora, "sve");
-        bench_lookup_kernels<sz_lookup_sve>(corpora, "sve");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve>(corpora, "sve");
+    if (section(env, "Cross SVE", sz_cap_sve_k)) {
+        bench_find_kernels<sz_find_sve, sz_rfind_sve>(env, "sve");
+        bench_find_byte_kernels<sz_find_byte_sve, sz_rfind_byte_sve>(env, "sve");
+        bench_utf8_norm_kernels<sz_utf8_norm_sve>(env, "sve");
+        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_sve>(env, "sve");
+        bench_bytesum_kernels<sz_bytesum_sve>(env, "sve");
+        bench_equal_kernels<sz_equal_sve>(env, "sve");
+        bench_order_kernels<sz_order_sve>(env, "sve");
+        bench_copy_kernels<sz_copy_sve>(env, "sve");
+        bench_move_kernels<sz_move_sve>(env, "sve");
+        bench_fill_kernels<sz_fill_sve>(env, "sve");
+        bench_lookup_kernels<sz_lookup_sve>(env, "sve");
+        bench_sequence_argsort_kernels<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve>(env, "sve");
 #if STRINGZILLA_HEADER_ONLY
-        bench_pgrams_sort_kernels<pgrams_sort_sve_>(corpora, "sve");
+        bench_pgrams_sort_kernels<pgrams_sort_sve_>(env, "sve");
 #endif
     }
 #endif // STRINGZILLA_TARGET_SVE
 #if STRINGZILLA_TARGET_SVE2
-    if (cross_section("Cross SVE2", sz_cap_sve2_k)) {
-        bench_find_byteset_kernels<sz_find_byteset_sve2, sz_rfind_byteset_sve2>(corpora, "sve2");
-        bench_utf8_count_kernels<sz_utf8_count_sve2>(corpora, "sve2");
-        bench_utf8_seek_kernels<sz_utf8_seek_sve2>(corpora, "sve2");
-        bench_utf8_decode_kernels<sz_utf8_decode_sve2>(corpora, "sve2");
-        bench_utf8_newlines_kernels<sz_utf8_newlines_sve2>(corpora, "sve2");
-        bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_sve2>(corpora, "sve2");
-        bench_utf8_delimiters_kernels<sz_utf8_delimiters_sve2>(corpora, "sve2");
-        bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_sve2>(corpora, "sve2");
-        bench_utf8_graphemes_kernels<sz_utf8_graphemes_sve2>(corpora, "sve2");
-        bench_utf8_sentences_kernels<sz_utf8_sentences_sve2>(corpora, "sve2");
-        bench_utf8_linebreaks_kernels<sz_utf8_linebreaks_sve2>(corpora, "sve2");
-        bench_utf8_norm_kernels<sz_utf8_norm_sve2>(corpora, "sve2");
-        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_sve2>(corpora, "sve2");
-        bench_utf8_uncased_fold_kernels<sz_utf8_uncased_fold_sve2>(corpora, "sve2");
-        bench_utf8_uncased_search_kernels<sz_utf8_uncased_search_sve2>(corpora, "sve2");
-        bench_bytesum_kernels<sz_bytesum_sve2>(corpora, "sve2");
+    if (section(env, "Cross SVE2", sz_cap_sve2_k)) {
+        bench_find_byteset_kernels<sz_find_byteset_sve2, sz_rfind_byteset_sve2>(env, "sve2");
+        bench_utf8_count_kernels<sz_utf8_count_sve2>(env, "sve2");
+        bench_utf8_seek_kernels<sz_utf8_seek_sve2>(env, "sve2");
+        bench_utf8_decode_kernels<sz_utf8_decode_sve2>(env, "sve2");
+        bench_utf8_newlines_kernels<sz_utf8_newlines_sve2>(env, "sve2");
+        bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_sve2>(env, "sve2");
+        bench_utf8_delimiters_kernels<sz_utf8_delimiters_sve2>(env, "sve2");
+        bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_sve2>(env, "sve2");
+        bench_utf8_graphemes_kernels<sz_utf8_graphemes_sve2>(env, "sve2");
+        bench_utf8_sentences_kernels<sz_utf8_sentences_sve2>(env, "sve2");
+        bench_utf8_linebreaks_kernels<sz_utf8_linebreaks_sve2>(env, "sve2");
+        bench_utf8_norm_kernels<sz_utf8_norm_sve2>(env, "sve2");
+        bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_sve2>(env, "sve2");
+        bench_utf8_uncased_fold_kernels<sz_utf8_uncased_fold_sve2>(env, "sve2");
+        bench_utf8_uncased_search_kernels<sz_utf8_uncased_search_sve2>(env, "sve2");
+        bench_bytesum_kernels<sz_bytesum_sve2>(env, "sve2");
     }
 #endif // STRINGZILLA_TARGET_SVE2
 #if STRINGZILLA_TARGET_SVE2AES
-    if (cross_section("Cross SVE2 AES", sz_cap_sve2aes_k)) {
-        bench_hash_kernels<sz_hash_sve2aes>(corpora, "sve2aes");
+    if (section(env, "Cross SVE2 AES", sz_cap_sve2aes_k)) {
+        bench_hash_kernels<sz_hash_sve2aes>(env, "sve2aes");
         bench_hash_stream_kernels<sz_hash_state_init_sve2aes, sz_hash_state_update_sve2aes,
-                                  sz_hash_state_digest_sve2aes>(corpora, "sve2aes");
-        bench_fill_random_kernels<sz_fill_random_sve2aes>(corpora, "sve2aes");
-        bench_aes256_ctr_kernels<sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes>(corpora, "sve2aes");
-        bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes>(corpora, "sve2aes");
+                                  sz_hash_state_digest_sve2aes>(env, "sve2aes");
+        bench_fill_random_kernels<sz_fill_random_sve2aes>(env, "sve2aes");
+        bench_aes256_ctr_kernels<sz_aes256_key_init_sve2aes, sz_aes256_ctr_xor_sve2aes>(env, "sve2aes");
+        bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encrypt_sve2aes>(env, "sve2aes");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_sve2aes, sz_aes256_gcm_encryptor_init_sve2aes,
                                         sz_aes256_gcm_encryptor_update_sve2aes, sz_aes256_gcm_encryptor_digest_sve2aes>(
-            corpora, "sve2aes");
+            env, "sve2aes");
     }
 #endif // STRINGZILLA_TARGET_SVE2AES
 }
+
+} // namespace ashvardanian::stringzilla::bench

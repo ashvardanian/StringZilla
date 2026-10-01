@@ -21,23 +21,6 @@
  *  intersections, the number of operations is estimated as the total number of characters in the
  *  two input sequences combined.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=0` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=words` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test SIMD-accelerated functions against the serial baselines.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_STRESS_LIMIT=1` : Controls the number of failures we're willing to tolerate.
- *  - `STRINGWARS_STRESS_DURATION=10` : Stress-testing time limit (in seconds) per benchmark.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  Here are a few build & run commands:
  *
  *  @code{.sh}
@@ -53,7 +36,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  STRINGWARS_STRESS=1 STRINGWARS_STRESS_DURATION=120 STRINGWARS_STRESS_DIR=logs
+ *  STRINGZILLA_STRESS=1 STRINGZILLA_STRESS_TIME_LIMIT=120s STRINGZILLA_STRESS_DIR=logs
  *  build_release/stringzilla_cpu_bench
  *  @endcode
  *
@@ -72,7 +55,7 @@
 
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::bench;
+namespace ashvardanian::stringzilla::bench {
 
 #if __linux__ && defined(_GNU_SOURCE) && !defined(__BIONIC__)
 #define STRINGZILLA_HAS_QSORT_R_ 1
@@ -84,8 +67,6 @@ using namespace ashvardanian::stringzilla::bench;
 #else
 #define STRINGZILLA_HAS_QSORT_S_ 0
 #endif
-
-namespace {
 
 #pragma region C Callbacks
 
@@ -173,20 +154,21 @@ struct argsort_strings_via_qsort_t {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
-void bench_sequencing_strings(environment_t const &env) {
-    permute_t permute_buffer(env.tokens.size());
+void bench_sequencing_strings(environment_t const &env, corpus_t const &corpus) {
+    permute_t permute_buffer(corpus.tokens.size());
 
-    auto base_call = argsort_strings_via_sz<cpu_best<sz_sequence_argsort_best>> {env.tokens, permute_buffer};
-    bench_result_t base = bench_nullary(env, "sz_sequence_argsort_best", base_call).log();
+    auto base_call = argsort_strings_via_sz<cpu_best<sz_sequence_argsort_best>> {corpus.tokens, permute_buffer};
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_argsort_best", base_call);
+    print(base);
 
     // Include STL functionality
-    auto std_call = argsort_strings_via_std_t {env.tokens, permute_buffer};
-    bench_nullary(env, "sequence_argsort<std::sort>", base_call, std_call).log(base);
+    auto std_call = argsort_strings_via_std_t {corpus.tokens, permute_buffer};
+    print(bench_nullary(env, corpus, "sequence_argsort<std::sort>", base_call, std_call), baseline_of(base));
 
     // Include POSIX and WinAPI functionality
 #if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
-    auto qsort_call = argsort_strings_via_qsort_t {env.tokens, permute_buffer};
-    bench_nullary(env, "sequence_argsort<qsort>", base_call, qsort_call).log(base);
+    auto qsort_call = argsort_strings_via_qsort_t {corpus.tokens, permute_buffer};
+    print(bench_nullary(env, corpus, "sequence_argsort<qsort>", base_call, qsort_call), baseline_of(base));
 #endif
 }
 
@@ -213,17 +195,19 @@ struct argsort_ci_strings_via_std_t {
  *  @brief Find the array permutation that sorts the input strings in UTF-8 case-folded order.
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
-void bench_sequencing_strings_uncased(environment_t const &env) {
-    permute_t permute_buffer(env.tokens.size());
-    std::vector<std::string> const folded = fold_tokens(env.tokens);
+void bench_sequencing_strings_uncased(environment_t const &env, corpus_t const &corpus) {
+    permute_t permute_buffer(corpus.tokens.size());
+    std::vector<std::string> const folded = fold_tokens(corpus.tokens);
 
-    auto base_call = argsort_ci_strings_via_sz<cpu_best<sz_sequence_argsort_uncased_best>> {env.tokens, folded,
+    auto base_call = argsort_ci_strings_via_sz<cpu_best<sz_sequence_argsort_uncased_best>> {corpus.tokens, folded,
                                                                                             permute_buffer};
-    bench_result_t base = bench_nullary(env, "sz_sequence_argsort_uncased_best", base_call).log();
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_argsort_uncased_best", base_call);
+    print(base);
 
     // Include STL functionality, as the case-folded reference
-    auto std_call = argsort_ci_strings_via_std_t {env.tokens, folded, permute_buffer};
-    bench_nullary(env, "sequence_argsort_uncased<std::stable_sort>", base_call, std_call).log(base);
+    auto std_call = argsort_ci_strings_via_std_t {corpus.tokens, folded, permute_buffer};
+    print(bench_nullary(env, corpus, "sequence_argsort_uncased<std::stable_sort>", base_call, std_call),
+          baseline_of(base));
 }
 
 #pragma endregion
@@ -255,10 +239,10 @@ struct sort_pgrams_via_std_t {
  *  The pgram sorts have no dispatch point, so the STL stands alone here, and the sorts themselves
  *  are timed by the cross files.
  */
-void bench_sequencing_pgrams(environment_t const &env) {
-    permute_t permute_buffer(env.tokens.size());
-    pgrams_t const pgrams_buffer = pgrams_from_tokens(env);
-    bench_nullary(env, "pgrams_sort<std::sort>", sort_pgrams_via_std_t {pgrams_buffer, permute_buffer}).log();
+void bench_sequencing_pgrams(environment_t const &env, corpus_t const &corpus) {
+    permute_t permute_buffer(corpus.tokens.size());
+    pgrams_t const pgrams_buffer = pgrams_from_tokens(corpus);
+    print(bench_nullary(env, corpus, "pgrams_sort<std::sort>", sort_pgrams_via_std_t {pgrams_buffer, permute_buffer}));
 }
 
 #pragma endregion
@@ -307,26 +291,27 @@ struct intersect_strings_via_std_t {
  *  @brief Intersect every distinct token with a sample of half as many.
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
-void bench_intersections(environment_t const &env) {
-    intersect_inputs_t inputs(env);
+void bench_intersections(environment_t const &env, corpus_t const &corpus) {
+    intersect_inputs_t inputs(corpus, env.settings.seed.value);
 
     auto base_call = intersect_strings_via_sz<cpu_best<sz_sequence_intersect_best>> {inputs};
-    bench_result_t base = bench_nullary(env, "sz_sequence_intersect_best", base_call).log();
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_intersect_best", base_call);
+    print(base);
 
     // Include STL functionality
     auto std_call = intersect_strings_via_std_t {inputs};
-    bench_nullary(env, "intersect<std::unordered_map>", base_call, std_call).log(base);
+    print(bench_nullary(env, corpus, "intersect<std::unordered_map>", base_call, std_call), baseline_of(base));
 }
 
 #pragma endregion
 
-} // namespace
-
-void bench_sequence(corpora_t &corpora) {
-    environment_t const &env = corpora.words();
+void bench_sequence(environment_t &env) {
+    corpus_t const &corpus = env.corpora.words();
     fmt::println("Starting sequence benchmarks...");
-    bench_sequencing_pgrams(env);
-    bench_sequencing_strings(env);
-    bench_sequencing_strings_uncased(env);
-    bench_intersections(env);
+    bench_sequencing_pgrams(env, corpus);
+    bench_sequencing_strings(env, corpus);
+    bench_sequencing_strings_uncased(env, corpus);
+    bench_intersections(env, corpus);
 }
+
+} // namespace ashvardanian::stringzilla::bench

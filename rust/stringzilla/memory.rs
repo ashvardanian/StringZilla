@@ -5,8 +5,9 @@
 //! File: rust/stringzilla/memory.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Moves the contents of `source` into `target`, overwriting the existing contents of `target`.
 /// This function is useful for scenarios where you need to replace the contents of a byte slice

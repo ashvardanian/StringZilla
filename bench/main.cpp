@@ -21,37 +21,35 @@
 
 using namespace ashvardanian::stringzilla::bench;
 
-int main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
-
-    // The arms throw on a failed status, so a bad call ends the run with its message, not a crash.
+int main() {
+    install_bench_signal_handlers();
+    environment_t env {read_settings(), probe_machine()};
+    print(env.machine);
+    print(env.settings);
     try {
-        corpora_t corpora(argc, argv);
 #if !STRINGZILLA_HEADER_ONLY
-        bench_find(corpora);
-        bench_token(corpora);
-        bench_sequence(corpora);
-        bench_memory(corpora);
-        bench_cipher(corpora);
-        bench_container(corpora);
-        bench_levenshtein(corpora);
-        bench_overlap(corpora);
-        bench_substrings(corpora);
-        bench_utf8_traverse(corpora);
-        bench_utf8_scan(corpora);
-        bench_utf8_segment(corpora);
-        bench_utf8_norm(corpora);
-        bench_utf8_uncased(corpora);
+        bench_find(env);
+        bench_token(env);
+        bench_sequence(env);
+        bench_memory(env);
+        bench_cipher(env);
+        bench_container(env);
+        bench_levenshtein(env);
+        bench_overlap(env);
+        bench_substrings(env);
+        bench_utf8_traverse(env);
+        bench_utf8_scan(env);
+        bench_utf8_segment(env);
+        bench_utf8_norm(env);
+        bench_utf8_uncased(env);
 #endif
-        bench_cross_serial(corpora);
-        bench_cross_x8664(corpora);
-        bench_cross_arm64(corpora);
-        bench_cross_riscv64(corpora);
-        bench_cross_loongarch64(corpora);
-        bench_cross_ppc64(corpora);
-        bench_cross_wasm(corpora);
+        bench_cross_serial(env);
+        bench_cross_x8664(env);
+        bench_cross_arm64(env);
+        bench_cross_riscv64(env);
+        bench_cross_loongarch64(env);
+        bench_cross_ppc64(env);
+        bench_cross_wasm(env);
     }
     catch (std::exception const &e) {
         fmt::println(stderr, "Failed with: {}", e.what());

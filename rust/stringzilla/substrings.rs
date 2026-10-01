@@ -3,9 +3,10 @@
 //! File: rust/stringzilla/substrings.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::mem::MaybeUninit;
+
+use super::*;
 
 /// The `hot_states` argument's "size the hot tier yourself" value, so zero stays a
 /// real all-cold request.

@@ -52,12 +52,13 @@ A case-insensitive vocabulary is refused there at init with `sz_device_code_mism
 
 ## Methodology
 
-Numbers are haystack throughput in MiB/s, measured with `stringzilla_cpu_bench` from the kernel rows of `bench/cross.hpp`, and with `stringzilla_cuda_bench` and `stringzilla_rocm_bench` from `bench/cross_simt.cuh`, over lines of two corpora.
-- __Text:__ the first 64 MiB of `xlsum.csv`, 128 MiB for the device, multilingual news in many scripts.
-- __Nucleotides:__ 64 MiB of uniformly random `ACGT` in 4,096-byte lines, 256 MiB for the device.
+Numbers are haystack throughput in MB/s, measured with `stringzilla_cpu_bench` from the kernel rows of `bench/cross.hpp`, and with `stringzilla_cuda_bench` and `stringzilla_rocm_bench` from `bench/cross_simt.cuh`, over lines of two corpora.
+- __Text:__ the first 64 MB of `xlsum.csv`, 128 MB for the device, multilingual news in many scripts.
+- __Nucleotides:__ 64 MB of uniformly random `ACGT` in 4,096-byte lines, 256 MB for the device.
 
 Vocabularies come in three slices:
-- __Frequent__ and __Rare__ are one percent of the corpus's words, from either end of the frequency ranking after stopwords and hapaxes are removed. Frequent stresses reporting, and Rare measures the transition alone.
+- __Frequent__ and __Rare__ are one percent of the corpus's words, from either end of the frequency ranking after stopwords and hapaxes are removed.
+  Frequent stresses reporting, and Rare measures the transition alone.
 - __Sampled__ is 1,000 distinct substrings of the corpus itself, 4 to 16 bytes long, which exists for any alphabet, with words or without.
 
 Each CPU tier registers its own row in one binary, and the device rows fill at least one residency wave of chunks.
@@ -147,7 +148,7 @@ The frequent slice with both sides folded, which is the cost of matching a vocab
 ## Compilation
 
 Building the engine is its own cost, paid once per vocabulary, and it is reported separately because a pipeline that rebuilds per query is bound by this rather than by the walk.
-Cells are needle bytes per second in MiB/s, over 3,462 needles per word slice and 1,000 per sampled slice.
+Cells are needle bytes per second in MB/s, over 3,462 needles per word slice and 1,000 per sampled slice.
 
 | Backend             | Cased, Frequent | Cased, Rare | Folded, Frequent | Sampled, Text | Sampled, Nucleotides |
 | :------------------ | --------------: | ----------: | ---------------: | ------------: | -------------------: |

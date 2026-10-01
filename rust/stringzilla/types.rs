@@ -14,11 +14,12 @@
 //! File: rust/stringzilla/types.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::{c_void, CStr};
 use core::fmt;
 use core::ops::BitOr;
 use core::sync::atomic::{AtomicU64, Ordering};
+
+use super::*;
 
 #[allow(non_camel_case_types)]
 pub(crate) type sz_capability_t = u64;

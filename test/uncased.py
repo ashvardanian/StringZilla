@@ -21,22 +21,19 @@ Author: Ash Vardanian
 Date: November 24, 2025
 """
 
-from random import randint
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-
-from test.helpers import (
-    vector_width_bracketing_strings,
-    SEED_VALUES,
-    scale_iterations,
-    seed_random_generators,
-    run_across_backends,
+from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
+    run_across_backends,
+    scale_iterations,
+    vector_width_bracketing_strings,
 )
+
+import stringzilla as sz
 
 UNCASED_DEGENERATE_HAYSTACKS = ["abcabc", "Straße"]
 """Both haystacks are 6 codepoints long, so a single bound list covers boundary offsets: 0, 1, just
@@ -523,25 +520,23 @@ def test_utf8_uncased_search_crossing_expansions(unicode_folds):
 # region Oracles
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_uncased_fold_random_strings(seed_value: int):
+def test_utf8_uncased_fold_random_strings(rng: Random):
     """Random ASCII-uppercase and Latin Extended strings fold identically to Python's str.casefold()."""
-    seed_random_generators(seed_value)
 
     # Test with ASCII uppercase
     for _ in range(scale_iterations(50)):
-        length = randint(1, 100)
-        test_str = "".join(chr(randint(0x41, 0x5A)) for _ in range(length))  # A-Z
+        length = rng.randint(1, 100)
+        test_str = "".join(chr(rng.randint(0x41, 0x5A)) for _ in range(length))  # A-Z
         python_folded = test_str.casefold().encode("utf-8")
         sz_folded = sz.utf8_uncased_fold(test_str)
         assert python_folded == sz_folded, f"Mismatch for: {test_str!r}"
 
     # Test with Latin Extended characters
     for _ in range(scale_iterations(50)):
-        length = randint(1, 50)
+        length = rng.randint(1, 50)
         # Mix of ASCII uppercase and Latin Extended (includes ß, etc.)
-        codepoints = [randint(0x41, 0x5A) for _ in range(length)]
-        codepoints += [randint(0xC0, 0xFF) for _ in range(length // 2)]
+        codepoints = [rng.randint(0x41, 0x5A) for _ in range(length)]
+        codepoints += [rng.randint(0xC0, 0xFF) for _ in range(length // 2)]
         test_str = "".join(chr(cp) for cp in codepoints)
         python_folded = test_str.casefold().encode("utf-8")
         sz_folded = sz.utf8_uncased_fold(test_str)
@@ -550,7 +545,7 @@ def test_utf8_uncased_fold_random_strings(seed_value: int):
 
 def test_utf8_uncased_prose():
     """Case-folded search finds realistic terms that a plain byte search misses."""
-    from test.utf8_helpers import PROSE_HOTEL_REVIEW, PROSE_SCIENCE_ABSTRACT, PROSE_LANGUAGE_LESSON
+    from utf8_helpers import PROSE_HOTEL_REVIEW, PROSE_LANGUAGE_LESSON, PROSE_SCIENCE_ABSTRACT
 
     cases = [
         (PROSE_HOTEL_REVIEW, "strasse"),
@@ -626,11 +621,9 @@ def test_utf8_uncased_fold_backend_differential_malformed(raw):
     assert_backends_agree(run_across_backends(lambda: sz.utf8_uncased_fold(raw)), format_inputs=lambda: raw.hex())
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_uncased_fold_backend_differential_random(seed_value):
+def test_utf8_uncased_fold_backend_differential_random(rng: Random):
     """Random ASCII corpora must fold identically across every SIMD backend."""
-    seed_random_generators(seed_value)
-    text = get_random_string()
+    text = get_random_string(rng)
     assert_backends_agree(run_across_backends(lambda: sz.utf8_uncased_fold(text)), format_inputs=lambda: repr(text))
 
 

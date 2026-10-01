@@ -1525,7 +1525,7 @@ STRINGZILLA_INLINE sz_bool_t sz_substrings_simt_resident_(sz_substrings_engine_t
 enum { sz_substrings_simt_matches_budget_default_k = 1u << 20 };
 
 /** Haystacks a round carries when the caller names no budget: three boundary entries apiece, so
- *  the default costs 24 MiB of arena beside the matches budget's 32. */
+ *  the default costs 24 MB of arena beside the matches budget's 32. */
 enum { sz_substrings_simt_haystacks_budget_default_k = 1u << 20 };
 
 /** Compiles @p needles on the device the caller already made current, which is every step of

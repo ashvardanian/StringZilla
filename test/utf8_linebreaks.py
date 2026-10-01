@@ -23,23 +23,18 @@ Author: Ash Vardanian
 Date: June 20, 2026
 """
 
-from random import Random, choice, randint, seed
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
-    SEED_VALUES,
-    scale_iterations,
+from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
     representatives_by_class,
     run_across_backends,
+    scale_iterations,
     vector_width_bracketing_strings,
 )
-from test.utf8_helpers import (
+from utf8_helpers import (
     SEGMENTATION_PALETTE,
     adversarial_utf8_inputs,
     assert_segments_tile,
@@ -48,6 +43,9 @@ from test.utf8_helpers import (
     corpus_of_byte_length,
     window_seam_lengths,
 )
+
+import stringzilla as sz
+from stringzilla import Str
 
 _byte_boundaries = byte_boundaries
 
@@ -110,20 +108,16 @@ def test_utf8_linebreaks_str_method():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_linewrap_safety(seed_value: int):
+def test_utf8_linewrap_safety(rng: Random):
     """Adversarial-byte safety: the linewrap iterator must survive the malformed battery and still tile its input."""
-    rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
         assert_segments_tile(sz.utf8_linebreaks(raw), raw)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_linewrap_seam(seed_value: int):
+def test_utf8_linewrap_seam(rng: Random):
     """Window-seam sweep: inputs sized to straddle the 64-byte SIMD windows, plus a full byte-offset phase
     sweep across one window, must still tile contiguously; this checks tiling only, not UAX-14 boundary
     agreement."""
-    rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
         assert_segments_tile(sz.utf8_linebreaks(raw), raw)
@@ -197,11 +191,9 @@ def test_utf8_linewrap_class_adjacency(line_break_props):
 # region Oracles
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_linewrap_differential_uniseg(seed_value: int):
+def test_utf8_linewrap_differential_uniseg(rng: Random):
     """Differential fuzz against ``uniseg.linebreak`` for line-break-opportunity segments."""
     uniseg_linebreak = pytest.importorskip("uniseg.linebreak", reason="uniseg not installed")
-    seed(seed_value)
 
     def ref_segments(text):
         return list(uniseg_linebreak.line_break_units(text))
@@ -209,7 +201,7 @@ def test_utf8_linewrap_differential_uniseg(seed_value: int):
     iterations = scale_iterations(2000)
     failures = []
     for _ in range(iterations):
-        text = "".join(choice(SEGMENTATION_PALETTE) for _ in range(randint(1, 24)))
+        text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 24)))
         sz_boundaries = _byte_boundaries(sz.utf8_linebreaks(text))
         ref_boundaries = _byte_boundaries(ref_segments(text))
         if sz_boundaries != ref_boundaries:
@@ -227,10 +219,10 @@ def test_utf8_linewrap_differential_uniseg(seed_value: int):
 def test_utf8_linebreaks_prose():
     """Realistic multi-script paragraphs: the UAX-14 line-break count matches the ICU root oracle, and
     segments tile."""
-    from test.utf8_helpers import (
+    from utf8_helpers import (
         PROSE_HOTEL_REVIEW,
-        PROSE_SCIENCE_ABSTRACT,
         PROSE_NEWS_LEDE,
+        PROSE_SCIENCE_ABSTRACT,
         assert_segments_tile,
         icu_segmenter,
     )

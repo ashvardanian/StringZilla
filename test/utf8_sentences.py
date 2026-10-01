@@ -23,24 +23,20 @@ Author: Ash Vardanian
 Date: June 20, 2026
 """
 
-from random import Random, choice, randint, seed
+from random import Random
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
-    SEED_VALUES,
-    scale_iterations,
+from base import (
+    StreamKey,
     assert_backends_agree,
     baseline_sentence_boundaries,
     malformed_utf8_corpus,
     representatives_by_class,
     run_across_backends,
+    scale_iterations,
     vector_width_bracketing_strings,
 )
-from test.utf8_helpers import (
+from utf8_helpers import (
     SEGMENTATION_PALETTE,
     adversarial_utf8_inputs,
     assert_segments_tile,
@@ -50,6 +46,9 @@ from test.utf8_helpers import (
     icu_segmenter,
     window_seam_lengths,
 )
+
+import stringzilla as sz
+from stringzilla import Str
 
 _byte_boundaries = byte_boundaries
 
@@ -106,22 +105,18 @@ def test_utf8_sentences_str_method():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_sentence_safety(seed_value: int):
+def test_utf8_sentence_safety(rng: Random):
     """Adversarial-byte safety: the sentence iterator must survive the malformed battery and still tile its input."""
-    rng = Random(seed_value)
     for raw in adversarial_utf8_inputs(rng):
         assert_segments_tile(sz.utf8_sentences(raw), raw)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_sentence_seam(seed_value: int):
+def test_utf8_sentence_seam(rng: Random):
     """Window-seam sweep: inputs sized to straddle the 64-byte SIMD windows must still tile, since
     segmentation against ICU is agreement-gated above and the invariant asserted here is contiguous
     tiling. The phase sweep additionally shifts a fixed corpus by every byte offset 0..63 so the
     content lands at every alignment relative to the 64-byte window, the exhaustive deterministic
     complement to the length sweep."""
-    rng = Random(seed_value)
     for length in window_seam_lengths():
         raw = corpus_of_byte_length(length, rng)
         assert_segments_tile(sz.utf8_sentences(raw), raw)
@@ -180,10 +175,8 @@ def test_utf8_sentence_class_adjacency(sentence_break_props):
 # region Oracles
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_sentence_differential_icu(seed_value: int):
+def test_utf8_sentence_differential_icu(rng: Random):
     """Differential fuzz against an independent sentence segmenter (``icu``, else ``pysbd``)."""
-    seed(seed_value)
 
     def icu_boundaries():
         icu = pytest.importorskip("icu", reason="PyICU not installed")
@@ -217,7 +210,7 @@ def test_utf8_sentence_differential_icu(seed_value: int):
     iterations = scale_iterations(500)
     failures = []
     for _ in range(iterations):
-        text = "".join(choice(palette) for _ in range(randint(1, 24)))
+        text = "".join(rng.choice(palette) for _ in range(rng.randint(1, 24)))
         sz_boundaries = _byte_boundaries(sz.utf8_sentences(text))
         ref_boundaries = _byte_boundaries(ref_segments(text))
         if sz_boundaries != ref_boundaries:
@@ -232,10 +225,8 @@ def test_utf8_sentence_differential_icu(seed_value: int):
     )
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_sentence_boundary_fuzz(seed_value: int, sentence_break_props):
+def test_utf8_sentence_boundary_fuzz(seed: StreamKey, rng: Random, sentence_break_props):
     """Fuzz: compare the C sentence iterator vs the pure-Python UAX-29 baseline."""
-    seed(seed_value)
 
     # The pure-Python `baseline_sentence_boundaries` is an imperfect SB reference, missing the SB11 break
     # after `ATerm Sp OP`. The authoritative oracles are the official UCD vector, tested strictly in
@@ -251,7 +242,7 @@ def test_utf8_sentence_boundary_fuzz(seed_value: int, sentence_break_props):
     total = 0
     disagreements = []
     for _ in range(scale_iterations(200)):
-        text = "".join(choice(SEGMENTATION_PALETTE) for _ in range(randint(1, 100)))
+        text = "".join(rng.choice(SEGMENTATION_PALETTE) for _ in range(rng.randint(1, 100)))
         try:
             expected = baseline_sentence_boundaries(text, sentence_break_props)
         except Exception:
@@ -270,17 +261,17 @@ def test_utf8_sentence_boundary_fuzz(seed_value: int, sentence_break_props):
 
     agreement = 1.0 - len(disagreements) / max(total, 1)
     assert agreement >= 0.98, "Sentence boundary agreement {:.2%} too low (seed {}):\n{}".format(
-        agreement, seed_value, "\n".join(f"  {c}\n    baseline={e}\n    got={g}" for c, e, g in disagreements[:10])
+        agreement, seed, "\n".join(f"  {c}\n    baseline={e}\n    got={g}" for c, e, g in disagreements[:10])
     )
 
 
 def test_utf8_sentences_prose():
     """Realistic multi-script paragraphs: sentence count matches the ICU root oracle; segments tile."""
-    from test.utf8_helpers import (
-        PROSE_HOTEL_REVIEW,
+    from utf8_helpers import (
         PROSE_CONCERT_POST,
-        PROSE_NEWS_LEDE,
+        PROSE_HOTEL_REVIEW,
         PROSE_MICRO_HARDBREAKS,
+        PROSE_NEWS_LEDE,
         assert_segments_tile,
         icu_segmenter,
     )

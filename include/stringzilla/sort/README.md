@@ -7,7 +7,7 @@ Each `_best` dispatch point runs the best kernel among the capabilities its call
 ## Methodology
 
 Numbers are sorting throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-Sorting throughput is reported as comparisons/s, with the operation count modeled as N·log2 N, matching StringWars.
+Sorting throughput is reported as comparisons/s, with the operation count modeled as N·log₂ N, matching StringWars.
 Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::sort` for Argsort and Pgram Sort, `std::stable_sort` for Uncased Argsort.
 Token length matters for comparison cost, so results are split into a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes).

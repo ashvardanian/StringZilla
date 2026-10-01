@@ -23,21 +23,6 @@
  *  There is no Standard row: the platform ships no multi-pattern search, so each verb is its own
  *  reference, and the kernels in the cross files are logged against the serial one.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Cross-check the backends against each other.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_cpu_bench
@@ -54,9 +39,7 @@
 
 #include "cross.hpp" // `substrings_vocabularies`, `substrings_counts_from_sz`
 
-using namespace ashvardanian::stringzilla::bench;
-
-namespace {
+namespace ashvardanian::stringzilla::bench {
 
 #pragma region Compilation
 
@@ -77,7 +60,6 @@ struct substrings_build_from_sz {
         check_value_t const mixed = (check_value_t)engine.state_count * 31u + engine.max_outputs_per_state;
         sz_substrings_engine_free(&engine);
         call_result_t result(dictionary.needle_bytes, mixed, dictionary.needle_bytes);
-        result.inputs_processed = dictionary.needles.size();
         return result;
     }
 };
@@ -87,7 +69,7 @@ struct substrings_build_from_sz {
 #pragma region Verbs
 
 /** One vocabulary slice, compiled, then walked by every verb under every policy it accepts. */
-void bench_substrings_slice(environment_t const &env, substrings_corpus_t const &corpus,
+void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, substrings_corpus_t const &staged,
                             substrings_vocabulary_t const &vocabulary) {
     substrings_dictionary_t const &dictionary = vocabulary.dictionary;
     std::string const &suffix = vocabulary.label;
@@ -101,38 +83,34 @@ void bench_substrings_slice(environment_t const &env, substrings_corpus_t const 
                      dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
     }
 
-    bench_unary(env, "sz_substrings_engine_init" + suffix, substrings_build_from_sz {dictionary}).log();
+    print(bench_unary(env, corpus, "sz_substrings_engine_init" + suffix, substrings_build_from_sz {dictionary}));
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
         substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
         std::string const cover = substrings_cover(vocabulary, policy);
-        bench_unary(env, "sz_substrings_counts" + cover,
-                    substrings_counts_from_sz<sz_substrings_counts> {engine, corpus, corpus.haystacks})
-            .log();
-        bench_unary(env, "sz_substrings_find" + cover,
-                    substrings_find_from_sz<sz_substrings_find> {engine, corpus, corpus.haystacks})
-            .log();
+        print(bench_unary(env, corpus, "sz_substrings_counts" + cover,
+                          substrings_counts_from_sz<sz_substrings_counts> {engine, staged, staged.haystacks}));
+        print(bench_unary(env, corpus, "sz_substrings_find" + cover,
+                          substrings_find_from_sz<sz_substrings_find> {engine, staged, staged.haystacks}));
     }
     for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
         substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
-        bench_unary(env, "sz_substrings_replace" + substrings_cover(vocabulary, policy),
-                    substrings_replace_from_sz<sz_substrings_replace> {engine, corpus, corpus.haystacks,
-                                                                       dictionary.replacements})
-            .log();
+        print(bench_unary(env, corpus, "sz_substrings_replace" + substrings_cover(vocabulary, policy),
+                          substrings_replace_from_sz<sz_substrings_replace> {engine, staged, staged.haystacks,
+                                                                             dictionary.replacements}));
     }
     substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
-    bench_unary(env, "sz_substrings_bm25_scores" + suffix,
-                substrings_bm25_from_sz<sz_substrings_bm25_scores> {engine, corpus, corpus.haystacks})
-        .log();
+    print(bench_unary(env, corpus, "sz_substrings_bm25_scores" + suffix,
+                      substrings_bm25_from_sz<sz_substrings_bm25_scores> {engine, staged, staged.haystacks}));
 }
 
 #pragma endregion Verbs
 
-} // namespace
-
-void bench_substrings(corpora_t &corpora) {
-    environment_t const &env = corpora.multilingual_lines();
-    substrings_corpus_t const corpus(env);
+void bench_substrings(environment_t &env) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    substrings_corpus_t const staged(corpus);
     fmt::println("Starting multi-pattern search benchmarks...");
-    for (substrings_vocabulary_t const &vocabulary : substrings_vocabularies(env))
-        bench_substrings_slice(env, corpus, vocabulary);
+    for (substrings_vocabulary_t const &vocabulary : substrings_vocabularies(env, corpus))
+        bench_substrings_slice(env, corpus, staged, vocabulary);
 }
+
+} // namespace ashvardanian::stringzilla::bench

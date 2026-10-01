@@ -22,20 +22,17 @@ Author: Ash Vardanian
 Date: September 24, 2023
 """
 
-from random import randint
+from random import Random
 
 import pytest
-
-from stringzilla import Str, Strs
-
-from test.helpers import (
-    SEED_VALUES,
-    seed_random_generators,
+from base import (
+    assert_backends_agree,
     get_random_string,
     numpy_available,
     run_across_backends,
-    assert_backends_agree,
 )
+
+from stringzilla import Str, Strs
 
 # NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
 # other than `ImportError`.
@@ -171,10 +168,10 @@ def test_unit_strs_argsort_out():
 # region Oracles
 
 
-def randomly_cased(text: str) -> str:
+def randomly_cased(rng: Random, text: str) -> str:
     """Flip each character's case with 50% probability, so `uncased=True` sorting has something to
     fold while the byte-case oracle stays well-defined via `str.casefold`."""
-    return "".join(char.upper() if randint(0, 1) else char for char in text)
+    return "".join(char.upper() if rng.randint(0, 1) else char for char in text)
 
 
 def assert_sort_family_matches_oracles(native_list: list, *, top=None, reverse: bool = False, uncased: bool = False):
@@ -202,13 +199,11 @@ def assert_sort_family_matches_oracles(native_list: list, *, top=None, reverse: 
 @pytest.mark.parametrize("list_length", [10, 20, 30, 40, 50])
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, seed_value: int):
+def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, rng: Random):
     """Fuzzed `Strs.argsort()`/`.sorted()` agree with Python's native `sorted()` on randomized batches:
     the pairwise `<`/`>` comparator, the permutation, and the re-split substrings all match, and the
     `argsort(out=...)` NumPy buffer path returns the same permutation."""
-    seed_random_generators(seed_value)
-    native_list = [get_random_string(variability=variability, length=part_length) for _ in range(list_length)]
+    native_list = [get_random_string(rng, variability=variability, length=part_length) for _ in range(list_length)]
     native_joined = ".".join(native_list)
     big_joined = Str(native_joined)
     big_list = big_joined.split(".")
@@ -262,25 +257,25 @@ BATCH_SIZES = [1, 2, 33, 64, 1000]
 and 64, and a size large enough to engage any parallel/chunked sort path at 1000."""
 
 
-def random_batch(size: int) -> list:
+def random_batch(rng: Random, size: int) -> list[str]:
     """A batch of random-length, randomly-cased small-alphabet strings (frequent ties and prefixes)."""
-    return [randomly_cased(get_random_string(variability=6, length=randint(0, 16))) for _ in range(size)]
+    return [randomly_cased(rng, get_random_string(rng, variability=6, length=rng.randint(0, 16))) for _ in range(size)]
 
 
-def all_equal_batch(size: int) -> list:
+def all_equal_batch(rng: Random, size: int) -> list[str]:
     """A batch where every element is byte-for-byte identical, the sort must stay stable / no-op."""
     return ["repeated"] * size
 
 
-def single_char_batch(size: int) -> list:
+def single_char_batch(rng: Random, size: int) -> list[str]:
     """A batch of single-character (possibly differently-cased) strings."""
-    return [randomly_cased(get_random_string(variability=20, length=1)) for _ in range(size)]
+    return [randomly_cased(rng, get_random_string(rng, variability=20, length=1)) for _ in range(size)]
 
 
-def empty_mixed_batch(size: int) -> list:
+def empty_mixed_batch(rng: Random, size: int) -> list[str]:
     """A batch interleaving empty strings with non-empty ones, every third element empty."""
     return [
-        "" if index % 3 == 0 else randomly_cased(get_random_string(variability=6, length=randint(1, 10)))
+        "" if index % 3 == 0 else randomly_cased(rng, get_random_string(rng, variability=6, length=rng.randint(1, 10)))
         for index in range(size)
     ]
 
@@ -296,27 +291,25 @@ BATCH_BUILDERS = {
 @pytest.mark.parametrize("uncased", [False, True])
 @pytest.mark.parametrize("batch_name", sorted(BATCH_BUILDERS))
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_sorted_argsort(seed_value, batch_size, batch_name, uncased):
+def test_unit_backend_differential_sorted_argsort(rng: Random, batch_size: int, batch_name: str, uncased: bool):
     """`Strs.sorted()`/`.argsort()` agree across every `capability_sweep()` backend and with CPython
     `sorted()`, byte mode or case-folded when `uncased=True`, across batch sizes bracketing
     SIMD/threading thresholds and the all-equal, single-char, length-1, and empty-mixed corner shapes;
     a divergence is a kernel bug, not a binding bug."""
-    seed_random_generators(seed_value)
-    native_list = BATCH_BUILDERS[batch_name](batch_size)
+    native_list = BATCH_BUILDERS[batch_name](rng, batch_size)
     assert_sort_family_matches_oracles(native_list, uncased=uncased)
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("top", [None, 1, 5, 50, 10_000])
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_sorted_argsort_top_reverse(seed_value, batch_size, top, reverse):
+def test_unit_backend_differential_sorted_argsort_top_reverse(
+    rng: Random, batch_size: int, top: int | None, reverse: bool
+):
     """`top=K` partial sort and `reverse=True` descending sort agree across every `capability_sweep()`
     backend and with CPython `sorted()[:K]`, for `top` values from below the batch size up to 10_000,
     far beyond it; a divergence is a kernel bug, not a binding bug."""
-    seed_random_generators(seed_value)
-    native_list = random_batch(batch_size)
+    native_list = random_batch(rng, batch_size)
     assert_sort_family_matches_oracles(native_list, top=top, reverse=reverse)
 
 

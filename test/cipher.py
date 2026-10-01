@@ -25,22 +25,20 @@ Author: Ash Vardanian
 Date: August 4, 2026
 """
 
+from random import Random
+
 import pytest
-
-import stringzilla as sz
-
-from test.helpers import (
-    SEED_VALUES,
+from base import (
     VECTOR_WIDTH_LENGTHS,
     assert_backends_agree,
     capability_sweep,
     differential_bodies,
     forced_capabilities,
-    get_random_string,
     run_across_backends,
     scale_iterations,
-    seed_random_generators,
 )
+
+import stringzilla as sz
 
 SECRET_LENGTH = 32
 NONCE_LENGTH = 12
@@ -127,10 +125,9 @@ ASSOCIATED_LENGTHS = [0, 1, 15, 16, 17, 40]
 """Associated-data lengths bracketing the 16-byte hash block, crossed with message lengths below."""
 
 
-def random_bytes(length: int, seed_value: int) -> bytes:
-    """Deterministic body of `length` bytes, seeded so a failing case reproduces from its identifier."""
-    seed_random_generators(seed_value)
-    return get_random_string(length=length).encode()
+def random_bytes(rng: Random, length: int) -> bytes:
+    """`length` bytes drawn uniformly from all 256 values."""
+    return rng.randbytes(length)
 
 
 # region Unit
@@ -167,13 +164,12 @@ def test_ctr_known_answer():
     assert key.xor(ciphertext, COUNTER_VECTOR_NONCE, offset=offset) == COUNTER_VECTOR_PLAINTEXT
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_ctr_every_length_and_offset(seed_value: int):
+def test_ctr_every_length_and_offset(rng: Random):
     """Every byte offset into the keystream must land on the bytes a from-zero encryption produced
     there, which is the whole reason counter mode is exposed apart from the authenticated one, and
     every message length must transform without disturbing that alignment."""
     span = scale_iterations(1024)
-    body = random_bytes(span, seed_value)
+    body = random_bytes(rng, span)
     key = sz.Aes256CtrKey(COUNTER_SECRET)
     whole = key.xor(body, COUNTER_NONCE)
     assert len(whole) == span
@@ -191,29 +187,27 @@ def test_ctr_every_length_and_offset(seed_value: int):
         assert key.xor(whole[offset:], COUNTER_NONCE, offset=offset) == body[offset:]
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_ctr_every_length_round_trips(seed_value: int):
+def test_ctr_every_length_round_trips(rng: Random):
     """Every length from zero up survives an encrypt followed by a decrypt, and yields as many bytes
     as it consumed."""
     key = sz.Aes256CtrKey(COUNTER_SECRET)
     longest = scale_iterations(200)
     for length in range(longest + 1):
-        body = random_bytes(length, seed_value + length)
+        body = random_bytes(rng, length)
         ciphertext = key.xor(body, COUNTER_NONCE)
         assert len(ciphertext) == length
         assert key.xor(ciphertext, COUNTER_NONCE) == body
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_every_length_round_trips(seed_value: int):
+def test_gcm_every_length_round_trips(rng: Random):
     """Every length from zero up encrypts and decrypts back, with the associated-data length rotating
     across the sizes that bracket the 16-byte hash block."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
     longest = scale_iterations(200)
     for length in range(longest + 1):
-        body = random_bytes(length, seed_value + length)
+        body = random_bytes(rng, length)
         associated_length = ASSOCIATED_LENGTHS[length % len(ASSOCIATED_LENGTHS)]
-        associated = random_bytes(associated_length, seed_value + length + 1)
+        associated = random_bytes(rng, associated_length)
 
         ciphertext, tag = key.encrypt(body, AUTHENTICATED_NONCE, associated)
         assert len(ciphertext) == length
@@ -222,15 +216,14 @@ def test_gcm_every_length_round_trips(seed_value: int):
 
 
 @pytest.mark.parametrize("associated_length", ASSOCIATED_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_associated_crossed_with_message(associated_length: int, seed_value: int):
+def test_gcm_associated_crossed_with_message(associated_length: int, rng: Random):
     """Every associated-data length crossed with every message length round-trips, and a message
     authenticated under one associated value is refused under any other."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    associated = random_bytes(associated_length, seed_value)
+    associated = random_bytes(rng, associated_length)
 
     for length in VECTOR_WIDTH_LENGTHS:
-        body = random_bytes(length, seed_value + length)
+        body = random_bytes(rng, length)
         ciphertext, tag = key.encrypt(body, AUTHENTICATED_NONCE, associated)
         assert key.decrypt(ciphertext, AUTHENTICATED_NONCE, tag, associated) == body
 
@@ -240,23 +233,21 @@ def test_gcm_associated_crossed_with_message(associated_length: int, seed_value:
             key.decrypt(ciphertext, AUTHENTICATED_NONCE, tag, other_associated)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_omitted_associated_matches_empty(seed_value: int):
+def test_gcm_omitted_associated_matches_empty(rng: Random):
     """Leaving `associated` out, passing None, and passing empty bytes are the same message."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    body = random_bytes(64, seed_value)
+    body = random_bytes(rng, 64)
     without = key.encrypt(body, AUTHENTICATED_NONCE)
     assert without == key.encrypt(body, AUTHENTICATED_NONCE, None)
     assert without == key.encrypt(body, AUTHENTICATED_NONCE, b"")
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_forged_inputs_are_refused(seed_value: int):
+def test_gcm_forged_inputs_are_refused(rng: Random):
     """A tag with any single byte disturbed, a mutated ciphertext, a different nonce, and a truncated
     ciphertext must every one of them raise rather than hand back plaintext."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    body = random_bytes(70, seed_value)
-    associated = random_bytes(17, seed_value + 1)
+    body = random_bytes(rng, 70)
+    associated = random_bytes(rng, 17)
     ciphertext, tag = key.encrypt(body, AUTHENTICATED_NONCE, associated)
 
     for index in range(TAG_LENGTH):
@@ -293,15 +284,14 @@ def test_authentication_error_is_a_value_error():
         key.decrypt(ciphertext, AUTHENTICATED_NONCE, bytes(TAG_LENGTH))
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_streaming_at_every_chunk_size(seed_value: int):
+def test_gcm_streaming_at_every_chunk_size(rng: Random):
     """A chunk boundary must be invisible: the keystream block and the hash block are both sixteen
     bytes wide and a caller's chunks are not, so every chunk size must reproduce the one-shot
     ciphertext and tag, encrypting and decrypting alike."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
     span = scale_iterations(512)
-    body = random_bytes(span, seed_value)
-    associated = random_bytes(23, seed_value + 1)
+    body = random_bytes(rng, span)
+    associated = random_bytes(rng, 23)
     expected_ciphertext, expected_tag = key.encrypt(body, AUTHENTICATED_NONCE, associated)
 
     for chunk_size in range(1, 41):
@@ -321,12 +311,11 @@ def test_gcm_streaming_at_every_chunk_size(seed_value: int):
         assert decryptor.verify(expected_tag) is None
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_streaming_associated_in_chunks(seed_value: int):
+def test_gcm_streaming_associated_in_chunks(rng: Random):
     """Associated data delivered in chunks of every size authenticates the same as one call."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    body = random_bytes(96, seed_value)
-    associated = random_bytes(40, seed_value + 1)
+    body = random_bytes(rng, 96)
+    associated = random_bytes(rng, 40)
     expected_ciphertext, expected_tag = key.encrypt(body, AUTHENTICATED_NONCE, associated)
 
     for chunk_size in range(1, 21):
@@ -337,11 +326,10 @@ def test_gcm_streaming_associated_in_chunks(seed_value: int):
         assert encryptor.digest() == expected_tag
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_gcm_streaming_refuses_a_forged_tag(seed_value: int):
+def test_gcm_streaming_refuses_a_forged_tag(rng: Random):
     """A streaming decryption that consumed tampered ciphertext must refuse at `verify`."""
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    body = random_bytes(100, seed_value)
+    body = random_bytes(rng, 100)
     ciphertext, tag = key.encrypt(body, AUTHENTICATED_NONCE)
 
     mutated = bytearray(ciphertext)
@@ -529,11 +517,10 @@ def test_unit_backend_differential_known_answers(vector):
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_ctr(length: int, seed_value: int):
+def test_unit_backend_differential_ctr(length: int, rng: Random):
     """Counter mode has no standard-library oracle, so every backend must agree with every other, for
     random, tiled, and all-same-character bodies, at offsets that split the first keystream block."""
-    for body in differential_bodies(length, seed_value):
+    for body in differential_bodies(length, rng):
         payload = body.encode()
         for offset in (0, 1, 15, 16, 17, 4096):
 
@@ -547,14 +534,13 @@ def test_unit_backend_differential_ctr(length: int, seed_value: int):
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_gcm(length: int, seed_value: int):
+def test_unit_backend_differential_gcm(length: int, rng: Random):
     """Authenticated encryption and decryption must agree across every backend, for random, tiled, and
     all-same-character bodies crossed with the associated-data lengths that bracket a hash block."""
-    for body in differential_bodies(length, seed_value):
+    for body in differential_bodies(length, rng):
         payload = body.encode()
         for associated_length in ASSOCIATED_LENGTHS:
-            associated = random_bytes(associated_length, seed_value + associated_length)
+            associated = random_bytes(rng, associated_length)
 
             def encrypt(payload=payload, associated=associated):
                 return sz.Aes256GcmKey(AUTHENTICATED_SECRET).encrypt(payload, AUTHENTICATED_NONCE, associated)
@@ -574,13 +560,12 @@ def test_unit_backend_differential_gcm(length: int, seed_value: int):
 
 
 @pytest.mark.parametrize("chunk_size", [1, 7, 15, 16, 17, 31, 64, 100])
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_gcm_streaming(chunk_size: int, seed_value: int):
+def test_unit_backend_differential_gcm_streaming(chunk_size: int, rng: Random):
     """The chunked state machine must agree across backends and match the one-shot call, since the
     keystream and hash blocks it carries between calls are where a vectorized tail goes wrong."""
     span = 512
-    body = random_bytes(span, seed_value)
-    associated = random_bytes(19, seed_value + 1)
+    body = random_bytes(rng, span)
+    associated = random_bytes(rng, 19)
 
     def streamed(body=body, associated=associated):
         key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
@@ -595,11 +580,10 @@ def test_unit_backend_differential_gcm_streaming(chunk_size: int, seed_value: in
     assert_backends_agree(run_across_backends(streamed), oracle=one_shot())
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_unit_backend_differential_ctr_seek(seed_value: int):
+def test_unit_backend_differential_ctr_seek(rng: Random):
     """The seek property must hold under every backend, not only under the one the host picks."""
     span = 512
-    body = random_bytes(span, seed_value)
+    body = random_bytes(rng, span)
 
     for config in capability_sweep():
         with forced_capabilities(config):
@@ -634,31 +618,29 @@ def counter_cipher_from_pycryptodome(aes, secret: bytes, nonce: bytes, byte_offs
     return cipher
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_stress_ctr_matches_pycryptodome(seed_value: int):
+def test_stress_ctr_matches_pycryptodome(rng: Random):
     """Counter mode must reach byte for byte what an independent implementation reaches, at every
     length and every seek offset, including offsets that land mid-block."""
     aes = pytest.importorskip("Crypto.Cipher.AES")
     key = sz.Aes256CtrKey(COUNTER_SECRET)
 
     for length in VECTOR_WIDTH_LENGTHS:
-        body = random_bytes(length, seed_value + length)
+        body = random_bytes(rng, length)
         for byte_offset in (0, 1, 15, 16, 17, 63, 4096, 16 * 0xFCFDFEFF):
             oracle = counter_cipher_from_pycryptodome(aes, COUNTER_SECRET, COUNTER_NONCE, byte_offset)
             assert key.xor(body, COUNTER_NONCE, offset=byte_offset) == oracle.encrypt(body)
 
 
 @pytest.mark.parametrize("associated_length", ASSOCIATED_LENGTHS)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_stress_gcm_matches_pycryptodome(associated_length: int, seed_value: int):
+def test_stress_gcm_matches_pycryptodome(associated_length: int, rng: Random):
     """One-shot authenticated encryption must reach the same ciphertext and the same tag as an
     independent implementation, over every message length crossed with every associated length."""
     aes = pytest.importorskip("Crypto.Cipher.AES")
     key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
-    associated = random_bytes(associated_length, seed_value)
+    associated = random_bytes(rng, associated_length)
 
     for length in VECTOR_WIDTH_LENGTHS:
-        body = random_bytes(length, seed_value + length)
+        body = random_bytes(rng, length)
         oracle = aes.new(AUTHENTICATED_SECRET, aes.MODE_GCM, nonce=AUTHENTICATED_NONCE)
         oracle.update(associated)
         expected_ciphertext, expected_tag = oracle.encrypt_and_digest(body)
@@ -668,14 +650,13 @@ def test_stress_gcm_matches_pycryptodome(associated_length: int, seed_value: int
 
 
 @pytest.mark.parametrize("chunk_size", STREAMING_CHUNK_SIZES)
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_stress_gcm_streaming_matches_pycryptodome(chunk_size: int, seed_value: int):
+def test_stress_gcm_streaming_matches_pycryptodome(chunk_size: int, rng: Random):
     """Chunk boundaries are where a carried keystream block or a half-filled hash block goes wrong, so
     both chunked types are held against an independent one-shot rather than against our own."""
     aes = pytest.importorskip("Crypto.Cipher.AES")
     span = scale_iterations(300)
-    body = random_bytes(span, seed_value)
-    associated = random_bytes(29, seed_value + 1)
+    body = random_bytes(rng, span)
+    associated = random_bytes(rng, 29)
 
     oracle = aes.new(AUTHENTICATED_SECRET, aes.MODE_GCM, nonce=AUTHENTICATED_NONCE)
     oracle.update(associated)

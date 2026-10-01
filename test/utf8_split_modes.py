@@ -23,17 +23,15 @@ Date: June 29, 2026
 """
 
 import pytest
-
-import stringzilla as sz
-from stringzilla import Str
-
-from test.helpers import (
+from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
     run_across_backends,
     vector_width_bracketing_strings,
 )
 
+import stringzilla as sz
+from stringzilla import Str
 
 # region Unit
 

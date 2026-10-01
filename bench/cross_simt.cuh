@@ -30,21 +30,6 @@
  *  and the device fills by haystack chunks rather than haystacks. A corpus that cuts into fewer
  *  chunks than one residency wave, or whose matches would not fit the device, is refused.
  *
- *  Instead of CLI arguments, for compatibility with @b StringWars, the following environment
- *  variables are used:
- *  - `STRINGWARS_DATASET=path` : Path to the dataset file.
- *  - `STRINGWARS_DATASET_LIMIT=64mb` : Reads at most this many dataset bytes; `0` reads the whole
- *    file.
- *  - `STRINGWARS_TOKENS=lines` : Tokenization model ("file", "lines", "words", or positive integer
- *    [1:200] for N-grams).
- *  - `STRINGWARS_SEED=42` : Optional seed for shuffling reproducibility.
- *
- *  Unlike StringWars, the following additional environment variables are supported:
- *  - `STRINGWARS_MAX_SECONDS=10` : Time limit (in seconds) per benchmark.
- *  - `STRINGWARS_STRESS=1` : Test the GPU backend against the serial baseline.
- *  - `STRINGWARS_STRESS_DIR=/.tmp` : Output directory for stress-testing failures logs.
- *  - `STRINGWARS_FILTER=pattern` : Regular Expression pattern to filter algorithm/backend names.
- *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_cuda_bench
@@ -55,12 +40,15 @@
 #ifndef STRINGZILLA_BENCH_CROSS_SIMT_CUH
 #define STRINGZILLA_BENCH_CROSS_SIMT_CUH
 
-#include <algorithm> // `std::min`, `std::stable_sort`
-#include <cmath>     // `std::ceil`, `std::log2`
-#include <numeric>   // `std::iota`
-#include <stdexcept> // `std::runtime_error`
-#include <string>    // `std::string`, `std::to_string`
-#include <vector>    // `std::vector`
+#include <cmath> // `std::ceil`, `std::log2`
+
+#include <algorithm>        // `std::min`, `std::stable_sort`
+#include <initializer_list> // `std::initializer_list`
+#include <numeric>          // `std::iota`
+#include <optional>         // `std::optional`
+#include <stdexcept>        // `std::runtime_error`
+#include <string>           // `std::string`, `std::to_string`
+#include <vector>           // `std::vector`
 
 #include <fmt/format.h>
 
@@ -156,7 +144,7 @@ inline check_value_t levenshtein_check_value(answers_type_ const &answers) {
  *  @brief The corpus as the device sees it: a tape of every candidate's bytes, two orderings of
  *      views into it, and the room for one round's distances.
  *
- *  The dataset the environment loads is managed, so a view into it is a page that follows whoever
+ *  The dataset the corpus loads is managed, so a view into it is a page that follows whoever
  *  touched it last. The candidates therefore cross once into plain device memory the host cannot
  *  address, and the CPU arms keep their own views into the dataset to score the very same texts.
  */
@@ -198,9 +186,9 @@ struct levenshtein_simt_corpus_t {
     /** Candidate bytes one round touches, whichever order. */
     std::size_t bytes = 0;
 
-    levenshtein_simt_corpus_t(environment_t const &env) {
-        std::size_t const count = std::min<std::size_t>(env.tokens.size(), resident_candidates_per_call(env));
-        for (std::size_t index = 0; index != count; ++index) bytes += env.tokens[index].size();
+    levenshtein_simt_corpus_t(environment_t const &env, corpus_t const &corpus) {
+        std::size_t const count = std::min<std::size_t>(corpus.tokens.size(), resident_candidates_per_call(env));
+        for (std::size_t index = 0; index != count; ++index) bytes += corpus.tokens[index].size();
         if (tape.resize_uninitialized(bytes) != sz::status_t::success_k ||
             device_views.resize_uninitialized(count) != sz::status_t::success_k ||
             device_sorted_views.resize_uninitialized(count) != sz::status_t::success_k ||
@@ -214,7 +202,7 @@ struct levenshtein_simt_corpus_t {
         staged.reserve(bytes);
         std::vector<sz_string_view_t> tape_views(count);
         for (std::size_t index = 0, written = 0; index != count; ++index) {
-            token_view_t const token = env.tokens[index];
+            token_view_t const token = corpus.tokens[index];
             host_views[index] = {token.data(), token.size()};
             staged.insert(staged.end(), token.data(), token.data() + token.size());
             tape_views[index] = {tape.data() + written, token.size()};
@@ -271,11 +259,11 @@ struct levenshtein_simt_corpus_t {
  *  The windows are managed dataset memory, which the host reads to count symbols and classes and
  *  the device builder then reads from the copies the init stages for it.
  */
-static std::vector<sz_string_view_t> levenshtein_simt_queries(environment_t const &env, std::size_t query_bytes) {
+static std::vector<sz_string_view_t> levenshtein_simt_queries(corpus_t const &corpus, std::size_t query_bytes) {
     std::vector<sz_string_view_t> views(levenshtein_queries_per_batch_k);
     for (std::size_t query = 0; query != views.size(); ++query) {
-        token_view_t const whole = env.tokens[(query * 7 + 1) % env.tokens.size()];
-        std::size_t const reachable = (std::size_t)(env.dataset.data() + env.dataset.size() - whole.data());
+        token_view_t const whole = corpus.tokens[(query * 7 + 1) % corpus.tokens.size()];
+        std::size_t const reachable = (std::size_t)(corpus.dataset.data() + corpus.dataset.size() - whole.data());
         views[query] = {whole.data(), std::min(query_bytes, reachable)};
     }
     return views;
@@ -293,9 +281,9 @@ struct levenshtein_simt_batch_t {
     /** The batch, prepared once and reused by every round. */
     sz_levenshtein_engine_t engine {};
 
-    levenshtein_simt_batch_t(environment_t const &env, std::size_t query_bytes, sz_levenshtein_symbol_t symbol,
+    levenshtein_simt_batch_t(corpus_t const &corpus, std::size_t query_bytes, sz_levenshtein_symbol_t symbol,
                              sz_bool_t on_device)
-        : views(levenshtein_simt_queries(env, query_bytes)) {
+        : views(levenshtein_simt_queries(corpus, query_bytes)) {
         sz_sequence_from_string_views(views.data(), views.size(), &queries);
         sz_capability_t const capabilities = on_device == sz_true_k ? simt_capabilities() : sz::default_capabilities();
         if (sz_levenshtein_engine_init(&engine, &queries, symbol, capabilities, 0, STRINGZILLA_NULL,
@@ -319,7 +307,7 @@ template <sz_kernel_levenshtein_distances_t distances_>
 struct levenshtein_distances_from_simt {
 
     /** The candidates, and the room for their distances. */
-    levenshtein_simt_corpus_t &corpus;
+    levenshtein_simt_corpus_t &resident;
 
     /** Which ordering of the candidates this arm walks. */
     levenshtein_simt_order_t order;
@@ -327,32 +315,31 @@ struct levenshtein_distances_from_simt {
     /** The queries, prepared on the device once. */
     levenshtein_simt_batch_t batch;
 
-    levenshtein_distances_from_simt(environment_t const &env, levenshtein_simt_corpus_t &corpus,
+    levenshtein_distances_from_simt(corpus_t const &corpus, levenshtein_simt_corpus_t &resident,
                                     std::size_t query_bytes, levenshtein_simt_order_t order,
                                     sz_levenshtein_symbol_t symbol = sz_levenshtein_bytes_k)
-        : corpus(corpus), order(order), batch(env, query_bytes, symbol, sz_true_k) {}
+        : resident(resident), order(order), batch(corpus, query_bytes, symbol, sz_true_k) {}
 
     call_result_t operator()(std::size_t token_index) {
         sz_unused_(token_index);
-        if (distances_(&batch.engine, &corpus.device_candidates(order), corpus.distances.data(), corpus.count(),
+        if (distances_(&batch.engine, &resident.device_candidates(order), resident.distances.data(), resident.count(),
                        STRINGZILLA_NULL) != sz_success_k)
             throw std::runtime_error("The GPU round failed.");
         // Device memory cannot migrate, so the answers cross as one block, not a fault per page.
-        if (copy_device_to_host(corpus.distances, sz::span<sz_size_t> {corpus.answers.data(), corpus.answers.size()}) !=
-            cudaSuccess)
+        if (copy_device_to_host(resident.distances,
+                                sz::span<sz_size_t> {resident.answers.data(), resident.answers.size()}) != cudaSuccess)
             throw std::runtime_error("The answers would not come back.");
-        call_result_t result(corpus.bytes, levenshtein_check_value(corpus.answers), batch.symbols() * corpus.bytes);
-        result.inputs_processed = corpus.count() * levenshtein_queries_per_batch_k;
-        return result;
+        return call_result_t(resident.bytes, levenshtein_check_value(resident.answers),
+                             batch.symbols() * resident.bytes);
     }
 };
 
-/** The same round on the CPU, so the two check values line up under @c STRINGWARS_STRESS. */
+/** The same round on the CPU, so the two check values line up under @c STRINGZILLA_STRESS. */
 template <sz_kernel_levenshtein_distances_t distances_>
 struct levenshtein_distances_from_sz {
 
     /** The candidates, whose texts both sides score. */
-    levenshtein_simt_corpus_t &corpus;
+    levenshtein_simt_corpus_t &resident;
 
     /** Which ordering of the candidates this arm walks. */
     levenshtein_simt_order_t order;
@@ -363,25 +350,24 @@ struct levenshtein_distances_from_sz {
     /** @b [queries, candidates], the CPU's own answers. */
     std::vector<sz_size_t> distances;
 
-    levenshtein_distances_from_sz(environment_t const &env, levenshtein_simt_corpus_t &corpus, std::size_t query_bytes,
+    levenshtein_distances_from_sz(corpus_t const &corpus, levenshtein_simt_corpus_t &resident, std::size_t query_bytes,
                                   levenshtein_simt_order_t order,
                                   sz_levenshtein_symbol_t symbol = sz_levenshtein_bytes_k)
-        : corpus(corpus), order(order), batch(env, query_bytes, symbol, sz_false_k),
-          distances(corpus.count() * levenshtein_queries_per_batch_k) {}
+        : resident(resident), order(order), batch(corpus, query_bytes, symbol, sz_false_k),
+          distances(resident.count() * levenshtein_queries_per_batch_k) {}
 
     call_result_t operator()(std::size_t token_index) {
         sz_unused_(token_index);
-        if (distances_(&batch.engine, &corpus.host_candidates(order), distances.data(), corpus.count(), nullptr) !=
+        if (distances_(&batch.engine, &resident.host_candidates(order), distances.data(), resident.count(), nullptr) !=
             sz_success_k)
             throw std::runtime_error("The CPU round failed.");
-        call_result_t result(corpus.bytes, levenshtein_check_value(distances), batch.symbols() * corpus.bytes);
-        result.inputs_processed = corpus.count() * levenshtein_queries_per_batch_k;
-        return result;
+        return call_result_t(resident.bytes, levenshtein_check_value(distances), batch.symbols() * resident.bytes);
     }
 };
 
 /** The device arm alone across query widths and both orders, for the word-count curve both ways. */
-static void bench_levenshtein_word_counts(environment_t const &env, levenshtein_simt_corpus_t &corpus) {
+static void bench_levenshtein_word_counts(environment_t const &env, corpus_t const &corpus,
+                                          levenshtein_simt_corpus_t &resident) {
     std::size_t const widths[] = {8, 64, 128, 256, 384, 512, 1024, 2048, 4096, 8192, 16384};
     levenshtein_simt_order_t const orders[] = {levenshtein_simt_order_t::shuffled_k,
                                                levenshtein_simt_order_t::sorted_k};
@@ -391,30 +377,41 @@ static void bench_levenshtein_word_counts(environment_t const &env, levenshtein_
             std::string const suffix = ":q" + std::to_string(query_bytes) + ":w" +
                                        std::to_string(sz_levenshtein_query_words(query_bytes)) +
                                        levenshtein_simt_order_name(order);
-            bench_unary(env, simt_arm("sz_levenshtein_distances") + suffix,
-                        levenshtein_distances_from_simt<simt_levenshtein_distances_k> {env, corpus, query_bytes, order})
-                .log();
+            print(bench_unary(
+                env, corpus, simt_arm("sz_levenshtein_distances") + suffix,
+                levenshtein_distances_from_simt<simt_levenshtein_distances_k> {corpus, resident, query_bytes, order}));
         }
 }
 
 /** Every arm at one query width, the width carried in each arm's name beside the resident count. */
-static void bench_levenshtein_cross_product(environment_t const &env, levenshtein_simt_corpus_t &corpus,
-                                            std::size_t query_bytes) {
-    std::string const suffix = ":q" + std::to_string(query_bytes) + ":c" + std::to_string(corpus.count());
+static void bench_levenshtein_cross_product(environment_t const &env, corpus_t const &corpus,
+                                            levenshtein_simt_corpus_t &resident, std::size_t query_bytes) {
+    std::string const suffix = ":q" + std::to_string(query_bytes) + ":c" + std::to_string(resident.count());
+    std::string const haswell_name = "sz_levenshtein_distances_haswell" + suffix,
+                      icelake_name = "sz_levenshtein_distances_icelake" + suffix,
+                      shuffled_name = simt_arm("sz_levenshtein_distances") + suffix + ":shuffled",
+                      sorted_name = simt_arm("sz_levenshtein_distances") + suffix + ":sorted",
+                      utf8_name = simt_arm("sz_levenshtein_distances") + ":utf8" + suffix + ":shuffled";
     auto validator = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
-        env, corpus, query_bytes, levenshtein_simt_order_t::shuffled_k};
-    bench_result_t base = bench_unary(env, std::string("sz_levenshtein_distances_serial") + suffix, validator).log();
+        corpus, resident, query_bytes, levenshtein_simt_order_t::shuffled_k};
+    std::optional<double> base = bench_baseline(env, corpus, "sz_levenshtein_distances_serial" + suffix,
+                                                {haswell_name, icelake_name, shuffled_name, sorted_name, utf8_name},
+                                                validator);
 #if STRINGZILLA_TARGET_HASWELL
-    base = bench_unary(env, std::string("sz_levenshtein_distances_haswell") + suffix, validator,
-                       levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {
-                           env, corpus, query_bytes, levenshtein_simt_order_t::shuffled_k})
-               .log(base);
+    std::optional<row_t> const haswell = bench_unary(
+        env, corpus, haswell_name, validator,
+        levenshtein_distances_from_sz<sz_levenshtein_distances_haswell> {corpus, resident, query_bytes,
+                                                                         levenshtein_simt_order_t::shuffled_k});
+    print(haswell, base);
+    if (std::optional<double> const rate = baseline_of(haswell)) base = rate;
 #endif
 #if STRINGZILLA_TARGET_ICELAKE
-    base = bench_unary(env, std::string("sz_levenshtein_distances_icelake") + suffix, validator,
-                       levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {
-                           env, corpus, query_bytes, levenshtein_simt_order_t::shuffled_k})
-               .log(base);
+    std::optional<row_t> const icelake = bench_unary(
+        env, corpus, icelake_name, validator,
+        levenshtein_distances_from_sz<sz_levenshtein_distances_icelake> {corpus, resident, query_bytes,
+                                                                         levenshtein_simt_order_t::shuffled_k});
+    print(icelake, base);
+    if (std::optional<double> const rate = baseline_of(icelake)) base = rate;
 #endif
     // The warped rung spreads a query across a warp's thirty-two lanes, and a wider one is
     // reported as out of reach rather than thrown.
@@ -424,27 +421,27 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
         return;
     }
     // Both orderings hold the same texts, so the gap between the arms is the warp's `max(L)` tax.
-    bench_unary(env, simt_arm("sz_levenshtein_distances") + suffix + ":shuffled", validator,
-                levenshtein_distances_from_simt<simt_levenshtein_distances_k> {env, corpus, query_bytes,
-                                                                               levenshtein_simt_order_t::shuffled_k})
-        .log(base);
+    print(bench_unary(env, corpus, shuffled_name, validator,
+                      levenshtein_distances_from_simt<simt_levenshtein_distances_k> {
+                          corpus, resident, query_bytes, levenshtein_simt_order_t::shuffled_k}),
+          base);
     auto validator_sorted = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
-        env, corpus, query_bytes, levenshtein_simt_order_t::sorted_k};
-    bench_unary(env, simt_arm("sz_levenshtein_distances") + suffix + ":sorted", validator_sorted,
-                levenshtein_distances_from_simt<simt_levenshtein_distances_k> {env, corpus, query_bytes,
-                                                                               levenshtein_simt_order_t::sorted_k})
-        .log(base);
+        corpus, resident, query_bytes, levenshtein_simt_order_t::sorted_k};
+    print(bench_unary(env, corpus, sorted_name, validator_sorted,
+                      levenshtein_distances_from_simt<simt_levenshtein_distances_k> {
+                          corpus, resident, query_bytes, levenshtein_simt_order_t::sorted_k}),
+          base);
 
     // A window of this many bytes holds at most as many runes, so the byte guard above covers the
     // rune arm. Cells count bytes on both sides, as the CPU arms do, so the rune rows compare.
     auto validator_utf8 = levenshtein_distances_from_sz<sz_levenshtein_distances_serial> {
-        env, corpus, query_bytes, levenshtein_simt_order_t::shuffled_k, sz_levenshtein_runes_k};
-    bench_result_t base_utf8 =
-        bench_unary(env, std::string("sz_levenshtein_distances_serial:utf8") + suffix, validator_utf8).log(base);
-    bench_unary(env, simt_arm("sz_levenshtein_distances") + ":utf8" + suffix + ":shuffled", validator_utf8,
-                levenshtein_distances_from_simt<simt_levenshtein_distances_k> {
-                    env, corpus, query_bytes, levenshtein_simt_order_t::shuffled_k, sz_levenshtein_runes_k})
-        .log(base_utf8);
+        corpus, resident, query_bytes, levenshtein_simt_order_t::shuffled_k, sz_levenshtein_runes_k};
+    std::optional<double> const base_utf8 = bench_baseline(env, corpus, "sz_levenshtein_distances_serial:utf8" + suffix,
+                                                           {utf8_name}, validator_utf8, base);
+    print(bench_unary(env, corpus, utf8_name, validator_utf8,
+                      levenshtein_distances_from_simt<simt_levenshtein_distances_k> {
+                          corpus, resident, query_bytes, levenshtein_simt_order_t::shuffled_k, sz_levenshtein_runes_k}),
+          base_utf8);
 }
 
 #pragma endregion Levenshtein
@@ -453,16 +450,16 @@ static void bench_levenshtein_cross_product(environment_t const &env, levenshtei
 
 /** The width the corpus's collision entropy picks for a query of @p query_bytes against a mean
  *  candidate of the corpus. */
-static std::size_t overlap_width_(environment_t const &env, std::size_t query_bytes) {
+static std::size_t overlap_width_(corpus_t const &corpus, std::size_t query_bytes) {
     double counts[256] = {};
-    for (char const byte : env.dataset) counts[static_cast<unsigned char>(byte)] += 1.0;
+    for (char const byte : corpus.dataset) counts[static_cast<unsigned char>(byte)] += 1.0;
     double collisions = 0.0;
     for (double const count : counts) collisions += count * count;
-    double const total = static_cast<double>(env.dataset.size());
+    double const total = static_cast<double>(corpus.dataset.size());
     double const collision_entropy = -std::log2(collisions / (total * total));
     std::size_t token_bytes = 0;
-    for (token_view_t const token : env.tokens) token_bytes += token.size();
-    double const mean_candidate_bytes = static_cast<double>(token_bytes) / static_cast<double>(env.tokens.size());
+    for (token_view_t const token : corpus.tokens) token_bytes += token.size();
+    double const mean_candidate_bytes = static_cast<double>(token_bytes) / static_cast<double>(corpus.tokens.size());
     double const width = std::ceil(std::log2(static_cast<double>(query_bytes) * mean_candidate_bytes) /
                                    collision_entropy);
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
@@ -471,7 +468,7 @@ static std::size_t overlap_width_(environment_t const &env, std::size_t query_by
 /**
  *  @brief The corpus as the device sees it: views over the tokens, and room for one round's scores.
  *
- *  Under CUDA the environment already loads the dataset into unified memory, so the candidates need
+ *  Under CUDA the corpus already loads the dataset into unified memory, so the candidates need
  *  no upload and the two sequences differ only in whose accessors they carry.
  */
 struct overlap_simt_corpus_t {
@@ -498,11 +495,11 @@ struct overlap_simt_corpus_t {
         return total;
     }
 
-    overlap_simt_corpus_t(environment_t const &env) {
-        std::size_t const count = std::min<std::size_t>(env.tokens.size(), resident_candidates_per_call(env));
+    overlap_simt_corpus_t(environment_t const &env, corpus_t const &corpus) {
+        std::size_t const count = std::min<std::size_t>(corpus.tokens.size(), resident_candidates_per_call(env));
         views.resize(count), scores.resize(count);
         for (std::size_t index = 0; index != count; ++index) {
-            token_view_t const token = env.tokens[index];
+            token_view_t const token = corpus.tokens[index];
             views[index].start = token.data(), views[index].length = token.size();
             bytes += token.size();
         }
@@ -513,22 +510,22 @@ struct overlap_simt_corpus_t {
 };
 
 /** The leading token cut to @p query_bytes: the one query each arm's engine is built over. */
-static std::string overlap_query_text_(environment_t const &env, std::size_t query_bytes) {
-    token_view_t const whole = env.tokens[0];
+static std::string overlap_query_text_(corpus_t const &corpus, std::size_t query_bytes) {
+    token_view_t const whole = corpus.tokens[0];
     return std::string(whole.data(), std::min(whole.size(), query_bytes));
 }
 
 /** Scores the resident corpus against the fixed query, entirely on the device. */
 struct overlap_scores_from_simt {
-    overlap_simt_corpus_t &corpus;
+    overlap_simt_corpus_t &resident;
     std::size_t windows;
     std::string query;
     sz_memory_allocator_t allocator;
     sz_overlap_engine_t engine {};
 
-    overlap_scores_from_simt(environment_t const &env, overlap_simt_corpus_t &corpus, std::size_t query_bytes,
+    overlap_scores_from_simt(corpus_t const &corpus, overlap_simt_corpus_t &resident, std::size_t query_bytes,
                              std::size_t width)
-        : corpus(corpus), windows(corpus.windows_at(width)), query(overlap_query_text_(env, query_bytes)) {
+        : resident(resident), windows(resident.windows_at(width)), query(overlap_query_text_(corpus, query_bytes)) {
         simt_memory_allocator_init_unified(&allocator, 0);
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
@@ -543,33 +540,31 @@ struct overlap_scores_from_simt {
     overlap_scores_from_simt &operator=(overlap_scores_from_simt const &) = delete;
 
     call_result_t operator()(std::size_t) {
-        if (simt_overlap_scores_k(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.scores.size(), 1,
-                                  STRINGZILLA_NULL) != sz_success_k)
+        if (simt_overlap_scores_k(&engine, &resident.device_candidates, resident.scores.data(), resident.scores.size(),
+                                  1, STRINGZILLA_NULL) != sz_success_k)
             throw std::runtime_error("The GPU round failed.");
         if (cudaStreamSynchronize(STRINGZILLA_NULL) != cudaSuccess)
             throw std::runtime_error("The GPU round did not finish.");
         check_value_t mixed = 0;
-        for (sz_f32_t const score : corpus.scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
-        call_result_t result(corpus.bytes, mixed, windows);
-        result.inputs_processed = corpus.views.size();
-        return result;
+        for (sz_f32_t const score : resident.scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
+        return call_result_t(resident.bytes, mixed, windows);
     }
 };
 
-/** The same round on the CPU, so the two check values line up under @c STRINGWARS_STRESS. */
+/** The same round on the CPU, so the two check values line up under @c STRINGZILLA_STRESS. */
 template <sz_kernel_overlap_engine_init_t init_, sz_kernel_overlap_scores_t scores_>
 struct overlap_scores_from_sz {
-    overlap_simt_corpus_t &corpus;
+    overlap_simt_corpus_t &resident;
     std::size_t windows;
     std::string query;
     sz_memory_allocator_t allocator;
     std::vector<sz_f32_t> scores;
     sz_overlap_engine_t engine {};
 
-    overlap_scores_from_sz(environment_t const &env, overlap_simt_corpus_t &corpus, std::size_t query_bytes,
+    overlap_scores_from_sz(corpus_t const &corpus, overlap_simt_corpus_t &resident, std::size_t query_bytes,
                            std::size_t width)
-        : corpus(corpus), windows(corpus.windows_at(width)), query(overlap_query_text_(env, query_bytes)),
-          scores(corpus.scores.size()) {
+        : resident(resident), windows(resident.windows_at(width)), query(overlap_query_text_(corpus, query_bytes)),
+          scores(resident.scores.size()) {
         sz_memory_allocator_init_default(&allocator);
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
@@ -583,38 +578,45 @@ struct overlap_scores_from_sz {
     overlap_scores_from_sz &operator=(overlap_scores_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t) {
-        if (scores_(&engine, &corpus.host_candidates, scores.data(), scores.size(), 1, nullptr) != sz_success_k)
+        if (scores_(&engine, &resident.host_candidates, scores.data(), scores.size(), 1, nullptr) != sz_success_k)
             throw std::runtime_error("The CPU round failed.");
         check_value_t mixed = 0;
         for (sz_f32_t const score : scores) mixed = mixed * 31u + (check_value_t)(score * 1048576.0f);
-        call_result_t result(corpus.bytes, mixed, windows);
-        result.inputs_processed = corpus.views.size();
-        return result;
+        return call_result_t(resident.bytes, mixed, windows);
     }
 };
 
 /** Every arm at one query width, the width carried in each arm's name beside the resident count. */
-static void bench_overlap_scores(environment_t const &env, overlap_simt_corpus_t &corpus, std::size_t query_bytes) {
-    std::size_t const width = overlap_width_(env, query_bytes);
+static void bench_overlap_scores(environment_t const &env, corpus_t const &corpus, overlap_simt_corpus_t &resident,
+                                 std::size_t query_bytes) {
+    std::size_t const width = overlap_width_(corpus, query_bytes);
     std::string const suffix = ":w" + std::to_string(width);
+    std::string const haswell_name = "sz_overlap_scores_haswell" + suffix,
+                      skylake_name = "sz_overlap_scores_skylake" + suffix,
+                      device_name = simt_arm("sz_overlap_scores") + suffix;
     auto validator = overlap_scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {
-        env, corpus, query_bytes, width};
-    bench_result_t base = bench_unary(env, std::string("sz_overlap_scores_serial") + suffix, validator).log();
+        corpus, resident, query_bytes, width};
+    std::optional<double> base = bench_baseline(env, corpus, "sz_overlap_scores_serial" + suffix,
+                                                {haswell_name, skylake_name, device_name}, validator);
 #if STRINGZILLA_TARGET_HASWELL
-    base = bench_unary(env, std::string("sz_overlap_scores_haswell") + suffix, validator,
-                       overlap_scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {
-                           env, corpus, query_bytes, width})
-               .log(base);
+    std::optional<row_t> const haswell = bench_unary(
+        env, corpus, haswell_name, validator,
+        overlap_scores_from_sz<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell> {corpus, resident,
+                                                                                           query_bytes, width});
+    print(haswell, base);
+    if (std::optional<double> const rate = baseline_of(haswell)) base = rate;
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-    base = bench_unary(env, std::string("sz_overlap_scores_skylake") + suffix, validator,
-                       overlap_scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {
-                           env, corpus, query_bytes, width})
-               .log(base);
+    std::optional<row_t> const skylake = bench_unary(
+        env, corpus, skylake_name, validator,
+        overlap_scores_from_sz<sz_overlap_engine_init_skylake, sz_overlap_scores_skylake> {corpus, resident,
+                                                                                           query_bytes, width});
+    print(skylake, base);
+    if (std::optional<double> const rate = baseline_of(skylake)) base = rate;
 #endif
-    bench_unary(env, simt_arm("sz_overlap_scores") + suffix, validator,
-                overlap_scores_from_simt {env, corpus, query_bytes, width})
-        .log(base);
+    print(bench_unary(env, corpus, device_name, validator,
+                      overlap_scores_from_simt {corpus, resident, query_bytes, width}),
+          base);
 }
 
 #pragma endregion Overlap
@@ -630,9 +632,9 @@ static sz_sequence_t substrings_device_sequence(unified_vector<sz_string_view_t>
 }
 
 /** Moves the corpus's managed pages to the device, so the first round does not time migration. */
-static void substrings_prefetch(substrings_corpus_t const &corpus) {
-    sz_cuda_prefetch_(corpus.views.data(), corpus.views.size() * sizeof(sz_string_view_t), STRINGZILLA_NULL);
-    for (sz_string_view_t const &view : corpus.views) sz_cuda_prefetch_(view.start, view.length, STRINGZILLA_NULL);
+static void substrings_prefetch(substrings_corpus_t const &resident) {
+    sz_cuda_prefetch_(resident.views.data(), resident.views.size() * sizeof(sz_string_view_t), STRINGZILLA_NULL);
+    for (sz_string_view_t const &view : resident.views) sz_cuda_prefetch_(view.start, view.length, STRINGZILLA_NULL);
     sz_unused_(cudaStreamSynchronize(0));
 }
 
@@ -643,29 +645,29 @@ static void substrings_prefetch(substrings_corpus_t const &corpus) {
  *  corpus total the same way: at least the corpus over the budget, and never under the warm-up a
  *  chunk has to pay.
  */
-static bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substrings_corpus_t const &corpus) {
+static bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substrings_corpus_t const &resident) {
     std::size_t const budget = engine.chunk_budget ? engine.chunk_budget : 1;
     std::size_t const floor_bytes = std::max<std::size_t>(4 * engine.max_source_match_bytes, 1);
-    std::size_t const chunk = std::max(sz::divide_round_up(corpus.bytes, budget), floor_bytes);
+    std::size_t const chunk = std::max(sz::divide_round_up(resident.bytes, budget), floor_bytes);
     std::size_t chunks = 0;
-    for (sz_string_view_t const &view : corpus.views)
+    for (sz_string_view_t const &view : resident.views)
         chunks += view.length == 0 ? 1 : sz::divide_round_up(view.length, chunk);
 
     double const waves = (double)chunks / (double)budget;
     fmt::println("> Corpus: {:.1f} MB in {} haystacks, cut into {} chunks of {} B " //
                  "against {} resident threads - {:.2f} waves",                      //
-                 (double)corpus.bytes / 1e6, corpus.views.size(), chunks, chunk, budget, waves);
+                 (double)resident.bytes / (1 << 20), resident.views.size(), chunks, chunk, budget, waves);
     if (waves >= 1.0) return true;
     fmt::println("> Refusing the round: below one wave it times the launch, not the walk. " //
-                 "Raise STRINGWARS_DATASET_LIMIT.");
+                 "Raise STRINGWARS_BYTES.");
     return false;
 }
 
 /** Whether overlapping matches fit the engine's match budget, and that budget fits the device. */
-static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substrings_corpus_t const &corpus,
+static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substrings_corpus_t const &resident,
                                        sz_sequence_t const &device_haystacks) {
     std::size_t free_bytes = 0, total_bytes = 0;
-    unified_vector<sz_size_t> offsets(corpus.views.size() + 1, 0);
+    unified_vector<sz_size_t> offsets(resident.views.size() + 1, 0);
     if (cudaMemGetInfo(&free_bytes, &total_bytes) != cudaSuccess)
         throw std::runtime_error("The device would not report its memory.");
     if (simt_substrings_find_k(&engine, &device_haystacks, nullptr, 0, offsets.data(), STRINGZILLA_NULL) !=
@@ -675,9 +677,10 @@ static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substring
 
     std::size_t const emitted = engine.report->matches_emitted;
     fmt::println("> Matches: {} against a budget of {}, in a {:.1f} GB arena and {:.1f} GB free", emitted,
-                 (std::size_t)engine.matches_budget, (double)engine.scratch_bytes / 1e9, (double)free_bytes / 1e9);
+                 (std::size_t)engine.matches_budget, (double)engine.scratch_bytes / (1 << 30),
+                 (double)free_bytes / (1 << 30));
     if (emitted <= engine.matches_budget && engine.scratch_bytes <= free_bytes / 2) return true;
-    fmt::println("> Refusing the round: the round outruns its match budget. Lower STRINGWARS_DATASET_LIMIT.");
+    fmt::println("> Refusing the round: the round outruns its match budget. Lower STRINGWARS_BYTES.");
     return false;
 }
 
@@ -686,59 +689,67 @@ static bool substrings_fits_the_budget(sz_substrings_engine_t &engine, substring
 #pragma region Substrings Verbs
 
 /** Per-haystack counts, the device arm logged against the CPU one. */
-static void bench_substrings_counts(environment_t const &env, substrings_engine_t &host, substrings_engine_t &device,
-                                    substrings_corpus_t const &corpus, sz_sequence_t const &device_haystacks,
-                                    std::string const &suffix) {
-    auto validator = substrings_counts_from_sz<sz_substrings_counts_serial> {host, corpus, corpus.haystacks};
-    bench_result_t base = bench_unary(env, "sz_substrings_counts_serial" + suffix, validator).log();
-    bench_unary(env, simt_arm("sz_substrings_counts") + suffix, validator,
-                substrings_counts_from_sz<simt_substrings_counts_k> {device, corpus, device_haystacks})
-        .log(base);
+static void bench_substrings_counts(environment_t const &env, corpus_t const &corpus, substrings_engine_t &host,
+                                    substrings_engine_t &device, substrings_corpus_t const &resident,
+                                    sz_sequence_t const &device_haystacks, std::string const &suffix) {
+    auto validator = substrings_counts_from_sz<sz_substrings_counts_serial> {host, resident, resident.haystacks};
+    std::string const device_name = simt_arm("sz_substrings_counts") + suffix;
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_counts_serial" + suffix,
+                                                      {device_name}, validator);
+    print(bench_unary(env, corpus, device_name, validator,
+                      substrings_counts_from_sz<simt_substrings_counts_k> {device, resident, device_haystacks}),
+          base);
 }
 
 /** Every match, the device arm logged against the CPU one. */
-static void bench_substrings_find(environment_t const &env, substrings_engine_t &host, substrings_engine_t &device,
-                                  substrings_corpus_t const &corpus, sz_sequence_t const &device_haystacks,
-                                  std::string const &suffix) {
-    auto validator = substrings_find_from_sz<sz_substrings_find_serial> {host, corpus, corpus.haystacks};
-    bench_result_t base = bench_unary(env, "sz_substrings_find_serial" + suffix, validator).log();
-    bench_unary(env, simt_arm("sz_substrings_find") + suffix, validator,
-                substrings_find_from_sz<simt_substrings_find_k> {device, corpus, device_haystacks})
-        .log(base);
+static void bench_substrings_find(environment_t const &env, corpus_t const &corpus, substrings_engine_t &host,
+                                  substrings_engine_t &device, substrings_corpus_t const &resident,
+                                  sz_sequence_t const &device_haystacks, std::string const &suffix) {
+    auto validator = substrings_find_from_sz<sz_substrings_find_serial> {host, resident, resident.haystacks};
+    std::string const device_name = simt_arm("sz_substrings_find") + suffix;
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_find_serial" + suffix, {device_name},
+                                                      validator);
+    print(bench_unary(env, corpus, device_name, validator,
+                      substrings_find_from_sz<simt_substrings_find_k> {device, resident, device_haystacks}),
+          base);
 }
 
 /** The rewrite, the device arm logged against the CPU one. */
-static void bench_substrings_replace(environment_t const &env, substrings_engine_t &host, substrings_engine_t &device,
-                                     substrings_dictionary_t const &dictionary, substrings_corpus_t const &corpus,
-                                     sz_sequence_t const &device_haystacks, sz_sequence_t const &device_replacements,
-                                     std::string const &suffix) {
-    auto validator = substrings_replace_from_sz<sz_substrings_replace_serial> {host, corpus, corpus.haystacks,
+static void bench_substrings_replace(environment_t const &env, corpus_t const &corpus, substrings_engine_t &host,
+                                     substrings_engine_t &device, substrings_dictionary_t const &dictionary,
+                                     substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                     sz_sequence_t const &device_replacements, std::string const &suffix) {
+    auto validator = substrings_replace_from_sz<sz_substrings_replace_serial> {host, resident, resident.haystacks,
                                                                                dictionary.replacements};
-    bench_result_t base = bench_unary(env, "sz_substrings_replace_serial" + suffix, validator).log();
-    bench_unary(
-        env, simt_arm("sz_substrings_replace") + suffix, validator,
-        substrings_replace_from_sz<simt_substrings_replace_k> {device, corpus, device_haystacks, device_replacements})
-        .log(base);
+    std::string const device_name = simt_arm("sz_substrings_replace") + suffix;
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_replace_serial" + suffix,
+                                                      {device_name}, validator);
+    print(bench_unary(env, corpus, device_name, validator,
+                      substrings_replace_from_sz<simt_substrings_replace_k> {device, resident, device_haystacks,
+                                                                             device_replacements}),
+          base);
 }
 
 /** BM25 scores, the device arm logged against the CPU one. */
-static void bench_substrings_bm25(environment_t const &env, substrings_engine_t &host, substrings_engine_t &device,
-                                  substrings_corpus_t const &corpus, sz_sequence_t const &device_haystacks,
-                                  std::string const &suffix) {
-    auto validator = substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {host, corpus, corpus.haystacks};
-    bench_result_t base = bench_unary(env, "sz_substrings_bm25_scores_serial" + suffix, validator).log();
-    bench_unary(env, simt_arm("sz_substrings_bm25_scores") + suffix, validator,
-                substrings_bm25_from_sz<simt_substrings_bm25_scores_k> {device, corpus, device_haystacks})
-        .log(base);
+static void bench_substrings_bm25(environment_t const &env, corpus_t const &corpus, substrings_engine_t &host,
+                                  substrings_engine_t &device, substrings_corpus_t const &resident,
+                                  sz_sequence_t const &device_haystacks, std::string const &suffix) {
+    auto validator = substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {host, resident, resident.haystacks};
+    std::string const device_name = simt_arm("sz_substrings_bm25_scores") + suffix;
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_substrings_bm25_scores_serial" + suffix,
+                                                      {device_name}, validator);
+    print(bench_unary(env, corpus, device_name, validator,
+                      substrings_bm25_from_sz<simt_substrings_bm25_scores_k> {device, resident, device_haystacks}),
+          base);
 }
 
 /** One vocabulary slice walked by each verb under each accepted policy, once the round is sound. */
-static void bench_substrings_slice(environment_t const &env, substrings_corpus_t const &corpus,
-                                   sz_sequence_t const &device_haystacks, substrings_slice_t slice,
-                                   sz_substrings_case_sensitivity_t sensitivity) {
+static void bench_substrings_slice(environment_t const &env, corpus_t const &corpus,
+                                   substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                   substrings_slice_t slice, sz_substrings_case_sensitivity_t sensitivity) {
     sz_memory_allocator_t allocator;
     simt_memory_allocator_init_unified(&allocator, 0);
-    substrings_dictionary_t const dictionary(env, slice, sensitivity, allocator);
+    substrings_dictionary_t const dictionary(env, corpus, slice, sensitivity, allocator);
     std::string const suffix = substrings_label(slice, sensitivity);
     if (dictionary.needles.empty()) {
         fmt::println("Vocabulary {} is empty on this corpus, skipping it.", suffix.c_str());
@@ -748,8 +759,8 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
         substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_residency_t::device_k);
         fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
                      dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
-        if (!substrings_fills_a_wave(probe.engine, corpus) ||
-            !substrings_fits_the_budget(probe.engine, corpus, device_haystacks))
+        if (!substrings_fills_a_wave(probe.engine, resident) ||
+            !substrings_fits_the_budget(probe.engine, resident, device_haystacks))
             return;
     }
 
@@ -758,19 +769,19 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
         substrings_engine_t host(dictionary, policy, substrings_residency_t::host_k);
         substrings_engine_t device(dictionary, policy, substrings_residency_t::device_k);
         std::string const cover = suffix + substrings_policy_name(policy);
-        bench_substrings_counts(env, host, device, corpus, device_haystacks, cover);
-        bench_substrings_find(env, host, device, corpus, device_haystacks, cover);
+        bench_substrings_counts(env, corpus, host, device, resident, device_haystacks, cover);
+        bench_substrings_find(env, corpus, host, device, resident, device_haystacks, cover);
     }
     for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
         substrings_engine_t host(dictionary, policy, substrings_residency_t::host_k);
         substrings_engine_t device(dictionary, policy, substrings_residency_t::device_k);
-        bench_substrings_replace(env, host, device, dictionary, corpus, device_haystacks, device_replacements,
+        bench_substrings_replace(env, corpus, host, device, dictionary, resident, device_haystacks, device_replacements,
                                  suffix + substrings_policy_name(policy));
     }
     {
         substrings_engine_t host(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
         substrings_engine_t device(dictionary, sz_substrings_overlapping_k, substrings_residency_t::device_k);
-        bench_substrings_bm25(env, host, device, corpus, device_haystacks, suffix);
+        bench_substrings_bm25(env, corpus, host, device, resident, device_haystacks, suffix);
     }
 }
 
@@ -780,38 +791,38 @@ static void bench_substrings_slice(environment_t const &env, substrings_corpus_t
 
 /** Every family's rows over the multilingual lines, each on a corpus it keeps resident; a build
  *  host without a device logs as much and passes. */
-inline int bench_simt_main(int argc, char const **argv) {
-    install_bench_signal_handlers(); // Backtrace on SIGSEGV/SIGABRT + line-buffered stdout for crash localization.
-    log_environment();
-    print_bench_environment();
-    if (!log_cuda_device()) return 0;
-
-    // The arms throw on a failed status, so a bad call ends the run with its message, not a crash.
+inline int bench_simt_main() {
+    install_bench_signal_handlers();
+    environment_t env {read_settings(), probe_machine()};
+    print(env.machine);
+    print(env.settings);
+    if (env.machine.device_name.empty()) return 0;
     try {
-        corpora_t corpora(argc, argv);
-        environment_t const &env = corpora.multilingual_lines();
+        corpus_t const &corpus = env.corpora.multilingual_lines();
         {
-            levenshtein_simt_corpus_t corpus(env);
-            fmt::println("Starting Levenshtein benchmarks over {} resident candidates...", corpus.count());
-            bench_levenshtein_cross_product(env, corpus, median_token_bytes(env));
-            bench_levenshtein_word_counts(env, corpus);
+            levenshtein_simt_corpus_t resident(env, corpus);
+            fmt::println("Starting Levenshtein benchmarks over {} resident candidates...", resident.count());
+            bench_levenshtein_cross_product(env, corpus, resident, median_token_bytes(corpus));
+            bench_levenshtein_word_counts(env, corpus, resident);
         }
         {
-            overlap_simt_corpus_t corpus(env);
-            fmt::println("Starting window overlap benchmarks over {} resident candidates...", corpus.views.size());
-            bench_overlap_scores(env, corpus, median_token_bytes(env));
+            overlap_simt_corpus_t resident(env, corpus);
+            fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.views.size());
+            bench_overlap_scores(env, corpus, resident, median_token_bytes(corpus));
         }
         {
-            substrings_corpus_t const corpus(env);
-            sz_sequence_t const device_haystacks = substrings_device_sequence(corpus.views);
-            substrings_prefetch(corpus);
+            substrings_corpus_t const resident(corpus);
+            sz_sequence_t const device_haystacks = substrings_device_sequence(resident.views);
+            substrings_prefetch(resident);
             fmt::println("Starting multi-pattern search benchmarks...");
-            bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::frequent_k,
+            bench_substrings_slice(env, corpus, resident, device_haystacks, substrings_slice_t::frequent_k,
                                    sz_substrings_cased_k);
-            bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::rare_k, sz_substrings_cased_k);
-            bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::frequent_k,
+            bench_substrings_slice(env, corpus, resident, device_haystacks, substrings_slice_t::rare_k,
+                                   sz_substrings_cased_k);
+            bench_substrings_slice(env, corpus, resident, device_haystacks, substrings_slice_t::frequent_k,
                                    sz_substrings_uncased_k);
-            bench_substrings_slice(env, corpus, device_haystacks, substrings_slice_t::sampled_k, sz_substrings_cased_k);
+            bench_substrings_slice(env, corpus, resident, device_haystacks, substrings_slice_t::sampled_k,
+                                   sz_substrings_cased_k);
         }
     }
     catch (std::exception const &e) {

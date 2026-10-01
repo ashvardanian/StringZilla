@@ -62,23 +62,23 @@ Only the languages that ship a counterpart appear under each heading.
                                                       Xeon4    M5 Pro
 ─────────────────────────────────────────────────────────────────────────────────
 Unicode case-insensitive substring search  (GB/s)
-  Python          icu.StringSearch                     0.06      0.15
-  StringZilla.C   sz_utf8_uncased_search_best         13.16      9.30
-  StringZilla.Py  sz.utf8_uncased_search              12.40      9.19
+  Python          icu.StringSearch                     0.06      0.14
+  StringZilla.C   sz_utf8_uncased_search_best         12.26      8.66
+  StringZilla.Py  sz.utf8_uncased_search              11.55      8.56
 
 Find the first occurrence of a random word, ≅ 5 bytes  (GB/s)
-  LibC            strstr                               21.3       3.5
-  STL C++         std::string::find                     9.1      10.9
-  Python          str.find                              2.5       3.1
-  StringZilla.C   sz_find_best                         21.0      37.1
-  StringZilla.Py  sz.find                              18.6      33.4
+  LibC            strstr                               19.8       3.3
+  STL C++         std::string::find                     8.5      10.2
+  Python          str.find                              2.3       2.9
+  StringZilla.C   sz_find_best                         19.6      34.6
+  StringZilla.Py  sz.find                              17.3      31.1
 
 Split lines separated by \n or \r  (GB/s)
-  LibC            strcspn                               9.2       3.8
-  STL C++         std::string::find_first_of            1.1       4.1
-  Python          re.finditer                          0.32      0.64
-  StringZilla.C   sz_find_byteset_best                 13.8      23.7
-  StringZilla.Py  sz.split_byteset_iter                11.2      21.7
+  LibC            strcspn                               8.6       3.5
+  STL C++         std::string::find_first_of            1.0       3.8
+  Python          re.finditer                          0.30      0.60
+  StringZilla.C   sz_find_byteset_best                 12.9      22.1
+  StringZilla.Py  sz.split_byteset_iter                10.4      20.2
 ```
 
 > Treat these as a first impression, not a benchmark suite.
@@ -144,30 +144,30 @@ Both shapes are designed to be extremely portable:
 Not all features are available across all bindings.
 Consider contributing if you need a feature that's not yet implemented.
 
-|                                | Maturity |   C   |  C++  | Python | Rust  |  JS   | Swift |  Go   |  C#   | Java  |
-| :----------------------------- | :------: | :---: | :---: | :----: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Substring Search               |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Character Set Search           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Sorting & Sequence Operations  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| Set Intersection & Joins       |    🧐     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| Lazy Ranges, Compressed Arrays |    🌳     |   ❌   |   ✅   |   ✅    |   ✅   |   ❌   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| One-Shot & Streaming Hashes    |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Cryptographic Hashes           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Small String Class             |    🧐     |   ✅   |   ✅   |   ❌    |   ⚪   |   ❌   |   ❌   |   ❌   |   ❌   |   ❌   |
-| Random String Generation       |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-|                                |          |       |       |        |       |       |       |       |       |       |
-| Unicode Case Folding           |    🧐     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Uncased UTF-8 Search           |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| TR29 Word Boundary Detection   |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ⚪   |   ✅   |   ✅   |
-| TR29 Grapheme Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| TR29 Sentence Segmentation     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| UAX14 Line-Break Detection     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ⚪   |   ⚪   |   ✅   |   ✅   |
-| Unicode Normalization          |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-| Codepoint Counting & Indexing  |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |   ✅   |
-|                                |          |       |       |        |       |       |       |       |       |       |
-| Batch Edit Distances           |    🌳     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Batch Window Overlap           |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
-| Batch Multi-Pattern Search     |    🚧     |   ✅   |   ✅   |   ✅    |   ✅   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |   ⚪   |
+|                                | Maturity |  C  | C++ | Python | Rust | JS  | Swift | Go  | C#  | Java |
+| :----------------------------- | :------: | :-: | :-: | :----: | :--: | :-: | :---: | :-: | :-: | :--: |
+| Substring Search               |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Character Set Search           |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Sorting & Sequence Operations  |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ✅  |  ✅  |
+| Set Intersection & Joins       |    🧐    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ✅  |  ✅  |
+| Lazy Ranges, Compressed Arrays |    🌳    | ❌  | ✅  |   ✅   |  ✅  | ❌  |  ⚪   | ⚪  | ✅  |  ✅  |
+| One-Shot & Streaming Hashes    |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Cryptographic Hashes           |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Small String Class             |    🧐    | ✅  | ✅  |   ❌   |  ⚪  | ❌  |  ❌   | ❌  | ❌  |  ❌  |
+| Random String Generation       |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ✅  |  ✅  |
+|                                |          |     |     |        |      |     |       |     |     |      |
+| Unicode Case Folding           |    🧐    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Uncased UTF-8 Search           |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| TR29 Word Boundary Detection   |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ⚪  | ✅  |  ✅  |
+| TR29 Grapheme Segmentation     |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ⚪   | ⚪  | ✅  |  ✅  |
+| TR29 Sentence Segmentation     |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ⚪   | ⚪  | ✅  |  ✅  |
+| UAX14 Line-Break Detection     |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ⚪   | ⚪  | ✅  |  ✅  |
+| Unicode Normalization          |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+| Codepoint Counting & Indexing  |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ✅  |  ✅   | ✅  | ✅  |  ✅  |
+|                                |          |     |     |        |      |     |       |     |     |      |
+| Batch Edit Distances           |    🌳    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
+| Batch Window Overlap           |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
+| Batch Multi-Pattern Search     |    🚧    | ✅  | ✅  |   ✅   |  ✅  | ⚪  |  ⚪   | ⚪  | ⚪  |  ⚪  |
 
 > 🌳 parts are used in production.
 > 🧐 parts are in beta.
@@ -569,7 +569,7 @@ Galois/counter mode adds a tag over the ciphertext and any associated data, and 
 Which trade a format wants is the format's decision, so both are exposed rather than one being wrapped in the other.
 
 The two share a key schedule but not a key struct.
-`sz_aes256_key_t` is the bare round-key schedule that counter mode needs, while `sz_aes256_gcm_key_t` adds the hash subkey powers `H^1` through `H^8`, so bulk encryption never carries a hundred and twenty-eight bytes it will not read.
+`sz_aes256_key_t` is the bare round-key schedule that counter mode needs, while `sz_aes256_gcm_key_t` adds the hash subkey powers H¹ through H⁸, so bulk encryption never carries a hundred and twenty-eight bytes it will not read.
 Both one-shot and streaming forms exist, and the streaming state carries __two__ sixteen-byte rhythms across chunk boundaries — one for the keystream block and one for the hash block — so a five-byte chunk followed by an eleven-byte chunk produces the same bytes and the same tag as one sixteen-byte chunk.
 
 Streaming splits by __type__ rather than by a flag: `sz_aes256_gcm_encryptor_t` seals and `sz_aes256_gcm_decryptor_t` opens.

@@ -73,7 +73,7 @@ typedef struct sz_aes256_gcm_key_t {
  *
  *  @note The key is embedded rather than referenced. A pointer would save the copy, but nothing in
  *      a transparent C struct can stop a state from outliving the key it points at, and that
- *      failure is silent. The copy costs about two percent of a 16 KiB record.
+ *      failure is silent. The copy costs about two percent of a 16 KB record.
  */
 typedef struct sz_aes256_gcm_state_t {
 

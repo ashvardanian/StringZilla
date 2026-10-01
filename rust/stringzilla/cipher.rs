@@ -3,9 +3,10 @@
 //! File: rust/stringzilla/cipher.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
 use core::fmt;
+
+use super::*;
 
 /// Bytes in an AES-256 secret key.
 pub const AES256_KEY_LENGTH: usize = 32;

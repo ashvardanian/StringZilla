@@ -54,8 +54,7 @@
 #include "cross.hpp"   // `check_memory_unit_`, `memory_backend_t`, `lookup_backend_t`
 #include "harness.hpp" // `randomize_string`, `test_context_t`
 
-namespace sz = ashvardanian::stringzilla;
-using namespace sz::test;
+namespace ashvardanian::stringzilla::test {
 using sz::literals::operator""_sv; // for `sz::string_view_t`
 using sz::literals::operator""_bs; // for `sz::byteset_t`
 
@@ -271,7 +270,7 @@ void test_strings_tape_assign_unit() {
 
 /** Validates that @c arrow_strings_tape refuses to grow past the range of its offset type. */
 void test_strings_tape_overflow_unit() {
-    // 8-bit offsets hit the same code path as 32-bit offsets past 4 GiB, but already at 256 bytes.
+    // 8-bit offsets hit the same code path as 32-bit offsets past 4 GB, but already at 256 bytes.
     using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
 
     // Appending past the offset range must fail cleanly and leave the stored strings untouched.
@@ -1630,3 +1629,5 @@ template void test_stl_updates_unit<std::string>();
 template void test_stl_updates_unit<sz::string_t>();
 template void test_extensions_reads_unit<sz::string_view_t>();
 template void test_extensions_reads_unit<sz::string_t>();
+
+} // namespace ashvardanian::stringzilla::test

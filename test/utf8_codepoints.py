@@ -24,21 +24,17 @@ Date: November 24, 2025
 from random import Random
 
 import pytest
-
-import stringzilla as sz
-
-from test.helpers import (
-    vector_width_bracketing_strings,
-    SEED_VALUES,
-    scale_iterations,
-    seed_random_generators,
-    run_across_backends,
+from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
+    run_across_backends,
+    scale_iterations,
+    vector_width_bracketing_strings,
 )
-from test.utf8_helpers import adversarial_utf8_inputs, random_segmentation_corpus
+from utf8_helpers import adversarial_utf8_inputs, random_segmentation_corpus
 
+import stringzilla as sz
 
 # region Unit
 
@@ -90,10 +86,8 @@ def test_unit_utf8_codepoints():
 # region Corner cases
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_count_roundtrip(seed_value: int):
+def test_utf8_count_roundtrip(rng: Random):
     """On valid UTF-8 corpora, utf8_count equals Python's codepoint count for both str and bytes inputs."""
-    rng = Random(seed_value)
     for _ in range(scale_iterations(200)):
         raw = random_segmentation_corpus(rng.randint(1, 400), "valid", None, rng)
         text = raw.decode("utf-8")
@@ -101,10 +95,8 @@ def test_utf8_count_roundtrip(seed_value: int):
         assert sz.utf8_count(raw) == len(text)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_codepoints_roundtrip(seed_value: int):
+def test_utf8_codepoints_roundtrip(rng: Random):
     """On valid UTF-8 corpora, utf8_codepoints reproduces Python's codepoint sequence for str and bytes inputs."""
-    rng = Random(seed_value)
     for _ in range(scale_iterations(200)):
         raw = random_segmentation_corpus(rng.randint(1, 400), "valid", None, rng)
         text = raw.decode("utf-8")
@@ -188,12 +180,10 @@ def test_utf8_codepoints_backend_differential_malformed(raw):
         assert 0 <= codepoint <= 0x10FFFF and not (0xD800 <= codepoint <= 0xDFFF)
 
 
-@pytest.mark.parametrize("seed_value", SEED_VALUES)
-def test_utf8_count_backend_differential_random(seed_value):
+def test_utf8_count_backend_differential_random(rng: Random):
     """utf8_count agrees across every capability_sweep() backend and with Python's own codepoint count
     for random ASCII corpora; a divergence is a kernel bug, not a binding bug."""
-    seed_random_generators(seed_value)
-    text = get_random_string()
+    text = get_random_string(rng)
     results = run_across_backends(lambda: sz.utf8_count(text))
     assert_backends_agree(results, oracle=len(text), format_inputs=lambda: repr(text))
 

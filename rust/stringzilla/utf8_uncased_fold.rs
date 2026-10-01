@@ -3,8 +3,9 @@
 //! File: rust/stringzilla/utf8_uncased_fold.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::ffi::c_void;
+
+use super::*;
 
 /// Applies Unicode case folding to a UTF-8 string, writing the result to a target buffer.
 ///

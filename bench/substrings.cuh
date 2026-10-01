@@ -78,12 +78,12 @@ static constexpr std::size_t substrings_sampled_needles_k = 1000;
 static constexpr std::size_t substrings_sampled_min_bytes_k = 4, substrings_sampled_max_bytes_k = 16;
 
 /** Distinct substrings of haystacks at seeded random positions, so any corpus yields needles. */
-static std::vector<std::string> substrings_sampled(environment_t const &env) {
-    std::mt19937_64 generator(env.seed);
+static std::vector<std::string> substrings_sampled(environment_t const &env, corpus_t const &corpus) {
+    std::mt19937_64 generator(env.settings.seed.value);
     std::set<std::string> distinct;
     std::size_t attempts = 0;
     while (distinct.size() != substrings_sampled_needles_k && attempts++ != 64 * substrings_sampled_needles_k) {
-        token_view_t const token = env.tokens[generator() % env.tokens.size()];
+        token_view_t const token = corpus.tokens[generator() % corpus.tokens.size()];
         std::size_t const length = substrings_sampled_min_bytes_k +
                                    generator() % (substrings_sampled_max_bytes_k - substrings_sampled_min_bytes_k + 1);
         if (token.size() < length) continue;
@@ -104,9 +104,10 @@ static std::vector<std::string> substrings_sampled(environment_t const &env) {
  *  Drawn from the dataset's words whatever tokenization shapes the haystacks, so a line search and
  *  a word search draw needles from the same vocabulary.
  */
-static std::vector<std::string> substrings_vocabulary(environment_t const &env, substrings_slice_t slice) {
-    if (slice == substrings_slice_t::sampled_k) return substrings_sampled(env);
-    tokens_t const tokenized = tokenize(env.dataset);
+static std::vector<std::string> substrings_vocabulary(environment_t const &env, corpus_t const &corpus,
+                                                      substrings_slice_t slice) {
+    if (slice == substrings_slice_t::sampled_k) return substrings_sampled(env, corpus);
+    tokens_t const tokenized = tokenize(corpus.dataset);
     std::vector<std::string_view> words;
     std::vector<std::string> distinct;
     std::vector<std::size_t> frequencies;
@@ -183,10 +184,11 @@ struct substrings_dictionary_t {
     /** Haystacks one round carries: the whole corpus, which a device engine's arena must fit. */
     std::size_t haystacks_budget = 0;
 
-    substrings_dictionary_t(environment_t const &env, substrings_slice_t slice,
+    substrings_dictionary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
                             sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &memory)
-        : needles(substrings_vocabulary(env, slice)), needle_views(needles.size()), replacement_views(needles.size()),
-          allocator(memory), sensitivity(sensitivity), haystacks_budget(env.tokens.size()) {
+        : needles(substrings_vocabulary(env, corpus, slice)), needle_views(needles.size()),
+          replacement_views(needles.size()), allocator(memory), sensitivity(sensitivity),
+          haystacks_budget(corpus.tokens.size()) {
         for (std::size_t index = 0; index != needles.size(); ++index) {
             std::string const replacement = index % 2 ? std::string() : "<" + std::to_string(index) + ">";
             replacement_bytes.insert(replacement_bytes.end(), replacement.begin(), replacement.end());
@@ -291,9 +293,9 @@ struct substrings_corpus_t {
     /** Haystack bytes one round walks. */
     std::size_t bytes = 0;
 
-    explicit substrings_corpus_t(environment_t const &env) : views(env.tokens.size()) {
-        for (std::size_t index = 0; index != env.tokens.size(); ++index) {
-            token_view_t const token = env.tokens[index];
+    explicit substrings_corpus_t(corpus_t const &corpus) : views(corpus.tokens.size()) {
+        for (std::size_t index = 0; index != corpus.tokens.size(); ++index) {
+            token_view_t const token = corpus.tokens[index];
             views[index] = {token.data(), token.size()};
             bytes += token.size();
         }
@@ -303,7 +305,6 @@ struct substrings_corpus_t {
     /** What one round over every haystack reports: its bytes as both throughput and operations. */
     call_result_t round(check_value_t check_value) const {
         call_result_t result(bytes, check_value, bytes);
-        result.inputs_processed = views.size();
         return result;
     }
 };

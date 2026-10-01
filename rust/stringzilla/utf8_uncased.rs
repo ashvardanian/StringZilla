@@ -3,11 +3,12 @@
 //! File: rust/stringzilla/utf8_uncased.rs
 //! Author: Ash Vardanian
 
-use super::*;
 use core::cmp::Ordering;
 use core::ffi::c_void;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+
+use super::*;
 
 /// Performs uncased search for `needle` in UTF-8 `haystack`.
 ///

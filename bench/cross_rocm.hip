@@ -6,4 +6,4 @@
  */
 #include "cross_simt.cuh"
 
-int main(int argc, char const **argv) { return sz::bench::bench_simt_main(argc, argv); }
+int main() { return sz::bench::bench_simt_main(); }

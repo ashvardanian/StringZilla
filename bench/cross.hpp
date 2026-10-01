@@ -43,27 +43,28 @@ namespace ashvardanian::stringzilla::bench {
 
 #pragma region Cross Sections
 
-/** Opens the kernels of one capability: prints @p title, and whether this CPU runs them. */
-inline bool cross_section(std::string_view title, sz_capability_t capability) noexcept {
-    sz_capability_t detected = 0;
-    sz_cpu_capabilities_detected(&detected);
-    bool const runnable = (detected & capability) != 0;
-    fmt::println("\n{}{}", title, runnable ? ":" : ": skipped, this CPU lacks it");
-    return runnable;
+/** Prints a kernel's @p row against the serial kernel @p serial_name, or keeps it as that one. */
+inline void log_kernel(environment_t &env, std::optional<row_t> const &row, std::string_view serial_name) {
+    if (!row) return;
+    if (row->name == serial_name) {
+        print(*row);
+        env.serial_rows.insert_or_assign(row->name, *row);
+    }
+    else if (auto const serial = env.serial_rows.find(serial_name); serial != env.serial_rows.end())
+        print(*row, baseline_of(serial->second));
+    else print(*row);
 }
 
-/** Serial kernels' results by name, which the other capabilities' kernels are logged against. */
-inline std::map<std::string, bench_result_t, std::less<>> serial_results;
+/** Whether the filter keeps the kernel @p name but dropped the serial row it prints against. */
+inline bool needs_serial_row(environment_t const &env, std::string_view name, std::string_view serial_name) {
+    return name != serial_name && env.settings.selects(name) && !env.serial_rows.contains(serial_name);
+}
 
-/** Logs a kernel's @p result against the serial kernel @p serial_name, or keeps it as that one. */
-inline void log_kernel(bench_result_t const &result, std::string_view serial_name) {
-    if (result.name == serial_name) {
-        result.log();
-        serial_results.insert_or_assign(result.name, result);
-    }
-    else if (auto const serial = serial_results.find(serial_name); serial != serial_results.end())
-        result.log(serial->second);
-    else result.log();
+/** Keeps @p row, timed under a kept kernel's name, as the serial row @p serial_name, unprinted. */
+inline void keep_serial_row(environment_t &env, std::optional<row_t> row, std::string_view serial_name) {
+    if (!row) return;
+    row->name = serial_name;
+    env.serial_rows.insert_or_assign(row->name, std::move(*row));
 }
 
 /**
@@ -72,10 +73,16 @@ inline void log_kernel(bench_result_t const &result, std::string_view serial_nam
  *  @param[in] extras The preprocessing and the check validator, when the kernel needs them.
  */
 template <typename serial_type_, typename callable_type_, typename... extras_types_>
-void bench_kernel_unary(environment_t const &env, std::string const &name, std::string const &serial_name,
-                        serial_type_ &&serial, callable_type_ &&callable, extras_types_ &&...extras) {
-    if (name == serial_name) log_kernel(bench_unary(env, name, callable_no_op_t {}, callable, extras...), serial_name);
-    else log_kernel(bench_unary(env, name, serial, callable, extras...), serial_name);
+void bench_kernel_unary(environment_t &env, corpus_t const &corpus, std::string const &name,
+                        std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable,
+                        extras_types_ &&...extras) {
+    if (name == serial_name)
+        log_kernel(env, bench_unary(env, corpus, name, callable_no_op_t {}, callable, extras...), serial_name);
+    else {
+        if (needs_serial_row(env, name, serial_name))
+            keep_serial_row(env, bench_unary(env, corpus, name, callable_no_op_t {}, serial, extras...), serial_name);
+        log_kernel(env, bench_unary(env, corpus, name, serial, callable, extras...), serial_name);
+    }
 }
 
 /**
@@ -84,11 +91,16 @@ void bench_kernel_unary(environment_t const &env, std::string const &name, std::
  *  @param[in] extras The preprocessing and the check validator, when the kernel needs them.
  */
 template <typename serial_type_, typename callable_type_, typename... extras_types_>
-void bench_kernel_nullary(environment_t const &env, std::string const &name, std::string const &serial_name,
-                          serial_type_ &&serial, callable_type_ &&callable, extras_types_ &&...extras) {
+void bench_kernel_nullary(environment_t &env, corpus_t const &corpus, std::string const &name,
+                          std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable,
+                          extras_types_ &&...extras) {
     if (name == serial_name)
-        log_kernel(bench_nullary(env, name, callable_no_op_t {}, callable, extras...), serial_name);
-    else log_kernel(bench_nullary(env, name, serial, callable, extras...), serial_name);
+        log_kernel(env, bench_nullary(env, corpus, name, callable_no_op_t {}, callable, extras...), serial_name);
+    else {
+        if (needs_serial_row(env, name, serial_name))
+            keep_serial_row(env, bench_nullary(env, corpus, name, callable_no_op_t {}, serial, extras...), serial_name);
+        log_kernel(env, bench_nullary(env, corpus, name, serial, callable, extras...), serial_name);
+    }
 }
 
 #pragma endregion Cross Sections
@@ -155,12 +167,12 @@ struct matcher_from_sz_find {
 
 /** Counts the matches of the @p token_index token, as a needle, across the whole dataset. */
 template <template <typename, typename> class range_template_, typename matcher_type_>
-auto callable_for_substring_search(environment_t const &env) {
+auto callable_for_substring_search(corpus_t const &corpus) {
     using matcher_t = matcher_type_;
     using matches_t = range_template_<std::string_view, matcher_t>;
-    return [&env](std::size_t token_index) -> call_result_t {
-        std::string_view haystack = env.dataset;
-        std::string_view needle = env.tokens[token_index];
+    return [&corpus](std::size_t token_index) -> call_result_t {
+        std::string_view haystack = corpus.dataset;
+        std::string_view needle = corpus.tokens[token_index];
         matcher_t matcher(needle);
         matches_t matches(haystack, matcher);
         // Drain all matches to ensure the compiler doesn't optimize the search away
@@ -193,11 +205,11 @@ struct matcher_from_sz_find_byte {
 
 /** Counts the spaces, newlines, and nulls in the @p token_index token, as a haystack. */
 template <template <typename, typename> class range_template_, typename matcher_type_>
-auto callable_for_byte_search(environment_t const &env) {
+auto callable_for_byte_search(corpus_t const &corpus) {
     using matcher_t = matcher_type_;
     using matches_t = range_template_<std::string_view, matcher_t>;
-    return [&env](std::size_t token_index) -> call_result_t {
-        std::string_view haystack = env.tokens[token_index];
+    return [&corpus](std::size_t token_index) -> call_result_t {
+        std::string_view haystack = corpus.tokens[token_index];
         std::size_t count_whitespaces = matches_t(haystack, matcher_t(' ')).size();
         std::size_t count_newlines = matches_t(haystack, matcher_t('\n')).size();
         std::size_t count_nulls = matches_t(haystack, matcher_t(0)).size();
@@ -233,7 +245,7 @@ struct matcher_from_sz_find_byteset {
 
 /** Counts the tabs, HTML specials, and digits in the @p token_index token, as a haystack. */
 template <template <typename, typename> class range_template_, typename matcher_type_>
-auto callable_for_byteset_search(environment_t const &env) {
+auto callable_for_byteset_search(corpus_t const &corpus) {
     using matcher_t = matcher_type_;
     using matches_t = range_template_<std::string_view, matcher_t>;
 
@@ -241,8 +253,8 @@ auto callable_for_byteset_search(environment_t const &env) {
     matcher_t const matcher_tabs(std::string_view("\n\r\v\f", 4));
     matcher_t const matcher_html(std::string_view("</>&'\"=[]", 9));
     matcher_t const matcher_digits(std::string_view("0123456789", 10));
-    return [&env, matcher_tabs, matcher_html, matcher_digits](std::size_t token_index) -> call_result_t {
-        std::string_view haystack = env.tokens[token_index];
+    return [&corpus, matcher_tabs, matcher_html, matcher_digits](std::size_t token_index) -> call_result_t {
+        std::string_view haystack = corpus.tokens[token_index];
         std::size_t count_tabs = matches_t(haystack, matcher_tabs).size();
         std::size_t count_html = matches_t(haystack, matcher_html).size();
         std::size_t count_digits = matches_t(haystack, matcher_digits).size();
@@ -256,44 +268,44 @@ auto callable_for_byteset_search(environment_t const &env) {
 
 /** Times one capability's forward and reverse substring search, each corpus word a needle. */
 template <sz_kernel_find_t find_, sz_kernel_find_t rfind_>
-void bench_find_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
-    bench_kernel_unary(env, fmt::format("sz_find_{}", kit), "sz_find_serial",
-                       callable_for_substring_search<forward_matches, matcher_from_sz_find<sz_find_serial>>(env),
-                       callable_for_substring_search<forward_matches, matcher_from_sz_find<find_>>(env));
-    bench_kernel_unary(env, fmt::format("sz_rfind_{}", kit), "sz_rfind_serial",
-                       callable_for_substring_search<reverse_matches, matcher_from_sz_find<sz_rfind_serial>>(env),
-                       callable_for_substring_search<reverse_matches, matcher_from_sz_find<rfind_>>(env));
+void bench_find_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
+    bench_kernel_unary(env, corpus, fmt::format("sz_find_{}", kit), "sz_find_serial",
+                       callable_for_substring_search<forward_matches, matcher_from_sz_find<sz_find_serial>>(corpus),
+                       callable_for_substring_search<forward_matches, matcher_from_sz_find<find_>>(corpus));
+    bench_kernel_unary(env, corpus, fmt::format("sz_rfind_{}", kit), "sz_rfind_serial",
+                       callable_for_substring_search<reverse_matches, matcher_from_sz_find<sz_rfind_serial>>(corpus),
+                       callable_for_substring_search<reverse_matches, matcher_from_sz_find<rfind_>>(corpus));
 }
 
 /** Times one capability's forward and reverse byte search, each corpus word a haystack. */
 template <sz_kernel_find_byte_t find_byte_, sz_kernel_find_byte_t rfind_byte_>
-void bench_find_byte_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
+void bench_find_byte_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
     using serial_t = matcher_from_sz_find_byte<sz_find_byte_serial>;
     using rserial_t = matcher_from_sz_find_byte<sz_rfind_byte_serial>;
-    bench_kernel_unary(env, fmt::format("sz_find_byte_{}", kit), "sz_find_byte_serial",
-                       callable_for_byte_search<forward_matches, serial_t>(env),
-                       callable_for_byte_search<forward_matches, matcher_from_sz_find_byte<find_byte_>>(env));
-    bench_kernel_unary(env, fmt::format("sz_rfind_byte_{}", kit), "sz_rfind_byte_serial",
-                       callable_for_byte_search<reverse_matches, rserial_t>(env),
-                       callable_for_byte_search<reverse_matches, matcher_from_sz_find_byte<rfind_byte_>>(env));
+    bench_kernel_unary(env, corpus, fmt::format("sz_find_byte_{}", kit), "sz_find_byte_serial",
+                       callable_for_byte_search<forward_matches, serial_t>(corpus),
+                       callable_for_byte_search<forward_matches, matcher_from_sz_find_byte<find_byte_>>(corpus));
+    bench_kernel_unary(env, corpus, fmt::format("sz_rfind_byte_{}", kit), "sz_rfind_byte_serial",
+                       callable_for_byte_search<reverse_matches, rserial_t>(corpus),
+                       callable_for_byte_search<reverse_matches, matcher_from_sz_find_byte<rfind_byte_>>(corpus));
 }
 
 /** Times one capability's forward and reverse byteset search, each corpus word a haystack. */
 template <sz_kernel_find_byteset_t find_byteset_, sz_kernel_find_byteset_t rfind_byteset_>
-void bench_find_byteset_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
+void bench_find_byteset_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
     using serial_t = matcher_from_sz_find_byteset<sz_find_byteset_serial>;
     using rserial_t = matcher_from_sz_find_byteset<sz_rfind_byteset_serial>;
     using kernel_t = matcher_from_sz_find_byteset<find_byteset_>;
     using rkernel_t = matcher_from_sz_find_byteset<rfind_byteset_>;
-    bench_kernel_unary(env, fmt::format("sz_find_byteset_{}", kit), "sz_find_byteset_serial",
-                       callable_for_byteset_search<forward_matches, serial_t>(env),
-                       callable_for_byteset_search<forward_matches, kernel_t>(env));
-    bench_kernel_unary(env, fmt::format("sz_rfind_byteset_{}", kit), "sz_rfind_byteset_serial",
-                       callable_for_byteset_search<reverse_matches, rserial_t>(env),
-                       callable_for_byteset_search<reverse_matches, rkernel_t>(env));
+    bench_kernel_unary(env, corpus, fmt::format("sz_find_byteset_{}", kit), "sz_find_byteset_serial",
+                       callable_for_byteset_search<forward_matches, serial_t>(corpus),
+                       callable_for_byteset_search<forward_matches, kernel_t>(corpus));
+    bench_kernel_unary(env, corpus, fmt::format("sz_rfind_byteset_{}", kit), "sz_rfind_byteset_serial",
+                       callable_for_byteset_search<reverse_matches, rserial_t>(corpus),
+                       callable_for_byteset_search<reverse_matches, rkernel_t>(corpus));
 }
 
 #pragma endregion Find
@@ -304,9 +316,9 @@ void bench_find_byteset_kernels(corpora_t &corpora, std::string_view kit) {
 template <sz_kernel_bytesum_t func_>
 struct bytesum_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -321,9 +333,9 @@ struct bytesum_from_sz {
 template <sz_kernel_hash_t func_>
 struct hash_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -342,9 +354,9 @@ inline std::array<sz_u64_t, 8> multiway_seeds() noexcept {
 /** Hashes one token under every seed in a single multi-seed kernel call. */
 template <sz_kernel_hash_multiseed_t func_>
 struct hash_multiseed_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
     inline call_result_t operator()(std::string_view buffer) const noexcept {
         auto seeds = multiway_seeds();
@@ -361,9 +373,9 @@ struct hash_multiseed_from_sz {
 template <sz_kernel_hash_state_init_t init_, sz_kernel_hash_state_update_t stream_, sz_kernel_hash_state_digest_t fold_>
 struct hash_stream_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     call_result_t operator()(std::string_view s) const noexcept {
@@ -382,9 +394,9 @@ template <sz_kernel_sha256_state_init_t init_, sz_kernel_sha256_state_update_t s
           sz_kernel_sha256_state_digest_t fold_>
 struct sha256_stream_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     call_result_t operator()(std::string_view s) const noexcept {
@@ -410,7 +422,7 @@ enum : std::size_t { multistate_lanes_k = 16 };
  *  Lanes in a group advance in lockstep, so the spread of lengths within a group is what the
  *  batched kernels are actually sensitive to - a corpus alone only ever shows whatever spread it
  *  happens to have. Every policy trims rather than extends, so lanes stay inside the tokens the
- *  environment already owns.
+ *  corpus already owns.
  */
 struct sha256_lanes_uniform_t {
     static constexpr char const *name_k = "";
@@ -444,14 +456,14 @@ struct sha256_lanes_one_long_t {
 template <sz_kernel_sha256_multistate_update_t update_, sz_kernel_sha256_multistate_digest_t digest_, typename lanes_>
 struct sha256_multistate_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
         sz_string_view_t lanes[multistate_lanes_k];
         sz_sha256_state_t states[multistate_lanes_k];
         sz_u8_t digests[multistate_lanes_k * STRINGZILLA_SHA256_DIGEST_LENGTH];
         std::size_t bytes_passed = 0;
         for (std::size_t lane_index = 0; lane_index != multistate_lanes_k; ++lane_index) {
-            std::string_view const token = env.tokens[(token_index + lane_index) % env.tokens.size()];
+            std::string_view const token = corpus.tokens[(token_index + lane_index) % corpus.tokens.size()];
             std::size_t const lane_length = lanes_::length(lane_index, token.size());
             lanes[lane_index].start = token.data();
             lanes[lane_index].length = lane_length;
@@ -474,8 +486,7 @@ struct sha256_multistate_from_sz {
         call_result_t result;
         result.bytes_passed = bytes_passed;
         result.check_value = static_cast<check_value_t>(mixed);
-        result.operations = multistate_lanes_k;
-        result.inputs_processed = multistate_lanes_k;
+        result.operations_count = multistate_lanes_k;
         return result;
     }
 };
@@ -487,9 +498,9 @@ struct sha256_multistate_from_sz {
 template <sz_kernel_equal_t func_>
 struct equality_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(corpus.tokens[token_index], corpus.tokens[corpus.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -515,9 +526,9 @@ struct equality_from_sz {
 template <sz_kernel_order_t func_>
 struct ordering_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index], env.tokens[env.tokens.size() - 1 - token_index]);
+        return operator()(corpus.tokens[token_index], corpus.tokens[corpus.tokens.size() - 1 - token_index]);
     }
 
     inline call_result_t operator()(std::string_view a, std::string_view b) const noexcept {
@@ -538,84 +549,84 @@ struct ordering_from_sz {
 
 /** Times one capability's byte sum over every line of the corpus. */
 template <sz_kernel_bytesum_t bytesum_>
-void bench_bytesum_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_kernel_unary(env, fmt::format("sz_bytesum_{}", kit), "sz_bytesum_serial",
-                       bytesum_from_sz<sz_bytesum_serial> {env}, bytesum_from_sz<bytesum_> {env});
+void bench_bytesum_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_kernel_unary(env, corpus, fmt::format("sz_bytesum_{}", kit), "sz_bytesum_serial",
+                       bytesum_from_sz<sz_bytesum_serial> {corpus}, bytesum_from_sz<bytesum_> {corpus});
 }
 
 /** Times one capability's single-shot hash over every line of the corpus. */
 template <sz_kernel_hash_t hash_>
-void bench_hash_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_kernel_unary(env, fmt::format("sz_hash_{}", kit), "sz_hash_serial", hash_from_sz<sz_hash_serial> {env},
-                       hash_from_sz<hash_> {env});
+void bench_hash_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_kernel_unary(env, corpus, fmt::format("sz_hash_{}", kit), "sz_hash_serial",
+                       hash_from_sz<sz_hash_serial> {corpus}, hash_from_sz<hash_> {corpus});
 }
 
 /** Times one capability's multi-seed hash, every seed of @c multiway_seeds in one call. */
 template <sz_kernel_hash_multiseed_t hash_multiseed_>
-void bench_hash_multiseed_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_kernel_unary(env, fmt::format("sz_hash_multiseed_{}", kit), "sz_hash_multiseed_serial",
-                       hash_multiseed_from_sz<sz_hash_multiseed_serial> {env},
-                       hash_multiseed_from_sz<hash_multiseed_> {env});
+void bench_hash_multiseed_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_kernel_unary(env, corpus, fmt::format("sz_hash_multiseed_{}", kit), "sz_hash_multiseed_serial",
+                       hash_multiseed_from_sz<sz_hash_multiseed_serial> {corpus},
+                       hash_multiseed_from_sz<hash_multiseed_> {corpus});
 }
 
 /** Times one capability's streaming hash: initialization, one update, and the digest. */
 template <sz_kernel_hash_state_init_t init_, sz_kernel_hash_state_update_t update_,
           sz_kernel_hash_state_digest_t digest_>
-void bench_hash_stream_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
+void bench_hash_stream_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
     using serial_t =
         hash_stream_from_sz<sz_hash_state_init_serial, sz_hash_state_update_serial, sz_hash_state_digest_serial>;
-    bench_kernel_unary(env, fmt::format("sz_hash_stream_{}", kit), "sz_hash_stream_serial", serial_t {env},
-                       hash_stream_from_sz<init_, update_, digest_> {env});
+    bench_kernel_unary(env, corpus, fmt::format("sz_hash_stream_{}", kit), "sz_hash_stream_serial", serial_t {corpus},
+                       hash_stream_from_sz<init_, update_, digest_> {corpus});
 }
 
 /** Times one capability's SHA256: initialization, one update, and the digest. */
 template <sz_kernel_sha256_state_init_t init_, sz_kernel_sha256_state_update_t update_,
           sz_kernel_sha256_state_digest_t digest_>
-void bench_sha256_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
+void bench_sha256_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
     using serial_t = sha256_stream_from_sz<sz_sha256_state_init_serial, sz_sha256_state_update_serial,
                                            sz_sha256_state_digest_serial>;
-    bench_kernel_unary(env, fmt::format("sz_sha256_{}", kit), "sz_sha256_serial", serial_t {env},
-                       sha256_stream_from_sz<init_, update_, digest_> {env});
+    bench_kernel_unary(env, corpus, fmt::format("sz_sha256_{}", kit), "sz_sha256_serial", serial_t {corpus},
+                       sha256_stream_from_sz<init_, update_, digest_> {corpus});
 }
 
 /** Times one capability's multi-state SHA256 against one lane-length shape. */
 template <sz_kernel_sha256_multistate_update_t update_, sz_kernel_sha256_multistate_digest_t digest_, typename lanes_>
-void bench_sha256_multistate_lanes(environment_t const &env, std::string_view kit) {
+void bench_sha256_multistate_lanes(environment_t &env, corpus_t const &corpus, std::string_view kit) {
     using serial_t =
         sha256_multistate_from_sz<sz_sha256_multistate_update_serial, sz_sha256_multistate_digest_serial, lanes_>;
-    bench_kernel_unary(env, fmt::format("sz_sha256_multistate_{}{}", kit, lanes_::name_k),
-                       fmt::format("sz_sha256_multistate_serial{}", lanes_::name_k), serial_t {env},
-                       sha256_multistate_from_sz<update_, digest_, lanes_> {env});
+    bench_kernel_unary(env, corpus, fmt::format("sz_sha256_multistate_{}{}", kit, lanes_::name_k),
+                       fmt::format("sz_sha256_multistate_serial{}", lanes_::name_k), serial_t {corpus},
+                       sha256_multistate_from_sz<update_, digest_, lanes_> {corpus});
 }
 
 /** Times one capability's multi-state SHA256 over uniform lanes, one short lane, and a long one. */
 template <sz_kernel_sha256_multistate_update_t update_, sz_kernel_sha256_multistate_digest_t digest_>
-void bench_sha256_multistate_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_uniform_t>(env, kit);
-    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_one_short_t>(env, kit);
-    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_one_long_t>(env, kit);
+void bench_sha256_multistate_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_uniform_t>(env, corpus, kit);
+    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_one_short_t>(env, corpus, kit);
+    bench_sha256_multistate_lanes<update_, digest_, sha256_lanes_one_long_t>(env, corpus, kit);
 }
 
 /** Times one capability's equality check over pairs of lines of the corpus. */
 template <sz_kernel_equal_t equal_>
-void bench_equal_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_kernel_unary(env, fmt::format("sz_equal_{}", kit), "sz_equal_serial", equality_from_sz<sz_equal_serial> {env},
-                       equality_from_sz<equal_> {env});
+void bench_equal_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_kernel_unary(env, corpus, fmt::format("sz_equal_{}", kit), "sz_equal_serial",
+                       equality_from_sz<sz_equal_serial> {corpus}, equality_from_sz<equal_> {corpus});
 }
 
 /** Times one capability's ordering over pairs of lines of the corpus. */
 template <sz_kernel_order_t order_>
-void bench_order_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    bench_kernel_unary(env, fmt::format("sz_order_{}", kit), "sz_order_serial", ordering_from_sz<sz_order_serial> {env},
-                       ordering_from_sz<order_> {env});
+void bench_order_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    bench_kernel_unary(env, corpus, fmt::format("sz_order_{}", kit), "sz_order_serial",
+                       ordering_from_sz<sz_order_serial> {corpus}, ordering_from_sz<order_> {corpus});
 }
 
 #pragma endregion Token
@@ -732,9 +743,9 @@ struct argsort_ci_strings_via_sz {
 };
 
 /** The leading bytes of every token as one integer, to sort prefixes before the strings. */
-inline pgrams_t pgrams_from_tokens(environment_t const &env) {
-    pgrams_t pgrams(env.tokens.size());
-    std::transform(env.tokens.begin(), env.tokens.end(), pgrams.begin(), [](std::string_view const &str) {
+inline pgrams_t pgrams_from_tokens(corpus_t const &corpus) {
+    pgrams_t pgrams(corpus.tokens.size());
+    std::transform(corpus.tokens.begin(), corpus.tokens.end(), pgrams.begin(), [](std::string_view const &str) {
         sz_pgram_t pgram = 0;
         std::memcpy(&pgram, str.data(), (std::min)(sizeof(pgram), str.size()));
         return pgram;
@@ -772,12 +783,12 @@ struct intersect_inputs_t {
     strings_t tokens_a, tokens_b;
     permute_t permute_a, permute_b;
 
-    explicit intersect_inputs_t(environment_t const &env) {
-        std::unordered_set<std::string_view> unique_tokens(env.tokens.begin(), env.tokens.end());
+    intersect_inputs_t(corpus_t const &corpus, std::uint32_t seed) {
+        std::unordered_set<std::string_view> unique_tokens(corpus.tokens.begin(), corpus.tokens.end());
         tokens_a.assign(unique_tokens.begin(), unique_tokens.end());
-        std::mt19937 generator(env.seed);
+        std::mt19937 generator(seed);
         std::sample(unique_tokens.begin(), unique_tokens.end(), //
-                    std::back_inserter(tokens_b), env.tokens.size() / 2, generator);
+                    std::back_inserter(tokens_b), corpus.tokens.size() / 2, generator);
         std::size_t const max_tokens_in_intersection = (std::min)(tokens_a.size(), tokens_b.size());
         permute_a.resize(max_tokens_in_intersection), permute_b.resize(max_tokens_in_intersection);
     }
@@ -822,36 +833,37 @@ struct intersect_strings_via_sz {
 
 /** Times one capability's argsort of the corpus words, in byte order and in case-folded order. */
 template <sz_kernel_sequence_argsort_t argsort_, sz_kernel_sequence_argsort_t argsort_uncased_>
-void bench_sequence_argsort_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
-    permute_t permute(env.tokens.size());
-    bench_kernel_nullary(env, fmt::format("sz_sequence_argsort_{}", kit), "sz_sequence_argsort_serial",
-                         argsort_strings_via_sz<sz_sequence_argsort_serial> {env.tokens, permute},
-                         argsort_strings_via_sz<argsort_> {env.tokens, permute});
-    std::vector<std::string> const folded = fold_tokens(env.tokens);
-    bench_kernel_nullary(env, fmt::format("sz_sequence_argsort_uncased_{}", kit), "sz_sequence_argsort_uncased_serial",
-                         argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_serial> {env.tokens, folded, permute},
-                         argsort_ci_strings_via_sz<argsort_uncased_> {env.tokens, folded, permute});
+void bench_sequence_argsort_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
+    permute_t permute(corpus.tokens.size());
+    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_argsort_{}", kit), "sz_sequence_argsort_serial",
+                         argsort_strings_via_sz<sz_sequence_argsort_serial> {corpus.tokens, permute},
+                         argsort_strings_via_sz<argsort_> {corpus.tokens, permute});
+    std::vector<std::string> const folded = fold_tokens(corpus.tokens);
+    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_argsort_uncased_{}", kit),
+                         "sz_sequence_argsort_uncased_serial",
+                         argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_serial> {corpus.tokens, folded, permute},
+                         argsort_ci_strings_via_sz<argsort_uncased_> {corpus.tokens, folded, permute});
 }
 
 /** Times one capability's pgram sort over the leading bytes of the corpus words. */
 template <sz_pgrams_sort_t_ sort_>
-void bench_pgrams_sort_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
-    pgrams_t const pgrams = pgrams_from_tokens(env);
+void bench_pgrams_sort_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
+    pgrams_t const pgrams = pgrams_from_tokens(corpus);
     pgrams_t sorted(pgrams.size());
     permute_t permute(pgrams.size());
-    bench_kernel_nullary(env, fmt::format("sz_pgrams_sort_{}", kit), "sz_pgrams_sort_serial",
+    bench_kernel_nullary(env, corpus, fmt::format("sz_pgrams_sort_{}", kit), "sz_pgrams_sort_serial",
                          sort_pgrams_via_sz<sz_pgrams_sort_serial_> {pgrams, sorted, permute},
                          sort_pgrams_via_sz<sort_> {pgrams, sorted, permute});
 }
 
 /** Times one capability's intersection of every distinct corpus word with a sample of them. */
 template <sz_kernel_sequence_intersect_t intersect_>
-void bench_sequence_intersect_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
-    intersect_inputs_t inputs(env);
-    bench_kernel_nullary(env, fmt::format("sz_sequence_intersect_{}", kit), "sz_sequence_intersect_serial",
+void bench_sequence_intersect_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
+    intersect_inputs_t inputs(corpus, env.settings.seed.value);
+    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_intersect_{}", kit), "sz_sequence_intersect_serial",
                          intersect_strings_via_sz<sz_sequence_intersect_serial> {inputs},
                          intersect_strings_via_sz<intersect_> {inputs});
 }
@@ -867,8 +879,8 @@ constexpr std::size_t max_shift_length = 299;
 struct dataset_copy_t {
     std::vector<char> storage;
 
-    explicit dataset_copy_t(environment_t const &env) : storage(4096 + env.dataset.size() + max_shift_length) {
-        std::memcpy(data(), env.dataset.data(), env.dataset.size());
+    explicit dataset_copy_t(corpus_t const &corpus) : storage(4096 + corpus.dataset.size() + max_shift_length) {
+        std::memcpy(data(), corpus.dataset.data(), corpus.dataset.size());
     }
     dataset_copy_t(dataset_copy_t const &) = delete;
     dataset_copy_t &operator=(dataset_copy_t const &) = delete;
@@ -884,15 +896,15 @@ struct dataset_copy_t {
 template <sz_kernel_copy_t copy_func_, int page_misalignment_ = 0>
 struct copy_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     sz_ptr_t output;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
+        std::size_t output_offset = slice.data() - corpus.dataset.data();
         // Round down to the nearest multiple of a cache line width for aligned writes
         output_offset = round_up_to_multiple<STRINGZILLA_CACHE_LINE_BYTES>(output_offset) -
                         STRINGZILLA_CACHE_LINE_BYTES;
@@ -907,15 +919,15 @@ struct copy_from_sz {
 template <sz_kernel_move_t move_func_, int shift_ = 0>
 struct move_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     sz_ptr_t output;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
+        std::size_t output_offset = slice.data() - corpus.dataset.data();
         // Shift forward
         move_func_(output + output_offset + shift_, output + output_offset, slice.size(), nullptr);
         // Shift backward to revert the changes
@@ -928,15 +940,15 @@ struct move_from_sz {
 template <sz_kernel_fill_t fill_func_>
 struct fill_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     sz_ptr_t output;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
+        std::size_t output_offset = slice.data() - corpus.dataset.data();
         fill_func_(output + output_offset, slice.size(), slice.front(), nullptr);
         return {slice.size(), static_cast<check_value_t>(slice.front())};
     }
@@ -946,15 +958,15 @@ struct fill_from_sz {
 template <sz_kernel_fill_random_t fill_func_>
 struct fill_random_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     sz_ptr_t output;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
+        std::size_t output_offset = slice.data() - corpus.dataset.data();
         fill_func_(output + output_offset, slice.size(), slice.front(), nullptr);
         char last_random_byte = output[output_offset + slice.size() - 1];
         do_not_optimize(last_random_byte);
@@ -966,82 +978,84 @@ struct fill_random_from_sz {
 template <sz_kernel_lookup_t lookup_func_>
 struct lookup_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     sz_ptr_t output;
     sz_cptr_t lookup_table;
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - env.dataset.data();
+        std::size_t output_offset = slice.data() - corpus.dataset.data();
         lookup_func_(output + output_offset, slice.data(), slice.size(), lookup_table, nullptr);
         return {slice.size(), static_cast<check_value_t>(slice.front())};
     }
 };
 
 /** The cyclic rotation of the alphabet every lookup benchmark transforms through. */
-inline sz_cptr_t rotated_alphabet() noexcept {
-    static std::array<unsigned char, 256> const lookup_table = [] {
-        std::array<unsigned char, 256> table {};
-        std::iota(table.begin(), table.end(), static_cast<unsigned char>(1)); // The last byte wraps around to 0
-        return table;
-    }();
-    return reinterpret_cast<sz_cptr_t>(lookup_table.data());
+inline std::array<unsigned char, 256> rotated_alphabet() noexcept {
+    std::array<unsigned char, 256> table {};
+    std::iota(table.begin(), table.end(), static_cast<unsigned char>(1)); // The last byte wraps around to 0
+    return table;
 }
 
 /** Times one capability's copy into cache-line aligned and one-byte shifted output. */
 template <sz_kernel_copy_t copy_>
-void bench_copy_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    dataset_copy_t output(env);
+void bench_copy_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
-    log_kernel(bench_unary(env, fmt::format("sz_copy_{}(align)", kit), copy_from_sz<copy_> {env, o}),
+    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_copy_{}(align)", kit), copy_from_sz<copy_> {corpus, o}),
                "sz_copy_serial(align)");
-    log_kernel(bench_unary(env, fmt::format("sz_copy_{}(shift)", kit), copy_from_sz<copy_, 1> {env, o}),
+    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_copy_{}(shift)", kit), copy_from_sz<copy_, 1> {corpus, o}),
                "sz_copy_serial(shift)");
 }
 
 /** Times one capability's move, shifting each line forward and back by a byte and a cache line. */
 template <sz_kernel_move_t move_>
-void bench_move_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    dataset_copy_t output(env);
+void bench_move_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
-    log_kernel(bench_unary(env, fmt::format("sz_move_{}(by1)", kit), move_from_sz<move_, 1> {env, o}),
+    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_move_{}(by1)", kit), move_from_sz<move_, 1> {corpus, o}),
                "sz_move_serial(by1)");
-    log_kernel(bench_unary(env, fmt::format("sz_move_{}(by64)", kit), move_from_sz<move_, 64> {env, o}),
+    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_move_{}(by64)", kit), move_from_sz<move_, 64> {corpus, o}),
                "sz_move_serial(by64)");
 }
 
 /** Times one capability's fill, each line overwritten with its own first byte. */
 template <sz_kernel_fill_t fill_>
-void bench_fill_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    dataset_copy_t output(env);
-    log_kernel(bench_unary(env, fmt::format("sz_fill_{}", kit), fill_from_sz<fill_> {env, output.data()}),
+void bench_fill_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    dataset_copy_t output(corpus);
+    log_kernel(env,
+               bench_unary(env, corpus, fmt::format("sz_fill_{}", kit), fill_from_sz<fill_> {corpus, output.data()}),
                "sz_fill_serial");
 }
 
 /** Times one capability's random fill, each line seeded with its own first byte. */
 template <sz_kernel_fill_random_t fill_random_>
-void bench_fill_random_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    dataset_copy_t output(env);
+void bench_fill_random_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    dataset_copy_t output(corpus);
     sz_ptr_t o = output.data();
-    bench_kernel_unary(env, fmt::format("sz_fill_random_{}", kit), "sz_fill_random_serial",
-                       fill_random_from_sz<sz_fill_random_serial> {env, o}, fill_random_from_sz<fill_random_> {env, o});
+    bench_kernel_unary(env, corpus, fmt::format("sz_fill_random_{}", kit), "sz_fill_random_serial",
+                       fill_random_from_sz<sz_fill_random_serial> {corpus, o},
+                       fill_random_from_sz<fill_random_> {corpus, o});
 }
 
 /** Times one capability's lookup, rotating the alphabet of every line by one. */
 template <sz_kernel_lookup_t lookup_>
-void bench_lookup_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
-    dataset_copy_t output(env);
-    log_kernel(bench_unary(env, fmt::format("sz_lookup_{}", kit),
-                           lookup_from_sz<lookup_> {env, output.data(), rotated_alphabet()}),
-               "sz_lookup_serial");
+void bench_lookup_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    dataset_copy_t output(corpus);
+    std::array<unsigned char, 256> const alphabet = rotated_alphabet();
+    log_kernel(
+        env,
+        bench_unary(env, corpus, fmt::format("sz_lookup_{}", kit),
+                    lookup_from_sz<lookup_> {corpus, output.data(), reinterpret_cast<sz_cptr_t>(alphabet.data())}),
+        "sz_lookup_serial");
 }
 
 #pragma endregion Memory
@@ -1094,8 +1108,7 @@ struct ctr_from_sz {
         call_result_t result;
         result.bytes_passed = message_bytes;
         result.check_value = static_cast<check_value_t>(check);
-        result.operations = 1;
-        result.inputs_processed = 1;
+        result.operations_count = 1;
         return result;
     }
 };
@@ -1132,8 +1145,7 @@ struct gcm_from_sz {
         call_result_t result;
         result.bytes_passed = message_bytes;
         result.check_value = static_cast<check_value_t>(check);
-        result.operations = 1;
-        result.inputs_processed = 1;
+        result.operations_count = 1;
         return result;
     }
 };
@@ -1182,37 +1194,36 @@ struct gcm_stream_from_sz {
         call_result_t result;
         result.bytes_passed = message_bytes;
         result.check_value = static_cast<check_value_t>(check);
-        result.operations = 1;
-        result.inputs_processed = 1;
+        result.operations_count = 1;
         return result;
     }
 };
 
 /** Times one capability's counter mode at every message size. */
 template <sz_kernel_aes256_key_init_t key_init_, sz_kernel_aes256_ctr_xor_t ctr_xor_>
-void bench_aes256_ctr_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
+void bench_aes256_ctr_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
         std::string const suffix = ":" + std::to_string(message_bytes);
         using serial_t = ctr_from_sz<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial>;
-        bench_kernel_unary(env, fmt::format("sz_aes256_ctr_xor_{}{}", kit, suffix), "sz_aes256_ctr_xor_serial" + suffix,
-                           serial_t {message_bytes, pool, target},
+        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_ctr_xor_{}{}", kit, suffix),
+                           "sz_aes256_ctr_xor_serial" + suffix, serial_t {message_bytes, pool, target},
                            ctr_from_sz<key_init_, ctr_xor_> {message_bytes, pool, target});
     }
 }
 
 /** Times one capability's Galois/counter mode at every message size. */
 template <sz_kernel_aes256_gcm_key_init_t key_init_, sz_kernel_aes256_gcm_encrypt_t encrypt_>
-void bench_aes256_gcm_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
+void bench_aes256_gcm_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
     for (std::size_t message_bytes : cipher_message_sizes_) {
         std::vector<char> pool = cipher_pool();
         std::vector<char> target(pool.size());
         std::string const suffix = ":" + std::to_string(message_bytes);
         using serial_t = gcm_from_sz<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial>;
-        bench_kernel_unary(env, fmt::format("sz_aes256_gcm_encrypt_{}{}", kit, suffix),
+        bench_kernel_unary(env, corpus, fmt::format("sz_aes256_gcm_encrypt_{}{}", kit, suffix),
                            "sz_aes256_gcm_encrypt_serial" + suffix, serial_t {message_bytes, pool, target},
                            gcm_from_sz<key_init_, encrypt_> {message_bytes, pool, target});
     }
@@ -1221,8 +1232,8 @@ void bench_aes256_gcm_kernels(corpora_t &corpora, std::string_view kit) {
 /** Times one capability's streaming Galois/counter mode over a page, at every chunk size. */
 template <sz_kernel_aes256_gcm_key_init_t key_init_, sz_kernel_aes256_gcm_encryptor_init_t begin_,
           sz_kernel_aes256_gcm_encryptor_update_t update_, sz_kernel_aes256_gcm_encryptor_digest_t digest_>
-void bench_aes256_gcm_stream_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.lines();
+void bench_aes256_gcm_stream_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
     std::size_t const message_bytes = 4096;
     for (std::size_t chunk_bytes : cipher_chunk_sizes_) {
         std::vector<char> pool = cipher_pool();
@@ -1232,7 +1243,7 @@ void bench_aes256_gcm_stream_kernels(corpora_t &corpora, std::string_view kit) {
             gcm_stream_from_sz<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,
                                sz_aes256_gcm_encryptor_update_serial, sz_aes256_gcm_encryptor_digest_serial>;
         bench_kernel_unary(
-            env, fmt::format("sz_aes256_gcm_stream_{}{}", kit, suffix), "sz_aes256_gcm_stream_serial" + suffix,
+            env, corpus, fmt::format("sz_aes256_gcm_stream_{}{}", kit, suffix), "sz_aes256_gcm_stream_serial" + suffix,
             serial_t {message_bytes, chunk_bytes, pool, target},
             gcm_stream_from_sz<key_init_, begin_, update_, digest_> {message_bytes, chunk_bytes, pool, target});
     }
@@ -1294,12 +1305,12 @@ template <typename container_type_>
 struct callable_for_associative_lookups {
 
     container_type_ container;
-    environment_t const &env;
+    corpus_t const &corpus;
 
-    inline callable_for_associative_lookups(environment_t const &env) noexcept : env(env) {}
+    inline callable_for_associative_lookups(corpus_t const &corpus) noexcept : corpus(corpus) {}
     void preprocess() {
         using key_type = typename container_type_::key_type;
-        for (std::string_view const &key : env.tokens) container[string_cast<key_type>(key)]++;
+        for (std::string_view const &key : corpus.tokens) container[string_cast<key_type>(key)]++;
     }
 
     /** Helper API to produce a delayed construction lambda. */
@@ -1309,7 +1320,7 @@ struct callable_for_associative_lookups {
 
     /** The actual lookup operation to be benchmarked. */
     call_result_t operator()(std::size_t token_index) const {
-        std::string_view key = env.tokens[token_index];
+        std::string_view key = corpus.tokens[token_index];
         auto counter = container.find(key)->second;
         return {key.size(), static_cast<std::size_t>(counter)};
     }
@@ -1317,23 +1328,27 @@ struct callable_for_associative_lookups {
 
 /** Times @c std::map lookups of every word, ordered by one capability's ordering kernel. */
 template <sz_kernel_order_t order_>
-void bench_map_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.words();
-    auto callable = callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<order_>>>(env);
-    log_kernel(bench_unary(env, fmt::format("map<sz_order_{}>::find", kit), callable_no_op_t(), callable,
+void bench_map_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.words();
+    auto callable = callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<order_>>>(
+        corpus);
+    log_kernel(env,
+               bench_unary(env, corpus, fmt::format("map<sz_order_{}>::find", kit), callable_no_op_t(), callable,
                            callable.preprocessor()),
                "map<sz_order_serial>::find");
 }
 
 /** Times @c std::unordered_map lookups of every word, hashed and compared by capability kernels. */
 template <sz_kernel_hash_t hash_, sz_kernel_equal_t equal_>
-void bench_unordered_map_kernels(corpora_t &corpora, std::string_view hash_kit, std::string_view equal_kit) {
-    environment_t const &env = corpora.words();
+void bench_unordered_map_kernels(environment_t &env, std::string_view hash_kit, std::string_view equal_kit) {
+    corpus_t const &corpus = env.corpora.words();
     auto callable = callable_for_associative_lookups<
-        std::unordered_map<std::string_view, unsigned, hasher_from_sz<hash_>, equal_to_from_sz<equal_>>>(env);
-    log_kernel(bench_unary(env, fmt::format("unordered_map<sz_hash_{}, sz_equal_{}>::find", hash_kit, equal_kit),
-                           callable_no_op_t(), callable, callable.preprocessor()),
-               "unordered_map<sz_hash_serial, sz_equal_serial>::find");
+        std::unordered_map<std::string_view, unsigned, hasher_from_sz<hash_>, equal_to_from_sz<equal_>>>(corpus);
+    log_kernel(
+        env,
+        bench_unary(env, corpus, fmt::format("unordered_map<sz_hash_{}, sz_equal_{}>::find", hash_kit, equal_kit),
+                    callable_no_op_t(), callable, callable.preprocessor()),
+        "unordered_map<sz_hash_serial, sz_equal_serial>::find");
 }
 
 #pragma endregion Container
@@ -1351,25 +1366,25 @@ inline constexpr std::size_t levenshtein_step_positions_k = sz_levenshtein_posit
 inline constexpr std::size_t levenshtein_queries_per_batch_k = 8;
 
 /** The query lengths every sweep runs: the slice's median token, and the 1024 bytes whose match
- *  masks fill a 32 KiB L1, where the multi-word regime starts. */
-inline std::array<std::size_t, 2> levenshtein_query_lengths(environment_t const &env) {
-    return {median_token_bytes(env), 1024};
+ *  masks fill a 32 KB L1, where the multi-word regime starts. */
+inline std::array<std::size_t, 2> levenshtein_query_lengths(corpus_t const &corpus) {
+    return {median_token_bytes(corpus), 1024};
 }
 
 /** The first token that fills a @p query_bytes query, clamped to it, or else the first token. */
-inline std::string_view levenshtein_query_token(environment_t const &env, std::size_t query_bytes) {
-    for (token_view_t const token : env.tokens)
+inline std::string_view levenshtein_query_token(corpus_t const &corpus, std::size_t query_bytes) {
+    for (token_view_t const token : corpus.tokens)
         if (token.size() >= query_bytes) return std::string_view(token.data(), query_bytes);
-    token_view_t const shortest = env.tokens[0];
+    token_view_t const shortest = corpus.tokens[0];
     return std::string_view(shortest.data(), shortest.size());
 }
 
 /** Stages @p positions bytes of @p lanes tokens as transposed class ids, zero past token ends. */
-inline std::vector<sz_u8_t> levenshtein_staged_classes(environment_t const &env, sz_u8_t const *byte_to_class,
+inline std::vector<sz_u8_t> levenshtein_staged_classes(corpus_t const &corpus, sz_u8_t const *byte_to_class,
                                                        std::size_t lanes, std::size_t positions) {
     std::vector<sz_u8_t> classes(positions * lanes, 0);
     for (std::size_t lane = 0; lane != lanes; ++lane) {
-        token_view_t const token = env.tokens[lane % env.tokens.size()];
+        token_view_t const token = corpus.tokens[lane % corpus.tokens.size()];
         std::size_t const filled = positions < token.size() ? positions : token.size();
         for (std::size_t position = 0; position != filled; ++position)
             classes[position * lanes + lane] = byte_to_class[(sz_u8_t)token[position]];
@@ -1383,7 +1398,7 @@ template <sz_kernel_levenshtein_engine_init_t init_, sz_kernel_levenshtein_dista
 struct levenshtein_distances_from_sz {
 
     /** The tokens the queries and candidates are drawn from. */
-    environment_t const &env;
+    corpus_t const &corpus;
 
     /** Bytes every query is clamped to. */
     std::size_t query_bytes;
@@ -1403,12 +1418,13 @@ struct levenshtein_distances_from_sz {
     /** The batch, prepared once and reused by every round. */
     sz_levenshtein_engine_t engine {};
 
-    levenshtein_distances_from_sz(environment_t const &env, std::size_t query_bytes, std::size_t candidates,
+    levenshtein_distances_from_sz(corpus_t const &corpus, std::size_t query_bytes, std::size_t candidates,
                                   sz_levenshtein_symbol_t symbol)
-        : env(env), query_bytes(query_bytes), candidates(candidates), query_views(levenshtein_queries_per_batch_k),
-          views(candidates), distances(levenshtein_queries_per_batch_k * candidates) {
+        : corpus(corpus), query_bytes(query_bytes), candidates(candidates),
+          query_views(levenshtein_queries_per_batch_k), views(candidates),
+          distances(levenshtein_queries_per_batch_k * candidates) {
         for (std::size_t query = 0; query != query_views.size(); ++query) {
-            std::string_view const token = std::string_view(env.tokens[query % env.tokens.size()]);
+            std::string_view const token = std::string_view(corpus.tokens[query % corpus.tokens.size()]);
             std::string_view const text = token.substr(0, query_bytes);
             query_views[query] = {text.data(), text.size()};
         }
@@ -1425,7 +1441,7 @@ struct levenshtein_distances_from_sz {
         std::size_t bytes = 0, query_symbols = 0;
         for (std::size_t query = 0; query != query_views.size(); ++query) query_symbols += query_views[query].length;
         for (std::size_t candidate = 0; candidate != candidates; ++candidate) {
-            std::string_view const token = env.tokens[(token_index + 1 + candidate) % env.tokens.size()];
+            std::string_view const token = corpus.tokens[(token_index + 1 + candidate) % corpus.tokens.size()];
             views[candidate] = {token.data(), token.size()};
             bytes += token.size();
         }
@@ -1436,9 +1452,7 @@ struct levenshtein_distances_from_sz {
         // Multiplied rather than summed, so two candidates swapping distances cannot cancel out.
         check_value_t mixed = 0;
         for (sz_size_t const distance : distances) mixed = mixed * 31u + distance;
-        call_result_t result(bytes, mixed, query_symbols * bytes);
-        result.inputs_processed = candidates * query_views.size();
-        return result;
+        return call_result_t(bytes, mixed, query_symbols * bytes);
     }
 };
 
@@ -1446,7 +1460,7 @@ struct levenshtein_distances_from_sz {
 struct levenshtein_prepare_from_sz {
 
     /** The tokens the query is drawn from. */
-    environment_t const &env;
+    corpus_t const &corpus;
 
     /** Bytes the query is clamped to. */
     std::size_t query_bytes;
@@ -1460,12 +1474,12 @@ struct levenshtein_prepare_from_sz {
     /** @b [words] one step's Myers deltas. */
     std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
 
-    levenshtein_prepare_from_sz(environment_t const &env, std::size_t query_bytes)
-        : env(env), query_bytes(query_bytes), masks(sz_levenshtein_query_mask_entries(query_bytes)),
+    levenshtein_prepare_from_sz(corpus_t const &corpus, std::size_t query_bytes)
+        : corpus(corpus), query_bytes(query_bytes), masks(sz_levenshtein_query_mask_entries(query_bytes)),
           byte_to_class(sz_levenshtein_byte_classes_k), verticals(sz_levenshtein_query_words(query_bytes)) {}
 
     call_result_t operator()(std::size_t token_index) {
-        std::string_view const query = std::string_view(env.tokens[token_index]).substr(0, query_bytes);
+        std::string_view const query = std::string_view(corpus.tokens[token_index]).substr(0, query_bytes);
         sz_levenshtein_query_t prepared {};
         if (sz_levenshtein_query_prepare(query.data(), query.size(), masks.data(), byte_to_class.data(), &prepared) !=
             sz_success_k)
@@ -1505,14 +1519,14 @@ struct levenshtein_step_from_serial {
     /** @b [lanes,words] Myers deltas. */
     std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
 
-    levenshtein_step_from_serial(environment_t const &env, std::size_t query_bytes)
+    levenshtein_step_from_serial(corpus_t const &corpus, std::size_t query_bytes)
         : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k) {
-        std::string_view const text = levenshtein_query_token(env, query_bytes);
+        std::string_view const text = levenshtein_query_token(corpus, query_bytes);
         if (sz_levenshtein_query_prepare(text.data(), text.size(), masks.data(), byte_to_class.data(), &query) !=
             sz_success_k)
             throw std::runtime_error("The query preparation failed.");
         words = sz_levenshtein_query_words(text.size());
-        classes = levenshtein_staged_classes(env, byte_to_class.data(), levenshtein_step_lanes_k,
+        classes = levenshtein_staged_classes(corpus, byte_to_class.data(), levenshtein_step_lanes_k,
                                              levenshtein_step_positions_k);
         verticals.resize(levenshtein_step_lanes_k * words);
     }
@@ -1529,35 +1543,33 @@ struct levenshtein_step_from_serial {
         check_value_t mixed = 0;
         for (std::size_t lane = 0; lane != levenshtein_step_lanes_k; ++lane)
             mixed = mixed * 31u + sz_levenshtein_u64x1_score_serial(&states[lane], 0);
-        call_result_t result(levenshtein_step_positions_k * levenshtein_step_lanes_k, mixed,
+        return call_result_t(levenshtein_step_positions_k * levenshtein_step_lanes_k, mixed,
                              levenshtein_step_positions_k * levenshtein_step_lanes_k * words);
-        result.inputs_processed = levenshtein_step_lanes_k;
-        return result;
     }
 };
 
 /** Times one capability's cross-product sweep at every query length, over bytes or over runes, with
  *  each batch prepared by that capability's own init kernel. */
 template <sz_kernel_levenshtein_engine_init_t init_, sz_kernel_levenshtein_distances_t distances_>
-void bench_levenshtein_distances_kernels(corpora_t &corpora, std::string_view kit, sz_levenshtein_symbol_t symbol) {
-    environment_t const &env = corpora.multilingual_lines();
-    std::size_t const candidates = candidates_per_call(env);
+void bench_levenshtein_distances_kernels(environment_t &env, std::string_view kit, sz_levenshtein_symbol_t symbol) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    std::size_t const candidates = candidates_per_call(env, corpus);
     using serial_t = levenshtein_distances_from_sz<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>;
-    for (std::size_t const query_bytes : levenshtein_query_lengths(env)) {
+    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus)) {
         std::string const suffix = fmt::format("{}:q{}", symbol == sz_levenshtein_runes_k ? ":utf8" : "", query_bytes);
-        bench_kernel_unary(env, fmt::format("sz_levenshtein_distances_{}{}", kit, suffix),
-                           "sz_levenshtein_distances_serial" + suffix, serial_t {env, query_bytes, candidates, symbol},
-                           levenshtein_distances_from_sz<init_, distances_> {env, query_bytes, candidates, symbol});
+        bench_kernel_unary(env, corpus, fmt::format("sz_levenshtein_distances_{}{}", kit, suffix),
+                           "sz_levenshtein_distances_serial" + suffix,
+                           serial_t {corpus, query_bytes, candidates, symbol},
+                           levenshtein_distances_from_sz<init_, distances_> {corpus, query_bytes, candidates, symbol});
     }
 }
 
 /** Times the query preparation at every query length, the one building block the family exports. */
-inline void bench_levenshtein_query_prepare(corpora_t &corpora) {
-    environment_t const &env = corpora.multilingual_lines();
-    for (std::size_t const query_bytes : levenshtein_query_lengths(env))
-        bench_unary(env, "sz_levenshtein_query_prepare:q" + std::to_string(query_bytes),
-                    levenshtein_prepare_from_sz {env, query_bytes})
-            .log();
+inline void bench_levenshtein_query_prepare(environment_t &env) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus))
+        print(bench_unary(env, corpus, "sz_levenshtein_query_prepare:q" + std::to_string(query_bytes),
+                          levenshtein_prepare_from_sz {corpus, query_bytes}));
 }
 
 /**
@@ -1566,14 +1578,14 @@ inline void bench_levenshtein_query_prepare(corpora_t &corpora) {
  *  @param[in] max_query_bytes Longest query the step takes, like the eight symbols of a byte lane.
  */
 template <typename step_type_>
-void bench_levenshtein_step_kernels(corpora_t &corpora, std::string const &name,
+void bench_levenshtein_step_kernels(environment_t &env, std::string const &name,
                                     std::size_t max_query_bytes = std::numeric_limits<std::size_t>::max()) {
-    environment_t const &env = corpora.multilingual_lines();
-    for (std::size_t const query_bytes : levenshtein_query_lengths(env)) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus)) {
         if (query_bytes > max_query_bytes) continue;
         std::string const suffix = ":q" + std::to_string(query_bytes);
-        bench_kernel_unary(env, name + suffix, "sz_levenshtein_u64x1_step_serial" + suffix,
-                           levenshtein_step_from_serial {env, query_bytes}, step_type_ {env, query_bytes});
+        bench_kernel_unary(env, corpus, name + suffix, "sz_levenshtein_u64x1_step_serial" + suffix,
+                           levenshtein_step_from_serial {corpus, query_bytes}, step_type_ {corpus, query_bytes});
     }
 }
 
@@ -1619,9 +1631,9 @@ std::size_t overlap_window_hashes_(sz_f64_t const *prefix_hashes, std::size_t by
 }
 
 /** The longest token in the slice, so every per-candidate arm sizes its scratch once. */
-inline std::size_t overlap_longest_token_(environment_t const &env) {
+inline std::size_t overlap_longest_token_(corpus_t const &corpus) {
     std::size_t longest = 0;
-    for (std::string_view const token : env.tokens) longest = std::max(longest, token.size());
+    for (std::string_view const token : corpus.tokens) longest = std::max(longest, token.size());
     return longest;
 }
 
@@ -1633,16 +1645,16 @@ inline std::size_t overlap_longest_token_(environment_t const &env) {
  *  width = ⌈log₂(query_bytes × mean candidate bytes) / H₂⌉
  *  @endverbatim
  */
-inline std::size_t overlap_width_(environment_t const &env, std::size_t query_bytes) {
+inline std::size_t overlap_width_(corpus_t const &corpus, std::size_t query_bytes) {
     double counts[256] = {};
-    for (char const byte : env.dataset) counts[static_cast<unsigned char>(byte)] += 1.0;
+    for (char const byte : corpus.dataset) counts[static_cast<unsigned char>(byte)] += 1.0;
     double collisions = 0.0;
     for (double const count : counts) collisions += count * count;
-    double const total = static_cast<double>(env.dataset.size());
+    double const total = static_cast<double>(corpus.dataset.size());
     double const collision_entropy = -std::log2(collisions / (total * total));
     std::size_t token_bytes = 0;
-    for (std::string_view const token : env.tokens) token_bytes += token.size();
-    double const mean_candidate_bytes = static_cast<double>(token_bytes) / static_cast<double>(env.tokens.size());
+    for (std::string_view const token : corpus.tokens) token_bytes += token.size();
+    double const mean_candidate_bytes = static_cast<double>(token_bytes) / static_cast<double>(corpus.tokens.size());
     double const width = std::ceil(std::log2(static_cast<double>(query_bytes) * mean_candidate_bytes) /
                                    collision_entropy);
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
@@ -1661,8 +1673,8 @@ struct overlap_query_t {
     /** The raw window hashes of @c text, what every sort and tree layout starts from. */
     std::vector<sz_u32_t> window_hashes;
 
-    overlap_query_t(environment_t const &env, std::size_t query_bytes) : width(overlap_width_(env, query_bytes)) {
-        for (std::string_view const token : env.tokens) {
+    overlap_query_t(corpus_t const &corpus, std::size_t query_bytes) : width(overlap_width_(corpus, query_bytes)) {
+        for (std::string_view const token : corpus.tokens) {
             if (text.size() >= query_bytes) break;
             text.append(token);
         }
@@ -1677,27 +1689,18 @@ struct overlap_query_t {
     }
 };
 
-/** The query every overlap row runs, at the slice's median token length, built once per corpus as
- *  its width scans every byte of the slice. */
-inline overlap_query_t const &overlap_median_query(environment_t const &env) {
-    static std::optional<overlap_query_t> query;
-    static environment_t const *owner = nullptr;
-    if (owner != &env) query.emplace(env, median_token_bytes(env)), owner = &env;
-    return *query;
-}
-
 /** The prefix hashes alone over one token, one per byte however many widths follow them. */
 template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_>
 struct prefix_hashes_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     std::vector<sz_f64_t> prefix_hashes;
 
-    explicit prefix_hashes_from_sz(environment_t const &env)
-        : env(env), prefix_hashes(overlap_longest_token_(env) + 1) {}
+    explicit prefix_hashes_from_sz(corpus_t const &corpus)
+        : corpus(corpus), prefix_hashes(overlap_longest_token_(corpus) + 1) {}
 
     call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = env.tokens[token_index];
+        std::string_view const text = corpus.tokens[token_index];
         overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
                                                                                                prefix_hashes.data());
         return call_result_t(text.size(), static_cast<check_value_t>(prefix_hashes[text.size()]), text.size());
@@ -1709,17 +1712,17 @@ template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
           overlap_window_hash_step_tail_t window_hash_step_tail_>
 struct window_hashes_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     std::size_t width;
     std::vector<sz_f64_t> prefix_hashes;
     std::vector<sz_u32_t> window_hashes;
 
-    window_hashes_from_sz(environment_t const &env, overlap_query_t const &query)
-        : env(env), width(query.width), prefix_hashes(overlap_longest_token_(env) + 1),
+    window_hashes_from_sz(corpus_t const &corpus, overlap_query_t const &query)
+        : corpus(corpus), width(query.width), prefix_hashes(overlap_longest_token_(corpus) + 1),
           window_hashes(prefix_hashes.size()) {}
 
     call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = env.tokens[token_index];
+        std::string_view const text = corpus.tokens[token_index];
         overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
                                                                                                prefix_hashes.data());
         std::size_t const windows =
@@ -1738,15 +1741,15 @@ template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_
           overlap_window_hash_step_tail_t window_hash_step_tail_, overlap_btree_sort_t btree_sort_,
           overlap_btree_probe_t btree_probe_>
 struct window_lookups_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     std::size_t width;
     std::vector<sz_f64_t> prefix_hashes;
     std::vector<sz_u32_t> window_hashes;
     std::vector<sz_u32_t> nodes;
     sz_overlap_btree_t btree {};
 
-    window_lookups_from_sz(environment_t const &env, overlap_query_t const &query)
-        : env(env), width(query.width), prefix_hashes(overlap_longest_token_(env) + 1),
+    window_lookups_from_sz(corpus_t const &corpus, overlap_query_t const &query)
+        : corpus(corpus), width(query.width), prefix_hashes(overlap_longest_token_(corpus) + 1),
           window_hashes(prefix_hashes.size()), nodes(sz_overlap_btree_entries(query.window_hashes.size())) {
         std::copy(query.window_hashes.begin(), query.window_hashes.end(), nodes.begin());
         std::size_t const distinct = btree_sort_(nodes.data(), query.window_hashes.size());
@@ -1755,7 +1758,7 @@ struct window_lookups_from_sz {
     }
 
     call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = env.tokens[token_index];
+        std::string_view const text = corpus.tokens[token_index];
         overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
                                                                                                prefix_hashes.data());
         std::size_t const windows =
@@ -1787,7 +1790,7 @@ struct query_preparation_from_sz {
 /** The engine's round over the next @c candidates tokens, its forest prepared at construction. */
 template <sz_kernel_overlap_engine_init_t init_, sz_kernel_overlap_scores_t scores_>
 struct scores_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     overlap_query_t const &query;
     std::size_t candidates;
     sz_memory_allocator_t allocator;
@@ -1795,8 +1798,8 @@ struct scores_from_sz {
     std::vector<sz_f32_t> scores;
     sz_overlap_engine_t engine {};
 
-    scores_from_sz(environment_t const &env, overlap_query_t const &query, std::size_t candidates)
-        : env(env), query(query), candidates(candidates), views(candidates), scores(candidates) {
+    scores_from_sz(corpus_t const &corpus, overlap_query_t const &query, std::size_t candidates)
+        : corpus(corpus), query(query), candidates(candidates), views(candidates), scores(candidates) {
         sz_memory_allocator_init_default(&allocator);
         sz_string_view_t const view {query.text.data(), query.text.size()};
         sz_sequence_t queries {};
@@ -1812,7 +1815,7 @@ struct scores_from_sz {
     call_result_t operator()(std::size_t token_index) {
         std::size_t bytes = 0, windows = 0;
         for (std::size_t candidate = 0; candidate != candidates; ++candidate) {
-            std::string_view const text = env.tokens[(token_index + candidate) % env.tokens.size()];
+            std::string_view const text = corpus.tokens[(token_index + candidate) % corpus.tokens.size()];
             views[candidate] = {text.data(), text.size()};
             bytes += text.size();
             windows += query.width <= text.size() ? text.size() - query.width + 1 : 0;
@@ -1828,9 +1831,7 @@ struct scores_from_sz {
             std::memcpy(&bits, &score, sizeof(bits));
             mixed = mixed * 31u + bits;
         }
-        call_result_t result(bytes, mixed, windows);
-        result.inputs_processed = candidates;
-        return result;
+        return call_result_t(bytes, mixed, windows);
     }
 };
 
@@ -1841,34 +1842,34 @@ template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_
           overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
           overlap_window_hash_step_tail_t window_hash_step_tail_, overlap_btree_sort_t btree_sort_,
           overlap_btree_probe_t btree_probe_>
-void bench_overlap_step_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_lines();
-    overlap_query_t const &query = overlap_median_query(env);
+void bench_overlap_step_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    overlap_query_t const query(corpus, median_token_bytes(corpus));
     std::string const suffix = ":w" + std::to_string(query.width);
     auto const name = [&](char const *arm, std::string_view of) {
         return fmt::format("sz_overlap_{}_{}{}", arm, of, suffix);
     };
     constexpr sz_size_t serial_positions_k = sz_overlap_serial_f64x1_positions_per_step_k;
-    bench_kernel_unary(env, name("prefix_hashes", kit), name("prefix_hashes", "serial"),
+    bench_kernel_unary(env, corpus, name("prefix_hashes", kit), name("prefix_hashes", "serial"),
                        prefix_hashes_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                                             sz_overlap_f64x1_prefix_hash_step_tail_serial> {env},
-                       prefix_hashes_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_> {env});
+                                             sz_overlap_f64x1_prefix_hash_step_tail_serial> {corpus},
+                       prefix_hashes_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_> {corpus});
     bench_kernel_unary(
-        env, name("window_hashes", kit), name("window_hashes", "serial"),
+        env, corpus, name("window_hashes", kit), name("window_hashes", "serial"),
         window_hashes_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
                               sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
-                              sz_overlap_f64x1_window_hash_step_tail_serial> {env, query},
+                              sz_overlap_f64x1_window_hash_step_tail_serial> {corpus, query},
         window_hashes_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_, window_hash_step_,
-                              window_hash_step_tail_> {env, query});
+                              window_hash_step_tail_> {corpus, query});
     bench_kernel_unary(
-        env, name("window_lookups", kit), name("window_lookups", "serial"),
+        env, corpus, name("window_lookups", kit), name("window_lookups", "serial"),
         window_lookups_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
                                sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
                                sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
-                               sz_overlap_u32x1_btree_probe_serial> {env, query},
+                               sz_overlap_u32x1_btree_probe_serial> {corpus, query},
         window_lookups_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_, window_hash_step_,
-                               window_hash_step_tail_, btree_sort_, btree_probe_> {env, query});
-    bench_kernel_unary(env, name("query_preparation", kit), name("query_preparation", "serial"),
+                               window_hash_step_tail_, btree_sort_, btree_probe_> {corpus, query});
+    bench_kernel_unary(env, corpus, name("query_preparation", kit), name("query_preparation", "serial"),
                        query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query},
                        query_preparation_from_sz<btree_sort_> {query});
 }
@@ -1876,14 +1877,15 @@ void bench_overlap_step_kernels(corpora_t &corpora, std::string_view kit) {
 /** Times one capability's engine round at the median query, its forest prepared by that
  *  capability's own init kernel. */
 template <sz_kernel_overlap_engine_init_t init_, sz_kernel_overlap_scores_t scores_>
-void bench_overlap_scores_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_lines();
-    overlap_query_t const &query = overlap_median_query(env);
-    std::size_t const candidates = candidates_per_call(env);
+void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    overlap_query_t const query(corpus, median_token_bytes(corpus));
+    std::size_t const candidates = candidates_per_call(env, corpus);
     std::string const suffix = ":w" + std::to_string(query.width);
-    bench_kernel_unary(env, fmt::format("sz_overlap_scores_{}{}", kit, suffix), "sz_overlap_scores_serial" + suffix,
-                       scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {env, query, candidates},
-                       scores_from_sz<init_, scores_> {env, query, candidates});
+    bench_kernel_unary(
+        env, corpus, fmt::format("sz_overlap_scores_{}{}", kit, suffix), "sz_overlap_scores_serial" + suffix,
+        scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {corpus, query, candidates},
+        scores_from_sz<init_, scores_> {corpus, query, candidates});
 }
 
 #pragma endregion Overlap
@@ -1899,9 +1901,9 @@ struct substrings_vocabulary_t {
     std::string label;
     substrings_dictionary_t dictionary;
 
-    substrings_vocabulary_t(environment_t const &env, substrings_slice_t slice,
+    substrings_vocabulary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
                             sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &allocator)
-        : label(substrings_label(slice, sensitivity)), dictionary(env, slice, sensitivity, allocator) {}
+        : label(substrings_label(slice, sensitivity)), dictionary(env, corpus, slice, sensitivity, allocator) {}
 };
 
 /**
@@ -1910,10 +1912,8 @@ struct substrings_vocabulary_t {
  *
  *  Drawn once per corpus, as each draw sorts every word of the corpus.
  */
-inline std::deque<substrings_vocabulary_t> const &substrings_vocabularies(environment_t const &env) {
-    static std::deque<substrings_vocabulary_t> vocabularies;
-    static environment_t const *owner = nullptr;
-    if (owner == &env) return vocabularies;
+inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t const &env, corpus_t const &corpus) {
+    std::deque<substrings_vocabulary_t> vocabularies;
     std::pair<substrings_slice_t, sz_substrings_case_sensitivity_t> const slices[] = {
         {substrings_slice_t::frequent_k, sz_substrings_cased_k},
         {substrings_slice_t::rare_k, sz_substrings_cased_k},
@@ -1922,9 +1922,8 @@ inline std::deque<substrings_vocabulary_t> const &substrings_vocabularies(enviro
     };
     sz_memory_allocator_t allocator;
     sz_memory_allocator_init_default(&allocator);
-    vocabularies.clear();
-    for (auto const &[slice, sensitivity] : slices) vocabularies.emplace_back(env, slice, sensitivity, allocator);
-    owner = &env;
+    for (auto const &[slice, sensitivity] : slices)
+        vocabularies.emplace_back(env, corpus, slice, sensitivity, allocator);
     return vocabularies;
 }
 
@@ -1937,40 +1936,41 @@ inline std::string substrings_cover(substrings_vocabulary_t const &vocabulary, s
  *  every overlap policy each verb accepts. */
 template <sz_kernel_substrings_counts_t counts_, sz_kernel_substrings_find_t find_,
           sz_kernel_substrings_replace_t replace_, sz_kernel_substrings_bm25_scores_t bm25_>
-void bench_substrings_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_lines();
-    substrings_corpus_t const corpus(env);
+void bench_substrings_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_lines();
+    substrings_corpus_t const staged(corpus);
     auto const name = [&](char const *verb, std::string_view of, std::string const &cover) {
         return fmt::format("sz_substrings_{}_{}{}", verb, of, cover);
     };
-    for (substrings_vocabulary_t const &vocabulary : substrings_vocabularies(env)) {
+    std::deque<substrings_vocabulary_t> const vocabularies = substrings_vocabularies(env, corpus);
+    for (substrings_vocabulary_t const &vocabulary : vocabularies) {
         substrings_dictionary_t const &dictionary = vocabulary.dictionary;
         if (dictionary.needles.empty()) continue;
         for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
             substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
             std::string const cover = substrings_cover(vocabulary, policy);
             bench_kernel_unary(
-                env, name("counts", kit, cover), name("counts", "serial", cover),
-                substrings_counts_from_sz<sz_substrings_counts_serial> {engine, corpus, corpus.haystacks},
-                substrings_counts_from_sz<counts_> {engine, corpus, corpus.haystacks});
-            bench_kernel_unary(env, name("find", kit, cover), name("find", "serial", cover),
-                               substrings_find_from_sz<sz_substrings_find_serial> {engine, corpus, corpus.haystacks},
-                               substrings_find_from_sz<find_> {engine, corpus, corpus.haystacks});
+                env, corpus, name("counts", kit, cover), name("counts", "serial", cover),
+                substrings_counts_from_sz<sz_substrings_counts_serial> {engine, staged, staged.haystacks},
+                substrings_counts_from_sz<counts_> {engine, staged, staged.haystacks});
+            bench_kernel_unary(env, corpus, name("find", kit, cover), name("find", "serial", cover),
+                               substrings_find_from_sz<sz_substrings_find_serial> {engine, staged, staged.haystacks},
+                               substrings_find_from_sz<find_> {engine, staged, staged.haystacks});
         }
         for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
             substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
             std::string const cover = substrings_cover(vocabulary, policy);
             bench_kernel_unary(
-                env, name("replace", kit, cover), name("replace", "serial", cover),
-                substrings_replace_from_sz<sz_substrings_replace_serial> {engine, corpus, corpus.haystacks,
+                env, corpus, name("replace", kit, cover), name("replace", "serial", cover),
+                substrings_replace_from_sz<sz_substrings_replace_serial> {engine, staged, staged.haystacks,
                                                                           dictionary.replacements},
-                substrings_replace_from_sz<replace_> {engine, corpus, corpus.haystacks, dictionary.replacements});
+                substrings_replace_from_sz<replace_> {engine, staged, staged.haystacks, dictionary.replacements});
         }
         substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
-        bench_kernel_unary(env, name("bm25_scores", kit, vocabulary.label),
+        bench_kernel_unary(env, corpus, name("bm25_scores", kit, vocabulary.label),
                            name("bm25_scores", "serial", vocabulary.label),
-                           substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {engine, corpus, corpus.haystacks},
-                           substrings_bm25_from_sz<bm25_> {engine, corpus, corpus.haystacks});
+                           substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {engine, staged, staged.haystacks},
+                           substrings_bm25_from_sz<bm25_> {engine, staged, staged.haystacks});
     }
 }
 
@@ -1983,10 +1983,10 @@ void bench_substrings_kernels(corpora_t &corpora, std::string_view kit) {
 /** Counts the codepoints of each token; checksum = codepoint count. */
 template <sz_kernel_utf8_count_t func_>
 struct utf8_count_from_sz {
-    environment_t const &env;
-    utf8_count_from_sz(environment_t const &env_) : env(env_) {}
+    corpus_t const &corpus;
+    utf8_count_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
     inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
+        token_view_t token = corpus.tokens[i];
         sz_size_t count = 0;
         func_(token.data(), token.size(), &count, nullptr);
         do_not_optimize(count);
@@ -1997,21 +1997,21 @@ struct utf8_count_from_sz {
 /** Locates the middle codepoint of each token; checksum = byte offset of the located codepoint. */
 template <sz_kernel_utf8_seek_t func_>
 struct utf8_seek_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
 
     /** The codepoint to locate per token, counted outside the timed call. */
     std::vector<sz_size_t> targets;
 
-    utf8_seek_from_sz(environment_t const &env_) : env(env_) {
-        targets.reserve(env.tokens.size());
-        for (auto const &token : env.tokens) {
+    utf8_seek_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
+        targets.reserve(corpus.tokens.size());
+        for (auto const &token : corpus.tokens) {
             sz_size_t count = 0;
             sz_utf8_count_serial(token.data(), token.size(), &count, nullptr);
             targets.push_back(count / 2);
         }
     }
     inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
+        token_view_t token = corpus.tokens[i];
         sz_cptr_t located = nullptr;
         func_(token.data(), token.size(), targets[i], &located, nullptr);
         do_not_optimize(located);
@@ -2025,15 +2025,15 @@ struct utf8_seek_from_sz {
 /** Transcodes each token UTF-8 → UTF-32 chunk by chunk; checksum = number of runes produced. */
 template <sz_kernel_utf8_decode_t func_>
 struct utf8_unpack_from_sz {
-    environment_t const &env;
+    corpus_t const &corpus;
     mutable std::vector<sz_rune_t> runes;
-    utf8_unpack_from_sz(environment_t const &env_) : env(env_) {
+    utf8_unpack_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
         std::size_t max_token = 1;
-        for (auto const &token : env.tokens) max_token = std::max(max_token, token.size());
+        for (auto const &token : corpus.tokens) max_token = std::max(max_token, token.size());
         runes.resize(max_token + 1);
     }
     inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
+        token_view_t token = corpus.tokens[i];
         sz_cptr_t cursor = token.data();
         sz_size_t remaining = token.size();
         std::size_t produced = 0;
@@ -2051,26 +2051,26 @@ struct utf8_unpack_from_sz {
 
 /** Times one capability's codepoint counting over the multilingual slice. */
 template <sz_kernel_utf8_count_t count_>
-void bench_utf8_count_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_count_{}", kit), "sz_utf8_count_serial",
-                       utf8_count_from_sz<sz_utf8_count_serial> {env}, utf8_count_from_sz<count_> {env});
+void bench_utf8_count_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_count_{}", kit), "sz_utf8_count_serial",
+                       utf8_count_from_sz<sz_utf8_count_serial> {corpus}, utf8_count_from_sz<count_> {corpus});
 }
 
 /** Times one capability's Nth-codepoint seeking over the multilingual slice. */
 template <sz_kernel_utf8_seek_t seek_>
-void bench_utf8_seek_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_seek_{}", kit), "sz_utf8_seek_serial",
-                       utf8_seek_from_sz<sz_utf8_seek_serial> {env}, utf8_seek_from_sz<seek_> {env});
+void bench_utf8_seek_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_seek_{}", kit), "sz_utf8_seek_serial",
+                       utf8_seek_from_sz<sz_utf8_seek_serial> {corpus}, utf8_seek_from_sz<seek_> {corpus});
 }
 
 /** Times one capability's UTF-8 → UTF-32 transcoding over the multilingual slice. */
 template <sz_kernel_utf8_decode_t decode_>
-void bench_utf8_decode_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_decode_{}", kit), "sz_utf8_decode_serial",
-                       utf8_unpack_from_sz<sz_utf8_decode_serial> {env}, utf8_unpack_from_sz<decode_> {env});
+void bench_utf8_decode_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_decode_{}", kit), "sz_utf8_decode_serial",
+                       utf8_unpack_from_sz<sz_utf8_decode_serial> {corpus}, utf8_unpack_from_sz<decode_> {corpus});
 }
 
 #pragma endregion UTF8 Traverse
@@ -2082,10 +2082,10 @@ void bench_utf8_decode_kernels(corpora_t &corpora, std::string_view kit) {
  *  @c sz_iterators_default_steps_k; the checksum is the total number of matches. */
 template <sz_kernel_utf8_tokenizer_t find_func_>
 struct utf8_enumerate_delimiters {
-    environment_t const &env;
-    utf8_enumerate_delimiters(environment_t const &env_) : env(env_) {}
+    corpus_t const &corpus;
+    utf8_enumerate_delimiters(corpus_t const &corpus_) : corpus(corpus_) {}
     inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
+        token_view_t token = corpus.tokens[i];
         sz_cptr_t text = token.data();
         sz_size_t len = token.size();
         sz_size_t offsets[sz_iterators_default_steps_k], lengths[sz_iterators_default_steps_k];
@@ -2104,29 +2104,29 @@ struct utf8_enumerate_delimiters {
 
 /** Times one capability's newline enumeration over the multilingual slice. */
 template <sz_kernel_utf8_tokenizer_t newlines_>
-void bench_utf8_newlines_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_newlines_{}", kit), "sz_utf8_newlines_serial",
-                       utf8_enumerate_delimiters<sz_utf8_newlines_serial> {env},
-                       utf8_enumerate_delimiters<newlines_> {env});
+void bench_utf8_newlines_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_newlines_{}", kit), "sz_utf8_newlines_serial",
+                       utf8_enumerate_delimiters<sz_utf8_newlines_serial> {corpus},
+                       utf8_enumerate_delimiters<newlines_> {corpus});
 }
 
 /** Times one capability's whitespace enumeration over the multilingual slice. */
 template <sz_kernel_utf8_tokenizer_t whitespaces_>
-void bench_utf8_whitespaces_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_whitespaces_{}", kit), "sz_utf8_whitespaces_serial",
-                       utf8_enumerate_delimiters<sz_utf8_whitespaces_serial> {env},
-                       utf8_enumerate_delimiters<whitespaces_> {env});
+void bench_utf8_whitespaces_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_whitespaces_{}", kit), "sz_utf8_whitespaces_serial",
+                       utf8_enumerate_delimiters<sz_utf8_whitespaces_serial> {corpus},
+                       utf8_enumerate_delimiters<whitespaces_> {corpus});
 }
 
 /** Times one capability's delimiter enumeration over the multilingual slice. */
 template <sz_kernel_utf8_tokenizer_t delimiters_>
-void bench_utf8_delimiters_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_delimiters_{}", kit), "sz_utf8_delimiters_serial",
-                       utf8_enumerate_delimiters<sz_utf8_delimiters_serial> {env},
-                       utf8_enumerate_delimiters<delimiters_> {env});
+void bench_utf8_delimiters_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_delimiters_{}", kit), "sz_utf8_delimiters_serial",
+                       utf8_enumerate_delimiters<sz_utf8_delimiters_serial> {corpus},
+                       utf8_enumerate_delimiters<delimiters_> {corpus});
 }
 
 #pragma endregion UTF8 Scan
@@ -2137,10 +2137,10 @@ void bench_utf8_delimiters_kernels(corpora_t &corpora, std::string_view kit) {
  *  checksum is the number of segments. */
 template <sz_kernel_utf8_segmenter_t func_>
 struct utf8_word_forward_from_sz {
-    environment_t const &env;
-    utf8_word_forward_from_sz(environment_t const &env_) : env(env_) {}
+    corpus_t const &corpus;
+    utf8_word_forward_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
     inline call_result_t operator()(std::size_t i) const noexcept {
-        token_view_t token = env.tokens[i];
+        token_view_t token = corpus.tokens[i];
         sz_cptr_t cursor = token.data();
         sz_size_t remaining = token.size();
         sz_size_t lengths[16];
@@ -2162,38 +2162,38 @@ struct utf8_word_forward_from_sz {
 
 /** Times one capability's UAX-29 word segmentation over the multilingual slice. */
 template <sz_kernel_utf8_segmenter_t wordbreaks_>
-void bench_utf8_wordbreaks_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_wordbreaks_{}", kit), "sz_utf8_wordbreaks_serial",
-                       utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {env},
-                       utf8_word_forward_from_sz<wordbreaks_> {env});
+void bench_utf8_wordbreaks_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_wordbreaks_{}", kit), "sz_utf8_wordbreaks_serial",
+                       utf8_word_forward_from_sz<sz_utf8_wordbreaks_serial> {corpus},
+                       utf8_word_forward_from_sz<wordbreaks_> {corpus});
 }
 
 /** Times one capability's UAX-29 grapheme-cluster segmentation over the multilingual slice. */
 template <sz_kernel_utf8_segmenter_t graphemes_>
-void bench_utf8_graphemes_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_graphemes_{}", kit), "sz_utf8_graphemes_serial",
-                       utf8_word_forward_from_sz<sz_utf8_graphemes_serial> {env},
-                       utf8_word_forward_from_sz<graphemes_> {env});
+void bench_utf8_graphemes_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_graphemes_{}", kit), "sz_utf8_graphemes_serial",
+                       utf8_word_forward_from_sz<sz_utf8_graphemes_serial> {corpus},
+                       utf8_word_forward_from_sz<graphemes_> {corpus});
 }
 
 /** Times one capability's UAX-29 sentence segmentation over the multilingual slice. */
 template <sz_kernel_utf8_segmenter_t sentences_>
-void bench_utf8_sentences_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_sentences_{}", kit), "sz_utf8_sentences_serial",
-                       utf8_word_forward_from_sz<sz_utf8_sentences_serial> {env},
-                       utf8_word_forward_from_sz<sentences_> {env});
+void bench_utf8_sentences_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_sentences_{}", kit), "sz_utf8_sentences_serial",
+                       utf8_word_forward_from_sz<sz_utf8_sentences_serial> {corpus},
+                       utf8_word_forward_from_sz<sentences_> {corpus});
 }
 
 /** Times one capability's UAX-14 line-break segmentation over the multilingual slice. */
 template <sz_kernel_utf8_segmenter_t linebreaks_>
-void bench_utf8_linebreaks_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_linebreaks_{}", kit), "sz_utf8_linebreaks_serial",
-                       utf8_word_forward_from_sz<sz_utf8_linebreaks_serial> {env},
-                       utf8_word_forward_from_sz<linebreaks_> {env});
+void bench_utf8_linebreaks_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_linebreaks_{}", kit), "sz_utf8_linebreaks_serial",
+                       utf8_word_forward_from_sz<sz_utf8_linebreaks_serial> {corpus},
+                       utf8_word_forward_from_sz<linebreaks_> {corpus});
 }
 
 #pragma endregion UTF8 Segment
@@ -2203,33 +2203,30 @@ void bench_utf8_linebreaks_kernels(corpora_t &corpora, std::string_view kit) {
 /** The checksum a transforming adapter validates its output with: the library's fastest, as the
  *  timed call includes it, or the serial one in header-only builds, which have no kernel finder. */
 inline sz_kernel_bytesum_t output_checksum_kernel() noexcept {
-    static sz_kernel_bytesum_t const kernel = [] {
-        sz_kernel_punned_t punned = nullptr;
-        sz_capability_t capability = 0;
-        sz_find_kernel_punned(sz_kernel_bytesum_k, sz::default_capabilities(), &punned, &capability);
-        return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
-    }();
-    return kernel;
+    sz_kernel_punned_t punned = nullptr;
+    sz_capability_t capability = 0;
+    sz_find_kernel_punned(sz_kernel_bytesum_k, sz::default_capabilities(), &punned, &capability);
+    return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
 }
 
 /** Wraps a hardware-specific UTF-8 normalization backend (transforms to NFC). */
 template <sz_kernel_utf8_norm_t func_>
 struct utf8_norm_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     mutable std::vector<char> output_buffer;
     sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
 
-    utf8_norm_from_sz(environment_t const &env_) : env(env_) {
+    utf8_norm_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
         // Pre-allocate worst-case buffer: 18x input size for the worst single-codepoint
         // compatibility decomposition (see `sz_utf8_norm_best` buffer-sizing docs).
         std::size_t max_token_size = 0;
-        for (auto const &token : env.tokens) max_token_size = std::max(max_token_size, token.size());
+        for (auto const &token : corpus.tokens) max_token_size = std::max(max_token_size, token.size());
         output_buffer.resize(max_token_size * 18 + 64); // Extra padding for safety
     }
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -2251,12 +2248,12 @@ struct utf8_norm_from_sz {
 template <sz_kernel_utf8_find_denormalized_t func_>
 struct utf8_find_denormalized_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
 
-    utf8_find_denormalized_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_find_denormalized_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -2273,19 +2270,20 @@ struct utf8_find_denormalized_from_sz {
 
 /** Times one capability's NFC normalization over the multilingual slice. */
 template <sz_kernel_utf8_norm_t norm_>
-void bench_utf8_norm_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_norm_{}", kit), "sz_utf8_norm_serial",
-                       utf8_norm_from_sz<sz_utf8_norm_serial> {env}, utf8_norm_from_sz<norm_> {env});
+void bench_utf8_norm_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_norm_{}", kit), "sz_utf8_norm_serial",
+                       utf8_norm_from_sz<sz_utf8_norm_serial> {corpus}, utf8_norm_from_sz<norm_> {corpus});
 }
 
 /** Times one capability's NFC quick-check scan over the multilingual slice. */
 template <sz_kernel_utf8_find_denormalized_t find_denormalized_>
-void bench_utf8_find_denormalized_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_find_denormalized_{}", kit), "sz_utf8_find_denormalized_serial",
-                       utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_serial> {env},
-                       utf8_find_denormalized_from_sz<find_denormalized_> {env});
+void bench_utf8_find_denormalized_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_find_denormalized_{}", kit),
+                       "sz_utf8_find_denormalized_serial",
+                       utf8_find_denormalized_from_sz<sz_utf8_find_denormalized_serial> {corpus},
+                       utf8_find_denormalized_from_sz<find_denormalized_> {corpus});
 }
 
 #pragma endregion UTF8 Norm
@@ -2296,19 +2294,19 @@ void bench_utf8_find_denormalized_kernels(corpora_t &corpora, std::string_view k
 template <sz_kernel_utf8_uncased_fold_t func_>
 struct utf8_uncased_fold_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
     mutable std::vector<char> output_buffer;
     sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
 
-    utf8_uncased_fold_from_sz(environment_t const &env_) : env(env_) {
+    utf8_uncased_fold_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
         // Pre-allocate worst-case buffer: 3x input size for worst-case expansion
         std::size_t max_token_size = 0;
-        for (auto const &token : env.tokens) max_token_size = std::max(max_token_size, token.size());
+        for (auto const &token : corpus.tokens) max_token_size = std::max(max_token_size, token.size());
         output_buffer.resize(max_token_size * 3 + 64); // Extra padding for safety
     }
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(env.tokens[token_index]);
+        return operator()(corpus.tokens[token_index]);
     }
 
     inline call_result_t operator()(std::string_view buffer) const noexcept {
@@ -2330,13 +2328,13 @@ struct utf8_uncased_fold_from_sz {
 template <sz_kernel_utf8_uncased_search_t func_>
 struct utf8_uncased_search_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
 
-    utf8_uncased_search_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_uncased_search_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        std::string_view haystack = env.dataset;
-        std::string_view needle = env.tokens[token_index];
+        std::string_view haystack = corpus.dataset;
+        std::string_view needle = corpus.tokens[token_index];
         return operator()(haystack, needle);
     }
 
@@ -2371,13 +2369,13 @@ struct utf8_uncased_search_from_sz {
 template <sz_kernel_utf8_uncased_order_t func_>
 struct utf8_uncased_order_from_sz {
 
-    environment_t const &env;
+    corpus_t const &corpus;
 
-    utf8_uncased_order_from_sz(environment_t const &env_) : env(env_) {}
+    utf8_uncased_order_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
 
     inline call_result_t operator()(std::size_t token_index) const noexcept {
-        std::string_view a = env.tokens[token_index];
-        std::string_view b = env.tokens[(token_index + 1) % env.tokens.size()];
+        std::string_view a = corpus.tokens[token_index];
+        std::string_view b = corpus.tokens[(token_index + 1) % corpus.tokens.size()];
         sz_ordering_t ordering = sz_equal_k;
         func_(a.data(), a.size(), b.data(), b.size(), &ordering, nullptr);
         do_not_optimize(ordering);
@@ -2390,29 +2388,29 @@ struct utf8_uncased_order_from_sz {
 
 /** Times one capability's case folding over the multilingual slice. */
 template <sz_kernel_utf8_uncased_fold_t fold_>
-void bench_utf8_uncased_fold_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_uncased_fold_{}", kit), "sz_utf8_uncased_fold_serial",
-                       utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_serial> {env},
-                       utf8_uncased_fold_from_sz<fold_> {env});
+void bench_utf8_uncased_fold_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_uncased_fold_{}", kit), "sz_utf8_uncased_fold_serial",
+                       utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_serial> {corpus},
+                       utf8_uncased_fold_from_sz<fold_> {corpus});
 }
 
 /** Times one capability's uncased substring search, each line a needle in the whole slice. */
 template <sz_kernel_utf8_uncased_search_t search_>
-void bench_utf8_uncased_search_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_uncased_search_{}", kit), "sz_utf8_uncased_search_serial",
-                       utf8_uncased_search_from_sz<sz_utf8_uncased_search_serial> {env},
-                       utf8_uncased_search_from_sz<search_> {env});
+void bench_utf8_uncased_search_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_uncased_search_{}", kit), "sz_utf8_uncased_search_serial",
+                       utf8_uncased_search_from_sz<sz_utf8_uncased_search_serial> {corpus},
+                       utf8_uncased_search_from_sz<search_> {corpus});
 }
 
 /** Times one capability's uncased ordering of neighboring lines of the multilingual slice. */
 template <sz_kernel_utf8_uncased_order_t order_>
-void bench_utf8_uncased_order_kernels(corpora_t &corpora, std::string_view kit) {
-    environment_t const &env = corpora.multilingual_slice();
-    bench_kernel_unary(env, fmt::format("sz_utf8_uncased_order_{}", kit), "sz_utf8_uncased_order_serial",
-                       utf8_uncased_order_from_sz<sz_utf8_uncased_order_serial> {env},
-                       utf8_uncased_order_from_sz<order_> {env});
+void bench_utf8_uncased_order_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_uncased_order_{}", kit), "sz_utf8_uncased_order_serial",
+                       utf8_uncased_order_from_sz<sz_utf8_uncased_order_serial> {corpus},
+                       utf8_uncased_order_from_sz<order_> {corpus});
 }
 
 #pragma endregion UTF8 Uncased

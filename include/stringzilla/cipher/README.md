@@ -17,8 +17,8 @@ A `…` cell is genuinely-missing data, on a backend not yet measured on hardwar
 | Backend          |     256 B |      1 KB |      4 KB |     16 KB |
 | :--------------- | --------: | --------: | --------: | --------: |
 | Serial @ Xeon4   | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s |
-| Westmere @ Xeon4 | 4.49 GB/s | 5.88 GB/s | 6.18 GB/s | 6.51 GB/s |
-| Ice Lake @ Xeon4 | 8.18 GB/s | 12.2 GB/s | 14.6 GB/s | 14.8 GB/s |
+| Westmere @ Xeon4 | 4.18 GB/s | 5.48 GB/s | 5.76 GB/s | 6.06 GB/s |
+| Ice Lake @ Xeon4 | 7.62 GB/s | 11.4 GB/s | 13.6 GB/s | 13.8 GB/s |
 | NEON @ Graviton4 |         … |         … |         … |         … |
 | SVE2 @ Graviton4 |         … |         … |         … |         … |
 
@@ -29,8 +29,8 @@ A `…` cell is genuinely-missing data, on a backend not yet measured on hardwar
 | Backend          |      256 B |       1 KB |       4 KB |      16 KB |
 | :--------------- | ---------: | ---------: | ---------: | ---------: |
 | Serial @ Xeon4   | 0.004 GB/s | 0.004 GB/s | 0.004 GB/s | 0.004 GB/s |
-| Westmere @ Xeon4 |  2.43 GB/s |  3.20 GB/s |  3.24 GB/s |  3.22 GB/s |
-| Ice Lake @ Xeon4 |  3.42 GB/s |  6.37 GB/s |  7.59 GB/s |  8.31 GB/s |
+| Westmere @ Xeon4 |  2.26 GB/s |  2.98 GB/s |  3.02 GB/s |  3.00 GB/s |
+| Ice Lake @ Xeon4 |  3.19 GB/s |  5.93 GB/s |  7.07 GB/s |  7.74 GB/s |
 | NEON @ Graviton4 |          … |          … |          … |          … |
 | SVE2 @ Graviton4 |          … |          … |          … |          … |
 

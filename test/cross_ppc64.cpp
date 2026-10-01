@@ -6,10 +6,10 @@
  */
 #include "cross.hpp"
 
-using namespace ashvardanian::stringzilla::test;
+namespace ashvardanian::stringzilla::test {
 
-std::size_t test_cross_ppc64(test_environment_t const &environment) {
-    [[maybe_unused]] cross_section_t check(environment);
+std::size_t test_cross_ppc64(environment_t const &env) {
+    [[maybe_unused]] cross_section_t check(env);
 
 #if STRINGZILLA_TARGET_POWERVSX
     check.section("Cross Power VSX", sz_cap_powervsx_k);
@@ -123,3 +123,5 @@ std::size_t test_cross_ppc64(test_environment_t const &environment) {
 
     return check.failures;
 }
+
+} // namespace ashvardanian::stringzilla::test

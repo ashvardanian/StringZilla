@@ -28,7 +28,7 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_v128_(sz_cptr_t text, sz_size_t length) {
     // there are NO widening/extend/64-bit-add reductions inside the loop. Each u16 lane sums two
     // byte columns, so after `k` iterations a lane holds at most `2 * k * 255`; it stays below
     // 65535 for `k <= 128`. We therefore flush the u16 accumulator into a wide u64 accumulator
-    // every 128 iterations (2 KiB), and do one horizontal reduction at the very end.
+    // every 128 iterations (2 KB), and do one horizontal reduction at the very end.
     sz_u128_vec_t sum16_vec, sum64_vec;
     sum16_vec.v128 = wasm_u64x2_splat(0); // 8x u16 partials
     sum64_vec.v128 = wasm_u64x2_splat(0); // 2x u64 partials
