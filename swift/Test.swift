@@ -288,9 +288,9 @@ func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _
     #expect(enabled.isSubset(of: try cpu.capabilitiesDetected.intersection(cpu.capabilitiesCompiled)))
     try cpu.configureThread(enabled)
     if let gpu = try? Device(kind: .metal, ordinal: 0) {
-        #expect(throws: DeviceError.self) { try gpu.configureThread(.any) }
+        #expect(throws: StringZilla.Error.self) { try gpu.configureThread(.any) }
     }
     #expect(try Device.count(.cpu) == 1)
-    #expect(throws: DeviceError.self) { try Device(kind: .cpu, ordinal: 1) }
-    #expect(throws: DeviceError.self) { try Device(kind: .metal, ordinal: (try? Device.count(.metal)) ?? 0) }
+    #expect(throws: StringZilla.Error.self) { try Device(kind: .cpu, ordinal: 1) }
+    #expect(throws: StringZilla.Error.self) { try Device(kind: .metal, ordinal: (try? Device.count(.metal)) ?? 0) }
 }

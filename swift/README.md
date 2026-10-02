@@ -225,5 +225,5 @@ let gpu = try Device(kind: .metal, ordinal: 0) // throws past the last one
 print(try gpu.capabilitiesEnabled)             // like "metal"
 ```
 
-`capabilitiesEnable(_:)` and `configureThread(_:)` throw a `DeviceError` on a GPU, which keeps no enabled set or thread state of its own: this package only reports GPU capabilities.
+`capabilitiesEnable(_:)` and `configureThread(_:)` throw a `StringZilla.Error` on a GPU, which keeps no enabled set or thread state of its own: this package only reports GPU capabilities.
 `.cpus`, `.devices` and `.any` group the CPU capabilities, the GPU ones, and all of them.

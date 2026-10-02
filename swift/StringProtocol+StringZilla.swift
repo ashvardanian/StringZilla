@@ -917,10 +917,45 @@ public enum DeviceKind: Sendable {
     case cpu, cuda, rocm, metal
 }
 
-/// Why a ``Device`` query failed, as `sz_status_name` spells the C status.
-public struct DeviceError: Error, CustomStringConvertible {
-    public let description: String
-    init(_ status: sz_status_t) { description = String(cString: sz_status_name(status)) }
+/// Why a call failed, one case per failing `sz_status_t`, which `sz_status_name` spells.
+public enum Status: Int32, Sendable {
+    case badAllocation = -10
+    case invalidUtf8 = -12
+    case containsDuplicates = -13
+    case overflowRisk = -14
+    case unexpectedDimensions = -15
+    case missingGpu = -16
+    case deviceCodeMismatch = -17
+    case deviceMemoryMismatch = -18
+    case authenticationFailed = -19
+    case missingKernel = -20
+    case missingLibrary = -21
+    case unknown = -1
+
+    /// The C spelling, like "missing_gpu".
+    public var name: String { String(cString: sz_status_name(sz_status_t(rawValue: rawValue))) }
+}
+
+/// One failed call: a status every caller can branch on, and the detail the status cannot
+/// carry.
+public struct Error: Swift.Error, CustomStringConvertible, Equatable, Sendable {
+    /// The failure identity, shared with the C library.
+    public let status: Status
+    /// This binding's detail when it rejected the call itself, else empty.
+    public let message: String
+
+    public var description: String {
+        message.isEmpty ? "stringzilla: \(status.name)" : "stringzilla: \(status.name): \(message)"
+    }
+}
+
+/// Builds the failure this binding reports for a fault it caught before the boundary.
+func fail(_ status: Status, _ message: String) -> Error { Error(status: status, message: message) }
+
+/// Throws the ``Error`` a C call reports, if any.
+func check(_ status: sz_status_t) throws(Error) {
+    guard status != sz_success_k else { return }
+    throw Error(status: Status(rawValue: status.rawValue) ?? .unknown, message: "")
 }
 
 /// One device StringZilla knows: the host CPU, or a GPU by its runtime's own ordinal, the one
@@ -951,14 +986,14 @@ public struct Device: Sendable, Equatable {
     }
 
     /// Device `ordinal` of `kind`.
-    /// - Throws: ``DeviceError`` past the last device of `kind`.
+    /// - Throws: ``Error`` past the last device of `kind`.
     public init(kind: DeviceKind, ordinal: Int) throws {
-        guard ordinal >= 0, ordinal < (try Device.count(kind)) else { throw DeviceError(sz_missing_gpu_k) }
+        guard ordinal >= 0, ordinal < (try Device.count(kind)) else { throw fail(.missingGpu, "no \(kind) device \(ordinal)") }
         self.init(kind: kind, unchecked: ordinal)
     }
 
     /// How many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
-    /// - Throws: ``DeviceError`` without a GPU of `kind`.
+    /// - Throws: ``Error`` without a GPU of `kind`.
     public static func count(_ kind: DeviceKind) throws -> Int {
         var count: sz_size_t = 1
         switch kind {
@@ -976,10 +1011,10 @@ public struct Device: Sendable, Equatable {
             var mask: sz_capability_t = 0
             let device = sz_size_t(ordinal)
             switch kind {
-            case .cpu: try Device.check(sz_cpu_capabilities_detected(&mask))
-            case .cuda: try Device.check(sz_cuda_capabilities_detected(device, &mask))
-            case .rocm: try Device.check(sz_rocm_capabilities_detected(device, &mask))
-            case .metal: try Device.check(sz_metal_capabilities_detected(device, &mask))
+            case .cpu: try check(sz_cpu_capabilities_detected(&mask))
+            case .cuda: try check(sz_cuda_capabilities_detected(device, &mask))
+            case .rocm: try check(sz_rocm_capabilities_detected(device, &mask))
+            case .metal: try check(sz_metal_capabilities_detected(device, &mask))
             }
             return Capabilities(rawValue: UInt64(mask))
         }
@@ -1006,9 +1041,9 @@ public struct Device: Sendable, Equatable {
             let device = sz_size_t(ordinal)
             switch kind {
             case .cpu: return Device.cpuEnabled
-            case .cuda: try Device.check(sz_cuda_capabilities_enabled(device, &mask))
-            case .rocm: try Device.check(sz_rocm_capabilities_enabled(device, &mask))
-            case .metal: try Device.check(sz_metal_capabilities_enabled(device, &mask))
+            case .cuda: try check(sz_cuda_capabilities_enabled(device, &mask))
+            case .rocm: try check(sz_rocm_capabilities_enabled(device, &mask))
+            case .metal: try check(sz_metal_capabilities_enabled(device, &mask))
             }
             return Capabilities(rawValue: UInt64(mask))
         }
@@ -1017,10 +1052,10 @@ public struct Device: Sendable, Equatable {
     /// Makes `wanted` the CPU's ``capabilitiesEnabled`` set, clamped to what it detects and this
     /// binary compiled and keeping ``Capabilities/serial``.
     /// - Returns: The set that took effect.
-    /// - Throws: ``DeviceError`` on a GPU, which keeps no such set.
+    /// - Throws: ``Error`` on a GPU, which keeps no such set.
     @discardableResult
     public func capabilitiesEnable(_ wanted: Capabilities) throws -> Capabilities {
-        guard kind == .cpu else { throw DeviceError(sz_missing_kernel_k) }
+        guard kind == .cpu else { throw fail(.missingKernel, "GPUs keep no capability set") }
         var mask = Capabilities.serial.native
         _ = sz_cpu_capabilities_enabled(&mask)
         Device.cpuEnabled = wanted.intersection(Capabilities(rawValue: UInt64(mask))).union(.serial)
@@ -1029,13 +1064,9 @@ public struct Device: Sendable, Equatable {
 
     /// Configures the current thread for `capabilities`, usually ``capabilitiesEnabled``. Call it
     /// once on every thread that runs kernels.
-    /// - Throws: ``DeviceError`` on a GPU, which has no thread state to configure.
+    /// - Throws: ``Error`` on a GPU, which has no thread state to configure.
     public func configureThread(_ capabilities: Capabilities) throws {
-        guard kind == .cpu else { throw DeviceError(sz_missing_kernel_k) }
-        try Device.check(sz_cpu_configure_thread(capabilities.native))
-    }
-
-    private static func check(_ status: sz_status_t) throws {
-        guard status == sz_success_k else { throw DeviceError(status) }
+        guard kind == .cpu else { throw fail(.missingKernel, "GPUs have no thread state to configure") }
+        try check(sz_cpu_configure_thread(capabilities.native))
     }
 }
