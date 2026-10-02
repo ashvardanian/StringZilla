@@ -236,7 +236,7 @@ jobs:
         run: |
           set -euo pipefail
           ls -la wheelhouse/
-          ls wheelhouse/*.whl | grep -qE 'pyemscripten_[0-9]+_[0-9]+_wasm32' \
+          compgen -G 'wheelhouse/*-pyemscripten_*_wasm32.whl' > /dev/null \
             || { echo "::error::Not tagged pyemscripten_*_wasm32, PyPI will reject it."; exit 1; }
       - name: Upload wheels
         uses: actions/upload-artifact@v7
