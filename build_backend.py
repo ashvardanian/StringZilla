@@ -194,7 +194,15 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
     # concurrently. Doctests sit out, asserting against a process-wide stdout capture that threads interleave.
     gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
     parallel = [] if gil_enabled else ["--parallel-threads=4", "--ignore=" + str(proj / "test" / "doctests.py")]
-    subprocess.check_call([sys.executable, "-m", "pytest", "-s", "-x", *parallel, *tests])  # noqa: S603
+    arguments = ["-s", "-x", *parallel, *tests]
+    # Emscripten implements no `fork`, so `subprocess` raises there. Running pytest in-process
+    # keeps the file selection above as the single source of truth, rather than restating it in
+    # a `cibuildwheel` test-command override that would drift from this one.
+    if sys.platform == "emscripten":
+        import pytest
+
+        raise SystemExit(pytest.main(arguments))
+    subprocess.check_call([sys.executable, "-m", "pytest", *arguments])  # noqa: S603
 
 
 def cli_check_wheels(wheel_dir: str, required: List[str]) -> None:

@@ -199,6 +199,52 @@ jobs:
           path: ./wheelhouse/*.whl
           overwrite: true
 
+  # WebAssembly under Pyodide - the only wheel that runs in a browser.
+  build_wheels_stringzilla_pyodide:
+    name: Build StringZilla Wheels for Pyodide, cp${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    needs: versioning
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each Pyodide release pins one CPython, so this tracks the identifiers `cibuildwheel`
+        # offers rather than the 3.10-3.14 range every other job spans. `cp312` is end-of-life
+        # in 4.x and `cp315` rides a Pyodide alpha, so both sit out.
+        python-version: ["313", "314"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: "main"
+          submodules: recursive
+      # Only runs `cibuildwheel` itself, which downloads a standalone interpreter per target,
+      # so this version need not match the one being built for.
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install cibuildwheel
+        run: python -m pip install 'cibuildwheel~=4.2'
+      - name: Build wheels
+        run: cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: cp${{ matrix.python-version }}-pyodide_wasm32
+          CIBW_PLATFORM: pyodide
+      # PyPI accepts only the PEP 783 spelling, and rejects a wheel file by file part-way
+      # through the upload, so catching the older tag here keeps a release from half-publishing.
+      - name: Require the PEP 783 platform tag
+        run: |
+          set -euo pipefail
+          ls -la wheelhouse/
+          ls wheelhouse/*.whl | grep -qE 'pyemscripten_[0-9]+_[0-9]+_wasm32' \
+            || { echo "::error::Not tagged pyemscripten_*_wasm32, PyPI will reject it."; exit 1; }
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: cibw-wheels-stringzilla-pyodide-cp${{ matrix.python-version }}
+          path: ./wheelhouse/*.whl
+          overwrite: true
+
   build_wheels_stringzilla_macos:
     name: Build StringZilla ${{ matrix.python-version }} for macOS
     runs-on: macos-26
@@ -671,6 +717,7 @@ jobs:
         build_wheels_stringzilla_linux_x86,
         build_wheels_stringzilla_linux_arm,
         build_wheels_stringzilla_linux_emulated,
+        build_wheels_stringzilla_pyodide,
         build_wheels_stringzilla_macos,
         build_wheels_stringzilla_windows_x86,
         build_wheels_stringzilla_windows_arm,

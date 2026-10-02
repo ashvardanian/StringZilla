@@ -97,6 +97,13 @@ musllinux-i686-image = "musllinux_1_2"
 musllinux-ppc64le-image = "musllinux_1_2"
 musllinux-s390x-image = "musllinux_1_2"
 musllinux-x86_64-image = "musllinux_1_2"
+# The riscv64 images `cibuildwheel` pins carry `patchelf` 0.17, which corrupts an extension
+# while rewriting its RPATH - the entry point lands below `.text` and the import dies with
+# SIGILL. `auditwheel repair` above does rewrite RPATHs, so this repository is exposed.
+# Dated tags hold the glibc 2.39 floor and the wheel tags, and only move `patchelf` to 0.19;
+# the named `manylinux_2_39` resolves back to the broken pin.
+manylinux-riscv64-image = "quay.io/pypa/manylinux_2_39_riscv64:2026.09.01-1"
+musllinux-riscv64-image = "quay.io/pypa/musllinux_1_2_riscv64:2026.09.01-1"
 
 # Different manylinux images use different package managers.
 # Try yum (CentOS/RHEL), dnf (Fedora), or apt-get (Debian/Ubuntu).
@@ -125,6 +132,39 @@ before-build = ["rd /s /q {project}\\build || echo Done"]
 # is on `PATH` in that job - so the new default would vendor `cudart64_12.dll` into the
 # wheel and shadow the user's own runtime. Empty keeps every Windows wheel byte-identical.
 repair-wheel-command = ""
+
+# RISC-V wheels have always shipped scalar code. `setup.py` forces `SZ_USE_*` for the x86 and
+# Arm tiers but names no others, so RVV falls to the `types.h` auto-detect, which needs
+# `__riscv_vector` from the baseline `-march` - and these images build at `rv64gc`. Turning the
+# tier on in `setup.py` keeps that baseline, because every kernel carries its own
+# `target("arch=+v")`; GCC ignores that pragma on RISC-V, so the toolchain moves to Clang,
+# which honours it and leaves the dispatch to `sz_capabilities` at runtime.
+[[tool.cibuildwheel.overrides]]
+before-all = "dnf install -y glibc-devel wget python3-devel clang lld"
+environment.CC = "clang"
+environment.CXX = "clang++"
+environment.LDFLAGS = "-fuse-ld=lld"
+inherit.environment = "append"
+select = "*-manylinux*_riscv64"
+
+# The musl leg keeps GCC, which ignores the pragma, so forcing the tier on there would fail
+# to compile rather than silently skip. Alpine's Clang cannot see the intrinsics behind the
+# pragma either, so this wheel stays scalar - shipping it is still better than dropping it.
+[[tool.cibuildwheel.overrides]]
+environment.SZ_USE_RVV = "0"
+inherit.environment = "append"
+select = "*-musllinux*_riscv64"
+
+# Pyodide cross-compiles from a Linux host, so `setup.py` takes its Linux branch and would
+# read the host's `platform.machine()` - forcing the x86 tiers on and pulling `immintrin.h`
+# into a wasm32 build. Pinning both arch flags off zeroes every x86 and Arm tier through
+# `is_64bit_x86()`/`is_64bit_arm()`, leaving `SZ_USE_V128` to the `__wasm_simd128__`
+# auto-detect, which follows whatever `-msimd128` Pyodide's own toolchain passes.
+[[tool.cibuildwheel.overrides]]
+environment.SZ_IS_64BIT_ARM_ = "0"
+environment.SZ_IS_64BIT_X86_ = "0"
+inherit.environment = "append"
+select = "*-pyodide*"
 
 # Detect x86 64-bit builds
 [[tool.cibuildwheel.overrides]]
