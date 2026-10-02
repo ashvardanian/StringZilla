@@ -28,7 +28,7 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - name: Run TinySemVer
-        uses: ashvardanian/tinysemver@v3.0.1
+        uses: ashvardanian/tinysemver@v3
         with:
           verbose: "true"
           version-file: "VERSION"
@@ -74,6 +74,10 @@ jobs:
         with:
           fetch-depth: 0
           submodules: recursive
+          # Checkout persists its credential as an `extraheader`, which the push below inherits and
+          # which outranks the token handed to `push-protected`. Left unset, the force-push arrives as
+          # `github-actions[bot]`, which holds no repository role to bypass the `main*` ruleset with.
+          token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
 
       - name: Perform rebase
         run: |
@@ -109,7 +113,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -143,7 +147,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -179,13 +183,14 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-          CIBW_ENVIRONMENT_LINUX: SZ_IS_QEMU_=1 SZ_TESTS_MULTIPLIER=0.05 SZ_TARGET=stringzilla
+          SZ_IS_QEMU_: 1
+          SZ_TESTS_MULTIPLIER: "0.05"
           SZ_TARGET: stringzilla
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -196,7 +201,7 @@ jobs:
 
   build_wheels_stringzilla_macos:
     name: Build StringZilla ${{ matrix.python-version }} for macOS
-    runs-on: macos-15
+    runs-on: macos-26
     needs: versioning
     strategy:
       fail-fast: false
@@ -214,7 +219,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -231,7 +236,7 @@ jobs:
   # Native AMD64 + 32-bit x86 on an Intel runner.
   build_wheels_stringzilla_windows_x86:
     name: Build StringZilla ${{ matrix.python-version }} for Windows x86
-    runs-on: windows-2022
+    runs-on: windows-2025
     needs: versioning
     strategy:
       fail-fast: false
@@ -248,7 +253,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -282,7 +287,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -316,13 +321,12 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           CIBW_ARCHS_LINUX: x86_64
-          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
           SZ_TARGET: stringzillas-cpus
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -351,13 +355,12 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           CIBW_ARCHS_LINUX: aarch64
-          CIBW_ENVIRONMENT_LINUX: SZ_TARGET=stringzillas-cpus
           SZ_TARGET: stringzillas-cpus
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -368,7 +371,7 @@ jobs:
 
   build_wheels_stringzillas_cpus_macos:
     name: Build StringZillas-CPUs ${{ matrix.python-version }} for macOS
-    runs-on: macos-15
+    runs-on: macos-26
     needs: versioning
     strategy:
       fail-fast: false
@@ -386,7 +389,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -404,7 +407,7 @@ jobs:
   # Native AMD64 on an Intel runner.
   build_wheels_stringzillas_cpus_windows_x86:
     name: Build StringZillas-CPUs ${{ matrix.python-version }} for Windows x86
-    runs-on: windows-2022
+    runs-on: windows-2025
     needs: versioning
     strategy:
       fail-fast: false
@@ -421,7 +424,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -455,7 +458,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -492,7 +495,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -502,8 +505,13 @@ jobs:
           CIBW_ARCHS_LINUX: auto64
           # `stubs` lets the driver-less test phase resolve `libcuda.so.1` and fail `cuInit` cleanly.
           # Arm needs Clang as nvcc's host: only Clang's `arm_neon.h` parses in nvcc's frontend.
+          # These paths exist only inside the container, so they cannot ride `environment-pass`
+          # like the other jobs' variables. Setting this replaces the whole `environment` option,
+          # `[[overrides]]` included, so the arch flags those would contribute are restated here.
           CIBW_ENVIRONMENT_LINUX: >-
             SZ_TARGET=stringzillas-cuda
+            SZ_IS_64BIT_X86_=${{ matrix.os == 'ubuntu-24.04-arm' && '0' || '1' }}
+            SZ_IS_64BIT_ARM_=${{ matrix.os == 'ubuntu-24.04-arm' && '1' || '0' }}
             CUDA_HOME=/usr/local/cuda-12.9
             PATH=/usr/local/cuda-12.9/bin:$PATH
             LD_LIBRARY_PATH=/usr/local/cuda-12.9/lib64:$LD_LIBRARY_PATH:/usr/local/cuda-12.9/lib64/stubs
@@ -521,7 +529,7 @@ jobs:
             ln -sf libcuda.so /usr/local/cuda-12.9/lib64/stubs/libcuda.so.1
             /usr/local/cuda-12.9/bin/nvcc --version
           # Never vendor `libcuda` - a bundled build-host stub would shadow the user's real driver.
-          CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 -w {dest_dir} {wheel}
+          CIBW_REPAIR_WHEEL_COMMAND_LINUX: auditwheel repair --exclude libcuda.so.1 --lib-sdir . -w {dest_dir} {wheel}
           SZ_TARGET: stringzillas-cuda
       - name: Upload wheels
         uses: actions/upload-artifact@v7
@@ -533,7 +541,7 @@ jobs:
   # AMD64 only - NVIDIA ships no CUDA Toolkit for Windows-on-Arm.
   build_wheels_stringzillas_cuda_windows:
     name: Build StringZillas-CUDA ${{ matrix.python-version }} for Windows
-    runs-on: windows-2022
+    runs-on: windows-2025
     needs: versioning
     strategy:
       fail-fast: false
@@ -561,7 +569,7 @@ jobs:
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install 'cibuildwheel~=4.2'
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
