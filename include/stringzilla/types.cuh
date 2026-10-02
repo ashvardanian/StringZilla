@@ -13,7 +13,7 @@
  *
  *  Written in C, as every `.cuh` in this library is: the only constructs here a C compiler would
  *  not take are the `extern "C"` that lets a C dispatch unit link against it, and the kernels'
- *  launches, which go through @ref sz_cuda_launch_ rather than the triple-chevron syntax the
+ *  launches, which go through @ref sz_device_launch_ rather than the triple-chevron syntax the
  *  language reserves for C++. HIP compiles the same source: the vendor calls differ in the bodies
  *  below, a kernel's cross-lane steps go through the @b Lanes helpers, and the few PTX sites a
  *  family keeps carry their own HIP arms.
@@ -114,14 +114,14 @@ STRINGZILLA_API sz_status_t sz_rocm_sequence_from_string_views(sz_string_view_t 
  *  @brief Makes device @p ordinal current for one call, keeping the caller's device in @p caller.
  *
  *  The runtime keeps each device's primary context from its first use, so switching is two runtime
- *  calls and the thread's device is restored by @ref sz_cuda_device_leave_ rather than left behind.
+ *  calls and the thread's device is restored by @ref sz_device_leave_ rather than left behind.
  *
  *  @param[in] stream The stream the call enqueues on, which has to belong to that device, or
  *      @c STRINGZILLA_NULL for its default stream.
  *  @return @c sz_success_k, @c sz_missing_gpu_k when the runtime has no such device, or
  *      @c sz_device_memory_mismatch_k for a stream of another device, leaving the caller's current.
  */
-STRINGZILLA_INLINE sz_status_t sz_cuda_device_enter_(sz_size_t ordinal, void *stream, int *caller) {
+STRINGZILLA_INLINE sz_status_t sz_device_enter_(sz_size_t ordinal, void *stream, int *caller) {
     int stream_device = 0;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipGetDevice(caller) != hipSuccess || hipSetDevice((int)ordinal) != hipSuccess) return sz_missing_gpu_k;
@@ -139,8 +139,8 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_device_enter_(sz_size_t ordinal, void *st
     return sz_device_memory_mismatch_k;
 }
 
-/** Makes @p caller current again, closing the scope @ref sz_cuda_device_enter_ opened. */
-STRINGZILLA_INLINE void sz_cuda_device_leave_(int caller) {
+/** Makes @p caller current again, closing the scope @ref sz_device_enter_ opened. */
+STRINGZILLA_INLINE void sz_device_leave_(int caller) {
 #if STRINGZILLA_ARCH_ROCM_
     sz_unused_(hipSetDevice(caller));
 #else
@@ -173,39 +173,39 @@ STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_device_(void const *pointer) {
 STRINGZILLA_INLINE void *sz_memory_allocate_unified_(sz_size_t bytes, void *handle) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
-    if (sz_cuda_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
+    if (sz_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipMallocManaged(&pointer, bytes, hipMemAttachGlobal) != hipSuccess) pointer = STRINGZILLA_NULL;
 #else
     if (cudaMallocManaged(&pointer, bytes, cudaMemAttachGlobal) != cudaSuccess) pointer = STRINGZILLA_NULL;
 #endif
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return pointer;
 }
 
 STRINGZILLA_INLINE void *sz_memory_allocate_device_(sz_size_t bytes, void *handle) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
-    if (sz_cuda_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
+    if (sz_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipMalloc(&pointer, bytes) != hipSuccess) pointer = STRINGZILLA_NULL;
 #else
     if (cudaMalloc(&pointer, bytes) != cudaSuccess) pointer = STRINGZILLA_NULL;
 #endif
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return pointer;
 }
 
 STRINGZILLA_INLINE void *sz_memory_allocate_pinned_(sz_size_t bytes, void *handle) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
-    if (sz_cuda_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
+    if (sz_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return STRINGZILLA_NULL;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipHostMalloc(&pointer, bytes, hipHostMallocDefault) != hipSuccess) pointer = STRINGZILLA_NULL;
 #else
     if (cudaHostAlloc(&pointer, bytes, cudaHostAllocDefault) != cudaSuccess) pointer = STRINGZILLA_NULL;
 #endif
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return pointer;
 }
 
@@ -213,25 +213,25 @@ STRINGZILLA_INLINE void *sz_memory_allocate_pinned_(sz_size_t bytes, void *handl
 STRINGZILLA_INLINE void sz_memory_free_device_(void *pointer, sz_size_t bytes, void *handle) {
     int caller = 0;
     sz_unused_(bytes);
-    if (!pointer || sz_cuda_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return;
+    if (!pointer || sz_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return;
 #if STRINGZILLA_ARCH_ROCM_
     sz_unused_(hipFree(pointer));
 #else
     sz_unused_(cudaFree(pointer));
 #endif
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
 }
 
 STRINGZILLA_INLINE void sz_memory_free_pinned_(void *pointer, sz_size_t bytes, void *handle) {
     int caller = 0;
     sz_unused_(bytes);
-    if (!pointer || sz_cuda_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return;
+    if (!pointer || sz_device_enter_((sz_size_t)handle, STRINGZILLA_NULL, &caller) != sz_success_k) return;
 #if STRINGZILLA_ARCH_ROCM_
     sz_unused_(hipHostFree(pointer));
 #else
     sz_unused_(cudaFreeHost(pointer));
 #endif
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
 }
 
 /**
@@ -287,7 +287,7 @@ STRINGZILLA_INLINE void sz_memory_allocator_init_pinned_(sz_memory_allocator_t *
 #pragma region Launches
 
 /** One attribute of the current device, as its vendor numbers them, or zero when unanswered. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_attribute_(int attribute) {
+STRINGZILLA_INLINE sz_size_t sz_device_attribute_(int attribute) {
     int device = 0, value = 0;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipGetDevice(&device) != hipSuccess) return 0;
@@ -300,35 +300,35 @@ STRINGZILLA_INLINE sz_size_t sz_cuda_attribute_(int attribute) {
 }
 
 /** Multiprocessors of the current device, or zero when the runtime will not say. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_multiprocessors_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_multiprocessors_(void) {
 #if STRINGZILLA_ARCH_ROCM_
-    return sz_cuda_attribute_(hipDeviceAttributeMultiprocessorCount);
+    return sz_device_attribute_(hipDeviceAttributeMultiprocessorCount);
 #else
-    return sz_cuda_attribute_(cudaDevAttrMultiProcessorCount);
+    return sz_device_attribute_(cudaDevAttrMultiProcessorCount);
 #endif
 }
 
 /** Threads one multiprocessor of the current device keeps resident, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_threads_per_multiprocessor_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_threads_per_multiprocessor_(void) {
 #if STRINGZILLA_ARCH_ROCM_
-    return sz_cuda_attribute_(hipDeviceAttributeMaxThreadsPerMultiProcessor);
+    return sz_device_attribute_(hipDeviceAttributeMaxThreadsPerMultiProcessor);
 #else
-    return sz_cuda_attribute_(cudaDevAttrMaxThreadsPerMultiProcessor);
+    return sz_device_attribute_(cudaDevAttrMaxThreadsPerMultiProcessor);
 #endif
 }
 
 /** Shared memory one block of the current device gets without opting in, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_shared_bytes_per_block_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_shared_bytes_per_block_(void) {
 #if STRINGZILLA_ARCH_ROCM_
-    return sz_cuda_attribute_(hipDeviceAttributeMaxSharedMemoryPerBlock);
+    return sz_device_attribute_(hipDeviceAttributeMaxSharedMemoryPerBlock);
 #else
-    return sz_cuda_attribute_(cudaDevAttrMaxSharedMemoryPerBlock);
+    return sz_device_attribute_(cudaDevAttrMaxSharedMemoryPerBlock);
 #endif
 }
 
 /** Blocks of @p threads running @p kernel with @p shared_bytes of dynamic shared memory that one
  *  multiprocessor keeps resident, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_resident_blocks_(void const *kernel, sz_size_t threads, sz_size_t shared_bytes) {
+STRINGZILLA_INLINE sz_size_t sz_device_resident_blocks_(void const *kernel, sz_size_t threads, sz_size_t shared_bytes) {
     int blocks = 0;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, kernel, (int)threads, shared_bytes) != hipSuccess)
@@ -347,8 +347,8 @@ STRINGZILLA_INLINE sz_size_t sz_cuda_resident_blocks_(void const *kernel, sz_siz
  *  device's and the kernel's rather than a constant's. Powers of two from 64 up to @p ceiling are
  *  tried, ties go to the wider block, and @p fallback answers when the runtime will not.
  */
-STRINGZILLA_INLINE sz_size_t sz_cuda_block_size_(void const *kernel, sz_size_t shared_bytes, sz_size_t ceiling,
-                                                 sz_size_t fallback) {
+STRINGZILLA_INLINE sz_size_t sz_device_block_size_(void const *kernel, sz_size_t shared_bytes, sz_size_t ceiling,
+                                                   sz_size_t fallback) {
     sz_size_t block_size = fallback, most_warps = 0, candidate;
 #if STRINGZILLA_ARCH_ROCM_
     hipFuncAttributes attributes;
@@ -359,7 +359,7 @@ STRINGZILLA_INLINE sz_size_t sz_cuda_block_size_(void const *kernel, sz_size_t s
 #endif
     if ((sz_size_t)attributes.maxThreadsPerBlock < ceiling) ceiling = (sz_size_t)attributes.maxThreadsPerBlock;
     for (candidate = 64; candidate <= ceiling; candidate *= 2) {
-        sz_size_t const warps = sz_cuda_resident_blocks_(kernel, candidate, shared_bytes) * (candidate / 32);
+        sz_size_t const warps = sz_device_resident_blocks_(kernel, candidate, shared_bytes) * (candidate / 32);
         if (warps >= most_warps && warps != 0) most_warps = warps, block_size = candidate;
     }
     return block_size;
@@ -367,8 +367,8 @@ STRINGZILLA_INLINE sz_size_t sz_cuda_block_size_(void const *kernel, sz_size_t s
 
 /** Launches @p kernel over @p grid blocks of @p block threads on @p stream, its arguments passed by
  *  address. The vendor's own error stays readable through its @c GetLastError. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_launch_(void const *kernel, dim3 grid, dim3 block, void **arguments,
-                                               sz_size_t shared_bytes, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_device_launch_(void const *kernel, dim3 grid, dim3 block, void **arguments,
+                                                 sz_size_t shared_bytes, void *stream) {
 #if STRINGZILLA_ARCH_ROCM_
     return hipLaunchKernel(kernel, grid, block, arguments, shared_bytes, (hipStream_t)stream) == hipSuccess
                ? sz_success_k
@@ -380,8 +380,72 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_launch_(void const *kernel, dim3 grid, di
 #endif
 }
 
+/** Whether @p kernel was compiled for Blackwell or later, whose blocks take over the tiles of
+ *  blocks not yet started, so its grid may be sized by the work rather than by residency. */
+STRINGZILLA_INLINE sz_bool_t sz_device_kernel_steals_(void const *kernel) {
+#if STRINGZILLA_ARCH_ROCM_
+    sz_unused_(kernel);
+    return sz_false_k;
+#else
+    cudaFuncAttributes attributes;
+    if (cudaFuncGetAttributes(&attributes, kernel) != cudaSuccess) return sz_false_k;
+    return attributes.ptxVersion >= 100 ? sz_true_k : sz_false_k;
+#endif
+}
+
+/**
+ *  @brief Clusters of @p cluster_blocks blocks of @p threads running @p kernel with @p shared_bytes
+ *      of dynamic shared memory the current device keeps resident at once, or zero for none.
+ *
+ *  A kernel built for a device older than Hopper has no cluster to read, so it is answered zero
+ *  whatever the device could do.
+ */
+STRINGZILLA_INLINE sz_size_t sz_device_resident_clusters_(void const *kernel, sz_size_t threads, sz_size_t shared_bytes,
+                                                          sz_size_t cluster_blocks) {
+#if STRINGZILLA_ARCH_ROCM_
+    sz_unused_(kernel), sz_unused_(threads), sz_unused_(shared_bytes), sz_unused_(cluster_blocks);
+    return 0;
+#else
+    cudaFuncAttributes attributes;
+    cudaLaunchConfig_t config;
+    cudaLaunchAttribute attribute;
+    int clusters = 0;
+    if (cudaFuncGetAttributes(&attributes, kernel) != cudaSuccess || attributes.ptxVersion < 90) return 0;
+    config.gridDim = dim3((unsigned)cluster_blocks), config.blockDim = dim3((unsigned)threads);
+    config.dynamicSmemBytes = shared_bytes, config.stream = 0;
+    attribute.id = cudaLaunchAttributeClusterDimension;
+    attribute.val.clusterDim.x = (unsigned)cluster_blocks, attribute.val.clusterDim.y = 1;
+    attribute.val.clusterDim.z = 1;
+    config.attrs = &attribute, config.numAttrs = 1;
+    if (cudaOccupancyMaxActiveClusters(&clusters, kernel, &config) != cudaSuccess) return 0;
+    return clusters > 0 ? (sz_size_t)clusters : 0;
+#endif
+}
+
+/** Launches @p kernel like @ref sz_device_launch_, in clusters of @p cluster_blocks blocks along x
+ *  when above one. */
+STRINGZILLA_INLINE sz_status_t sz_device_launch_clustered_(void const *kernel, dim3 grid, dim3 block, void **arguments,
+                                                           sz_size_t shared_bytes, sz_size_t cluster_blocks,
+                                                           void *stream) {
+#if STRINGZILLA_ARCH_ROCM_
+    sz_unused_(cluster_blocks);
+    return sz_device_launch_(kernel, grid, block, arguments, shared_bytes, stream);
+#else
+    cudaLaunchConfig_t config;
+    cudaLaunchAttribute attribute;
+    if (cluster_blocks <= 1) return sz_device_launch_(kernel, grid, block, arguments, shared_bytes, stream);
+    config.gridDim = grid, config.blockDim = block, config.dynamicSmemBytes = shared_bytes;
+    config.stream = (cudaStream_t)stream;
+    attribute.id = cudaLaunchAttributeClusterDimension;
+    attribute.val.clusterDim.x = (unsigned)cluster_blocks, attribute.val.clusterDim.y = 1;
+    attribute.val.clusterDim.z = 1;
+    config.attrs = &attribute, config.numAttrs = 1;
+    return cudaLaunchKernelExC(&config, kernel, arguments) == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
+#endif
+}
+
 /** Sets @p bytes at device-reachable @p pointer to @p value, in order on @p stream. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_memset_(void *pointer, int value, sz_size_t bytes, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_device_memset_(void *pointer, int value, sz_size_t bytes, void *stream) {
 #if STRINGZILLA_ARCH_ROCM_
     return hipMemsetAsync(pointer, value, bytes, (hipStream_t)stream) == hipSuccess ? sz_success_k
                                                                                     : sz_device_code_mismatch_k;
@@ -392,7 +456,7 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_memset_(void *pointer, int value, sz_size
 }
 
 /** Waits for everything enqueued on @p stream; only an engine's init may. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_synchronize_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_device_synchronize_(void *stream) {
 #if STRINGZILLA_ARCH_ROCM_
     return hipStreamSynchronize((hipStream_t)stream) == hipSuccess ? sz_success_k : sz_device_code_mismatch_k;
 #else
@@ -403,7 +467,7 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_synchronize_(void *stream) {
 /** Migrates managed @p pointer to the current device on @p stream, so a kernel reading what the
  *  host just filled takes one bulk move rather than a fault per page. Memory the driver does not
  *  manage reports as much, which is not an error. */
-STRINGZILLA_INLINE void sz_cuda_prefetch_(void const *pointer, sz_size_t bytes, void *stream) {
+STRINGZILLA_INLINE void sz_device_prefetch_(void const *pointer, sz_size_t bytes, void *stream) {
     int device = 0;
 #if STRINGZILLA_ARCH_ROCM_
     if (hipGetDevice(&device) != hipSuccess) return;
@@ -425,7 +489,7 @@ STRINGZILLA_INLINE void sz_cuda_prefetch_(void const *pointer, sz_size_t bytes, 
 #pragma region Lanes
 
 /** @p value from the lane @p delta below this one, or this lane's own below lane @p delta. */
-STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_(sz_u32_t value, unsigned delta) {
+STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_simt_(sz_u32_t value, unsigned delta) {
 #if STRINGZILLA_ARCH_ROCM_
     return __shfl_up(value, delta, 32);
 #else
@@ -434,7 +498,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_(sz_u32_t value, unsigned delta) {
 }
 
 /** @p value from the lane @p delta above this one, or this lane's own past the last lane. */
-STRINGZILLA_DEVICE int sz_shuffle_down_(int value, unsigned delta) {
+STRINGZILLA_DEVICE int sz_shuffle_down_simt_(int value, unsigned delta) {
 #if STRINGZILLA_ARCH_ROCM_
     return __shfl_down(value, delta, 32);
 #else
@@ -442,8 +506,17 @@ STRINGZILLA_DEVICE int sz_shuffle_down_(int value, unsigned delta) {
 #endif
 }
 
+/** Lane zero's @p value, on every one of this thread's 32 lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_simt_(sz_u32_t value) {
+#if STRINGZILLA_ARCH_ROCM_
+    return __shfl(value, 0, 32);
+#else
+    return __shfl_sync(0xFFFFFFFFu, value, 0);
+#endif
+}
+
 /** Whether @p predicate holds on any of this thread's 32 lanes. */
-STRINGZILLA_DEVICE int sz_lanes_any_(int predicate) {
+STRINGZILLA_DEVICE int sz_lanes_any_simt_(int predicate) {
 #if STRINGZILLA_ARCH_ROCM_
     return ((__ballot(predicate) >> (__lane_id() & 32u)) & 0xFFFFFFFFull) != 0;
 #else
@@ -452,6 +525,229 @@ STRINGZILLA_DEVICE int sz_lanes_any_(int predicate) {
 }
 
 #pragma endregion Lanes
+
+/*  Hopper and later group a grid's blocks into clusters whose shared memory each of them addresses,
+ *  so a few blocks can share one block's tables. Elsewhere, and in a grid launched without
+ *  clusters, every block is a cluster of one. */
+#pragma region Clusters
+
+/** The block's rank inside its cluster. */
+STRINGZILLA_DEVICE sz_u32_t sz_cluster_rank_simt_(void) {
+    sz_u32_t rank = 0;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    asm("mov.u32 %0, %%cluster_ctarank;" : "=r"(rank));
+#endif
+    return rank;
+}
+
+/** Blocks in the block's cluster. */
+STRINGZILLA_DEVICE sz_u32_t sz_cluster_size_simt_(void) {
+    sz_u32_t size = 1;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    asm("mov.u32 %0, %%cluster_nctarank;" : "=r"(size));
+#endif
+    return size;
+}
+
+/** Where @p pointer, into this block's shared memory, lands in the cluster's block at @p rank. */
+STRINGZILLA_DEVICE void *sz_cluster_map_simt_(void *pointer, sz_u32_t rank) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    void *mapped;
+    asm("mapa.u64 %0, %1, %2;" : "=l"(mapped) : "l"(pointer), "r"(rank));
+    return mapped;
+#else
+    sz_unused_(rank);
+    return pointer;
+#endif
+}
+
+/** A barrier across every thread of the cluster, ordering each block's shared writes before it. */
+STRINGZILLA_DEVICE void sz_cluster_sync_simt_(void) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 900
+    asm volatile("barrier.cluster.arrive.release.aligned;\nbarrier.cluster.wait.acquire.aligned;" ::: "memory");
+#else
+    __syncthreads();
+#endif
+}
+
+#pragma endregion Clusters
+
+/*  A grid can be sized by its work rather than by what stays resident: on Blackwell a block done
+ *  with its own tile cancels a block not yet started and takes that block's tile, so the hardware's
+ *  queue of unlaunched blocks is the queue of tiles, and a round keeps no state of its own on the
+ *  device. Every other target runs each block on its own tile. */
+#pragma region Tile Queues
+
+/** One block's queue of a grid's tiles, in shared memory. */
+typedef struct sz_tile_queue_t {
+
+    /** The device's answer to the block's latest request for another tile. */
+    unsigned long long answer[2] __attribute__((aligned(16)));
+
+    /** The barrier that answer's arrival completes. */
+    unsigned long long arrived;
+
+    /** The tile being drawn from - its x in the top half, its y in the next quarter - and the items
+     *  drawn from it in the last quarter, so one atomic reads all three. */
+    unsigned long long drawn;
+
+    /** Answers consumed, whose parity is the phase the next one completes. */
+    sz_u32_t answers;
+} sz_tile_queue_t;
+
+/** The x a drained queue holds, past every tile. */
+#define STRINGZILLA_CUDA_QUEUE_DRAINED (0xFFFFFFFFull << 32)
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+
+/** Asks the device for a block of this grid not yet started, the answer completing the barrier. */
+STRINGZILLA_DEVICE void sz_tile_queue_ask_simt_(sz_tile_queue_t *queue) {
+    sz_u32_t const arrived = (sz_u32_t)__cvta_generic_to_shared(&queue->arrived);
+    sz_u32_t const answer = (sz_u32_t)__cvta_generic_to_shared(queue->answer);
+    asm volatile("mbarrier.arrive.expect_tx.shared::cta.b64 _, [%0], 16;" ::"r"(arrived) : "memory");
+    asm volatile("clusterlaunchcontrol.try_cancel.async.shared::cta.mbarrier::complete_tx::bytes.b128" //
+                 " [%0], [%1];" ::"r"(answer),
+                 "r"(arrived)
+                 : "memory");
+}
+
+/** Waits for the answer to the latest request, writing the cancelled block's coordinates, and
+ *  whether there was one. A request answered with none must be the block's last. */
+STRINGZILLA_DEVICE int sz_tile_queue_take_simt_(sz_tile_queue_t *queue, sz_u32_t *x, sz_u32_t *y) {
+    sz_u32_t const arrived = (sz_u32_t)__cvta_generic_to_shared(&queue->arrived);
+    sz_u32_t const answer = (sz_u32_t)__cvta_generic_to_shared(queue->answer);
+    // Counted atomically, as consecutive handovers take answers from different threads.
+    sz_u32_t const parity = atomicAdd(&queue->answers, 1u) & 1u;
+    sz_u32_t done = 0, taken = 0, first_x = 0, first_y = 0, first_z = 0, unused = 0;
+    while (!done)
+        asm volatile("{\n .reg .pred p;\n mbarrier.try_wait.parity.shared::cta.b64 p, [%1], %2;\n" //
+                     " selp.u32 %0, 1, 0, p;\n}"
+                     : "=r"(done)
+                     : "r"(arrived), "r"(parity)
+                     : "memory");
+    asm volatile("{\n .reg .b128 r;\n .reg .pred p;\n ld.shared.b128 r, [%5];\n"                            //
+                 " clusterlaunchcontrol.query_cancel.is_canceled.pred.b128 p, r;\n selp.u32 %0, 1, 0, p;\n" //
+                 " @p clusterlaunchcontrol.query_cancel.get_first_ctaid.v4.b32.b128 {%1, %2, %3, %4}, r;\n}"
+                 : "=r"(taken), "+r"(first_x), "+r"(first_y), "+r"(first_z), "+r"(unused)
+                 : "r"(answer)
+                 : "memory");
+    *x = first_x, *y = first_y;
+    return (int)taken;
+}
+
+#endif
+
+/**
+ *  @brief Points @p queue at the block's own tile and, where blocks steal, asks for the next one;
+ *      every thread calls it, and it ends in a barrier.
+ *
+ *  @param[in] seats Items of the tile handed out without a draw, one to each of the block's first
+ *      seats by @ref sz_tile_queue_first_simt_, so its opening draws never contend at once.
+ */
+STRINGZILLA_DEVICE void sz_tile_queue_open_simt_(sz_tile_queue_t *queue, sz_size_t tile_size, sz_size_t count,
+                                                 sz_size_t seats) {
+    if (threadIdx.x == 0) {
+        sz_size_t const items = sz_min_of_two(tile_size, count - (sz_size_t)blockIdx.x * tile_size);
+        queue->drawn = ((unsigned long long)blockIdx.x << 32) | ((unsigned long long)blockIdx.y << 16) |
+                       (unsigned long long)sz_min_of_two(seats, items);
+        queue->answers = 0;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+        sz_u32_t const arrived = (sz_u32_t)__cvta_generic_to_shared(&queue->arrived);
+        asm volatile("mbarrier.init.shared::cta.b64 [%0], 1;" ::"r"(arrived) : "memory");
+        asm volatile("fence.mbarrier_init.release.cluster;" ::: "memory");
+        sz_tile_queue_ask_simt_(queue);
+#endif
+    }
+    __syncthreads();
+}
+
+/**
+ *  @brief Draws one item of the tiles @p queue hands out, @p tile_size of @p count to a tile, from
+ *      any thread at any time.
+ *
+ *  @param[out] y The row of the grid the item's tile sits on.
+ *  @param[out] item The item's index among all @p count.
+ *  @return Zero once the grid has nothing left for this block.
+ *
+ *  The thread that draws one past a tile's last item hands the queue over to the tile its block's
+ *  latest request took, and asks for the next; any thread drawing past it meanwhile waits for the
+ *  handover, which independent thread scheduling lets it do beside the thread making it.
+ */
+STRINGZILLA_DEVICE int sz_tile_queue_draw_simt_(sz_tile_queue_t *queue, sz_size_t tile_size, sz_size_t count,
+                                                sz_u32_t *y, sz_size_t *item) {
+    for (;;) {
+        unsigned long long const drawn = atomicAdd(&queue->drawn, 1ull);
+        if (drawn >= STRINGZILLA_CUDA_QUEUE_DRAINED) return 0;
+        sz_size_t const first = (sz_size_t)(drawn >> 32) * tile_size;
+        sz_size_t const items = sz_min_of_two(tile_size, count - first);
+        sz_size_t const offset = (sz_size_t)(drawn & 0xFFFFu);
+        if (offset < items) {
+            *y = (sz_u32_t)(drawn >> 16) & 0xFFFFu, *item = first + offset;
+            return 1;
+        }
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+        // The last handover moved the answer count before the tile this thread saw: fence first.
+        __threadfence_block();
+        if (offset == items) {
+            sz_u32_t next_x, next_y;
+            if (!sz_tile_queue_take_simt_(queue, &next_x, &next_y)) {
+                atomicExch(&queue->drawn, STRINGZILLA_CUDA_QUEUE_DRAINED);
+                return 0;
+            }
+            sz_tile_queue_ask_simt_(queue);
+            __threadfence_block();
+            atomicExch(&queue->drawn, ((unsigned long long)next_x << 32) | ((unsigned long long)next_y << 16) | 1ull);
+            *y = next_y, *item = (sz_size_t)next_x * tile_size;
+            return 1;
+        }
+        while (((*(unsigned long long volatile *)&queue->drawn ^ drawn) >> 16) == 0) __nanosleep(64);
+#else
+        return 0;
+#endif
+    }
+}
+
+/** The first item of @p seat, which is handed out directly while the block's own tile holds it and
+ *  drawn like any other past that. */
+STRINGZILLA_DEVICE int sz_tile_queue_first_simt_(sz_tile_queue_t *queue, sz_size_t tile_size, sz_size_t count,
+                                                 sz_size_t seat, sz_u32_t *y, sz_size_t *item) {
+    sz_size_t const first = (sz_size_t)blockIdx.x * tile_size;
+    if (seat < sz_min_of_two(tile_size, count - first)) {
+        *y = blockIdx.y, *item = first + seat;
+        return 1;
+    }
+    return sz_tile_queue_draw_simt_(queue, tile_size, count, y, item);
+}
+
+/**
+ *  @brief The block's next tile, once every thread is done with its last; every thread calls it.
+ *  @return Zero once the grid has nothing left for this block.
+ *
+ *  Thread zero takes the answer and asks again before the barrier, so the request is in flight
+ *  while the block works through the tile it returns. The caller holds another barrier between two
+ *  calls, as each overwrites what the last one shared.
+ */
+STRINGZILLA_DEVICE int sz_tile_queue_next_simt_(sz_tile_queue_t *queue, sz_u32_t *x, sz_u32_t *y) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+    if (threadIdx.x == 0) {
+        sz_u32_t next_x = 0, next_y = 0;
+        int const taken = sz_tile_queue_take_simt_(queue, &next_x, &next_y);
+        if (taken) sz_tile_queue_ask_simt_(queue);
+        queue->drawn = taken ? ((unsigned long long)next_x << 32) | ((unsigned long long)next_y << 16)
+                             : STRINGZILLA_CUDA_QUEUE_DRAINED;
+    }
+    __syncthreads();
+    unsigned long long const drawn = queue->drawn;
+    if (drawn >= STRINGZILLA_CUDA_QUEUE_DRAINED) return 0;
+    *x = (sz_u32_t)(drawn >> 32), *y = (sz_u32_t)(drawn >> 16) & 0xFFFFu;
+    return 1;
+#else
+    sz_unused_(queue), sz_unused_(x), sz_unused_(y);
+    return 0;
+#endif
+}
+
+#pragma endregion Tile Queues
 
 #pragma region Device Sequences
 
@@ -497,8 +793,8 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_from_string_views_cuda_(sz_string_vie
     if (cudaMemcpyFromSymbol(&get_start, (void const *)&sz_sequence_cuda_view_start_symbol_, sizeof(get_start), 0,
                              cudaMemcpyDeviceToHost) != cudaSuccess)
         return sz_device_code_mismatch_k;
-    if (cudaMemcpyFromSymbol(&get_length, (void const *)&sz_sequence_cuda_view_length_symbol_,
-                             sizeof(get_length), 0, cudaMemcpyDeviceToHost) != cudaSuccess)
+    if (cudaMemcpyFromSymbol(&get_length, (void const *)&sz_sequence_cuda_view_length_symbol_, sizeof(get_length), 0,
+                             cudaMemcpyDeviceToHost) != cudaSuccess)
         return sz_device_code_mismatch_k;
 #endif
     sequence->get_start = get_start;

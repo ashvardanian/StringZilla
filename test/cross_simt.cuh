@@ -21,11 +21,12 @@
 #ifndef STRINGZILLA_TEST_CROSS_SIMT_CUH
 #define STRINGZILLA_TEST_CROSS_SIMT_CUH
 
-#include <cmath>   // `std::fabs`
+#include <cmath>   // `std::fabs`, `std::exp`, `std::log`
 #include <cstddef> // `std::size_t`
 
-#include <algorithm> // `std::sort`
+#include <algorithm> // `std::sort`, `std::copy`, `std::min`
 #include <array>     // `std::array`
+#include <random>    // `std::mt19937`, `std::uniform_real_distribution`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
 
@@ -56,6 +57,32 @@ struct simt_backend_t {
 template <auto best_>
 inline constexpr auto gpu_best =
     [](auto... arguments) noexcept { return call_best<best_>(gpu_capabilities(), arguments...); };
+
+/** How the candidate lengths of a skewed batch differ by orders of magnitude. */
+enum class simt_skew_t {
+
+    /** One candidate of three mebibytes, wherever the draw puts it, among a hundred thousand of at
+     *  most thirty-two bytes. */
+    lone_long_k,
+
+    /** A hundred and twenty-eight drawn log-uniform up to a mebibyte. */
+    log_uniform_k,
+};
+
+/** Candidate lengths of one @p skew. A round that hands one thread one candidate costs its longest,
+ *  so these are the batches a balanced round exists for. */
+static std::vector<std::size_t> simt_skewed_lengths_(std::mt19937 &generator, simt_skew_t skew) {
+    if (skew == simt_skew_t::lone_long_k) {
+        std::vector<std::size_t> lengths(100000);
+        for (std::size_t &length : lengths) length = generator() % 33;
+        lengths[generator() % lengths.size()] = (std::size_t)3 << 20;
+        return lengths;
+    }
+    std::vector<std::size_t> lengths(128);
+    std::uniform_real_distribution<double> exponent(0.0, std::log((double)((std::size_t)1 << 20)));
+    for (std::size_t &length : lengths) length = (std::size_t)std::exp(exponent(generator));
+    return lengths;
+}
 
 #pragma region Levenshtein Helpers
 
@@ -118,23 +145,7 @@ struct levenshtein_simt_corpus_t {
                               levenshtein_simt_alphabet_t alphabet)
         : query_views(query_count), views(count), distances(query_count * count) {
         std::vector<std::string> const symbols = levenshtein_simt_symbols_(alphabet);
-        std::vector<std::string> drawn(query_symbols);
-        for (std::size_t symbol = 0; symbol != query_symbols; ++symbol)
-            drawn[symbol] = symbols[(symbol * 37 + 11) % symbols.size()];
-
-        // Every query is the same length, so one batch still spans one rung, and every one
-        // of them differs.
-        for (std::size_t query = 0; query != query_count; ++query) {
-            std::vector<std::string> edited = drawn;
-            for (std::size_t symbol = query; symbol < edited.size(); symbol += query_count + 1)
-                edited[symbol] = symbols[(symbol + query * 5 + 3) % symbols.size()];
-            std::size_t length = 0;
-            for (std::string const &symbol : edited) length += symbol.size();
-            query_views[query].length = length;
-            for (std::string const &symbol : edited)
-                query_arena.insert(query_arena.end(), symbol.begin(), symbol.end());
-        }
-
+        std::vector<std::string> const drawn = fill_queries_(symbols, query_symbols);
         arena.reserve(count * query_symbols * 4);
         std::vector<std::string> edited;
         for (std::size_t index = 0; index != count; ++index) {
@@ -149,9 +160,53 @@ struct levenshtein_simt_corpus_t {
             views[index].length = length;
             for (std::string const &symbol : edited) arena.insert(arena.end(), symbol.begin(), symbol.end());
         }
+        bind_();
+    }
 
-        // An arena's address is only final once it has stopped growing, so the starts
-        // are filled afterwards.
+    /** Candidates of @p candidate_symbols symbols each, one in four of them drawn from the queries'
+     *  own, so a distance moves well below the longer side's length. */
+    levenshtein_simt_corpus_t(std::mt19937 &generator, std::vector<std::size_t> const &candidate_symbols,
+                              std::size_t query_symbols, std::size_t query_count, levenshtein_simt_alphabet_t alphabet)
+        : query_views(query_count), views(candidate_symbols.size()), distances(query_count * candidate_symbols.size()) {
+        std::vector<std::string> const symbols = levenshtein_simt_symbols_(alphabet);
+        std::vector<std::string> const drawn = fill_queries_(symbols, query_symbols);
+        std::size_t total = 0;
+        for (std::size_t const count : candidate_symbols) total += count;
+        arena.reserve(total * 4);
+        for (std::size_t index = 0; index != candidate_symbols.size(); ++index) {
+            std::size_t const before = arena.size();
+            for (std::size_t symbol = 0; symbol != candidate_symbols[index]; ++symbol) {
+                std::string const &picked = generator() % 4 == 0 ? drawn[generator() % drawn.size()]
+                                                                 : symbols[generator() % symbols.size()];
+                arena.insert(arena.end(), picked.begin(), picked.end());
+            }
+            views[index].length = arena.size() - before;
+        }
+        bind_();
+    }
+
+    /** Fills the queries, every one as long as @p query_symbols and every one different, and
+     *  returns the symbols they were edited from. */
+    std::vector<std::string> fill_queries_(std::vector<std::string> const &symbols, std::size_t query_symbols) {
+        std::vector<std::string> drawn(query_symbols);
+        for (std::size_t symbol = 0; symbol != query_symbols; ++symbol)
+            drawn[symbol] = symbols[(symbol * 37 + 11) % symbols.size()];
+        // Every query is the same length, so one batch still spans one rung, and every one differs.
+        for (std::size_t query = 0; query != query_views.size(); ++query) {
+            std::vector<std::string> edited = drawn;
+            for (std::size_t symbol = query; symbol < edited.size(); symbol += query_views.size() + 1)
+                edited[symbol] = symbols[(symbol + query * 5 + 3) % symbols.size()];
+            std::size_t length = 0;
+            for (std::string const &symbol : edited) length += symbol.size();
+            query_views[query].length = length;
+            for (std::string const &symbol : edited)
+                query_arena.insert(query_arena.end(), symbol.begin(), symbol.end());
+        }
+        return drawn;
+    }
+
+    /** Points the views into the arenas and binds the sequences, once neither arena grows. */
+    void bind_() {
         std::size_t written = 0;
         for (sz_string_view_t &view : query_views) view.start = query_arena.data() + written, written += view.length;
         written = 0;
@@ -265,7 +320,7 @@ static void check_levenshtein_simt_narrow_lanes_(std::mt19937 &generator, char c
     enum { arena_bytes_k = 256, longest_candidate_k = 33, offsets_k = 97 };
     handle_checked_heap_t heap;
 
-    std::size_t const count = sz_cuda_multiprocessors_() * sz_cuda_threads_per_multiprocessor_() *
+    std::size_t const count = sz_device_multiprocessors_() * sz_device_threads_per_multiprocessor_() *
                               sz_levenshtein_simt_lanes_waves_min_k;
     if (count == 0) return;
     for (std::size_t const query_symbols : {(std::size_t)8, (std::size_t)16}) {
@@ -310,6 +365,40 @@ static void check_levenshtein_simt_narrow_lanes_(std::mt19937 &generator, char c
                 fail_backend_(name, "a narrow rung's distance differs from serial");
     }
     verify(heap.live_allocations == 0);
+}
+
+/** Symbol-words a skewed batch scores at one query width before that width is skipped, so the
+ *  serial reference stays within seconds. */
+enum { levenshtein_simt_skewed_budget_k = 256u * 1024u * 1024u };
+
+/** Skewed batches against serial, at query widths the threaded rung and the warped one take. */
+static void check_levenshtein_simt_skewed_(std::mt19937 &generator, char const *name,
+                                           levenshtein_simt_alphabet_t alphabet,
+                                           sz_kernel_levenshtein_distances_t device) {
+    sz_levenshtein_symbol_t const symbol = levenshtein_simt_symbol_(alphabet);
+    for (simt_skew_t const skew : {simt_skew_t::lone_long_k, simt_skew_t::log_uniform_k}) {
+        std::vector<std::size_t> const lengths = simt_skewed_lengths_(generator, skew);
+        std::size_t total = 0;
+        for (std::size_t const length : lengths) total += length;
+        for (std::size_t const query_symbols : {(std::size_t)40, (std::size_t)600, (std::size_t)1500}) {
+            if (total * sz_levenshtein_query_words(query_symbols) > (std::size_t)levenshtein_simt_skewed_budget_k)
+                continue;
+            levenshtein_simt_corpus_t corpus(generator, lengths, query_symbols, 2, alphabet);
+            sz_levenshtein_engine_t engine {};
+            verify(sz_levenshtein_engine_init(&engine, &corpus.queries, symbol, gpu_capabilities(), 0, STRINGZILLA_NULL,
+                                              STRINGZILLA_NULL) == sz_success_k);
+            sz_status_t const produced = device(&engine, &corpus.device_candidates, corpus.distances.data(),
+                                                corpus.count(), STRINGZILLA_NULL);
+            verify(cudaStreamSynchronize((cudaStream_t)STRINGZILLA_NULL) == cudaSuccess);
+            sz_levenshtein_engine_free(&engine);
+            if (produced != sz_success_k) fail_backend_(name, "a skewed batch was refused");
+
+            std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, symbol);
+            for (std::size_t index = 0; index != expected.size(); ++index)
+                if (corpus.distances[index] != expected[index])
+                    fail_backend_(name, "a skewed batch's distance differs from serial");
+        }
+    }
 }
 
 /** The tiled wavefront against serial's answer at the same lengths, on the one pair it takes. */
@@ -479,19 +568,50 @@ struct overlap_simt_corpus_t {
     overlap_simt_corpus_t(std::mt19937 &generator, std::size_t queries_count, std::size_t count,
                           std::size_t query_length, std::size_t widths_count)
         : views(count), scores(queries_count * count * widths_count) {
+        fill_queries_(generator, queries_count, query_length);
+        for (std::size_t index = 0; index != count; ++index) arena.resize(arena.size() + 1 + (index * 37) % 900);
+        randomize_string(generator, arena);
+        std::vector<std::size_t> lengths(count);
+        for (std::size_t index = 0; index != count; ++index) lengths[index] = 1 + (index * 37) % 900;
+        bind_(lengths);
+    }
+
+    /** Candidates of @p lengths bytes, spliced from spans of the queries between runs of random
+     *  bytes, so windows match across wherever a kernel cuts a candidate. */
+    overlap_simt_corpus_t(std::mt19937 &generator, std::size_t queries_count, std::vector<std::size_t> const &lengths,
+                          std::size_t query_length, std::size_t widths_count)
+        : views(lengths.size()), scores(queries_count * lengths.size() * widths_count) {
+        fill_queries_(generator, queries_count, query_length);
+        std::size_t total = 0;
+        for (std::size_t const length : lengths) total += length;
+        arena.resize(total);
+        randomize_string(generator, arena);
+        for (std::size_t at = 0; at < total;) {
+            std::string const &query = queries[generator() % queries.size()];
+            std::size_t const span = std::min({(std::size_t)(1 + generator() % 48), query.size(), total - at});
+            std::size_t const from = generator() % (query.size() - span + 1);
+            std::copy(query.begin() + (std::ptrdiff_t)from, query.begin() + (std::ptrdiff_t)(from + span),
+                      arena.begin() + (std::ptrdiff_t)at);
+            at += span + generator() % 9;
+        }
+        bind_(lengths);
+    }
+
+    /** Draws the query texts, each a different length below @p query_length. */
+    void fill_queries_(std::mt19937 &generator, std::size_t queries_count, std::size_t query_length) {
         for (std::size_t index = 0; index != queries_count; ++index) {
             std::string text(query_length ? query_length - index % query_length : 0, '\0');
             randomize_string(generator, text);
             queries.push_back(text);
         }
-        for (std::size_t index = 0; index != count; ++index) arena.resize(arena.size() + 1 + (index * 37) % 900);
-        randomize_string(generator, arena);
+    }
 
+    /** Cuts the arena into candidates of @p lengths bytes and binds the sequences over them. */
+    void bind_(std::vector<std::size_t> const &lengths) {
         std::size_t written = 0;
-        for (std::size_t index = 0; index != count; ++index) {
-            std::size_t const length = 1 + (index * 37) % 900;
-            views[index].start = arena.data() + written, views[index].length = length;
-            written += length;
+        for (std::size_t index = 0; index != lengths.size(); ++index) {
+            views[index].start = arena.data() + written, views[index].length = lengths[index];
+            written += lengths[index];
         }
         query_sequence = sequence_from_(queries);
         verify(gpu_sequence_from_string_views(views.data(), views.size(), &device_candidates) == sz_success_k);
@@ -547,6 +667,28 @@ static void check_overlap_simt_equivalence_(std::mt19937 &generator, simt_backen
             }
 }
 
+/** Skewed batches against serial, at the narrowest window and at the widest the device takes. */
+static void check_overlap_simt_skewed_(std::mt19937 &generator, simt_backend_t const &backend) {
+    std::array<sz_size_t, 3> const widths {3, 8, sz_overlap_simt_widest_window_k};
+    for (simt_skew_t const skew : {simt_skew_t::lone_long_k, simt_skew_t::log_uniform_k}) {
+        std::vector<std::size_t> const lengths = simt_skewed_lengths_(generator, skew);
+        overlap_simt_corpus_t corpus(generator, 2, lengths, 777, widths.size());
+        std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
+        sz_overlap_engine_t engine {};
+        if (sz_overlap_engine_init(&engine, &corpus.query_sequence, widths.data(), widths.size(), 0, gpu_capabilities(),
+                                   0, STRINGZILLA_NULL, STRINGZILLA_NULL) != sz_success_k)
+            fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
+        if (backend.overlap_scores(&engine, &corpus.device_candidates, corpus.scores.data(), corpus.query_stride(),
+                                   corpus.candidate_stride(), STRINGZILLA_NULL) != sz_success_k)
+            fail_backend_(backend.name, "a skewed batch was refused");
+        verify(cudaStreamSynchronize(STRINGZILLA_NULL) == cudaSuccess);
+        sz_overlap_engine_free(&engine);
+        for (std::size_t slot = 0; slot != expected.size(); ++slot)
+            if (corpus.scores[slot] != expected[slot])
+                fail_backend_(backend.name, "a skewed batch's share differs from serial");
+    }
+}
+
 /** One backend refusing host memory no kernel can address, rather than reading a bad pointer. */
 static void check_overlap_simt_memory_safety_(std::mt19937 &generator, simt_backend_t const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
@@ -575,7 +717,7 @@ static void check_overlap_simt_memory_safety_(std::mt19937 &generator, simt_back
     sz_overlap_engine_free(&engine);
 }
 
-/** The widest window the per-thread ring holds, and the refusals one step past either bound. */
+/** The widest window a device engine takes, and the refusals one step past either bound. */
 static void check_overlap_simt_width_safety_(std::mt19937 &generator, simt_backend_t const &backend) {
     std::array<sz_size_t, 1> const widest {sz_overlap_simt_widest_window_k};
     std::array<sz_size_t, 1> const past {sz_overlap_simt_widest_window_k + 1};
@@ -1042,6 +1184,25 @@ static void test_substrings_simt_equivalence(test_context_t &context, simt_backe
         check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_substrings_cased_k);
     }
 
+    // Documents long enough for a cluster of blocks to walk each of them together, among short ones
+    // a block scores alone, under a tally of a slot per needle and under a hashed one.
+    {
+        std::vector<std::string> haystacks;
+        for (std::size_t index = 0; index != 20; ++index)
+            haystacks.push_back(random_string(generator, index % 7 == 3 ? (std::size_t)3 << 20 : 512 + index * 31,
+                                              "abcdefghijklmnopqrstuvwxyz"));
+        substrings_simt_corpus_t corpus(haystacks);
+        for (std::size_t const needles_count : {(std::size_t)300, (std::size_t)6000}) {
+            std::vector<std::string> needles;
+            for (std::size_t index = 0; index != needles_count; ++index)
+                needles.push_back(random_string(generator, 2 + index % 4, "abcdefghijklmnopqrstuvwxyz"));
+            std::sort(needles.begin(), needles.end());
+            needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
+            substrings_simt_vocabulary_t vocabulary(needles);
+            check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_substrings_cased_k);
+        }
+    }
+
     // Nucleotides, where the whole hot tier is five columns wide and fits a block's shared memory.
     {
         std::vector<std::string> needles, haystacks;
@@ -1169,10 +1330,18 @@ inline void check_simt_backend_(cross_section_t &check, simt_backend_t const &ba
         check_levenshtein_simt_narrow_lanes_(context.generator, backend.name, backend.levenshtein_distances);
         check_levenshtein_simt_tiled_(backend.name, backend.levenshtein_distance_tiled);
     });
+    check("test_levenshtein_skewed_" + suffix, [&](test_context_t &context) {
+        check_levenshtein_simt_skewed_(context.generator, backend.name, levenshtein_simt_alphabet_t::bytes_k,
+                                       backend.levenshtein_distances);
+        check_levenshtein_simt_skewed_(context.generator, backend.name, levenshtein_simt_alphabet_t::runes_k,
+                                       backend.levenshtein_distances);
+    });
     check("test_levenshtein_safety_" + suffix,
           [&](test_context_t &context) { check_levenshtein_simt_memory_safety_(context.generator, backend); });
     check("test_overlap_equivalence_" + suffix,
           [&](test_context_t &context) { check_overlap_simt_equivalence_(context.generator, backend); });
+    check("test_overlap_skewed_" + suffix,
+          [&](test_context_t &context) { check_overlap_simt_skewed_(context.generator, backend); });
     check("test_overlap_safety_" + suffix, [&](test_context_t &context) {
         check_overlap_simt_memory_safety_(context.generator, backend);
         check_overlap_simt_width_safety_(context.generator, backend);

@@ -593,6 +593,65 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_simt_accepts_words_(sz_substrings_
     return sz_size_divide_round_up(engine->slots_count, 32);
 }
 
+/** Blocks a BM25 cluster spans where the device groups them, which is the portable ceiling. */
+enum { sz_substrings_simt_bm25_cluster_blocks_k = 8 };
+
+/** Walks one haystack's share of chunks, the @p thread th of @p threads, into @p tally. */
+STRINGZILLA_DEVICE void sz_substrings_simt_bm25_walk_(sz_substrings_engine_t const *engine, sz_u32_t const *staged_rows,
+                                                      sz_u32_t staged_count, sz_cptr_t haystack, sz_size_t length,
+                                                      sz_size_t haystack_index, sz_size_t thread, sz_size_t threads,
+                                                      sz_substrings_simt_tally_t const *tally) {
+    // Never narrower than the longest match, past which a chunk re-walks more warm-up than it owns.
+    sz_size_t const warm_up = sz_max_of_two((sz_size_t)engine->max_source_match_bytes, (sz_size_t)1);
+    sz_size_t const chunk_bytes = sz_max_of_two(sz_size_divide_round_up(length, threads), warm_up);
+    sz_size_t const chunk_begin = thread * chunk_bytes;
+    if (chunk_begin >= length) return;
+    sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
+    if (engine->case_sensitivity == sz_substrings_uncased_k)
+        sz_substrings_simt_walk_chunk_uncased_(engine, staged_rows, staged_count, haystack, length, chunk_begin,
+                                               chunk_end, haystack_index, sz_substrings_simt_tallying_k,
+                                               STRINGZILLA_NULL, tally);
+    else
+        sz_substrings_simt_walk_chunk_cased_(engine, staged_rows, staged_count, haystack, length, chunk_begin,
+                                             chunk_end, haystack_index, sz_substrings_simt_tallying_k, STRINGZILLA_NULL,
+                                             tally);
+}
+
+/** Sums the terms of the block's own @p tally in fixed point into @p score, zeroing every slot,
+ *  overflow entry and the sum itself as it reads them, so the next haystack starts clean. */
+STRINGZILLA_DEVICE void sz_substrings_simt_bm25_score_(sz_substrings_simt_tally_t const *tally, sz_size_t table_slots,
+                                                       sz_size_t needles_count, sz_substrings_bm25_t const *parameters,
+                                                       sz_f64_t norm, sz_f32_t const *needle_weights,
+                                                       unsigned long long *block_sum, sz_f32_t *score) {
+    sz_i64_t mine = 0;
+    sz_size_t slot, needle;
+    for (slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
+        sz_u32_t const frequency = tally->counts[slot];
+        if (!frequency) continue;
+        needle = tally->keys ? (sz_size_t)tally->keys[slot] - 1 : slot;
+        mine += __double2ll_rn(sz_substrings_bm25_term(parameters, norm, needle_weights[needle], frequency) *
+                               STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
+        tally->counts[slot] = 0;
+        if (tally->keys) tally->keys[slot] = 0;
+    }
+    if (*tally->overflowed)
+        for (needle = threadIdx.x; needle < needles_count; needle += blockDim.x) {
+            sz_u32_t const frequency = tally->overflow[needle];
+            if (!frequency) continue;
+            mine += __double2ll_rn(sz_substrings_bm25_term(parameters, norm, needle_weights[needle], frequency) *
+                                   STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
+            tally->overflow[needle] = 0;
+        }
+    // Two's complement makes the unsigned sum of signed terms the signed sum, bit for bit.
+    if (mine) atomicAdd(block_sum, (unsigned long long)mine);
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        *score = (sz_f32_t)((sz_f64_t)(sz_i64_t)*block_sum / STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
+        *block_sum = 0, *tally->overflowed = 0;
+    }
+    __syncthreads();
+}
+
 /**
  *  @brief Scores one haystack per block: its threads walk contiguous chunks into one shared tally,
  *      then sum the tallied terms in fixed point.
@@ -602,8 +661,10 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_simt_accepts_words_(sz_substrings_
  *  @param[in] staged_count Hot rows staged after them, a prefix of the tier.
  *
  *  Dynamic shared memory holds the counts, the keys when hashed, then the staged acceptance bitmap
- *  and rows. A block rather than a grid per haystack keeps the tally in shared memory, at the price
- *  of one long document spreading across one block's threads only.
+ *  and rows. A block rather than a grid per haystack keeps the tally in shared memory.
+ *
+ *  Launched in clusters, a batch of fewer haystacks than clusters walks each of them with a whole
+ *  cluster, every count landing in the first block's tally, which only that block then scores.
  */
 static __global__ void sz_substrings_simt_bm25_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
                                                        sz_f32_t const *document_lengths,
@@ -617,8 +678,10 @@ static __global__ void sz_substrings_simt_bm25_kernel_(sz_substrings_engine_t en
     __shared__ unsigned long long block_sum;
     sz_size_t const needles_count = engine.needles_count;
     sz_size_t const table_slots = sz_substrings_simt_tally_slots_for_(needles_count);
-    sz_size_t const warm_up = sz_max_of_two((sz_size_t)engine.max_source_match_bytes, (sz_size_t)1);
-    sz_substrings_simt_tally_t tally;
+    sz_u32_t const cluster_rank = sz_cluster_rank_simt_(), cluster_blocks = sz_cluster_size_simt_();
+    sz_size_t const cluster_threads = (sz_size_t)cluster_blocks * blockDim.x;
+    sz_size_t const clusters = gridDim.x / cluster_blocks;
+    sz_substrings_simt_tally_t tally, leader;
     sz_u32_t *staged_accepts, *staged_rows;
     sz_size_t haystack_index, slot;
     tally.layout = needles_count <= sz_substrings_simt_tally_slots_k ? sz_substrings_simt_tally_direct_k
@@ -629,6 +692,12 @@ static __global__ void sz_substrings_simt_bm25_kernel_(sz_substrings_engine_t en
     tally.overflow = overflow_rows ? overflow_rows + (sz_size_t)blockIdx.x * needles_count : STRINGZILLA_NULL;
     staged_accepts = tally.counts + (tally.keys ? 2 : 1) * table_slots;
     staged_rows = staged_accepts + staged_accepts_words;
+    // A cluster counts into its first block's tally, which a block alone is to itself.
+    leader.layout = tally.layout;
+    leader.counts = (sz_u32_t *)sz_cluster_map_simt_(tally.counts, 0);
+    leader.keys = tally.keys ? (sz_u32_t *)sz_cluster_map_simt_(tally.keys, 0) : STRINGZILLA_NULL;
+    leader.overflowed = (sz_u32_t *)sz_cluster_map_simt_(&overflowed, 0);
+    leader.overflow = overflow_rows ? tally.overflow - (sz_size_t)cluster_rank * needles_count : STRINGZILLA_NULL;
 
     for (slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
         tally.counts[slot] = 0;
@@ -638,62 +707,34 @@ static __global__ void sz_substrings_simt_bm25_kernel_(sz_substrings_engine_t en
         staged_accepts[slot] = engine.accepts_words[slot];
     // The walks read acceptance through the automaton, so rebinding the by-value copy is the whole change.
     if (staged_accepts_words) engine.accepts_words = staged_accepts;
-    if (threadIdx.x == 0) overflowed = 0;
+    if (threadIdx.x == 0) overflowed = 0, block_sum = 0;
     sz_substrings_simt_stage_(&engine, staged_classes, staged_rows,
                               staged_count); // ! Ends in the barrier the zeroing needs.
 
-    for (haystack_index = blockIdx.x; haystack_index < haystacks.count; haystack_index += gridDim.x) {
+    for (haystack_index = blockIdx.x / cluster_blocks; haystack_index < haystacks.count; haystack_index += clusters) {
         sz_cptr_t const haystack = haystacks.get_start(haystacks.handle, haystack_index);
         sz_size_t const length = haystacks.get_length(haystacks.handle, haystack_index);
-        // Never narrower than the longest match, past which a chunk re-walks more warm-up than it owns.
-        sz_size_t const chunk_bytes = sz_max_of_two(sz_size_divide_round_up(length, blockDim.x), warm_up);
-        sz_size_t const chunk_begin = (sz_size_t)threadIdx.x * chunk_bytes;
         sz_f64_t const norm = sz_substrings_bm25_norm(
             &parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
-        sz_i64_t mine = 0;
-        sz_size_t needle;
-        if (threadIdx.x == 0) block_sum = 0;
-        if (chunk_begin < length) {
-            sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
-            if (engine.case_sensitivity == sz_substrings_uncased_k)
-                sz_substrings_simt_walk_chunk_uncased_(&engine, staged_rows, staged_count, haystack, length,
-                                                       chunk_begin, chunk_end, haystack_index,
-                                                       sz_substrings_simt_tallying_k, STRINGZILLA_NULL, &tally);
-            else
-                sz_substrings_simt_walk_chunk_cased_(&engine, staged_rows, staged_count, haystack, length, chunk_begin,
-                                                     chunk_end, haystack_index, sz_substrings_simt_tallying_k,
-                                                     STRINGZILLA_NULL, &tally);
+        // The cluster's first tally is clear before its blocks count into it, and every count lands
+        // before that block reads them; a block alone names its own tally to keep shared atomics.
+        if (cluster_blocks > 1) {
+            sz_cluster_sync_simt_();
+            sz_substrings_simt_bm25_walk_(&engine, staged_rows, staged_count, haystack, length, haystack_index,
+                                          (sz_size_t)cluster_rank * blockDim.x + threadIdx.x, cluster_threads, &leader);
+            sz_cluster_sync_simt_();
         }
-        __syncthreads();
-
-        // Every slot and overflow entry is zeroed as it is read, so the next haystack starts from a clean tally.
-        for (slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
-            sz_u32_t const frequency = tally.counts[slot];
-            if (!frequency) continue;
-            needle = tally.keys ? (sz_size_t)tally.keys[slot] - 1 : slot;
-            mine += __double2ll_rn(sz_substrings_bm25_term(&parameters, norm, needle_weights[needle], frequency) *
-                                   STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
-            tally.counts[slot] = 0;
-            if (tally.keys) tally.keys[slot] = 0;
+        else {
+            sz_substrings_simt_bm25_walk_(&engine, staged_rows, staged_count, haystack, length, haystack_index,
+                                          threadIdx.x, blockDim.x, &tally);
+            __syncthreads();
         }
-        if (overflowed)
-            for (needle = threadIdx.x; needle < needles_count; needle += blockDim.x) {
-                sz_u32_t const frequency = tally.overflow[needle];
-                if (!frequency) continue;
-                mine += __double2ll_rn(sz_substrings_bm25_term(&parameters, norm, needle_weights[needle], frequency) *
-                                       STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
-                tally.overflow[needle] = 0;
-            }
-        // Two's complement makes the unsigned sum of signed terms the signed sum, bit for bit.
-        if (mine) atomicAdd(&block_sum, (unsigned long long)mine);
-        __syncthreads();
-        if (threadIdx.x == 0) {
-            scores[haystack_index * scores_stride] = (sz_f32_t)((sz_f64_t)(sz_i64_t)block_sum /
-                                                                STRINGZILLA_SUBSTRINGS_CUDA_BM25_SCALE);
-            overflowed = 0;
-        }
-        __syncthreads();
+        if (cluster_rank == 0)
+            sz_substrings_simt_bm25_score_(&tally, table_slots, needles_count, &parameters, norm, needle_weights,
+                                           &block_sum, scores + haystack_index * scores_stride);
     }
+    // A block's shared memory outlives every count another block of its cluster sends into it.
+    if (cluster_blocks > 1) sz_cluster_sync_simt_();
 }
 
 #pragma endregion Scoring Kernels
@@ -1044,14 +1085,14 @@ static __global__ void sz_substrings_simt_target_kernel_(sz_size_t const *rewrit
 /** Multiprocessors on the current device, or one when the driver will not say, since chunk widths
  *  divide by what this scales. */
 STRINGZILLA_INLINE sz_size_t sz_substrings_simt_multiprocessors_(void) {
-    sz_size_t const multiprocessors = sz_cuda_multiprocessors_();
+    sz_size_t const multiprocessors = sz_device_multiprocessors_();
     return sz_max_of_two(multiprocessors, (sz_size_t)1);
 }
 
 /** Blocks of @p kernel this device holds resident per multiprocessor at @p shared_bytes
  *  of dynamic shared, and never fewer than one. */
 STRINGZILLA_INLINE sz_size_t sz_substrings_simt_resident_blocks_(void const *kernel, sz_size_t shared_bytes) {
-    sz_size_t const blocks = sz_cuda_resident_blocks_(kernel, sz_substrings_simt_threads_per_block_k, shared_bytes);
+    sz_size_t const blocks = sz_device_resident_blocks_(kernel, sz_substrings_simt_threads_per_block_k, shared_bytes);
     return sz_max_of_two(blocks, (sz_size_t)1);
 }
 
@@ -1092,7 +1133,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_simt_launch_(void const *kernel, un
     dim3 grid, block;
     grid.x = blocks, grid.y = 1, grid.z = 1;
     block.x = sz_substrings_simt_threads_per_block_k, block.y = 1, block.z = 1;
-    return sz_cuda_launch_(kernel, grid, block, arguments, shared_bytes, stream);
+    return sz_device_launch_(kernel, grid, block, arguments, shared_bytes, stream);
 }
 
 /** Tiles the tier's fixed block size covers @p count elements in. */
@@ -1159,7 +1200,7 @@ STRINGZILLA_INLINE sz_u32_t sz_substrings_simt_staged_rows_(sz_substrings_engine
                                                             sz_substrings_simt_staging_t staging) {
     sz_size_t const row_bytes = engine->classes_count * sizeof(sz_u32_t);
     sz_size_t const unstaged_blocks = sz_substrings_simt_resident_blocks_(kernel, reserved_bytes);
-    sz_size_t const ceiling = sz_cuda_shared_bytes_per_block_();
+    sz_size_t const ceiling = sz_device_shared_bytes_per_block_();
     sz_size_t fitting, low, high;
     if (!engine->hot_count) return 0;
     if (reserved_bytes >= ceiling) return 0;
@@ -1376,10 +1417,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_simt_arena_clear_(sz_substrings_eng
     sz_substrings_simt_arena_t const arena = sz_substrings_simt_arena_(engine, haystacks_count);
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
     // The head of the arena only, so no round pays a memset proportional to a budget it did not spend.
-    sz_status_t const cleared = sz_cuda_memset_(block + arena.report, 0, arena.tile_sums - arena.report, stream);
+    sz_status_t const cleared = sz_device_memset_(block + arena.report, 0, arena.tile_sums - arena.report, stream);
     if (cleared != sz_success_k || !covering) return cleared;
     // The cover writes only the flags below the emitted count, and the scan reads every one of them.
-    return sz_cuda_memset_(block + arena.keep_offsets, 0, (engine->matches_budget + 1) * sizeof(sz_size_t), stream);
+    return sz_device_memset_(block + arena.keep_offsets, 0, (engine->matches_budget + 1) * sizeof(sz_size_t), stream);
 }
 
 /**
@@ -1538,7 +1579,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_simt_(
     sz_memory_allocator_t unified;
     sz_size_t staged_bytes;
     sz_status_t status;
-    if (!sz_cuda_multiprocessors_()) return sz_missing_gpu_k;
+    if (!sz_device_multiprocessors_()) return sz_missing_gpu_k;
     if (!allocator) {
         sz_memory_allocator_init_unified_(&unified, ordinal);
         allocator = &unified;
@@ -1571,11 +1612,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_simt_scoped_(
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_substrings_engine_init_simt_(engine, needles, case_sensitivity, overlap_policy, hot_states,
                                              matches_budget, haystacks_budget, ordinal, allocator);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1619,7 +1660,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_simt_(sz_substrings_engine_t *
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
     // The offsets kernel retires when the matches did not fit, so the caller's array is zeroed rather than
     // left holding whatever it held before.
-    status = sz_cuda_memset_(matches_offsets, 0, (haystacks->count + 1) * sizeof(sz_size_t), stream);
+    status = sz_device_memset_(matches_offsets, 0, (haystacks->count + 1) * sizeof(sz_size_t), stream);
     if (status != sz_success_k) return status;
 
     // The boundaries land straight in the caller's array, which is the same shape a rewrite already takes.
@@ -1664,7 +1705,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_simt_(sz_substrings_engine_
     if (status != sz_success_k) return status;
     // The offsets kernel retires when the matches did not fit, so the caller's array is zeroed rather than
     // left holding whatever it held before.
-    status = sz_cuda_memset_(offsets, 0, boundaries * sizeof(sz_size_t), stream);
+    status = sz_device_memset_(offsets, 0, boundaries * sizeof(sz_size_t), stream);
     if (status != sz_success_k) return status;
 
     report = engine->report;
@@ -1714,8 +1755,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_simt_(sz_substrings_eng
     sz_sequence_t haystacks_copy = *haystacks;
     sz_substrings_bm25_t parameters_copy;
     sz_u32_t *overflow_rows = STRINGZILLA_NULL;
-    sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks;
+    sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks, resident, clusters, cluster_blocks = 1;
     sz_u32_t staged_accepts_words = 0, staged_count;
+    dim3 grid, block;
     void *arguments[10];
     sz_status_t status = sz_substrings_bm25_check(parameters, needle_weights);
     if (status != sz_success_k) return status;
@@ -1729,25 +1771,35 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_simt_(sz_substrings_eng
     engine_copy = *engine;
 
     // The acceptance bitmap is read on every step, so it is staged whenever it fits without costing a block.
-    if (table_bytes + accepts_bytes <= sz_cuda_shared_bytes_per_block_() &&
+    if (table_bytes + accepts_bytes <= sz_device_shared_bytes_per_block_() &&
         sz_substrings_simt_resident_blocks_(kernel, table_bytes + accepts_bytes) >=
             sz_substrings_simt_resident_blocks_(kernel, table_bytes))
         staged_accepts_words = (sz_u32_t)(accepts_bytes / sizeof(sz_u32_t)), reserved_bytes += accepts_bytes;
     staged_count = sz_substrings_simt_staged_rows_(engine, kernel, reserved_bytes, sz_substrings_simt_stage_prefix_k);
     shared_bytes = reserved_bytes + (sz_size_t)staged_count * engine->classes_count * sizeof(sz_u32_t);
-    blocks = sz_min_of_two(haystacks->count, sz_substrings_simt_multiprocessors_() *
-                                                 sz_substrings_simt_resident_blocks_(kernel, shared_bytes));
+    resident = sz_substrings_simt_multiprocessors_() * sz_substrings_simt_resident_blocks_(kernel, shared_bytes);
+    blocks = sz_min_of_two(haystacks->count, resident);
+    // Fewer haystacks than resident blocks would idle the device at a block each, so where it
+    // groups blocks, each haystack takes a whole cluster instead.
+    clusters = sz_device_resident_clusters_(kernel, sz_substrings_simt_threads_per_block_k, shared_bytes,
+                                            sz_substrings_simt_bm25_cluster_blocks_k);
+    if (layout == sz_substrings_simt_tally_hashed_k)
+        clusters = sz_min_of_two(clusters, arena.overflow_count / sz_substrings_simt_bm25_cluster_blocks_k);
+    if (clusters && haystacks->count < resident) {
+        cluster_blocks = sz_substrings_simt_bm25_cluster_blocks_k;
+        blocks = sz_min_of_two(haystacks->count, clusters) * cluster_blocks;
+    }
 
     // A hashed tally spills into one arena row per block, so the block count is capped by the rows the
     // arena was sized for rather than by what the device happens to have free at this moment.
     if (layout == sz_substrings_simt_tally_hashed_k) {
         sz_size_t const overflow_bytes = arena.overflow_count * needles_count * sizeof(sz_u32_t);
-        blocks = sz_max_of_two(sz_min_of_two(blocks, arena.overflow_count), (sz_size_t)1);
+        if (cluster_blocks == 1) blocks = sz_max_of_two(sz_min_of_two(blocks, arena.overflow_count), (sz_size_t)1);
         overflow_rows = (sz_u32_t *)((sz_ptr_t)engine->scratch + arena.overflow_rows);
-        status = sz_cuda_memset_(overflow_rows, 0, overflow_bytes, stream);
+        status = sz_device_memset_(overflow_rows, 0, overflow_bytes, stream);
         if (status != sz_success_k) return status;
     }
-    status = sz_cuda_memset_(engine->report, 0, sizeof(sz_substrings_report_t), stream);
+    status = sz_device_memset_(engine->report, 0, sizeof(sz_substrings_report_t), stream);
     if (status != sz_success_k) return status;
 
     parameters_copy = *parameters;
@@ -1755,7 +1807,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_simt_(sz_substrings_eng
     arguments[3] = &parameters_copy, arguments[4] = &needle_weights, arguments[5] = &overflow_rows;
     arguments[6] = &scores, arguments[7] = &scores_stride, arguments[8] = &staged_accepts_words;
     arguments[9] = &staged_count;
-    return sz_substrings_simt_launch_(kernel, (unsigned)blocks, arguments, shared_bytes, stream);
+    grid.x = (unsigned)blocks, grid.y = 1, grid.z = 1;
+    block.x = sz_substrings_simt_threads_per_block_k, block.y = 1, block.z = 1;
+    return sz_device_launch_clustered_(kernel, grid, block, arguments, shared_bytes, cluster_blocks, stream);
 }
 
 /*  Each launcher makes the engine's device current around its helper, and restores the caller's. */
@@ -1764,10 +1818,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_simt_scoped_(sz_substrings_e
                                                                  sz_sequence_t const *haystacks, sz_size_t *counts,
                                                                  sz_size_t counts_stride, void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_substrings_counts_simt_(engine, haystacks, counts, counts_stride, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1777,10 +1831,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_simt_scoped_(sz_substrings_eng
                                                                sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                                void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_substrings_find_simt_(engine, haystacks, matches, matches_capacity, matches_offsets, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1790,10 +1844,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_simt_scoped_(sz_substrings_
                                                                   sz_size_t target_capacity, sz_size_t *offsets,
                                                                   void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_substrings_replace_simt_(engine, haystacks, replacements, target, target_capacity, offsets, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1804,11 +1858,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_simt_scoped_(sz_substri
                                                                       sz_f32_t const *needle_weights, sz_f32_t *scores,
                                                                       sz_size_t scores_stride, void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_substrings_bm25_scores_simt_(engine, haystacks, document_lengths, parameters, needle_weights, scores,
                                              scores_stride, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 

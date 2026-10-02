@@ -2,9 +2,9 @@
  *  @file include/stringzilla/overlap/simt.cuh
  *  @author Ash Vardanian
  *  @date January 27, 2024
- *  @brief CUDA backend for window overlap: one thread per candidate, its chain walked through a
- *      ring of prefix hashes so every width is scored in one pass, and one prepared query's B-tree
- *      probed per block row.
+ *  @brief CUDA backend for window overlap: a block's tile of candidates cut into chunks of equal
+ *      bytes, one per thread, each width's window hash rolled through a chunk in one pass, and one
+ *      prepared query's B-tree probed per block row.
  *
  *  The arithmetic is the serial tier's, reached from the device through `--expt-relaxed-constexpr`,
  *  so the scores are bit-identical rather than merely close. Integers, not doubles: both factors
@@ -12,16 +12,21 @@
  *  multiply-high - where an @c f64 reduction would run at the device's double-precision rate, a
  *  sixty-fourth of its single-precision one on consumer parts.
  *
- *  A candidate's chain is a dependent recurrence, so it stays on one thread; parallelism comes from
- *  the candidates, which is what the device has thousands of. The thread keeps the last
- *  @ref sz_overlap_simt_ring_span_k prefix hashes rather than the whole chain, so its footprint is
- *  constant in the candidate's length and every width is scored in the same pass over the text.
+ *  A chain of hashes is a dependent recurrence, but a window's hash depends only on its own bytes,
+ *  so a candidate can be cut anywhere: a chunk primes itself from the widest window's bytes before
+ *  its start and counts only the windows ending inside it. A block cuts its tile's bytes evenly
+ *  across its threads, so a warp costs its share rather than its longest candidate, a long one is
+ *  spread across as many threads as it holds shares, and the counts meet in shared memory before
+ *  one thread per candidate scores it.
  *
  *  The query axis rides @c blockIdx.y, one tree per block, strided when a batch outruns a grid
- *  dimension. The chain is therefore walked once per query rather than once per candidate - the
- *  probe is a @c levels deep descent with a sixteen-key branch step at every node against two
+ *  dimension. The text is therefore walked once per query rather than once per candidate - the
+ *  probe is a @c levels deep descent with a sixteen-key node halved at every level against two
  *  operations of chain, so sharing it would buy about a percent and cost a per-thread match counter
  *  per query, which no register file holds.
+ *
+ *  On Blackwell a block done with its tile takes over one whose block has not started, keeping its
+ *  staged tree when the query is the same.
  *
  *  Nothing here crosses the bus during a round. The forest, the candidates and the scores are
  *  already where the device reaches them and the texts are read in place, so a round costs one
@@ -44,12 +49,9 @@ extern "C" {
 
 #pragma region CUDA
 
-/** Prefix hashes one thread keeps, one past the widest window so a window's start and end never
- *  alias; a power of two, so the ring index is a mask rather than a division. */
-enum { sz_overlap_simt_ring_span_k = sz_overlap_simt_widest_window_k + 1 };
-
-/** Candidates one block scores when the device cannot be asked; measured flat from 32 to 512 and
- *  off a cliff at 1024, so this is the ceiling of the flat range rather than a tuned figure. */
+/** Candidates one block's tile holds, and the threads it cuts their bytes across, when the device
+ *  cannot be asked; measured flat from 32 to 512 and off a cliff at 1024, so this is the ceiling of
+ *  the flat range rather than a tuned figure, and the widest tile the occupancy walk considers. */
 enum { sz_overlap_simt_candidates_per_block_k = 512 };
 
 /** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid
@@ -80,101 +82,233 @@ typedef struct sz_overlap_simt_geometry_t {
     sz_size_t staged_nodes_count;
 } sz_overlap_simt_geometry_t;
 
-/** Whether the prepared query holds one raw @p window_hash, walking the tree a level at a time. */
+/** How many of a node's sixteen ascending entries sit below the flipped @p key, up to fifteen, by
+ *  halving: four dependent loads where a scan takes sixteen, and only a sixteenth entry below the
+ *  key goes uncounted. */
+STRINGZILLA_DEVICE sz_u32_t sz_overlap_simt_rank_(sz_u32_t const *node, sz_i32_t key) {
+    sz_u32_t rank = (sz_i32_t)node[7] < key ? 8u : 0u;
+    rank += (sz_i32_t)node[rank + 3] < key ? 4u : 0u;
+    rank += (sz_i32_t)node[rank + 1] < key ? 2u : 0u;
+    rank += (sz_i32_t)node[rank] < key ? 1u : 0u;
+    return rank;
+}
+
+/** Whether the prepared query holds one raw @p window_hash, halving one node per level. */
 STRINGZILLA_DEVICE sz_size_t sz_overlap_simt_btree_probe_(sz_overlap_btree_t const *btree, sz_u32_t window_hash) {
-    sz_u32_t const key = window_hash ^ (sz_u32_t)sz_overlap_sign_flip_k;
+    sz_i32_t const key = (sz_i32_t)(window_hash ^ (sz_u32_t)sz_overlap_sign_flip_k);
+    sz_u32_t const last = sz_overlap_keys_per_node_k - 1;
     sz_size_t node = 0;
-    for (sz_size_t level = 0; level + 1 != btree->levels; ++level) {
+    for (sz_size_t level = 0; level + 1 < btree->levels; ++level) {
         sz_u32_t const *const separators = btree->nodes +
                                            (btree->level_bases[level] + node) * sz_overlap_keys_per_node_k;
-        node = node * sz_overlap_branches_per_node_k + sz_overlap_serial_branch_step_(separators, key);
+        sz_u32_t const rank = sz_overlap_simt_rank_(separators, key);
+        node = node * sz_overlap_branches_per_node_k + rank + (rank == last && (sz_i32_t)separators[last] < key);
     }
-    sz_u32_t const *const leaf = btree->nodes +
-                                 (btree->level_bases[btree->levels - 1] + node) * sz_overlap_keys_per_node_k;
-    return sz_overlap_serial_leaf_step_(leaf, key);
+    // The leaves lead the arena, so the last level's base is zero.
+    sz_u32_t const *const leaf = btree->nodes + node * sz_overlap_keys_per_node_k;
+    return leaf[sz_overlap_simt_rank_(leaf, key)] == (sz_u32_t)key;
 }
 
 /**
- *  @brief Scores one candidate against one prepared query, one score per width, on one thread.
+ *  @brief Counts the windows of one query's widths that end inside one chunk of a candidate, on one
+ *      thread, and adds them to the candidate's shared counts.
  *
- *  The ring holds P(k) back to P(k − widest), so a window of any width up to that reads its
- *  start straight out of it and the text is walked once however many widths are asked for.
+ *  A window's hash depends only on its own bytes, so a chunk primes itself from @p warm_up bytes
+ *  before its own start and every window is counted by the one chunk it ends in. Each width rolls
+ *  its own hash a byte at a time, `H' = H * 256 + in - out * 256^w`, the byte leaving the window
+ *  read again from the text rather than kept: the hashes stay in registers, where a ring of prefix
+ *  hashes indexed by width would take a stack frame, and each byte costs one reduction per width
+ *  instead of three. The residues are the serial tier's, as both are exact modulo the same prime.
  *
- *  @p candidates ' accessors run here, on the device: one call per candidate, uniform across the
- *  warp, against multi-kilobyte texts. Nothing is flattened for the launch, so a caller whose
- *  sequence is some other layout entirely - a tape, a column, an index into someone else's arena -
- *  needs no conversion.
+ *  @p candidates ' accessors run here, on the device, once per chunk. Nothing is flattened for the
+ *  launch, so a caller whose sequence is some other layout entirely - a tape, a column, an index
+ *  into someone else's arena - needs no conversion.
  */
-STRINGZILLA_DEVICE void sz_overlap_simt_sweep_(sz_overlap_engine_t const *engine, sz_overlap_btree_t const *btree,
-                                               sz_size_t query, sz_sequence_t const *candidates, sz_size_t candidate,
-                                               sz_f32_t *scores, sz_size_t scores_query_stride,
-                                               sz_size_t scores_candidate_stride) {
+STRINGZILLA_DEVICE void sz_overlap_simt_chunk_(sz_overlap_engine_t const *engine, sz_overlap_btree_t const *btree,
+                                               sz_sequence_t const *candidates, sz_size_t candidate,
+                                               sz_size_t chunk_begin, sz_size_t chunk_bytes, sz_size_t warm_up,
+                                               sz_u32_t *counts) {
     sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
     sz_size_t const length = candidates->get_length(candidates->handle, candidate);
-    sz_size_t const query_length = engine->lengths[query];
-    sz_f32_t *const candidate_scores = scores + query * scores_query_stride + candidate * scores_candidate_stride;
+    sz_size_t const walk_begin = chunk_begin > warm_up ? chunk_begin - warm_up : 0;
+    sz_size_t const walk_bytes = sz_min_of_two(chunk_begin + chunk_bytes, length) - walk_begin;
+    sz_size_t const warm_bytes = chunk_begin - walk_begin;
+    sz_size_t const widths_count = engine->widths_count;
+    sz_u8_t const *const walk = (sz_u8_t const *)text + walk_begin;
 
-    sz_u32_t matches[sz_overlap_simt_widths_max_k];
-    for (sz_size_t index = 0; index != engine->widths_count; ++index) matches[index] = 0;
+    // Unrolled to the ceiling and guarded, so the hashes and counters stay in registers.
+    sz_u32_t hashes[sz_overlap_simt_widths_max_k], matches[sz_overlap_simt_widths_max_k];
+#pragma unroll
+    for (sz_size_t index = 0; index != sz_overlap_simt_widths_max_k; ++index) hashes[index] = 0, matches[index] = 0;
 
-    // `ring[k & mask]` is `P(k)`, so a window ending at `k` reads its start at `(k - width) & mask`. The base is
-    // `256 mod p`, which is 256 itself, the modulus being the wider of the two.
-    sz_size_t const mask = sz_overlap_simt_ring_span_k - 1;
-    sz_u32_t ring[sz_overlap_simt_ring_span_k];
-    ring[0] = 0;
-    sz_u64_t prior = 0;
-    for (sz_size_t position = 0; position != length; ++position) {
-        prior = (prior * 256 + (sz_u64_t)(sz_u8_t)text[position]) % (sz_u64_t)sz_overlap_modulus_k;
-        sz_size_t const ending = position + 1;
-        ring[ending & mask] = (sz_u32_t)prior;
-        for (sz_size_t index = 0; index != engine->widths_count; ++index) {
+    // Bytes before the walk count as zeros, so a window not yet full holds its own bytes' hash.
+    for (sz_size_t ending = 1; ending <= walk_bytes; ++ending) {
+        sz_u64_t const incoming = walk[ending - 1];
+#pragma unroll
+        for (sz_size_t index = 0; index != sz_overlap_simt_widths_max_k; ++index) {
+            if (index >= widths_count) break;
             sz_size_t const width = engine->widths[index];
-            if (!width || width > ending) continue;
-            sz_u64_t const start = (sz_u64_t)ring[(ending - width) & mask];
-            sz_u64_t const shifted = start * engine->powers[index] % (sz_u64_t)sz_overlap_modulus_k;
-            sz_u64_t const residue = prior + (sz_u64_t)sz_overlap_modulus_k - shifted;
-            matches[index] += (sz_u32_t)sz_overlap_simt_btree_probe_(
-                btree, (sz_u32_t)(residue % (sz_u64_t)sz_overlap_modulus_k));
+            if (!width) continue;
+            sz_u64_t const outgoing = ending > width ? walk[ending - width - 1] : 0;
+            sz_u64_t const rolled = (sz_u64_t)hashes[index] * 256 + incoming + (sz_u64_t)sz_overlap_modulus_k * 256 -
+                                    outgoing * engine->powers[index];
+            hashes[index] = (sz_u32_t)(rolled % (sz_u64_t)sz_overlap_modulus_k);
+            if (ending <= warm_bytes || width > ending) continue;
+            matches[index] += (sz_u32_t)sz_overlap_simt_btree_probe_(btree, hashes[index]);
         }
     }
+#pragma unroll
+    for (sz_size_t index = 0; index != sz_overlap_simt_widths_max_k; ++index)
+        if (index < widths_count && matches[index]) atomicAdd(counts + index, matches[index]);
+}
 
-    for (sz_size_t index = 0; index != engine->widths_count; ++index) {
-        sz_size_t const width = engine->widths[index];
-        sz_bool_t const scored = width && width <= query_length && width <= length ? sz_true_k : sz_false_k;
-        candidate_scores[index] = scored
-                                      ? sz_overlap_share_(matches[index], length - width + 1, query_length - width + 1)
-                                      : 0.0f;
+/** Index of the last entry at or below @p value in an ascending array; zero when none is. */
+STRINGZILLA_DEVICE sz_size_t sz_overlap_simt_last_not_above_(sz_u32_t const *ascending, sz_size_t count,
+                                                             sz_size_t value) {
+    sz_size_t low = 0, high = count;
+    while (low + 1 < high) {
+        sz_size_t const middle = low + (high - low) / 2;
+        if (ascending[middle] <= value) low = middle;
+        else high = middle;
     }
+    return low;
 }
 
 /**
- *  @brief One block row per prepared query, one thread per candidate, the tree staged when the
- *      launch asked for it.
+ *  @brief Cuts one block's tile of candidates into chunks of about equal bytes, a share per thread,
+ *      returning the bytes a chunk takes and leaving each candidate's first in @p chunk_offsets.
  *
- *  No thread leaves the query loop early, because the staging barriers are collective: a candidate
- *  past the batch skips its sweep rather than returning, so every thread of the block reaches
- *  every @c __syncthreads.
+ *  A thread per candidate costs a warp its longest one, and a single long candidate pins a single
+ *  thread. Cutting the tile's bytes evenly across the block's threads instead bounds a thread's
+ *  work by one share, however the lengths are spread, and a long candidate is split across as many
+ *  threads as it holds shares.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_overlap_simt_tile_chunks_(sz_sequence_t const *candidates, sz_size_t tile_first,
+                                                          sz_size_t tile_count, sz_size_t warm_up,
+                                                          unsigned long long *tile_bytes, sz_u32_t *chunk_offsets) {
+    sz_size_t mine = 0, candidate;
+    if (threadIdx.x == 0) *tile_bytes = 0;
+    __syncthreads();
+    for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x)
+        mine += candidates->get_length(candidates->handle, tile_first + candidate);
+    if (mine) atomicAdd(tile_bytes, (unsigned long long)mine);
+    __syncthreads();
+
+    // Never so narrow that priming a chunk costs more than a quarter of walking it.
+    sz_size_t const chunk_bytes = sz_max_of_two(sz_size_divide_round_up((sz_size_t)*tile_bytes, blockDim.x),
+                                                4 * sz_max_of_two(warm_up, (sz_size_t)1));
+    for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x)
+        chunk_offsets[candidate] = (sz_u32_t)sz_size_divide_round_up(
+            candidates->get_length(candidates->handle, tile_first + candidate), chunk_bytes);
+    __syncthreads();
+
+    // One warp scans the tile's chunk counts, each lane a run of them, so the scan is two passes
+    // and a shuffle ladder rather than a block-wide collective.
+    if (threadIdx.x < 32) {
+        unsigned const lane = threadIdx.x;
+        sz_size_t const run = sz_size_divide_round_up(tile_count + 1, 32);
+        sz_size_t const first = sz_min_of_two(lane * run, tile_count + 1),
+                        last = sz_min_of_two(first + run, tile_count + 1);
+        sz_u32_t total = 0, index;
+        for (index = first; index != last; ++index) total += index < tile_count ? chunk_offsets[index] : 0;
+        sz_u32_t inclusive = total;
+#pragma unroll
+        for (unsigned offset = 1; offset != 32; offset <<= 1) {
+            sz_u32_t const below = sz_shuffle_up_simt_(inclusive, offset);
+            if (lane >= offset) inclusive += below;
+        }
+        sz_u32_t running = inclusive - total;
+        for (index = first; index != last; ++index) {
+            sz_u32_t const own = index < tile_count ? chunk_offsets[index] : 0;
+            chunk_offsets[index] = running, running += own;
+        }
+    }
+    __syncthreads();
+    return chunk_bytes;
+}
+
+/**
+ *  @brief One block per tile of candidates and per prepared query, the tile's bytes cut into chunks
+ *      its threads share, the tree staged when the launch asked for it.
+ *
+ *  No thread leaves the query loop early, because the barriers are collective: the staging, the
+ *  counts zeroed before the chunks add to them, and the scores read off them after.
+ *
+ *  Dynamic shared memory holds the staged tree, then each candidate's count per width, then each
+ *  candidate's first chunk.
  */
 static __global__ void sz_overlap_simt_scores_kernel_(sz_overlap_engine_t engine, sz_sequence_t candidates,
                                                       sz_f32_t *scores, sz_size_t scores_query_stride,
                                                       sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
-    extern __shared__ sz_u32_t staged_nodes_[];
-    sz_size_t const candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    extern __shared__ sz_u32_t sz_overlap_simt_shared_[];
+    __shared__ unsigned long long tile_bytes;
+    __shared__ sz_tile_queue_t queue;
+    sz_size_t const widths_count = engine.widths_count;
+    sz_u32_t *const staged_nodes = sz_overlap_simt_shared_;
+    sz_u32_t *const counts = staged_nodes + sz_size_divide_round_up(staged_nodes_count, 4) * 4;
+    sz_u32_t *const chunk_offsets = counts + (sz_size_t)blockDim.x * widths_count;
+    sz_size_t warm_up = 0, staged_query = STRINGZILLA_SIZE_MAX, chunk_bytes = 0, slot, chunk, candidate;
+    sz_u32_t tile_x = blockIdx.x, tile_y = blockIdx.y, laid_x = 0xFFFFFFFFu;
+    for (slot = 0; slot != widths_count; ++slot) warm_up = sz_max_of_two(warm_up, (sz_size_t)engine.widths[slot]);
+    warm_up = warm_up ? warm_up - 1 : 0;
+    sz_tile_queue_open_simt_(&queue, 1, gridDim.x, 0);
 
-    for (sz_size_t query = blockIdx.y; query < engine.count; query += gridDim.y) {
-        sz_overlap_btree_t btree = sz_overlap_engine_row_(&engine, query);
-        if (staged_nodes_count) {
-            sz_size_t const entries = engine.nodes_offsets[query + 1] - engine.nodes_offsets[query];
-            for (sz_size_t entry = threadIdx.x; entry < entries; entry += blockDim.x)
-                staged_nodes_[entry] = btree.nodes[entry];
-            __syncthreads();
-            btree.nodes = staged_nodes_;
+    // A tile taken over from another block of the same grid keeps the chunks or the tree already
+    // laid out whenever it shares the candidates or the query.
+    do {
+        sz_size_t const tile_first = (sz_size_t)tile_x * blockDim.x;
+        sz_size_t const tile_count = sz_min_of_two((sz_size_t)blockDim.x, candidates.count - tile_first);
+        if (tile_x != laid_x) {
+            chunk_bytes = sz_overlap_simt_tile_chunks_(&candidates, tile_first, tile_count, warm_up, &tile_bytes,
+                                                       chunk_offsets);
+            laid_x = tile_x;
         }
-        if (candidate < candidates.count)
-            sz_overlap_simt_sweep_(&engine, &btree, query, &candidates, candidate, scores, scores_query_stride,
-                                   scores_candidate_stride);
-        if (staged_nodes_count) __syncthreads();
-    }
+        sz_size_t const chunks = chunk_offsets[tile_count];
+
+        for (sz_size_t query = tile_y; query < engine.count; query += gridDim.y) {
+            sz_overlap_btree_t btree = sz_overlap_engine_row_(&engine, query);
+            sz_size_t const query_length = engine.lengths[query];
+            if (staged_nodes_count && query != staged_query) {
+                sz_size_t const entries = engine.nodes_offsets[query + 1] - engine.nodes_offsets[query];
+                for (sz_size_t entry = threadIdx.x; entry < entries; entry += blockDim.x)
+                    staged_nodes[entry] = btree.nodes[entry];
+                staged_query = query;
+            }
+            if (staged_nodes_count) btree.nodes = staged_nodes;
+            for (slot = threadIdx.x; slot < tile_count * widths_count; slot += blockDim.x) counts[slot] = 0;
+            __syncthreads();
+
+            for (chunk = threadIdx.x; chunk < chunks; chunk += blockDim.x) {
+                candidate = sz_overlap_simt_last_not_above_(chunk_offsets, tile_count, chunk);
+                sz_overlap_simt_chunk_(&engine, &btree, &candidates, tile_first + candidate,
+                                       (chunk - chunk_offsets[candidate]) * chunk_bytes, chunk_bytes, warm_up,
+                                       counts + candidate * widths_count);
+            }
+            __syncthreads();
+
+            for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x) {
+                sz_size_t const length = candidates.get_length(candidates.handle, tile_first + candidate);
+                sz_f32_t *const candidate_scores = scores + query * scores_query_stride +
+                                                   (tile_first + candidate) * scores_candidate_stride;
+                for (slot = 0; slot != widths_count; ++slot) {
+                    sz_size_t const width = engine.widths[slot];
+                    sz_bool_t const scored = width && width <= query_length && width <= length ? sz_true_k : sz_false_k;
+                    candidate_scores[slot] = scored ? sz_overlap_share_(counts[candidate * widths_count + slot],
+                                                                        length - width + 1, query_length - width + 1)
+                                                    : 0.0f;
+                }
+            }
+            // The next query restages the tree and rezeroes the counts these reads still hold.
+            __syncthreads();
+        }
+    } while (sz_tile_queue_next_simt_(&queue, &tile_x, &tile_y));
+}
+
+/** Dynamic shared memory one block of @p threads takes: the staged tree, rounded up to a vector,
+ *  then a count per width and a first chunk per candidate of its tile, and the tile's total. */
+STRINGZILLA_INLINE sz_size_t sz_overlap_simt_shared_bytes_(sz_size_t staged_nodes_count, sz_size_t threads,
+                                                           sz_size_t widths_count) {
+    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 1) + 1) * sizeof(sz_u32_t);
 }
 
 /** Prepares the forest on the device the caller already made current, which is every step of
@@ -183,7 +317,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_simt_(sz_overlap_engine_t 
                                                             sz_size_t const *window_widths,
                                                             sz_size_t window_widths_count, sz_size_t ordinal,
                                                             sz_memory_allocator_t *allocator) {
-    if (!sz_cuda_multiprocessors_()) return sz_missing_gpu_k;
+    if (!sz_device_multiprocessors_()) return sz_missing_gpu_k;
     if (!window_widths_count || window_widths_count > sz_overlap_simt_widths_max_k) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != window_widths_count; ++index)
         if (window_widths[index] > sz_overlap_simt_widest_window_k) return sz_unexpected_dimensions_k;
@@ -245,14 +379,20 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_simt_(sz_overlap_engine_t 
     host.free(chain, chain_bytes, host.handle);
 
     // What the bound device will hand one block, not what the part this was tuned on would have. Every block
-    // stages one tree, so the widest of them is what the launch has to fit and what the occupancy walk is told.
+    // stages one tree, so the widest of them is what the launch has to fit and what the occupancy
+    // walk is told, beside the counts of the widest tile the walk may pick.
     sz_overlap_simt_geometry_t *const geometry = (sz_overlap_simt_geometry_t *)sz_overlap_engine_head_(engine);
+    sz_size_t const shared_ceiling = sz_device_shared_bytes_per_block_();
     geometry->staged_nodes_count = 0;
-    if (widest_nodes * sizeof(sz_u32_t) * sz_overlap_simt_shared_tree_share_k <= sz_cuda_shared_bytes_per_block_())
+    if (widest_nodes * sizeof(sz_u32_t) * sz_overlap_simt_shared_tree_share_k <= shared_ceiling &&
+        sz_overlap_simt_shared_bytes_(widest_nodes, sz_overlap_simt_candidates_per_block_k, engine->widths_count) <=
+            shared_ceiling)
         geometry->staged_nodes_count = widest_nodes;
-    geometry->candidates_per_block = sz_cuda_block_size_((void const *)sz_overlap_simt_scores_kernel_,
-                                                         geometry->staged_nodes_count * sizeof(sz_u32_t),
-                                                         STRINGZILLA_SIZE_MAX, sz_overlap_simt_candidates_per_block_k);
+    geometry->candidates_per_block = sz_device_block_size_(
+        (void const *)sz_overlap_simt_scores_kernel_,
+        sz_overlap_simt_shared_bytes_(geometry->staged_nodes_count, sz_overlap_simt_candidates_per_block_k,
+                                      engine->widths_count),
+        sz_overlap_simt_candidates_per_block_k, sz_overlap_simt_candidates_per_block_k);
 
     engine->capability = STRINGZILLA_ARCH_ROCM_ ? sz_cap_rocm_k : sz_cap_cuda_k, engine->ordinal = ordinal;
     return sz_success_k;
@@ -280,7 +420,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_simt_(sz_overlap_engine_t 
  *  @sa sz_overlap_engine_init
  *
  *  A window count is bad when zero or above @ref sz_overlap_simt_widths_max_k, and a width when it
- *  is past @ref sz_overlap_simt_widest_window_k, the per-thread ring's compile-time bound.
+ *  is past @ref sz_overlap_simt_widest_window_k, which bounds the bytes a chunk re-walks to start.
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_simt_scoped_(sz_overlap_engine_t *engine,
                                                                    sz_sequence_t const *queries,
@@ -290,10 +430,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_simt_scoped_(sz_overlap_en
                                                                    sz_memory_allocator_t *allocator, void *stream) {
     int caller = 0;
     sz_unused_(candidates_budget);
-    sz_status_t status = sz_cuda_device_enter_(ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_overlap_engine_init_simt_(engine, queries, window_widths, window_widths_count, ordinal, allocator);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -318,7 +458,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_simt_(sz_overlap_engine_t *engi
     sz_size_t const rows = engine->count < sz_overlap_simt_queries_per_grid_k ? engine->count
                                                                               : sz_overlap_simt_queries_per_grid_k;
     sz_size_t staged_nodes_count = geometry->staged_nodes_count;
-    sz_size_t const staged_bytes = staged_nodes_count * sizeof(sz_u32_t);
+    sz_size_t const shared_bytes = sz_overlap_simt_shared_bytes_(staged_nodes_count, per_block, engine->widths_count);
 
     // The engine travels by value with its host-only members cleared: an allocator's function pointers would ride
     // into constant memory on every launch and no kernel can call them.
@@ -336,7 +476,8 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_simt_(sz_overlap_engine_t *engi
     void *arguments[6];
     arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &scores;
     arguments[3] = &scores_query_stride, arguments[4] = &scores_candidate_stride, arguments[5] = &staged_nodes_count;
-    return sz_cuda_launch_((void const *)sz_overlap_simt_scores_kernel_, grid, block, arguments, staged_bytes, stream);
+    return sz_device_launch_((void const *)sz_overlap_simt_scores_kernel_, grid, block, arguments, shared_bytes,
+                             stream);
 }
 
 /**
@@ -356,10 +497,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_simt_scoped_(sz_overlap_engine_
                                                               sz_size_t scores_query_stride,
                                                               sz_size_t scores_candidate_stride, void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 

@@ -2,9 +2,9 @@
  *  @file include/stringzilla/levenshtein/simt.cuh
  *  @author Ash Vardanian
  *  @date September 6, 2023
- *  @brief CUDA backend for Levenshtein distances: one candidate per thread, streaming Myers'
- *      bit-parallel recurrence against a batch of queries prepared once into match masks the
- *      whole grid shares.
+ *  @brief CUDA backend for Levenshtein distances: a candidate per thread or per warp at a time,
+ *      streaming Myers' bit-parallel recurrence against a batch of queries prepared once into match
+ *      masks the whole grid shares.
  *
  *  The step is the serial tier's, reached from the device through `--expt-relaxed-constexpr`, so
  *  the distances are the same integers rather than merely close ones. Myers is add-with-carry and
@@ -18,6 +18,12 @@
  *  live in the thread's own registers or local memory, @c words of them, while the match masks are
  *  read-only and shared: every thread indexes the same @c classes × stride plane by the class of
  *  the byte it is stepping, so the rows stay hot in cache instead of being rebuilt per candidate.
+ *
+ *  A block owns a tile of candidates rather than one each per thread, and a thread or warp done
+ *  with one takes the next one of the tile, so lengths that differ by orders of magnitude cost a
+ *  warp about their sum over its lanes rather than thirty-two times the longest. On Blackwell a
+ *  block done with its tile takes over a block not yet started, the grid is as wide as the batch,
+ *  and a tile holds one round; elsewhere it holds several. Neither keeps state on the device.
  *
  *  A batch is bucketed by rung key at @ref sz_levenshtein_engine_init_simt_scoped_, so one launch
  *  carries only queries that share an entry point, and the occupancy walk each of those entry
@@ -73,13 +79,18 @@ enum { sz_levenshtein_simt_candidates_per_block_max_k = 256 };
  *  the same kernel. */
 enum { sz_levenshtein_simt_grid_rows_max_k = 65535 };
 
+/** Rounds of candidates one block's tile holds where its blocks cannot take over unstarted ones.
+ *  Measured on one wave of XLSum lines, four rounds at a quarter of the blocks beat one, two and
+ *  eight, the balance being worth more than the residency it costs. */
+enum { sz_levenshtein_simt_tile_rounds_k = 4 };
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- *  @brief One candidate's Myers sweep at a compile-time @p words, which is what keeps the
- *      verticals in registers.
+ *  @brief One block's tile of candidates, Myers-swept at a compile-time @p words, which is what
+ *      keeps the verticals in registers.
  *
  *  A word count the compiler cannot see makes @c verticals a dynamically indexed array, and the
  *  only place it can live is local memory - a 256-byte stack frame and four local accesses per
@@ -87,43 +98,75 @@ extern "C" {
  *  from entry points that each pass a literal, the same body is worth 2.2x at a one-word query and
  *  3.3x at sixteen.
  *
+ *  A thread draws candidates from its block's queue one after another, and the sweep is one flat
+ *  loop of eight steps per turn, which is where a thread past its text draws the next one. Nested
+ *  loops would hold every lane at the inner loop's end until the warp's longest candidate is done.
+ *
  *  @param[in] order The launch's own slice of the batch's bucketing, one query index per
  *      @c blockIdx.y row.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_simt_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
                                                    sz_sequence_t candidates, sz_size_t *distances,
                                                    sz_size_t distances_stride, sz_size_t words) {
-    sz_size_t const candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (candidate >= candidates.count) return;
+    __shared__ sz_tile_queue_t queue;
+    sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
+    sz_size_t candidate;
+    sz_u32_t row_index, drawn_row;
+    sz_tile_queue_open_simt_(&queue, tile_size, candidates.count, blockDim.x);
+    if (!sz_tile_queue_first_simt_(&queue, tile_size, candidates.count, threadIdx.x, &row_index, &candidate)) return;
 
-    sz_size_t const query_index = order[blockIdx.y];
-    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
-    sz_size_t *const row = distances + query_index * distances_stride;
-    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
-    sz_u8_t const *const byte_to_class = query.byte_to_class;
-
+    sz_size_t query_index = order[row_index];
+    sz_levenshtein_query_t query = sz_levenshtein_engine_row_(&engine, query_index);
+    sz_size_t *row = distances + query_index * distances_stride;
     sz_levenshtein_u64x1_state_serial_t state;
     sz_levenshtein_u64x1_vertical_serial_t verticals[sz_levenshtein_simt_thread_words_max_k];
     sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
 
     // One byte per step is one uncoalesced sector per step, and at a one-word query that load is most of the
-    // round. Eight bytes arrive in one, so the cost amortizes over eight steps; the head walks to an aligned
-    // boundary and the tail finishes whatever the last chunk leaves.
-    sz_size_t position = 0;
-    sz_size_t const head = (sz_size_t)(-(sz_ssize_t)(sz_size_t)text) & 7;
-    sz_size_t const aligned_head = head < length ? head : length;
-    for (; position != aligned_head; ++position)
-        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, byte_to_class[(sz_u8_t)text[position]]);
-    for (; position + 8 <= length; position += 8) {
-        sz_u64_t const octet = *(sz_u64_t const *)(text + position);
-        for (sz_size_t byte = 0; byte != 8; ++byte)
+    // round. A text's eight bytes span two aligned words, and the second is read only once it holds
+    // a byte of the text: an aligned word that holds one lies in a page the device may read all
+    // eight bytes of.
+    sz_cptr_t text = candidates.get_start(candidates.handle, candidate);
+    sz_size_t left = candidates.get_length(candidates.handle, candidate);
+    sz_size_t *slot_out = row + candidate;
+    sz_u32_t shift = (sz_u32_t)((sz_size_t)text & 7) * 8;
+    sz_u64_t const *cursor = (sz_u64_t const *)(text - shift / 8);
+    sz_u64_t word = left ? cursor[0] : 0;
+    for (;;) {
+        if (!left) {
+            *slot_out = sz_levenshtein_u64x1_score_serial(&state, candidate);
+            if (!sz_tile_queue_draw_simt_(&queue, tile_size, candidates.count, &drawn_row, &candidate)) break;
+            if (drawn_row != row_index) {
+                row_index = drawn_row, query_index = order[row_index];
+                query = sz_levenshtein_engine_row_(&engine, query_index);
+                row = distances + query_index * distances_stride;
+            }
+            text = candidates.get_start(candidates.handle, candidate);
+            left = candidates.get_length(candidates.handle, candidate);
+            slot_out = row + candidate;
+            shift = (sz_u32_t)((sz_size_t)text & 7) * 8;
+            cursor = (sz_u64_t const *)(text - shift / 8);
+            word = left ? cursor[0] : 0;
+            sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
+            continue;
+        }
+        sz_u64_t const following = left + shift / 8 > 8 ? cursor[1] : 0;
+        sz_u64_t const octet = shift ? (word >> shift) | (following << (64 - shift)) : word;
+        word = following, ++cursor;
+        // A whole octet steps unguarded; only the last one of a text tests its slots.
+        if (left >= 8) {
+#pragma unroll
+            for (sz_size_t slot = 0; slot != 8; ++slot)
+                sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query,
+                                                 query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))]);
+            left -= 8;
+            continue;
+        }
+        for (sz_size_t slot = 0; slot != left; ++slot)
             sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query,
-                                             byte_to_class[(sz_u8_t)(octet >> (byte * 8))]);
+                                             query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))]);
+        left = 0;
     }
-    for (; position != length; ++position)
-        sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, byte_to_class[(sz_u8_t)text[position]]);
-    row[candidate] = sz_levenshtein_u64x1_score_serial(&state, candidate);
 }
 
 /*  One entry point per word count, each passing its own literal, so every query length gets its
@@ -250,8 +293,8 @@ static void const *const sz_levenshtein_simt_entry_points_[sz_levenshtein_simt_t
  *  it go to the wider block.
  */
 static sz_size_t sz_levenshtein_simt_per_block_(void const *entry_point) {
-    return sz_cuda_block_size_(entry_point, 0, sz_levenshtein_simt_candidates_per_block_max_k,
-                               sz_levenshtein_simt_candidates_per_block_k);
+    return sz_device_block_size_(entry_point, 0, sz_levenshtein_simt_candidates_per_block_max_k,
+                                 sz_levenshtein_simt_candidates_per_block_k);
 }
 
 #pragma endregion Myers Threaded
@@ -264,7 +307,7 @@ static sz_size_t sz_levenshtein_simt_per_block_(void const *entry_point) {
  *
  *  A lane owns @p words_per_lane consecutive words and advances the character @p words_per_lane
  *  steps behind the lane below it, so the carry out of the lane below's top word was finalized one
- *  step earlier and arrives through a single @c sz_shuffle_up_. Unskewed, that same carry is a
+ *  step earlier and arrives through a single @c sz_shuffle_up_simt_. Unskewed, that same carry is a
  *  warp-wide prefix, and the lookahead resolving it costs a dozen shuffles per character against
  *  roughly twenty useful word operations. The skew costs a lane of fill and a lane of drain, so a
  *  warp runs @c length+live_lanes-1 steps for a candidate of @c length characters, and the
@@ -277,19 +320,13 @@ static sz_size_t sz_levenshtein_simt_per_block_(void const *entry_point) {
  *  @param[in] words_per_lane Exactly @c ceil(query_words/32); a literal, which keeps the
  *      verticals in registers.
  */
-STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                        sz_sequence_t candidates, sz_size_t *distances,
-                                                        sz_size_t distances_stride, sz_size_t words_per_lane) {
+STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_candidate_(sz_levenshtein_query_t const *query_pointer,
+                                                            sz_sequence_t const *candidates, sz_size_t candidate,
+                                                            sz_size_t *row, sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
-    sz_size_t const candidate = (sz_size_t)blockIdx.x * (blockDim.x >> 5) + (threadIdx.x >> 5);
-    // Warp uniform, so the shuffles below still see a whole warp.
-    if (candidate >= candidates.count) return;
-
-    sz_size_t const query_index = order[blockIdx.y];
-    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
-    sz_size_t *const row = distances + query_index * distances_stride;
-    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
+    sz_levenshtein_query_t const query = *query_pointer;
+    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
+    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const live_lanes = sz_size_divide_round_up(words, words_per_lane);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
@@ -306,7 +343,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_(sz_levenshtein_engine_t 
     unsigned carry = 0;
     sz_size_t const steps = length + live_lanes - 1;
     for (sz_size_t step = 0; step != steps; ++step) {
-        unsigned const received = sz_shuffle_up_(carry, 1);
+        unsigned const received = sz_shuffle_up_simt_(carry, 1);
         sz_ssize_t const position = (sz_ssize_t)step - (sz_ssize_t)lane;
         if (lane >= live_lanes || position < 0 || position >= (sz_ssize_t)length) continue;
 
@@ -348,8 +385,55 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_(sz_levenshtein_engine_t 
         deltas += __popcll(positive[word] & live) - __popcll(negative[word] & live);
     }
 #pragma unroll
-    for (unsigned offset = 16; offset != 0; offset >>= 1) deltas += sz_shuffle_down_(deltas, offset);
+    for (unsigned offset = 16; offset != 0; offset >>= 1) deltas += sz_shuffle_down_simt_(deltas, offset);
     if (lane == 0) row[candidate] = (sz_size_t)((sz_ssize_t)length + deltas);
+}
+
+/** Lane zero's draw from the block's queue, which every lane of the warp then holds. */
+STRINGZILLA_DEVICE int sz_levenshtein_simt_warp_draw_(sz_tile_queue_t *queue, sz_size_t tile_size, sz_size_t count,
+                                                      sz_u32_t *row_index, sz_size_t *candidate) {
+    int drawn = 0;
+    sz_u32_t drawn_row = 0;
+    sz_size_t drawn_candidate = 0;
+    if ((threadIdx.x & 31u) == 0)
+        drawn = sz_tile_queue_draw_simt_(queue, tile_size, count, &drawn_row, &drawn_candidate);
+    *row_index = sz_lanes_broadcast_simt_(drawn_row);
+    *candidate = (sz_size_t)sz_lanes_broadcast_simt_((sz_u32_t)drawn_candidate) |
+                 ((sz_size_t)sz_lanes_broadcast_simt_((sz_u32_t)(drawn_candidate >> 32)) << 32);
+    return (int)sz_lanes_broadcast_simt_((sz_u32_t)drawn);
+}
+
+/** Opens the block's queue, a warp to a seat, and takes each warp's first candidate. */
+STRINGZILLA_DEVICE int sz_levenshtein_simt_warp_first_(sz_tile_queue_t *queue, sz_size_t tile_size, sz_size_t count,
+                                                       sz_u32_t *row_index, sz_size_t *candidate) {
+    int drawn = 0;
+    sz_u32_t drawn_row = 0;
+    sz_size_t drawn_candidate = 0;
+    sz_tile_queue_open_simt_(queue, tile_size, count, blockDim.x >> 5);
+    if ((threadIdx.x & 31u) == 0)
+        drawn = sz_tile_queue_first_simt_(queue, tile_size, count, threadIdx.x >> 5, &drawn_row, &drawn_candidate);
+    *row_index = sz_lanes_broadcast_simt_(drawn_row);
+    *candidate = (sz_size_t)sz_lanes_broadcast_simt_((sz_u32_t)drawn_candidate) |
+                 ((sz_size_t)sz_lanes_broadcast_simt_((sz_u32_t)(drawn_candidate >> 32)) << 32);
+    return (int)sz_lanes_broadcast_simt_((sz_u32_t)drawn);
+}
+
+/** One block's tile of candidates, a whole warp to each, a warp done with one taking the next. */
+STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                        sz_sequence_t candidates, sz_size_t *distances,
+                                                        sz_size_t distances_stride, sz_size_t words_per_lane) {
+    __shared__ sz_tile_queue_t queue;
+    sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
+    sz_size_t candidate;
+    sz_u32_t row_index;
+    int drawn = sz_levenshtein_simt_warp_first_(&queue, tile_size, candidates.count, &row_index, &candidate);
+    // Warp uniform, so the shuffles inside still see a whole warp.
+    for (; drawn; drawn = sz_levenshtein_simt_warp_draw_(&queue, tile_size, candidates.count, &row_index, &candidate)) {
+        sz_size_t const query_index = order[row_index];
+        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
+        sz_levenshtein_simt_warp_candidate_(&query, &candidates, candidate, distances + query_index * distances_stride,
+                                            words_per_lane);
+    }
 }
 
 /*  One entry point per words-per-lane, each passing its own literal, for the reason the threaded
@@ -493,65 +577,78 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_lanes_sweep_(sz_levenshtein_engine_t
     sz_size_t const query_index = order[blockIdx.y];
     sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
     sz_size_t *const row = distances + query_index * distances_stride;
+    sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
+    sz_size_t const tile_first = (sz_size_t)blockIdx.x * tile_size;
+    sz_size_t const tile_end = sz_min_of_two(tile_first + tile_size, candidates.count);
 
     // At these query lengths a class's whole mask fits one lane, so the class map and the mask rows collapse
     // into one table the block builds once and every lane of every thread in it reads. Folding the two lookups
     // into one is worth 1.22x on XLSum words and 1.73x where the candidates are long enough to be step bound.
     __shared__ sz_u32_t byte_to_mask[sz_levenshtein_byte_classes_k];
+    __shared__ sz_u32_t taken;
     for (sz_size_t entry = threadIdx.x; entry < sz_levenshtein_byte_classes_k; entry += blockDim.x)
         byte_to_mask[entry] = (sz_u32_t)query.masks[(sz_size_t)query.byte_to_class[entry] * query.stride];
+    if (threadIdx.x == 0) taken = 0;
     __syncthreads();
 
-    // A block takes one contiguous range, and a lane strides through it by the block's width, so the thirty-two
-    // views one instruction reads are thirty-two consecutive ones and the texts behind them lie together too.
-    sz_size_t const lane_stride = blockDim.x;
-    sz_size_t const first_candidate = (sz_size_t)blockIdx.x * blockDim.x * lanes + threadIdx.x;
-    if (first_candidate >= candidates.count) return;
-
-    // A lane past the batch repeats the first candidate's text, whose address is one the device may read,
-    // and takes length zero, which retires it before the first step.
-    sz_cptr_t texts[sz_levenshtein_simt_lanes_per_thread_max_k];
-    sz_size_t lengths[sz_levenshtein_simt_lanes_per_thread_max_k];
-    sz_u64_t words[sz_levenshtein_simt_lanes_per_thread_max_k];
-    sz_u64_t octets[sz_levenshtein_simt_lanes_per_thread_max_k];
-    sz_u32_t unread = 0;
-#pragma unroll
-    for (sz_size_t lane = 0; lane != lanes; ++lane) {
-        sz_size_t const candidate = first_candidate + lane * lane_stride;
-        sz_size_t const index = candidate < candidates.count ? candidate : first_candidate;
-        sz_size_t const length = candidate < candidates.count ? candidates.get_length(candidates.handle, index) : 0;
-        sz_cptr_t const text = candidates.get_start(candidates.handle, index);
-        sz_size_t const head = (sz_size_t)text & 7;
-        sz_u64_t const *const aligned = (sz_u64_t const *)(text - head);
-        texts[lane] = text, lengths[lane] = length, octets[lane] = 0;
-        words[lane] = length ? aligned[0] : 0;
-        if (length) unread |= (sz_u32_t)1 << lane;
-        else if (candidate < candidates.count) row[candidate] = query.length;
-    }
-
+    // A lane done with its text takes the next candidate of the block's tile at the following
+    // refill, its bits reset to a fresh column, so a thread's lanes stay busy however their lengths
+    // differ. A lane's cursor is the aligned word its next eight bytes start in, and its count is
+    // the bytes it has left.
+    sz_u64_t const *cursors[sz_levenshtein_simt_lanes_per_thread_max_k];
+    sz_size_t lefts[sz_levenshtein_simt_lanes_per_thread_max_k];
+    sz_u64_t words[sz_levenshtein_simt_lanes_per_thread_max_k], octets[sz_levenshtein_simt_lanes_per_thread_max_k];
+    sz_u32_t shifts[sz_levenshtein_simt_lanes_per_thread_max_k], held[sz_levenshtein_simt_lanes_per_thread_max_k];
+    sz_u32_t const lane_mask = lane_bits == 8 ? 0xFFu : 0xFFFFu;
     sz_u32_t const live = ((sz_u32_t)1 << query.length) - 1;
     sz_u32_t const lane_low_bits = lane_bits == 8 ? 0x01010101u : 0x00010001u;
     sz_u32_t const lane_high_bits = lane_bits == 8 ? 0x80808080u : 0x80008000u;
-    sz_u32_t positive = ~(sz_u32_t)0, negative = 0;
-    // The earliest position an unread lane's text ends at, so a step costs one compare rather than a rescan.
-    sz_size_t next_end = STRINGZILLA_SIZE_MAX;
+    sz_u32_t positive = ~(sz_u32_t)0, negative = 0, unread = 0, refill = ((sz_u32_t)1 << lanes) - 1;
 #pragma unroll
     for (sz_size_t lane = 0; lane != lanes; ++lane)
-        if (unread & ((sz_u32_t)1 << lane)) next_end = sz_min_of_two(next_end, lengths[lane]);
+        lefts[lane] = 0, shifts[lane] = 0, words[lane] = 0, octets[lane] = 0;
 
-    for (sz_size_t position = 0; unread != 0; position += sz_levenshtein_simt_bytes_per_refill_k) {
+    for (;;) {
+        if (refill) {
+#pragma unroll
+            for (sz_size_t lane = 0; lane != lanes; ++lane) {
+                if ((refill & ((sz_u32_t)1 << lane)) == 0) continue;
+                // An empty candidate's distance is the query's length, and it takes no lane at all.
+                for (;;) {
+                    sz_size_t const candidate = tile_first + atomicAdd(&taken, 1u);
+                    if (candidate >= tile_end) break;
+                    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
+                    if (!length) {
+                        row[candidate] = query.length;
+                        continue;
+                    }
+                    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
+                    sz_size_t const head = (sz_size_t)text & 7;
+                    cursors[lane] = (sz_u64_t const *)(text - head), shifts[lane] = (sz_u32_t)(head * 8);
+                    words[lane] = cursors[lane][0], lefts[lane] = length;
+                    held[lane] = (sz_u32_t)(candidate - tile_first), unread |= (sz_u32_t)1 << lane;
+                    positive |= lane_mask << (lane * lane_bits), negative &= ~(lane_mask << (lane * lane_bits));
+                    break;
+                }
+            }
+            refill = 0;
+            if (!unread) break;
+        }
+
         // A lane's next eight bytes span two aligned words, and the second is read only once it holds a byte
         // of the text: an aligned word that holds one lies in a page the device may read all eight bytes of.
+        // A lane holding no text steps whatever its last octet was, which no distance reads.
+        sz_u32_t ending = 0;
 #pragma unroll
         for (sz_size_t lane = 0; lane != lanes; ++lane) {
-            sz_size_t const head = (sz_size_t)texts[lane] & 7;
-            sz_u64_t const *const aligned = (sz_u64_t const *)(texts[lane] - head);
-            sz_size_t const shift = head * 8;
-            sz_u64_t const following = position + sz_levenshtein_simt_bytes_per_refill_k < head + lengths[lane]
-                                           ? aligned[position / sz_levenshtein_simt_bytes_per_refill_k + 1]
+            if ((unread & ((sz_u32_t)1 << lane)) == 0) continue;
+            sz_u64_t const following = lefts[lane] + shifts[lane] / 8 > sz_levenshtein_simt_bytes_per_refill_k
+                                           ? cursors[lane][1]
                                            : 0;
-            octets[lane] = shift ? (words[lane] >> shift) | (following << (64 - shift)) : words[lane];
-            words[lane] = following;
+            octets[lane] = shifts[lane] ? (words[lane] >> shifts[lane]) | (following << (64 - shifts[lane]))
+                                        : words[lane];
+            words[lane] = following, ++cursors[lane];
+            if (lefts[lane] <= sz_levenshtein_simt_bytes_per_refill_k) ending |= (sz_u32_t)1 << (lefts[lane] - 1);
         }
 #pragma unroll
         for (sz_size_t slot = 0; slot != sz_levenshtein_simt_bytes_per_refill_k; ++slot) {
@@ -562,21 +659,18 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_lanes_sweep_(sz_levenshtein_engine_t
                 equality |= byte_to_mask[byte] << (lane * lane_bits);
             }
             sz_levenshtein_simt_lanes_step_(&positive, &negative, equality, lane_low_bits, lane_high_bits);
-            if (position + slot + 1 != next_end) continue;
-            next_end = STRINGZILLA_SIZE_MAX;
+            if ((ending & ((sz_u32_t)1 << slot)) == 0) continue;
 #pragma unroll
             for (sz_size_t lane = 0; lane != lanes; ++lane) {
-                if ((unread & ((sz_u32_t)1 << lane)) == 0) continue;
-                if (lengths[lane] != position + slot + 1) {
-                    next_end = sz_min_of_two(next_end, lengths[lane]);
-                    continue;
-                }
-                row[first_candidate + lane * lane_stride] = sz_levenshtein_simt_lane_distance_(
-                    positive, negative, lane * lane_bits, live, lengths[lane]);
-                unread &= ~((sz_u32_t)1 << lane);
+                if ((unread & ((sz_u32_t)1 << lane)) == 0 || lefts[lane] != slot + 1) continue;
+                sz_size_t const candidate = tile_first + held[lane];
+                row[candidate] = sz_levenshtein_simt_lane_distance_(
+                    positive, negative, lane * lane_bits, live, candidates.get_length(candidates.handle, candidate));
+                unread &= ~((sz_u32_t)1 << lane), refill |= (sz_u32_t)1 << lane;
             }
-            if (unread == 0) break;
         }
+#pragma unroll
+        for (sz_size_t lane = 0; lane != lanes; ++lane) lefts[lane] -= sz_min_of_two(lefts[lane], (sz_size_t)8);
     }
 }
 
@@ -604,7 +698,7 @@ static sz_size_t sz_levenshtein_simt_lanes_per_thread_(sz_size_t length) {
  *  residency scales. @c STRINGZILLA_SIZE_MAX where the device cannot be asked, so the threaded rung
  *  keeps every batch. */
 static sz_size_t sz_levenshtein_simt_lanes_candidates_min_(void) {
-    sz_size_t const resident_threads = sz_cuda_multiprocessors_() * sz_cuda_threads_per_multiprocessor_();
+    sz_size_t const resident_threads = sz_device_multiprocessors_() * sz_device_threads_per_multiprocessor_();
     return resident_threads ? resident_threads * sz_levenshtein_simt_lanes_waves_min_k : STRINGZILLA_SIZE_MAX;
 }
 
@@ -613,38 +707,52 @@ static sz_size_t sz_levenshtein_simt_lanes_candidates_min_(void) {
 #pragma region Myers UTF 8
 
 /**
- *  @brief One candidate's Myers sweep over runes at a compile-time @p words, the byte sweep with
- *      a rune cursor.
+ *  @brief One block's tile of candidates, Myers-swept over runes at a compile-time @p words, the
+ *      byte sweep with a rune cursor.
  *
  *  The byte sweep's octet load has no counterpart here: a rune spans one to four bytes, so its
  *  width is known only once the lead byte is read, and the loop takes one rune per step. The class
  *  comes from the query's page table - two dependent loads, and no scratch of its own per candidate
  *  - rather than a byte map.
+ *
+ *  A thread past its text draws the next candidate inside one flat loop, as the byte sweep does.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_simt_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
                                                         sz_sequence_t candidates, sz_size_t *distances,
                                                         sz_size_t distances_stride, sz_size_t words) {
-    sz_size_t const query_index = order[blockIdx.y];
-    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
-    sz_size_t *const row = distances + query_index * distances_stride;
-    // The grid is what stays resident rather than what the corpus needs, so a block strides through many
-    // candidates and its launch and setup are paid once instead of once per candidate.
-    sz_size_t const grid_size = (sz_size_t)gridDim.x * blockDim.x;
-    for (sz_size_t candidate = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; candidate < candidates.count;
-         candidate += grid_size) {
-        sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
-        sz_size_t const length = candidates.get_length(candidates.handle, candidate);
+    __shared__ sz_tile_queue_t queue;
+    sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
+    sz_size_t candidate;
+    sz_u32_t row_index, drawn_row;
+    sz_tile_queue_open_simt_(&queue, tile_size, candidates.count, blockDim.x);
+    if (!sz_tile_queue_first_simt_(&queue, tile_size, candidates.count, threadIdx.x, &row_index, &candidate)) return;
 
-        sz_levenshtein_u64x1_state_serial_t state;
-        sz_levenshtein_u64x1_vertical_serial_t verticals[sz_levenshtein_simt_thread_words_max_k];
-        sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
-
-        sz_size_t position = 0;
-        while (position < length) {
+    sz_size_t query_index = order[row_index];
+    sz_levenshtein_query_t query = sz_levenshtein_engine_row_(&engine, query_index);
+    sz_size_t *row = distances + query_index * distances_stride;
+    sz_levenshtein_u64x1_state_serial_t state;
+    sz_levenshtein_u64x1_vertical_serial_t verticals[sz_levenshtein_simt_thread_words_max_k];
+    sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
+    sz_cptr_t text = candidates.get_start(candidates.handle, candidate);
+    sz_size_t length = candidates.get_length(candidates.handle, candidate);
+    sz_size_t position = 0;
+    for (;;) {
+        if (position < length) {
             sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
             sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, sz_levenshtein_utf8_class(&query, rune));
+            continue;
         }
         row[candidate] = sz_levenshtein_u64x1_score_serial(&state, candidate);
+        if (!sz_tile_queue_draw_simt_(&queue, tile_size, candidates.count, &drawn_row, &candidate)) break;
+        if (drawn_row != row_index) {
+            row_index = drawn_row, query_index = order[row_index];
+            query = sz_levenshtein_engine_row_(&engine, query_index);
+            row = distances + query_index * distances_stride;
+        }
+        text = candidates.get_start(candidates.handle, candidate);
+        length = candidates.get_length(candidates.handle, candidate);
+        position = 0;
+        sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
     }
 }
 
@@ -776,9 +884,9 @@ static void const *const sz_levenshtein_simt_entry_points_utf8_[sz_levenshtein_s
  *
  *  Runes are variable-width, so no lane can address the rune at @c step-lane without decoding
  *  everything below it - and nothing here wants the rune, only its class. Lane zero decodes one
- *  rune per step and hands its class up through a second @c sz_shuffle_up_, so the class walks one
- *  lane per step, which is the lag the skew already imposes; every rune is decoded once per
- *  candidate and its width is never inverted.
+ *  rune per step and hands its class up through a second @c sz_shuffle_up_simt_, so the class
+ *  walks one lane per step, which is the lag the skew already imposes; every rune is decoded once
+ *  per candidate and its width is never inverted.
  *
  *  The chain carries the class plus one, leaving zero to mark a step whose rune is past the
  *  candidate's end - the liveness the byte sweep reads off its own position instead, and what a
@@ -788,19 +896,13 @@ static void const *const sz_levenshtein_simt_entry_points_utf8_[sz_levenshtein_s
  *  @param[in] words_per_lane Exactly @c ceil(query_words/32); a literal, which keeps the
  *      verticals in registers.
  */
-STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
-                                                             sz_sequence_t candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride, sz_size_t words_per_lane) {
+STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_candidate_utf8_(sz_levenshtein_query_t const *query_pointer,
+                                                                 sz_sequence_t const *candidates, sz_size_t candidate,
+                                                                 sz_size_t *row, sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
-    sz_size_t const candidate = (sz_size_t)blockIdx.x * (blockDim.x >> 5) + (threadIdx.x >> 5);
-    // Warp uniform, so the shuffles below still see a whole warp.
-    if (candidate >= candidates.count) return;
-
-    sz_size_t const query_index = order[blockIdx.y];
-    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
-    sz_size_t *const row = distances + query_index * distances_stride;
-    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
+    sz_levenshtein_query_t const query = *query_pointer;
+    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
+    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const live_lanes = sz_size_divide_round_up(words, words_per_lane);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
@@ -823,11 +925,11 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_utf8_(sz_levenshtein_engi
             sz_rune_t const rune = sz_utf8_next_rune_(text, length, &cursor);
             decoded = sz_levenshtein_utf8_class(&query, rune) + 1, ++runes;
         }
-        sz_u32_t const inherited = sz_shuffle_up_(held, 1);
-        unsigned const received = sz_shuffle_up_(carry, 1);
+        sz_u32_t const inherited = sz_shuffle_up_simt_(held, 1);
+        unsigned const received = sz_shuffle_up_simt_(carry, 1);
         held = lane == 0 ? decoded : inherited;
         unsigned const live = held != 0 && lane < live_lanes;
-        running = (unsigned)sz_lanes_any_((int)live);
+        running = (unsigned)sz_lanes_any_simt_((int)live);
         if (!live) continue;
 
         sz_u64_t const *const masks = lane_masks + (sz_size_t)(held - 1) * query.stride;
@@ -867,8 +969,26 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_utf8_(sz_levenshtein_engi
         deltas += __popcll(positive[word] & live) - __popcll(negative[word] & live);
     }
 #pragma unroll
-    for (unsigned offset = 16; offset != 0; offset >>= 1) deltas += sz_shuffle_down_(deltas, offset);
+    for (unsigned offset = 16; offset != 0; offset >>= 1) deltas += sz_shuffle_down_simt_(deltas, offset);
     if (lane == 0) row[candidate] = (sz_size_t)((sz_ssize_t)runes + deltas);
+}
+
+/** One block's tile of rune candidates, a warp to each, a warp done with one taking the next. */
+STRINGZILLA_DEVICE void sz_levenshtein_simt_warp_sweep_utf8_(sz_levenshtein_engine_t engine, sz_u32_t const *order,
+                                                             sz_sequence_t candidates, sz_size_t *distances,
+                                                             sz_size_t distances_stride, sz_size_t words_per_lane) {
+    __shared__ sz_tile_queue_t queue;
+    sz_size_t const tile_size = sz_size_divide_round_up(candidates.count, gridDim.x);
+    sz_size_t candidate;
+    sz_u32_t row_index;
+    int drawn = sz_levenshtein_simt_warp_first_(&queue, tile_size, candidates.count, &row_index, &candidate);
+    // Warp uniform, so the shuffles inside still see a whole warp.
+    for (; drawn; drawn = sz_levenshtein_simt_warp_draw_(&queue, tile_size, candidates.count, &row_index, &candidate)) {
+        sz_size_t const query_index = order[row_index];
+        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(&engine, query_index);
+        sz_levenshtein_simt_warp_candidate_utf8_(&query, &candidates, candidate,
+                                                 distances + query_index * distances_stride, words_per_lane);
+    }
 }
 
 /*  One warped rune entry point per words-per-lane, each passing its own literal, for the reason the
@@ -948,6 +1068,9 @@ typedef struct sz_levenshtein_simt_head_t {
     /** Candidates before a narrow rung is launched, asked of the device once. */
     sz_size_t candidates_min;
 
+    /** Whether the wide rungs' blocks take over unstarted ones, so a tile holds one round. */
+    sz_bool_t steals;
+
     /** Threads the byte-lane and the short-lane entry points take. */
     sz_size_t narrow_per_block[2];
 
@@ -1026,6 +1149,7 @@ static void sz_levenshtein_simt_bind_head_(sz_levenshtein_engine_t *engine, sz_s
     // Every driver round trip a round would otherwise pay: the residency floor once, and one occupancy walk
     // per entry point the batch can reach, which the buckets fixed here and no later call can widen.
     head->candidates_min = sz_levenshtein_simt_lanes_candidates_min_();
+    head->steals = sz_device_kernel_steals_((void const *)sz_levenshtein_u64x1_distances_simt_w1_);
     head->narrow_per_block[0] = sz_levenshtein_simt_per_block_((void const *)sz_levenshtein_u8x4_distances_simt_);
     head->narrow_per_block[1] = sz_levenshtein_simt_per_block_((void const *)sz_levenshtein_u16x2_distances_simt_);
     for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket)
@@ -1110,9 +1234,9 @@ static sz_status_t sz_levenshtein_simt_build_masks_(sz_levenshtein_engine_t *eng
     }
 
     sz_size_t const masks_bytes = engine->masks_offsets[engine->count] * sizeof(sz_u64_t);
-    sz_status_t status = sz_cuda_memset_((void *)engine->masks, 0, masks_bytes, stream);
-    sz_cuda_prefetch_(engine->memory, engine->memory_bytes, stream);
-    sz_cuda_prefetch_(staged, staged_bytes, stream);
+    sz_status_t status = sz_device_memset_((void *)engine->masks, 0, masks_bytes, stream);
+    sz_device_prefetch_(engine->memory, engine->memory_bytes, stream);
+    sz_device_prefetch_(staged, staged_bytes, stream);
     for (sz_size_t first = 0; first < queries->count && status == sz_success_k;
          first += sz_levenshtein_simt_grid_rows_max_k) {
         sz_levenshtein_engine_t launch_engine = *engine;
@@ -1124,10 +1248,10 @@ static sz_status_t sz_levenshtein_simt_build_masks_(sz_levenshtein_engine_t *eng
         grid.x = 1, grid.z = 1;
         grid.y = (unsigned)sz_min_of_two(queries->count - first, (sz_size_t)sz_levenshtein_simt_grid_rows_max_k);
         block.x = sz_levenshtein_simt_masks_threads_k, block.y = 1, block.z = 1;
-        status = sz_cuda_launch_((void const *)sz_levenshtein_simt_masks_kernel_, grid, block, arguments, 0, stream);
+        status = sz_device_launch_((void const *)sz_levenshtein_simt_masks_kernel_, grid, block, arguments, 0, stream);
     }
     // The staging is the host's, so it outlives the builder only as long as the join below takes.
-    if (status == sz_success_k) status = sz_cuda_synchronize_(stream);
+    if (status == sz_success_k) status = sz_device_synchronize_(stream);
     engine->allocator.free(staged, staged_bytes, engine->allocator.handle);
     return status;
 }
@@ -1139,7 +1263,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_simt_(sz_levenshtein_e
                                                                 sz_levenshtein_symbol_t symbol, sz_size_t ordinal,
                                                                 sz_memory_allocator_t *allocator, void *stream) {
     sz_memory_allocator_t unified;
-    if (!sz_cuda_multiprocessors_()) return sz_missing_gpu_k;
+    if (!sz_device_multiprocessors_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
     else sz_memory_allocator_init_unified_(&unified, ordinal);
     if (queries->count == 0) return sz_unexpected_dimensions_k;
@@ -1170,7 +1294,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_simt_(sz_levenshtein_e
     // where a round may not, so the one crossing is a bulk migration rather than a fault per page.
     if (symbol == sz_levenshtein_runes_k) {
         sz_levenshtein_engine_fill_(engine, queries);
-        sz_cuda_prefetch_(engine->memory, engine->memory_bytes, stream);
+        sz_device_prefetch_(engine->memory, engine->memory_bytes, stream);
         return sz_success_k;
     }
     status = sz_levenshtein_simt_build_masks_(engine, queries, stream);
@@ -1184,10 +1308,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_simt_scoped_(sz_levens
                                                                        sz_size_t ordinal,
                                                                        sz_memory_allocator_t *allocator, void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_levenshtein_engine_init_simt_(engine, queries, symbol, ordinal, allocator, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1203,7 +1327,7 @@ static sz_status_t sz_levenshtein_simt_distances_(void const *entry_point, sz_si
     void *arguments[5];
     arguments[0] = &engine, arguments[1] = &order, arguments[2] = &candidates, arguments[3] = &distances;
     arguments[4] = &distances_stride;
-    return sz_cuda_launch_(entry_point, grid, block, arguments, 0, stream);
+    return sz_device_launch_(entry_point, grid, block, arguments, 0, stream);
 }
 
 /** Enqueues one round on the device the caller already made current, which is every step of
@@ -1233,17 +1357,22 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_simt_(sz_levenshtein_eng
                                      : sz_false_k;
         void const *entry_point = sz_levenshtein_simt_entry_point_(engine->symbol, bucket);
         sz_size_t per_block = head->per_block[bucket];
-        sz_size_t candidates_per_block = per_block;
+        // A block that takes over unstarted ones needs no more than one round of its own, and the
+        // grid is then as wide as the batch; elsewhere a tile holds several rounds for its block's
+        // threads to share.
+        sz_size_t const rounds = head->steals && !narrow ? 1 : sz_levenshtein_simt_tile_rounds_k;
+        sz_size_t candidates_per_block = per_block * rounds;
         if (narrow) {
             entry_point = bucket == 0 ? (void const *)sz_levenshtein_u8x4_distances_simt_
                                       : (void const *)sz_levenshtein_u16x2_distances_simt_;
             per_block = head->narrow_per_block[bucket];
-            candidates_per_block = per_block * sz_levenshtein_simt_lanes_per_thread_(
-                                                   bucket == 0 ? sz_levenshtein_simt_byte_lanes_symbols_max_k
-                                                               : sz_levenshtein_simt_short_lanes_symbols_max_k);
+            candidates_per_block = per_block * rounds *
+                                   sz_levenshtein_simt_lanes_per_thread_(
+                                       bucket == 0 ? sz_levenshtein_simt_byte_lanes_symbols_max_k
+                                                   : sz_levenshtein_simt_short_lanes_symbols_max_k);
         }
         else if (sz_levenshtein_simt_bucket_words_(bucket) >= sz_levenshtein_simt_warp_words_min_k)
-            candidates_per_block = per_block / sz_levenshtein_simt_warp_lanes_k;
+            candidates_per_block = per_block / sz_levenshtein_simt_warp_lanes_k * rounds;
         sz_size_t const blocks = sz_size_divide_round_up(candidates->count, candidates_per_block);
 
         for (sz_size_t row = first; row < last; row += sz_levenshtein_simt_grid_rows_max_k) {
@@ -1262,10 +1391,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_simt_scoped_(sz_levensht
                                                                      sz_size_t *distances, sz_size_t distances_stride,
                                                                      void *stream) {
     int caller = 0;
-    sz_status_t status = sz_cuda_device_enter_(engine->ordinal, stream, &caller);
+    sz_status_t status = sz_device_enter_(engine->ordinal, stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_levenshtein_distances_simt_(engine, candidates, distances, distances_stride, stream);
-    sz_cuda_device_leave_(caller);
+    sz_device_leave_(caller);
     return status;
 }
 
@@ -1289,7 +1418,7 @@ enum {
     sz_levenshtein_simt_tiled_warp_stride_k = sz_levenshtein_simt_lanes_k,
 #endif
     sz_levenshtein_simt_tiled_threads_per_block_k = sz_levenshtein_simt_tiled_warps_per_block_k *
-        sz_levenshtein_simt_tiled_warp_stride_k,
+                                                    sz_levenshtein_simt_tiled_warp_stride_k,
 };
 
 /** Longest text the wavefront indexes. Lengths and cells are @c sz_u32_t inside the kernel, and the
@@ -1380,9 +1509,9 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_await_(sz_u32_t const *counter, sz_u
  *  Lane @e l owns micro-column @e l and enters at wavefront step @e l, so 32 micro-rows across
  *  32 lanes take @c micro_rows_k+lanes_k-1 steps. Lane 0 reads its left column and diagonal
  *  corner from the staged @p shared_left; every other lane receives the left neighbour's right
- *  column and top-right corner from @c sz_shuffle_up_, which is itself the warp-wide rendezvous
- *  ordering the two. @p carry_top enters holding the row above the tile and leaves holding the
- *  tile's bottom row.
+ *  column and top-right corner from @c sz_shuffle_up_simt_, which is itself the warp-wide
+ *  rendezvous ordering the two. @p carry_top enters holding the row above the tile and leaves
+ *  holding the tile's bottom row.
  *
  *  @param[in] march Whether finished cells need the corner test, which only a partial or
  *      corner tile does.
@@ -1422,8 +1551,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_simt_march_tile_(                        
         sz_u32_t shuffled_topright;
 #pragma unroll
         for (element = 0; element != sz_levenshtein_simt_micro_side_k; ++element)
-            shuffled_right_edge[element] = sz_shuffle_up_(previous_right_edge[element], 1);
-        shuffled_topright = sz_shuffle_up_(previous_topright, 1);
+            shuffled_right_edge[element] = sz_shuffle_up_simt_(previous_right_edge[element], 1);
+        shuffled_topright = sz_shuffle_up_simt_(previous_topright, 1);
         if (micro_row >= sz_levenshtein_simt_micro_rows_k) continue;
 
         sz_u32_t const micro_first_row = tile_first_row + micro_row * sz_levenshtein_simt_micro_side_k;
@@ -1640,7 +1769,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_simt_(sz_cptr_t a, 
         dim3 one;
         one.x = 1, one.y = 1, one.z = 1;
         arguments[0] = &launch_distance, arguments[1] = &launch_value;
-        return sz_cuda_launch_((void const *)sz_levenshtein_simt_store_kernel_, one, one, arguments, 0, stream);
+        return sz_device_launch_((void const *)sz_levenshtein_simt_store_kernel_, one, one, arguments, 0, stream);
     }
     if (!sz_memory_reaches_device_(shorter_text) || !sz_memory_reaches_device_(longer_text) ||
         !sz_memory_reaches_device_(scratch))
@@ -1653,12 +1782,12 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_simt_(sz_cptr_t a, 
     sz_u32_t *const progress = row_frontier + row_frontier_cells;
 
     // Every launched block has to be resident, since a block spins on a tile-column another block owns.
-    sz_size_t const resident_per_multiprocessor = sz_cuda_resident_blocks_(
+    sz_size_t const resident_per_multiprocessor = sz_device_resident_blocks_(
         (void const *)sz_levenshtein_simt_tiled_kernel_, sz_levenshtein_simt_tiled_threads_per_block_k, 0);
-    sz_size_t const resident_blocks = sz_cuda_multiprocessors_() *
+    sz_size_t const resident_blocks = sz_device_multiprocessors_() *
                                       sz_max_of_two(resident_per_multiprocessor, (sz_size_t)1);
     if (!resident_blocks) return sz_missing_gpu_k;
-    sz_status_t const cleared = sz_cuda_memset_(progress, 0, tile_grid_columns * sizeof(sz_u32_t), stream);
+    sz_status_t const cleared = sz_device_memset_(progress, 0, tile_grid_columns * sizeof(sz_u32_t), stream);
     if (cleared != sz_success_k) return cleared;
 
     // A warp waits on the tile-column to its left, so a block that never gets scheduled is a block its
@@ -1677,7 +1806,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_simt_(sz_cptr_t a, 
     arguments[0] = &launch_shorter_text, arguments[1] = &launch_shorter_length;
     arguments[2] = &launch_longer_text, arguments[3] = &launch_longer_length;
     arguments[4] = &launch_row_frontier, arguments[5] = &launch_progress, arguments[6] = &launch_distance;
-    return sz_cuda_launch_((void const *)sz_levenshtein_simt_tiled_kernel_, grid, block, arguments, 0, stream);
+    return sz_device_launch_((void const *)sz_levenshtein_simt_tiled_kernel_, grid, block, arguments, 0, stream);
 }
 
 #pragma endregion Tiled

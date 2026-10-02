@@ -6,6 +6,7 @@
  *      and the arms.
  */
 #include <algorithm>   // `std::sort`, `std::min`, `std::max`
+#include <limits>      // `std::numeric_limits`
 #include <random>      // `std::mt19937_64`
 #include <set>         // `std::set`
 #include <stdexcept>   // `std::runtime_error`
@@ -184,6 +185,9 @@ struct substrings_dictionary_t {
     /** Haystacks one round carries: the whole corpus, which a device engine's arena must fit. */
     std::size_t haystacks_budget = 0;
 
+    /** Matches one device round may emit, or zero for the engine's default before sizing. */
+    std::size_t matches_budget = 0;
+
     substrings_dictionary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
                             sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &memory)
         : needles(substrings_vocabulary(env, corpus, slice)), needle_views(needles.size()),
@@ -237,8 +241,9 @@ inline sz_status_t substrings_init_device(substrings_dictionary_t const &diction
         STRINGZILLA_ARCH_ROCM_ ? sz::device_kind_t::rocm_k : sz::device_kind_t::cuda_k, 0);
     if (sz::failed(make_status)) return static_cast<sz_status_t>(make_status);
     return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, dictionary.haystacks_budget,
-                                     device.capabilities_enabled().value, 0, &allocator, nullptr);
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, dictionary.matches_budget,
+                                     dictionary.haystacks_budget, device.capabilities_enabled().value, 0, &allocator,
+                                     nullptr);
 }
 
 /** Joins the default stream if a device engine could have enqueued on it; host engines never do. */
@@ -293,12 +298,21 @@ struct substrings_corpus_t {
     /** Haystack bytes one round walks. */
     std::size_t bytes = 0;
 
-    explicit substrings_corpus_t(corpus_t const &corpus) : views(corpus.tokens.size()) {
-        for (std::size_t index = 0; index != corpus.tokens.size(); ++index) {
+    /** Views over the leading @p limit tokens of @p corpus, or over all of them. */
+    explicit substrings_corpus_t(corpus_t const &corpus, std::size_t limit = std::numeric_limits<std::size_t>::max())
+        : views(std::min(corpus.tokens.size(), limit)) {
+        for (std::size_t index = 0; index != views.size(); ++index) {
             token_view_t const token = corpus.tokens[index];
             views[index] = {token.data(), token.size()};
             bytes += token.size();
         }
+        sz_sequence_from_string_views(views.data(), views.size(), &haystacks);
+    }
+
+    /** Views over @p spans, which a device build must be able to reach. */
+    explicit substrings_corpus_t(std::vector<sz_string_view_t> const &spans) : views(spans.size()) {
+        for (std::size_t index = 0; index != spans.size(); ++index)
+            views[index] = spans[index], bytes += spans[index].length;
         sz_sequence_from_string_views(views.data(), views.size(), &haystacks);
     }
 
