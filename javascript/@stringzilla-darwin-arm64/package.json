@@ -1,6 +1,6 @@
 {
   "name": "@stringzilla/darwin-arm64",
-  "version": "5.1.2",
+  "version": "5.2.0",
   "description": "macOS arm64 native binary for StringZilla",
   "repository": {
     "type": "git",
