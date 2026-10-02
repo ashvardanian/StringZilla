@@ -900,6 +900,33 @@ def test_unit_strs_reinit_rebinds():
     assert [str(x) for x in ss] == ["p", "q"]
 
 
+def _file_mapping_available() -> bool:
+    """Whether this platform maps files at all - Emscripten and other wasm hosts do not.
+
+    Probed by mapping rather than by naming platforms: `sz.File` imports fine everywhere and only
+    fails when the mapping is attempted, so the import is no evidence either way.
+    """
+    import gc
+
+    with tempfile.NamedTemporaryFile(delete=False) as probe_file:
+        probe_file.write(b"probe")
+        probe_filename = probe_file.name
+    mapped = None
+    try:
+        mapped = sz.File(probe_filename)
+        return True
+    except Exception:
+        return False
+    finally:
+        mapped = None
+        gc.collect()
+        os.remove(probe_filename)
+
+
+file_mapping_available = _file_mapping_available()
+
+
+@pytest.mark.skipif(not file_mapping_available, reason="Platform maps no files")
 def test_unit_file_reinit_rebinds():
     """Calling `File.__init__` again, even on the same path, must not corrupt the mapping or raise."""
     import gc
@@ -969,6 +996,7 @@ def test_invalid_utf8_handling():
 
 
 # region Interop
+
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
 def test_str_to_pyarrow_conversion():
