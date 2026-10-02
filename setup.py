@@ -1,7 +1,7 @@
 import os
 import sys
 import platform
-from setuptools import setup, find_packages, Extension
+from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from typing import List, Tuple, Final
 import subprocess
@@ -919,7 +919,7 @@ setup(
     include_dirs=[],
     setup_requires=[],
     ext_modules=ext_modules,
-    packages=find_packages(),
+    packages=[],
     entry_points=entry_points,
     cmdclass=command_class,
     install_requires=install_requires,
