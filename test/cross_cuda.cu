@@ -20,6 +20,8 @@ std::size_t test_cross_cuda(environment_t const &env) {
         sz_substrings_find_cuda,
         sz_substrings_replace_cuda,
         sz_substrings_bm25_scores_cuda,
+        sz_utf8_uncased_fold_cuda,
+        sz_utf8_norm_cuda,
     };
     cross_section_t check(env);
     check.detected = gpu_capabilities();

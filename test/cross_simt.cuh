@@ -33,6 +33,7 @@
 #include <stringzilla/stringzilla.h> // Primary C API
 
 #include "harness.hpp" // `cross_section_t`, `unified_vector`, `verify`
+#include "cross.hpp"   // `check_uncased_fold_equivalence_`, `for_each_adversarial_utf8_input_`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -50,6 +51,8 @@ struct simt_backend_t {
     sz_kernel_substrings_find_t substrings_find;
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
+    sz_kernel_utf8_uncased_fold_t utf8_uncased_fold;
+    sz_kernel_utf8_norm_t utf8_norm;
 };
 
 /** The dispatch point @p best_ in the shape of its capability kernels, over the capabilities of the
@@ -1317,6 +1320,128 @@ static void test_substrings_simt_safety(simt_backend_t const &backend) {
 
 #pragma endregion Substrings Checks
 
+#pragma region UTF8 Uncased Checks
+
+/** @p fold called the way a CPU fold is, its text, output and length staged where the device
+ *  reaches them and the stream joined, so the CPU fold checks drive it unchanged. */
+static auto utf8_uncased_fold_staged_(sz_kernel_utf8_uncased_fold_t fold) {
+    return [fold](sz_cptr_t source, sz_size_t length, sz_ptr_t target, sz_size_t *target_length,
+                  void *stream) -> sz_status_t {
+        unified_vector<char> staged_source(source, source + length), staged_target(length * 3 + 4);
+        unified_vector<sz_size_t> staged_length(1, 0);
+        sz_status_t const status = fold(staged_source.data(), length, staged_target.data(), staged_length.data(),
+                                        stream);
+        if (status != sz_success_k) return status;
+        join_();
+        std::copy(staged_target.begin(), staged_target.begin() + staged_length[0], target);
+        *target_length = staged_length[0];
+        return status;
+    };
+}
+
+/** The device fold against the serial one, over the battery every CPU fold is held to. */
+static void check_utf8_uncased_simt_equivalence_(test_context_t &context, simt_backend_t const &backend) {
+    check_uncased_fold_equivalence_(context, sz_utf8_uncased_fold_serial,
+                                    utf8_uncased_fold_staged_(backend.utf8_uncased_fold), 4000,
+                                    context.iterations(1200));
+}
+
+/** The malformed inputs every CPU fold survives, which the device folds byte for byte as serial
+ *  does, and memory the device cannot reach, which it refuses rather than reading. */
+static void check_utf8_uncased_simt_safety_(test_context_t &context, simt_backend_t const &backend) {
+    auto const staged = utf8_uncased_fold_staged_(backend.utf8_uncased_fold);
+    std::vector<char> expected, produced;
+    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
+        expected.resize(length * 3 + 4), produced.resize(length * 3 + 4);
+        sz_size_t const expected_length = kernel_result<sz_size_t>(sz_utf8_uncased_fold_serial, input, length,
+                                                                   expected.data());
+        sz_size_t const produced_length = kernel_result<sz_size_t>(staged, input, length, produced.data());
+        if (produced_length != expected_length ||
+            !std::equal(expected.begin(), expected.begin() + expected_length, produced.begin()))
+            fail_backend_(backend.name, "a malformed text folds differently from serial");
+    });
+
+    std::string const host_source = "HELLO";
+    unified_vector<char> source(host_source.begin(), host_source.end()), target(host_source.size() * 3);
+    unified_vector<sz_size_t> target_length(1, 0);
+    std::vector<char> host_target(host_source.size() * 3);
+    sz_size_t host_length = 0;
+    if (backend.utf8_uncased_fold(host_source.data(), host_source.size(), target.data(), target_length.data(),
+                                  STRINGZILLA_NULL) != sz_device_memory_mismatch_k ||
+        backend.utf8_uncased_fold(source.data(), source.size(), host_target.data(), target_length.data(),
+                                  STRINGZILLA_NULL) != sz_device_memory_mismatch_k ||
+        backend.utf8_uncased_fold(source.data(), source.size(), target.data(), &host_length, STRINGZILLA_NULL) !=
+            sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "a fold of memory the device cannot reach was not refused");
+}
+
+#pragma endregion UTF8 Uncased Checks
+
+#pragma region UTF8 Norm Checks
+
+/** @p norm called the way a CPU normalizer is, its text, output and length staged where the device
+ *  reaches them and the stream joined, so the CPU normalization checks drive it unchanged. */
+static auto utf8_norm_staged_(sz_kernel_utf8_norm_t norm) {
+    return [norm](sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t target, sz_size_t *target_length,
+                  void *stream) -> sz_status_t {
+        unified_vector<char> staged_source(source, source + length), staged_target(length * 18 + 18);
+        unified_vector<sz_size_t> staged_length(1, 0);
+        sz_status_t const status = norm(staged_source.data(), length, form, staged_target.data(), staged_length.data(),
+                                        stream);
+        if (status != sz_success_k) return status;
+        join_();
+        std::copy(staged_target.begin(), staged_target.begin() + staged_length[0], target);
+        *target_length = staged_length[0];
+        return status;
+    };
+}
+
+/** The device normalizer against the serial one, over the battery every CPU normalizer is held to;
+ *  the device has no violation finder, so the serial one stands in for it. */
+static void check_utf8_norm_simt_equivalence_(test_context_t &context, simt_backend_t const &backend) {
+    struct {
+        decltype(utf8_norm_staged_(nullptr)) norm;
+        sz_kernel_utf8_find_denormalized_t find_denormalized;
+    } const kernels {utf8_norm_staged_(backend.utf8_norm), sz_utf8_find_denormalized_serial};
+    check_utf8_norm_equivalence_(context, kernels);
+}
+
+/** The well-formed adversarial inputs every CPU normalizer faces, which the device normalizes byte
+ *  for byte as serial does in every form, and memory the device cannot reach, which it refuses. */
+static void check_utf8_norm_simt_safety_(test_context_t &context, simt_backend_t const &backend) {
+    static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
+                                                   sz_normal_form_nfkc_k};
+    auto const staged = utf8_norm_staged_(backend.utf8_norm);
+    std::vector<char> expected, produced;
+    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
+        if (sz_utf8_find_malformed(input, (sz_size_t)length) != STRINGZILLA_NULL_CHAR) return;
+        expected.resize(length * 18 + 18), produced.resize(length * 18 + 18);
+        for (sz_normal_form_t form : norm_forms) {
+            sz_size_t const expected_length = kernel_result<sz_size_t>(sz_utf8_norm_serial, input, length, form,
+                                                                       expected.data());
+            sz_size_t const produced_length = kernel_result<sz_size_t>(staged, input, length, form, produced.data());
+            if (produced_length != expected_length ||
+                !std::equal(expected.begin(), expected.begin() + expected_length, produced.begin()))
+                fail_backend_(backend.name, "a text normalizes differently from serial");
+        }
+    });
+
+    std::string const host_source = "caf\xC3\xA9";
+    unified_vector<char> source(host_source.begin(), host_source.end()), target(host_source.size() * 18);
+    unified_vector<sz_size_t> target_length(1, 0);
+    std::vector<char> host_target(host_source.size() * 18);
+    sz_size_t host_length = 0;
+    if (backend.utf8_norm(host_source.data(), host_source.size(), sz_normal_form_nfd_k, target.data(),
+                          target_length.data(), STRINGZILLA_NULL) != sz_device_memory_mismatch_k ||
+        backend.utf8_norm(source.data(), source.size(), sz_normal_form_nfd_k, host_target.data(), target_length.data(),
+                          STRINGZILLA_NULL) != sz_device_memory_mismatch_k ||
+        backend.utf8_norm(source.data(), source.size(), sz_normal_form_nfd_k, target.data(), &host_length,
+                          STRINGZILLA_NULL) != sz_device_memory_mismatch_k)
+        fail_backend_(backend.name, "a normalization of memory the device cannot reach was not refused");
+}
+
+#pragma endregion UTF8 Norm Checks
+
 #pragma region Drivers
 
 /** Registers every check of one vendor's kernels, or of the dispatch points, in @p check. */
@@ -1350,15 +1475,29 @@ inline void check_simt_backend_(cross_section_t &check, simt_backend_t const &ba
     check("test_substrings_equivalence_" + suffix,
           [&](test_context_t &context) { test_substrings_simt_equivalence(context, backend); });
     check("test_substrings_safety_" + suffix, [&] { test_substrings_simt_safety(backend); });
+    check("test_utf8_uncased_equivalence_" + suffix,
+          [&](test_context_t &context) { check_utf8_uncased_simt_equivalence_(context, backend); });
+    check("test_utf8_uncased_safety_" + suffix,
+          [&](test_context_t &context) { check_utf8_uncased_simt_safety_(context, backend); });
+    check("test_utf8_norm_equivalence_" + suffix,
+          [&](test_context_t &context) { check_utf8_norm_simt_equivalence_(context, backend); });
+    check("test_utf8_norm_safety_" + suffix,
+          [&](test_context_t &context) { check_utf8_norm_simt_safety_(context, backend); });
 }
 
 /** The dispatching entry points, over the capabilities of the device the checks launch on, and the
  *  refusals and asynchrony only a dispatch point's engine init promises. */
 std::size_t test_cross_dispatch(environment_t const &env) {
-    simt_backend_t const dispatched {
-        "dispatched",          sz_levenshtein_distances, gpu_best<sz_levenshtein_distance_tiled_best>,
-        sz_overlap_scores,     sz_substrings_counts,     sz_substrings_find,
-        sz_substrings_replace, sz_substrings_bm25_scores};
+    simt_backend_t const dispatched {"dispatched",
+                                     sz_levenshtein_distances,
+                                     gpu_best<sz_levenshtein_distance_tiled_best>,
+                                     sz_overlap_scores,
+                                     sz_substrings_counts,
+                                     sz_substrings_find,
+                                     sz_substrings_replace,
+                                     sz_substrings_bm25_scores,
+                                     gpu_best<sz_utf8_uncased_fold_best>,
+                                     gpu_best<sz_utf8_norm_best>};
     cross_section_t check(env);
     check.detected = gpu_capabilities();
     check.section("Cross Dispatch", gpu_baseline_k);

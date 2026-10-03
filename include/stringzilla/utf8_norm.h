@@ -38,14 +38,22 @@ extern "C" {
  *  an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
  *  part in canonical ordering, and processing resyncs at the next byte.
  *
+ *  On CUDA and ROCm the normalization is enqueued on @p stream, which names the device: the source,
+ *  the target and the length slot must all be memory that device reaches, and the length lands once
+ *  @p stream is joined. Each call copies the normalization tables to the device on @p stream ahead
+ *  of its kernel, allocating nothing and joining nothing.
+ *
  *  @param[in] source UTF-8 string to normalize.
  *  @param[in] source_length Number of bytes in @p source.
  *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
  *  @param[out] target Buffer to receive the normalized UTF-8 string.
  *  @param[out] target_length Number of bytes written to @p target.
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
- *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
- *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the
+ *      device; null for the default.
+ *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
+ *      and on a GPU @c sz_device_memory_mismatch_k for a buffer or a @p stream the device cannot
+ *      use or @c sz_unexpected_dimensions_k for a text of more than nine hundred gibibytes.
  *  @warning No bounds checking is performed on @p target.
  */
 STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
@@ -213,6 +221,20 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_powervsx(                              
 /** @copydoc sz_utf8_find_denormalized_best */
 STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_powervsx( //
     sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_cptr_t *match, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_CUDA
+/** @copydoc sz_utf8_norm_best */
+STRINGZILLA_API sz_status_t sz_utf8_norm_cuda(                                         //
+    sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_ptr_t target, //
+    sz_size_t *target_length, void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_ROCM
+/** @copydoc sz_utf8_norm_best */
+STRINGZILLA_API sz_status_t sz_utf8_norm_rocm(                                         //
+    sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_ptr_t target, //
+    sz_size_t *target_length, void *stream);
 #endif
 
 #pragma endregion

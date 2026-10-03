@@ -455,6 +455,22 @@ STRINGZILLA_INLINE sz_status_t sz_device_memset_(void *pointer, int value, sz_si
 #endif
 }
 
+/** Copies @p bytes of host @p source into the @c __device__ variable at @p symbol, in order on
+ *  @p stream; from pageable memory the runtime stages the copy before returning. */
+STRINGZILLA_INLINE sz_status_t sz_copy_to_symbol_simt_(void const *symbol, void const *source, sz_size_t bytes,
+                                                       void *stream) {
+#if defined(__HIP__)
+    return hipMemcpyToSymbolAsync(symbol, source, bytes, 0, hipMemcpyHostToDevice, (hipStream_t)stream) == hipSuccess
+               ? sz_success_k
+               : sz_device_code_mismatch_k;
+#else
+    return cudaMemcpyToSymbolAsync(symbol, source, bytes, 0, cudaMemcpyHostToDevice, (cudaStream_t)stream) ==
+                   cudaSuccess
+               ? sz_success_k
+               : sz_device_code_mismatch_k;
+#endif
+}
+
 /** Waits for everything enqueued on @p stream; only an engine's init may. */
 STRINGZILLA_INLINE sz_status_t sz_device_synchronize_(void *stream) {
 #if STRINGZILLA_ARCH_ROCM_
@@ -522,6 +538,32 @@ STRINGZILLA_DEVICE int sz_lanes_any_simt_(int predicate) {
 #else
     return __any_sync(0xFFFFFFFFu, predicate) != 0;
 #endif
+}
+
+/**
+ *  @brief The block's exclusive prefix sum of @p value, with the block's own total left
+ *      in @p total.
+ *
+ *  A Hillis-Steele scan over @p shared, which the caller sizes at one entry per thread. Thirty
+ *  lines rather than a dependency: a block scan is the only collective these kernels need, and
+ *  pulling a template library into a C tier for it would cost the property the tier exists for.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_block_scan_simt_(sz_size_t value, sz_size_t *shared, sz_size_t *total) {
+    unsigned const lane = threadIdx.x;
+    unsigned offset;
+    sz_size_t inclusive;
+    shared[lane] = value;
+    __syncthreads();
+    for (offset = 1; offset < blockDim.x; offset *= 2) {
+        sz_size_t const addend = lane >= offset ? shared[lane - offset] : 0;
+        __syncthreads();
+        shared[lane] += addend;
+        __syncthreads();
+    }
+    inclusive = shared[lane];
+    *total = shared[blockDim.x - 1];
+    __syncthreads(); // ! The caller reuses `shared` for the next tile.
+    return inclusive - value;
 }
 
 #pragma endregion Lanes
@@ -748,6 +790,76 @@ STRINGZILLA_DEVICE int sz_tile_queue_next_simt_(sz_tile_queue_t *queue, sz_u32_t
 }
 
 #pragma endregion Tile Queues
+
+/*  A kernel whose tiles only learn their output sizes by doing their work publishes them through
+ *  the caller's own length slot: blocks take tickets in the order they start, and each tile waits
+ *  for the one before it to chain its total, adds its own, and only then writes. A ticket is only
+ *  ever held by a running block, so the wait always ends, and a round needs no scratch beyond the
+ *  slot it reports into, which the last tile overwrites with the length. */
+#pragma region Chained Tiles
+
+enum {
+
+    /** Tiles one chain carries at most, which bounds how long the last one waits. */
+    sz_chain_tiles_max_k = 1024,
+
+    /** Where the length slot keeps the tickets handed out while a round runs. */
+    sz_chain_tickets_shift_k = 54,
+
+    /** Where it keeps the tiles chained, above the bytes those produced. */
+    sz_chain_chained_shift_k = 44,
+};
+
+/** Tiles of at least @p tile_bytes_min a chain cuts @p length bytes into, at most
+ *  @c sz_chain_tiles_max_k of them, and the width @p tile_bytes each takes. */
+STRINGZILLA_INLINE sz_size_t sz_chain_tiles_simt_(sz_size_t length, sz_size_t tile_bytes_min, sz_size_t *tile_bytes) {
+    sz_size_t const tiles = sz_min_of_two(sz_size_divide_round_up(length, tile_bytes_min),
+                                          (sz_size_t)sz_chain_tiles_max_k);
+    *tile_bytes = sz_size_divide_round_up(length, tiles);
+    return sz_size_divide_round_up(length, *tile_bytes);
+}
+
+/** This block's ticket, the tile it works on; every thread calls it, and it ends in a barrier. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_ticket_simt_(sz_size_t *slot) {
+    __shared__ sz_size_t ticket;
+    if (threadIdx.x == 0)
+        ticket = (sz_size_t)(atomicAdd((unsigned long long *)slot, 1ull << sz_chain_tickets_shift_k) >>
+                             sz_chain_tickets_shift_k);
+    __syncthreads();
+    return ticket;
+}
+
+/** Where tile @p ticket of @p tiles writes, once every tile before it chained, publishing its own
+ *  @p total for the ones after; every thread calls it, and it ends in a barrier. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_offset_simt_(sz_size_t *slot, sz_size_t ticket, sz_size_t tiles,
+                                                   sz_size_t total) {
+    __shared__ sz_size_t offset;
+    if (threadIdx.x == 0) {
+        unsigned long long *const chain = (unsigned long long *)slot;
+        unsigned long long chained;
+        do chained = *(unsigned long long volatile *)chain;
+        while ((chained >> sz_chain_chained_shift_k & (sz_chain_tiles_max_k - 1)) != ticket);
+        offset = (sz_size_t)(chained & ((1ull << sz_chain_chained_shift_k) - 1));
+        // Every ticket is taken and every earlier tile chained, so the last tile's write is final.
+        if (ticket + 1 == tiles) *slot = offset + total;
+        else atomicAdd(chain, (1ull << sz_chain_chained_shift_k) + total);
+    }
+    __syncthreads();
+    return offset;
+}
+
+/** The first place at or after @p position a serial walk over UTF-8 steps on, which is where both
+ *  neighbours of a cut agree to split. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_utf8_cut_simt_(sz_u8_t const *text, sz_size_t length, sz_size_t position) {
+    // The walk starts on the text's first byte whatever it is, and three continuation bytes in a
+    // row end every codepoint begun before them, so a cut never moves further.
+    for (sz_size_t step = 0; step != 3 && position != 0 && position < length && (text[position] & 0xC0u) == 0x80u;
+         ++step)
+        ++position;
+    return position;
+}
+
+#pragma endregion Chained Tiles
 
 #pragma region Device Sequences
 

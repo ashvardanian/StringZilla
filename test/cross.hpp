@@ -4638,8 +4638,10 @@ inline void check_utf8_norm_unit_(utf8_norm_kernels_t kernels) {
  *  under all four normal forms, so the comparison stresses canonical ordering, every
  *  decomposition/composition path, and SIMD-block straddles. Below a multiplier of 1.0 the
  *  codepoint space is strided, not truncated, so the astral planes stay reachable on a cheap run.
+ *  The candidate holds kernels or anything called like them, as a device kernel on staged buffers.
  */
-inline void check_utf8_norm_equivalence_(test_context_t &context, utf8_norm_kernels_t candidate) {
+template <typename kernels_type_>
+inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ const &candidate) {
     utf8_norm_kernels_t const reference {sz_utf8_norm_serial, sz_utf8_find_denormalized_serial};
     std::size_t const codepoint_stride = context.sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
@@ -5596,9 +5598,11 @@ inline void check_uncased_order_(sz_kernel_utf8_uncased_order_t order) {
 
 /** Compares the @p reference and @p candidate folds byte-by-byte over a fixed multi-script battery,
  *  @p min_iterations random concatenations of at least @p min_text_length bytes, and the exhaustive
- *  sweep of every valid Unicode codepoint, both in order and shuffled. */
+ *  sweep of every valid Unicode codepoint, both in order and shuffled. The candidate is a fold
+ *  kernel or anything called like one, such as a device kernel behind staged buffers. */
+template <typename candidate_type_>
 inline void check_uncased_fold_equivalence_(test_context_t &context, sz_kernel_utf8_uncased_fold_t reference,
-                                            sz_kernel_utf8_uncased_fold_t candidate, sz_size_t min_text_length,
+                                            candidate_type_ const &candidate, sz_size_t min_text_length,
                                             sz_size_t min_iterations) {
 
     // Output buffers (3x input for worst-case expansion)

@@ -7,10 +7,14 @@
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
+#include "stringzilla/utf8_norm.h"
+#include "stringzilla/utf8_uncased_fold.h"
 
 #include "stringzilla/levenshtein/simt.cuh"
 #include "stringzilla/overlap/simt.cuh"
 #include "stringzilla/substrings/simt.cuh"
+#include "stringzilla/utf8_norm/simt.cuh"
+#include "stringzilla/utf8_uncased_fold/simt.cuh"
 
 extern "C" STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count) {
     *count = sz_rocm_count_devices_();

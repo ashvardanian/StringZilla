@@ -49,6 +49,18 @@ static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
         (sz_kernel_punned_t)&sz_utf8_norm_powervsx,
 #endif
     };
+    static sz_kernel_punned_t const cuda[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_CUDA
+        (sz_kernel_punned_t)&sz_utf8_norm_cuda,
+#endif
+    };
+    static sz_kernel_punned_t const rocm[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_ROCM
+        (sz_kernel_punned_t)&sz_utf8_norm_rocm,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
@@ -57,8 +69,8 @@ static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
              sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED |
              sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
-        {0, sz_no_kernels_},
-        {0, sz_no_kernels_},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {0, sz_no_kernels_},
     };
     return lists;

@@ -20,6 +20,8 @@ std::size_t test_cross_rocm(environment_t const &env) {
         sz_substrings_find_rocm,
         sz_substrings_replace_rocm,
         sz_substrings_bm25_scores_rocm,
+        sz_utf8_uncased_fold_rocm,
+        sz_utf8_norm_rocm,
     };
     cross_section_t check(env);
     check.detected = gpu_capabilities();
