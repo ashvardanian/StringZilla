@@ -282,8 +282,8 @@ func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _
         (.cuda, "cuda"), (.rocm, "rocm"), (.metal, "metal"),
     ]
     for (capability, name) in names { #expect(capability.description == name) }
-    #expect(Capabilities.cpus.union(.devices).isSubset(of: .any))
-    #expect(Capabilities.cpus.intersection(.devices).isEmpty)
+    #expect(Capabilities.cpus.union(.gpus).isSubset(of: .any))
+    #expect(Capabilities.cpus.intersection(.gpus).isEmpty)
     #expect(enabled.contains(.serial))
     #expect(enabled.isSubset(of: try cpu.capabilitiesDetected.intersection(cpu.capabilitiesCompiled)))
     try cpu.configureThread(enabled)

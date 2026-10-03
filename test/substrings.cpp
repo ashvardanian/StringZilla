@@ -35,15 +35,15 @@ namespace ashvardanian::stringzilla::test {
 #pragma region Helpers
 
 /** The dispatched engine builder over the CPU capabilities, in the shape of its capability kernels,
- *  whose mask sits before the ordinal rather than the stream. */
+ *  whose mask sits before the allocator. */
 static sz_status_t substrings_engine_init_dispatched_(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
                                                       sz_substrings_case_sensitivity_t case_sensitivity,
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
-                                                      sz_size_t haystacks_budget, sz_size_t ordinal,
-                                                      sz_memory_allocator_t *allocator, void *stream) {
+                                                      sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                      void *stream) {
     return sz_substrings_engine_init(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
-                                     haystacks_budget, sz::default_capabilities(), ordinal, allocator, stream);
+                                     haystacks_budget, sz::default_capabilities(), allocator, stream);
 }
 
 /** The dispatched builder and the verbs that walk whatever capability it prepared for. */
@@ -57,7 +57,7 @@ static sz_status_t build_over_(std::vector<std::string> const &needles, sz_subst
     std::vector<sz_string_view_t> views;
     sz_sequence_t const sequence = sequence_over_(needles, views);
     return sz_substrings_engine_init(engine, &sequence, sensitivity, sz_substrings_overlapping_k,
-                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), 0,
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
                                      allocator, nullptr);
 }
 
@@ -75,14 +75,14 @@ struct rationed_allocator_t {
     sz_memory_allocator_t allocator {};
 
     explicit rationed_allocator_t(std::size_t granted) noexcept : grants(granted) {
-        allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
             rationed_allocator_t &self = *static_cast<rationed_allocator_t *>(handle);
             if (!self.grants) return nullptr;
             void *const pointer = std::malloc(length ? length : 1);
             if (pointer) --self.grants, self.bytes_held += length;
             return pointer;
         };
-        allocator.free = +[](void *pointer, sz_size_t length, void *handle) {
+        allocator.free = +[](void *pointer, sz_size_t length, void *handle, void *) {
             static_cast<rationed_allocator_t *>(handle)->bytes_held -= length;
             std::free(pointer);
         };
@@ -101,7 +101,7 @@ static void check_build_refusals_(std::vector<std::string> const &needles,
         sz_substrings_engine_t engine {};
         sz_status_t const status = build_over_(needles, sensitivity, &rationed.allocator, &engine);
         if (status == sz_success_k) {
-            sz_substrings_engine_free(&engine);
+            sz_substrings_engine_free(&engine, nullptr);
             verify(rationed.bytes_held == 0);
             return;
         }
@@ -153,7 +153,7 @@ void test_substrings_safety(test_context_t &context) {
     sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
     sz_sequence_t const replacement_sequence = sequence_over_(replacements, replacement_views);
     verify(sz_substrings_engine_init(&engine, &needle_sequence, sz_substrings_cased_k, sz_substrings_overlapping_k,
-                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), 0,
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
                                      &heap.allocator, nullptr) == sz_success_k);
 
     // A capacity that cannot hold the matches is not an error: the report names the true total and the
@@ -203,7 +203,7 @@ void test_substrings_safety(test_context_t &context) {
         verify(std::fabs(score - 3.0f) <= 1e-6f);
     }
 
-    sz_substrings_engine_free(&engine);
+    sz_substrings_engine_free(&engine, nullptr);
 
     // One replacement per needle, so a shorter list names no substitution for the needles it omits.
     {
@@ -214,10 +214,10 @@ void test_substrings_safety(test_context_t &context) {
         sz_substrings_engine_t covering;
         verify(sz_substrings_engine_init(&covering, &needle_sequence, sz_substrings_cased_k,
                                          sz_substrings_leftmost_first_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                         sz::default_capabilities(), 0, &heap.allocator, nullptr) == sz_success_k);
+                                         sz::default_capabilities(), &heap.allocator, nullptr) == sz_success_k);
         verify(sz_substrings_replace(&covering, &haystack_sequence, &one_sequence, nullptr, 0, offsets.data(),
                                      nullptr) == sz_unexpected_dimensions_k);
-        sz_substrings_engine_free(&covering);
+        sz_substrings_engine_free(&covering, nullptr);
     }
     verify(heap.live_allocations == 0);
 

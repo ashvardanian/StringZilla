@@ -14,7 +14,7 @@ typedef struct {
     sz_substrings_engine_t engine;
 
     /** Guards the round arena and the report every call rewrites. */
-    sz_engine_lock_field_
+    sz_py_mutex_t mutex;
 } SubstringsEngine;
 
 #pragma region Construction
@@ -84,7 +84,8 @@ static int parse_optional_size_(PyObject *size_obj, char const *name, sz_size_t 
 }
 
 static void SubstringsEngine_dealloc(SubstringsEngine *self) {
-    sz_substrings_engine_free(&self->engine);
+    sz_substrings_engine_free(&self->engine, STRINGZILLA_NULL);
+    sz_py_mutex_close_(&self->mutex);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -100,7 +101,7 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
     PyObject *overlap_policy_obj = positional_count > 2 ? PyTuple_GET_ITEM(args, 2) : NULL;
     PyObject *hot_states_obj = positional_count > 3 ? PyTuple_GET_ITEM(args, 3) : NULL;
     PyObject *matches_budget_obj = positional_count > 4 ? PyTuple_GET_ITEM(args, 4) : NULL;
-    PyObject *haystacks_budget_object = NULL, *capabilities_object = NULL, *device_object = NULL, *stream_object = NULL;
+    PyObject *haystacks_budget_object = NULL, *capabilities_object = NULL, *stream_object = NULL;
     if (kwargs) {
         Py_ssize_t keyword_cursor = 0;
         PyObject *key = NULL, *value = NULL;
@@ -141,7 +142,6 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
                 haystacks_budget_object = value;
             }
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "device") == 0) { device_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "stream") == 0) { stream_object = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "SubstringsEngine() got an unexpected keyword argument '%U'", key);
@@ -155,7 +155,6 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
     sz_substrings_overlap_policy_t overlap_policy;
     sz_size_t hot_states = 0, matches_budget = 0, haystacks_budget = 0;
     sz_capability_t capabilities;
-    sz_size_t ordinal;
     void *stream;
     if (sz_py_export_strings(needles_obj, "needles", &needles) != 0) return -1;
     if (parse_case_sensitivity_(case_sensitivity_obj, &case_sensitivity) != 0) return -1;
@@ -164,16 +163,17 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
         return -1;
     if (parse_optional_size_(matches_budget_obj, "matches_budget", 0, &matches_budget) != 0) return -1;
     if (parse_optional_size_(haystacks_budget_object, "haystacks_budget", 0, &haystacks_budget) != 0) return -1;
-    if (sz_py_export_engine_placement(device_object, capabilities_object, stream_object, &capabilities, &ordinal,
-                                      &stream) != 0)
-        return -1;
+    if (sz_py_export_engine_placement(capabilities_object, stream_object, &capabilities, &stream) != 0) return -1;
+    if (sz_py_mutex_open_(&self->mutex) != 0) return -1;
 
-    sz_engine_lock_(self);
-    sz_substrings_engine_free(&self->engine);
-    sz_status_t const status = sz_substrings_engine_init(&self->engine, &needles, case_sensitivity, overlap_policy,
-                                                         hot_states, matches_budget, haystacks_budget, capabilities,
-                                                         ordinal, STRINGZILLA_NULL, stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    sz_substrings_engine_free(&self->engine, STRINGZILLA_NULL);
+    status = sz_substrings_engine_init(&self->engine, &needles, case_sensitivity, overlap_policy, hot_states,
+                                       matches_budget, haystacks_budget, capabilities, STRINGZILLA_NULL, stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     if (status != sz_success_k) {
         sz_py_raise_status(status, "SubstringsEngine()");
         return -1;
@@ -198,7 +198,7 @@ static char const doc_SubstringsEngine_counts[] =                               
     "Count the matches of every needle in every haystack, into `out`.\n"                          //
     "\n"                                                                                          //
     "Args:\n"                                                                                     //
-    "  haystacks (Strs): Texts to search.\n"                                                      //
+    "  haystacks (Strs): Texts to search, from `Strs.copy` on a GPU.\n"                           //
     "  out (buffer): Writable 1-D buffer of pointer-width unsigned integers, one per haystack.\n" //
     "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"         //
     "    A device engine enqueues there and returns, so `out` must be device-reachable\n"         //
@@ -242,10 +242,12 @@ static PyObject *SubstringsEngine_counts(SubstringsEngine *self, PyObject *const
     }
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
+    sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks;
     void *stream = NULL;
-    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    if (!(capability & sz_cap_gpus_k)) stream = NULL;
+    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
 
     sz_size_t const extents[1] = {haystacks.count};
     sz_size_t strides[1];
@@ -254,10 +256,14 @@ static PyObject *SubstringsEngine_counts(SubstringsEngine *self, PyObject *const
         return NULL;
 
     sz_size_t *const counts = (sz_size_t *)out_view.buf;
-    sz_engine_lock_(self);
-    if (!(self->engine.capability & sz_cap_devices_k)) stream = NULL;
-    sz_status_t const status = sz_substrings_counts(&self->engine, &haystacks, counts, strides[0], stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    // Another thread may have rebuilt the engine since the arguments were bound to its placement.
+    if (self->engine.capability != capability) status = sz_unexpected_dimensions_k;
+    else status = sz_substrings_counts(&self->engine, &haystacks, counts, strides[0], stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     PyBuffer_Release(&out_view);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "counts()");
@@ -275,7 +281,7 @@ static char const doc_SubstringsEngine_find[] =                                 
     "what sizes the next call.\n"                                                                      //
     "\n"                                                                                               //
     "Args:\n"                                                                                          //
-    "  haystacks (Strs): Texts to search.\n"                                                           //
+    "  haystacks (Strs): Texts to search, from `Strs.copy` on a GPU.\n"                                //
     "  matches (buffer or None): Writable, fully contiguous 2-D buffer of pointer-width unsigned\n"    //
     "    integers, shaped `(capacity, 4)` - haystack index, needle index, byte offset, byte length.\n" //
     "    None makes the call a pure size query.\n"                                                     //
@@ -332,10 +338,12 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     }
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
+    sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks;
     void *stream = NULL;
-    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    if (!(capability & sz_cap_gpus_k)) stream = NULL;
+    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
 
     // One match is four pointer-width fields back to back, so the rows have to be packed as well as the columns.
     sz_substrings_match_t *matches = STRINGZILLA_NULL;
@@ -374,11 +382,14 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     }
 
     sz_size_t *const offsets = (sz_size_t *)offsets_view.buf;
-    sz_engine_lock_(self);
-    if (!(self->engine.capability & sz_cap_devices_k)) stream = NULL;
-    sz_status_t const status = sz_substrings_find(&self->engine, &haystacks, matches, matches_capacity, offsets,
-                                                  stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    // Another thread may have rebuilt the engine since the arguments were bound to its placement.
+    if (self->engine.capability != capability) status = sz_unexpected_dimensions_k;
+    else status = sz_substrings_find(&self->engine, &haystacks, matches, matches_capacity, offsets, stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     PyBuffer_Release(&offsets_view);
     if (have_matches) PyBuffer_Release(&matches_view);
     if (status != sz_success_k) {
@@ -397,8 +408,9 @@ static char const doc_SubstringsEngine_replace[] =                              
     "A target too small is not an error: `offsets` and `report` are filled either way.\n"              //
     "\n"                                                                                               //
     "Args:\n"                                                                                          //
-    "  haystacks (Strs): Texts to rewrite.\n"                                                          //
-    "  replacements (Strs): One replacement per needle; an empty one deletes the match.\n"             //
+    "  haystacks (Strs): Texts to rewrite, from `Strs.copy` on a GPU.\n"                               //
+    "  replacements (Strs): One replacement per needle; an empty one deletes the match. On a GPU\n"    //
+    "    engine, from `Strs.copy` too.\n"                                                              //
     "  target (buffer or None): Writable, contiguous byte buffer; None makes the call a size query.\n" //
     "  offsets (buffer): Writable, contiguous 1-D buffer of pointer-width unsigned integers holding\n" //
     "    len(haystacks) + 1 rewritten boundaries, the last being the total.\n"                         //
@@ -454,11 +466,14 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
     }
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
+    sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks, replacements;
     void *stream = NULL;
-    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
-    if (sz_py_export_strings(replacements_obj, "replacements", &replacements) != 0) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    if (!(capability & sz_cap_gpus_k)) stream = NULL;
+    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
+    if (sz_py_export_engine_strings(replacements_obj, "replacements", capability, stream, &replacements) != 0)
+        return NULL;
 
     sz_ptr_t target = STRINGZILLA_NULL;
     sz_size_t target_capacity = 0;
@@ -496,11 +511,16 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
     }
 
     sz_size_t *const offsets = (sz_size_t *)offsets_view.buf;
-    sz_engine_lock_(self);
-    if (!(self->engine.capability & sz_cap_devices_k)) stream = NULL;
-    sz_status_t const status = sz_substrings_replace(&self->engine, &haystacks, &replacements, target, target_capacity,
-                                                     offsets, stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    // Another thread may have rebuilt the engine since the arguments were bound to its placement.
+    if (self->engine.capability != capability) status = sz_unexpected_dimensions_k;
+    else
+        status = sz_substrings_replace(&self->engine, &haystacks, &replacements, target, target_capacity, offsets,
+                                       stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     PyBuffer_Release(&offsets_view);
     if (have_target) PyBuffer_Release(&target_view);
     if (status != sz_success_k) {
@@ -520,7 +540,7 @@ static char const doc_SubstringsEngine_bm25_scores[] =                          
     "Term frequencies are raw overlapping counts, so the engine's own overlap policy does not apply.\n" //
     "\n"                                                                                                //
     "Args:\n"                                                                                           //
-    "  haystacks (Strs): Documents to score.\n"                                                         //
+    "  haystacks (Strs): Documents to score, from `Strs.copy` on a GPU.\n"                              //
     "  needle_weights (buffer): One 32-bit float IDF or boost per needle.\n"                            //
     "  out (buffer): Writable 1-D buffer of 32-bit floats, one score per haystack.\n"                   //
     "  document_lengths (buffer, optional): One 32-bit float length per haystack; byte lengths\n"       //
@@ -601,14 +621,17 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
         parameters.average_document_length = (sz_f32_t)value;
     }
 
+    sz_capability_t const capability = self->engine.capability;
+    sz_size_t const needles_count = self->engine.needles_count;
     sz_sequence_t haystacks;
     void *stream = NULL;
-    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    if (!(capability & sz_cap_gpus_k)) stream = NULL;
+    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
 
     Py_buffer weights_view;
-    if (sz_py_export_input_buffer(weights_obj, "needle_weights", (Py_ssize_t)sizeof(sz_f32_t),
-                                  self->engine.needles_count, &weights_view) != 0)
+    if (sz_py_export_input_buffer(weights_obj, "needle_weights", (Py_ssize_t)sizeof(sz_f32_t), needles_count,
+                                  &weights_view) != 0)
         return NULL;
 
     sz_f32_t const *lengths = STRINGZILLA_NULL;
@@ -635,11 +658,17 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
 
     sz_f32_t const *const weights = (sz_f32_t const *)weights_view.buf;
     sz_f32_t *const scores = (sz_f32_t *)out_view.buf;
-    sz_engine_lock_(self);
-    if (!(self->engine.capability & sz_cap_devices_k)) stream = NULL;
-    sz_status_t const status = sz_substrings_bm25_scores(&self->engine, &haystacks, lengths, &parameters, weights,
-                                                         scores, strides[0], stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    // Another thread may have rebuilt the engine since the arguments were bound to its shape.
+    if (self->engine.capability != capability || self->engine.needles_count != needles_count)
+        status = sz_unexpected_dimensions_k;
+    else
+        status = sz_substrings_bm25_scores(&self->engine, &haystacks, lengths, &parameters, weights, scores, strides[0],
+                                           stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     PyBuffer_Release(&out_view);
     if (have_lengths) PyBuffer_Release(&lengths_view);
     PyBuffer_Release(&weights_view);
@@ -666,8 +695,17 @@ static char const doc_SubstringsEngine_report[] =                               
 
 static PyObject *SubstringsEngine_get_report(SubstringsEngine *self, void *closure) {
     sz_unused_(closure);
-    sz_substrings_report_t const *const report = self->engine.report;
-    if (!report) {
+    sz_substrings_report_t report;
+    sz_bool_t compiled = self->engine.report ? sz_true_k : sz_false_k;
+    if (compiled) {
+        Py_BEGIN_ALLOW_THREADS;
+        sz_py_mutex_lock_(&self->mutex);
+        compiled = self->engine.report ? sz_true_k : sz_false_k;
+        if (compiled) report = *self->engine.report;
+        sz_py_mutex_unlock_(&self->mutex);
+        Py_END_ALLOW_THREADS;
+    }
+    if (!compiled) {
         PyErr_SetString(PyExc_ValueError, "SubstringsEngine holds no compiled vocabulary");
         return NULL;
     }
@@ -675,10 +713,10 @@ static PyObject *SubstringsEngine_get_report(SubstringsEngine *self, void *closu
         char const *name;
         unsigned long long value;
     } const fields[] = {
-        {"matches_emitted", (unsigned long long)report->matches_emitted},
-        {"matches_stored", (unsigned long long)report->matches_stored},
-        {"target_length", (unsigned long long)report->target_length},
-        {"shortfall", (unsigned long long)report->shortfall},
+        {"matches_emitted", (unsigned long long)report.matches_emitted},
+        {"matches_stored", (unsigned long long)report.matches_stored},
+        {"target_length", (unsigned long long)report.target_length},
+        {"shortfall", (unsigned long long)report.shortfall},
     };
     PyObject *result = PyDict_New();
     for (sz_size_t index = 0; result && index != sizeof(fields) / sizeof(fields[0]); ++index) {
@@ -696,7 +734,7 @@ static PyObject *SubstringsEngine_get_report(SubstringsEngine *self, void *closu
 static char const doc_SubstringsEngine[] =                                                              //
     "SubstringsEngine(needles, case_sensitivity='cased', overlap_policy='overlapping',\n"               //
     "                 hot_states=None, matches_budget=0, *, haystacks_budget=0,\n"                      //
-    "                 device=None, capabilities=None, stream=None)\n"                                   //
+    "                 capabilities=None, stream=None)\n"                                                //
     "\n"                                                                                                //
     "Compile a vocabulary once and stream many collections of haystacks through it.\n"                  //
     "\n"                                                                                                //
@@ -709,10 +747,10 @@ static char const doc_SubstringsEngine[] =                                      
     "  hot_states (int, optional): States kept in the dense hot rows; None sizes them automatically.\n" //
     "  matches_budget (int, optional): Matches one round may emit, read by a device tier only.\n"       //
     "  haystacks_budget (int, optional): Haystacks one round may carry, read by a device tier only.\n"  //
-    "  device (Device, optional): Where the engine runs, defaulting to Device.cpu().\n"                 //
-    "  capabilities (Capability, optional): A narrowing of the device's capabilities_enabled(),\n"      //
-    "    which is the default.\n"                                                                       //
-    "  stream (int, optional): A stream of that device as an integer, or None for the default.\n"       //
+    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n"    //
+    "    defaulting to cpu_capabilities_enabled().\n"                                                   //
+    "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"     //
+    "    for the default.\n"                                                                            //
     "Example:\n"                                                                                        //
     "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']), case_sensitivity='cased')\n"            //
     "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                                  //

@@ -50,24 +50,20 @@ typedef struct PyAPI {
     sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_memory_allocator_t *);
 } PyAPI;
 
-#pragma region Devices
+#pragma region Capabilities
 
 /** The @c stringzilla.Capability flags class every capability query speaks, built at import. */
 static PyObject *capability_type = NULL;
 
-sz_capability_t sz_py_enabled_capabilities = sz_cap_serial_k;
-
 int sz_py_export_capabilities(PyObject *capabilities_object, sz_capability_t *capabilities) {
     if (!capabilities_object || capabilities_object == Py_None) {
-        *capabilities = sz_py_enabled_capabilities;
+        *capabilities = sz_cap_cpus_k;
         return 0;
     }
     unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
     if (bits == (unsigned long long)-1 && PyErr_Occurred()) return -1;
-    sz_capability_t detected = sz_cap_serial_k;
-    sz_cpu_capabilities_detected(&detected);
-    // A capability this CPU lacks would fault, and a GPU one would get host pointers
-    *capabilities = (sz_capability_t)bits & detected;
+    // The lookup drops what this CPU lacks, and a GPU capability would get host pointers
+    *capabilities = (sz_capability_t)bits & sz_cap_cpus_k;
     return 0;
 }
 
@@ -79,348 +75,342 @@ static PyObject *capability_from_mask_(sz_capability_t capabilities) {
     return capability;
 }
 
-static sz_status_t cpu_count_devices_(sz_size_t *count) {
-    *count = 1;
-    return sz_success_k;
-}
-
-static sz_status_t cpu_capabilities_detected_(sz_size_t device, sz_capability_t *capabilities) {
-    sz_unused_(device);
-    return sz_cpu_capabilities_detected(capabilities);
-}
-
-static sz_status_t cpu_capabilities_enabled_(sz_size_t device, sz_capability_t *capabilities) {
-    sz_unused_(device);
-    *capabilities = sz_py_enabled_capabilities;
-    return sz_success_k;
-}
-
-/** One kind of @c stringzilla.Device, and the C queries that answer for it. */
-typedef struct DeviceKind {
-    char const *name;
-    sz_status_t (*count_devices)(sz_size_t *count);
-    sz_status_t (*capabilities_detected)(sz_size_t device, sz_capability_t *capabilities);
-    sz_status_t (*capabilities_compiled)(sz_capability_t *capabilities);
-    sz_status_t (*capabilities_enabled)(sz_size_t device, sz_capability_t *capabilities);
-} DeviceKind;
-
-static DeviceKind const device_kinds[] = {
-    {"cpu", cpu_count_devices_, cpu_capabilities_detected_, sz_cpu_capabilities_compiled, cpu_capabilities_enabled_},
-    {"cuda", sz_cuda_count_devices, sz_cuda_capabilities_detected, sz_cuda_capabilities_compiled,
-     sz_cuda_capabilities_enabled},
-    {"rocm", sz_rocm_count_devices, sz_rocm_capabilities_detected, sz_rocm_capabilities_compiled,
-     sz_rocm_capabilities_enabled},
-    {"metal", sz_metal_count_devices, sz_metal_capabilities_detected, sz_metal_capabilities_compiled,
-     sz_metal_capabilities_enabled},
-};
-
-static sz_size_t const device_kinds_count = sizeof(device_kinds) / sizeof(device_kinds[0]);
-
-static DeviceKind const *device_kind_named_(PyObject *name) {
-    if (!PyUnicode_Check(name)) {
-        PyErr_Format(PyExc_TypeError, "device kind must be a string, got %s", Py_TYPE(name)->tp_name);
-        return NULL;
-    }
-    for (sz_size_t index = 0; index != device_kinds_count; ++index)
-        if (PyUnicode_CompareWithASCIIString(name, device_kinds[index].name) == 0) return &device_kinds[index];
-    PyErr_Format(PyExc_ValueError, "device kind must be 'cpu', 'cuda', 'rocm' or 'metal', got %R", name);
-    return NULL;
-}
-
-/** Counts the devices of @p kind, raising the status C reports when there are none. */
-static int device_kind_count_(DeviceKind const *kind, sz_size_t *count) {
-    sz_status_t const status = kind->count_devices(count);
-    if (status == sz_success_k) return 1;
-    sz_py_raise_status(status, kind->name);
-    return 0;
-}
-
-static PyObject *device_new_(DeviceKind const *kind, sz_size_t ordinal) {
-    Device *device = PyObject_New(Device, &DeviceType);
-    if (!device) return NULL;
-    device->kind = kind;
-    device->ordinal = ordinal;
-    return (PyObject *)device;
-}
-
-int sz_py_export_engine_placement(PyObject *device_object, PyObject *capabilities_object, PyObject *stream_object,
-                                  sz_capability_t *capabilities, sz_size_t *ordinal, void **stream) {
-    DeviceKind const *kind = &device_kinds[0];
-    *ordinal = 0;
-    if (device_object && device_object != Py_None) {
-        if (!PyObject_TypeCheck(device_object, &DeviceType)) {
-            PyErr_Format(PyExc_TypeError, "device must be a stringzilla.Device, got %s",
-                         Py_TYPE(device_object)->tp_name);
-            return -1;
-        }
-        kind = ((Device const *)device_object)->kind;
-        *ordinal = ((Device const *)device_object)->ordinal;
-    }
-    sz_capability_t available = 0;
-    sz_status_t const status = kind->capabilities_enabled(*ordinal, &available);
-    if (status != sz_success_k || !available) {
-        PyErr_Format(PyExc_ValueError, "StringZilla has no kernels for Device('%s', %zu): %s", kind->name,
-                     (size_t)*ordinal,
-                     status == sz_success_k ? "this build lacks its capabilities" : sz_status_name(status));
-        return -1;
-    }
-    *capabilities = available;
+int sz_py_export_engine_placement(PyObject *capabilities_object, PyObject *stream_object, sz_capability_t *capabilities,
+                                  void **stream) {
+    *capabilities = sz_cap_cpus_k;
     if (capabilities_object && capabilities_object != Py_None) {
         unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
         if (bits == (unsigned long long)-1 && PyErr_Occurred()) return -1;
-        if ((sz_capability_t)bits & ~available) {
-            char names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-            sz_capabilities_name(available, names, sizeof(names));
-            PyErr_Format(PyExc_ValueError, "capabilities must narrow those of Device('%s', %zu): %s", kind->name,
-                         (size_t)*ordinal, names);
-            return -1;
-        }
         *capabilities = (sz_capability_t)bits;
     }
     if (sz_py_export_stream(stream_object, stream) != 0) return -1;
-    if (kind == &device_kinds[0] && *stream) {
+    // Dispatch picks the group of the highest bit, so only a mask below every GPU's runs on the CPU
+    if (*capabilities >= sz_cap_cuda_k) return 0;
+    if (*stream) {
         PyErr_SetString(PyExc_ValueError, "a CPU engine takes no stream");
         return -1;
     }
     return 0;
 }
 
-static PyObject *Device_new(PyTypeObject *type, PyObject *args, PyObject *kwargs) {
-    sz_unused_(type);
-    Py_ssize_t const positional_count = PyTuple_GET_SIZE(args);
-    if (positional_count > 2) {
-        PyErr_Format(PyExc_TypeError, "Device() takes at most 2 arguments, got %zd", positional_count);
-        return NULL;
-    }
-    PyObject *kind_object = positional_count > 0 ? PyTuple_GET_ITEM(args, 0) : NULL;
-    PyObject *ordinal_object = positional_count > 1 ? PyTuple_GET_ITEM(args, 1) : NULL;
-    Py_ssize_t position = 0;
-    PyObject *key, *value;
-    while (kwargs && PyDict_Next(kwargs, &position, &key, &value)) {
-        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "kind") == 0      ? &kind_object
-                          : PyUnicode_CompareWithASCIIString(key, "ordinal") == 0 ? &ordinal_object
-                                                                                  : NULL;
-        if (!slot) return PyErr_Format(PyExc_TypeError, "Device() got an unexpected keyword argument '%S'", key);
-        if (*slot) return PyErr_Format(PyExc_TypeError, "Device() got multiple values for argument '%S'", key);
-        *slot = value;
-    }
-    if (!kind_object) {
-        PyErr_SetString(PyExc_TypeError, "Device() missing required argument 'kind'");
-        return NULL;
-    }
-
-    DeviceKind const *kind = device_kind_named_(kind_object);
-    if (!kind) return NULL;
-    Py_ssize_t ordinal = 0;
-    if (ordinal_object) {
-        ordinal = PyLong_AsSsize_t(ordinal_object);
-        if (ordinal == -1 && PyErr_Occurred()) return NULL;
-    }
-    if (ordinal < 0) return PyErr_Format(PyExc_ValueError, "device ordinal must be non-negative, got %zd", ordinal);
-    sz_size_t count = 0;
-    if (!device_kind_count_(kind, &count)) return NULL;
-    if ((sz_size_t)ordinal >= count)
-        return PyErr_Format(PyExc_ValueError, "no %s device %zd, as this process sees %zu", kind->name, ordinal,
-                            (size_t)count);
-    return device_new_(kind, (sz_size_t)ordinal);
-}
-
-static PyObject *Device_repr(PyObject *self) {
-    Device const *device = (Device const *)self;
-    return PyUnicode_FromFormat("Device('%s', %zu)", device->kind->name, (size_t)device->ordinal);
-}
-
-static PyObject *Device_richcompare(PyObject *self, PyObject *other, int operation) {
-    if (!PyObject_TypeCheck(other, &DeviceType) || (operation != Py_EQ && operation != Py_NE)) Py_RETURN_NOTIMPLEMENTED;
-    Device const *first = (Device const *)self, *second = (Device const *)other;
-    int const same = first->kind == second->kind && first->ordinal == second->ordinal;
-    return PyBool_FromLong(same == (operation == Py_EQ));
-}
-
-static Py_hash_t Device_hash(PyObject *self) {
-    Device const *device = (Device const *)self;
-    return (Py_hash_t)(device->ordinal * device_kinds_count + (sz_size_t)(device->kind - device_kinds));
-}
-
-static PyObject *Device_get_kind(PyObject *self, void *closure) {
-    sz_unused_(closure);
-    return PyUnicode_FromString(((Device const *)self)->kind->name);
-}
-
-static PyObject *Device_get_ordinal(PyObject *self, void *closure) {
-    sz_unused_(closure);
-    return PyLong_FromSize_t(((Device const *)self)->ordinal);
-}
-
-static char const doc_Device_cpu[] =                     //
-    "Get the CPU, the one device every process has.\n\n" //
-    "Signature:\n"                                       //
-    "    >>> def cpu() -> sz.Device: ...";
-
-static PyObject *Device_cpu(PyObject *unused_self, PyObject *unused_args) {
-    sz_unused_(unused_self);
-    sz_unused_(unused_args);
-    return device_new_(&device_kinds[0], 0);
-}
-
-static char const doc_Device_count[] =                                                       //
-    "Count the devices of one kind this process sees.\n\n"                                   //
-    "Args:\n"                                                                                //
-    "    kind: One of 'cpu', 'cuda', 'rocm' or 'metal'.\n\n"                                 //
-    "Returns:\n"                                                                             //
-    "    int: One for the CPU, and how many GPUs of that kind the runtime sees.\n\n"         //
-    "Raises:\n"                                                                              //
-    "    RuntimeError: No device of that kind answers, or this build lacks its kernels.\n\n" //
-    "Signature:\n"                                                                           //
-    "    >>> def count(kind, /) -> int: ...";
-
-static PyObject *Device_count(PyObject *unused_self, PyObject *kind_object) {
-    sz_unused_(unused_self);
-    DeviceKind const *kind = device_kind_named_(kind_object);
-    sz_size_t count = 0;
-    if (!kind || !device_kind_count_(kind, &count)) return NULL;
-    return PyLong_FromSize_t(count);
-}
-
 /** Wraps what one capability query reported, raising the status of a query that failed. */
-static PyObject *device_capabilities_reported_(sz_status_t status, sz_capability_t capabilities) {
+static PyObject *capabilities_reported_(sz_status_t status, sz_capability_t capabilities, char const *context) {
     if (status != sz_success_k) {
-        sz_py_raise_status(status, "Device");
+        sz_py_raise_status(status, context);
         return NULL;
     }
     return capability_from_mask_(capabilities);
 }
 
-static char const doc_Device_capabilities_detected[] =                                               //
-    "Get the capabilities this device can execute.\n\n"                                              //
-    "Detected from CPUID or HWCAP on the CPU, and from the runtime on a GPU. Says nothing about\n"   //
-    "whether the kernels were compiled in, which `capabilities_compiled` reports.\n\n"               //
-    "Returns:\n"                                                                                     //
-    "    Capability: One flag per capability; GPU bits sit above every member, so they print as a\n" //
-    "        number.\n\n"                                                                            //
-    "Signature:\n"                                                                                   //
-    "    >>> def capabilities_detected(self, /) -> sz.Capability: ...";
-
-static PyObject *Device_capabilities_detected(PyObject *self, PyObject *unused_args) {
-    sz_unused_(unused_args);
-    Device const *device = (Device const *)self;
-    sz_capability_t capabilities = 0;
-    sz_status_t const status = device->kind->capabilities_detected(device->ordinal, &capabilities);
-    return device_capabilities_reported_(status, capabilities);
+/** One GPU producer's device count, raising the status of a vendor with none. */
+static PyObject *devices_counted_(sz_status_t (*count_devices)(sz_size_t *), char const *context) {
+    sz_size_t count = 0;
+    sz_status_t const status = count_devices(&count);
+    if (status == sz_success_k) return PyLong_FromSize_t(count);
+    sz_py_raise_status(status, context);
+    return NULL;
 }
 
-static char const doc_Device_capabilities_compiled[] =                                                   //
-    "Get the capabilities of this device's kind whose kernels were compiled into this binary.\n\n"       //
+/** One GPU producer's capabilities of the device numbered @p ordinal_object. */
+static PyObject *capabilities_of_ordinal_(sz_status_t (*query)(sz_size_t, sz_capability_t *), PyObject *ordinal_object,
+                                          char const *context) {
+    Py_ssize_t const ordinal = PyLong_AsSsize_t(ordinal_object);
+    if (ordinal == -1 && PyErr_Occurred()) return NULL;
+    if (ordinal < 0)
+        return PyErr_Format(PyExc_ValueError, "%s: ordinal must be non-negative, got %zd", context, ordinal);
+    sz_capability_t capabilities = 0;
+    sz_status_t const status = query((sz_size_t)ordinal, &capabilities);
+    return capabilities_reported_(status, capabilities, context);
+}
+
+/** One producer's capabilities that take no ordinal. */
+static PyObject *capabilities_read_(sz_status_t (*query)(sz_capability_t *), char const *context) {
+    sz_capability_t capabilities = 0;
+    sz_status_t const status = query(&capabilities);
+    return capabilities_reported_(status, capabilities, context);
+}
+
+/** One GPU producer's new stream on the device numbered @p ordinal_object, as an integer. */
+static PyObject *stream_created_(sz_status_t (*init)(sz_size_t, void **), PyObject *ordinal_object,
+                                 char const *context) {
+    Py_ssize_t const ordinal = PyLong_AsSsize_t(ordinal_object);
+    if (ordinal == -1 && PyErr_Occurred()) return NULL;
+    if (ordinal < 0)
+        return PyErr_Format(PyExc_ValueError, "%s: ordinal must be non-negative, got %zd", context, ordinal);
+    void *stream = NULL;
+    sz_status_t const status = init((sz_size_t)ordinal, &stream);
+    if (status == sz_success_k) return PyLong_FromVoidPtr(stream);
+    sz_py_raise_status(status, context);
+    return NULL;
+}
+
+/** Frees a stream one GPU producer made, carried as an integer. */
+static PyObject *stream_freed_(sz_status_t (*release)(void *), PyObject *stream_object, char const *context) {
+    void *stream = NULL;
+    if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    sz_status_t const status = release(stream);
+    if (status == sz_success_k) Py_RETURN_NONE;
+    sz_py_raise_status(status, context);
+    return NULL;
+}
+
+static char const doc_cpu_capabilities_detected[] =                                                  //
+    "Get the capabilities this CPU can execute.\n\n"                                                 //
+    "Detected from CPUID or HWCAP. Says nothing about whether the kernels were compiled in, which\n" //
+    "`cpu_capabilities_compiled` reports.\n\n"                                                       //
+    "Signature:\n"                                                                                   //
+    "    >>> def cpu_capabilities_detected() -> sz.Capability: ...";
+
+static PyObject *cpu_capabilities_detected(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return capabilities_read_(sz_cpu_capabilities_detected, "cpu_capabilities_detected()");
+}
+
+static char const doc_cpu_capabilities_compiled[] =                                                      //
+    "Get the CPU capabilities whose kernels were compiled into this binary.\n\n"                         //
     "Decided at build time. Independent of the hardware: a binary built with a broken probe toolchain\n" //
     "still detects this machine's full set while containing no SIMD kernels at all, which is what\n"     //
     "makes a scalar build hard to spot.\n\n"                                                             //
     "Signature:\n"                                                                                       //
-    "    >>> def capabilities_compiled(self, /) -> sz.Capability: ...";
+    "    >>> def cpu_capabilities_compiled() -> sz.Capability: ...";
 
-static PyObject *Device_capabilities_compiled(PyObject *self, PyObject *unused_args) {
+static PyObject *cpu_capabilities_compiled(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
     sz_unused_(unused_args);
-    sz_capability_t capabilities = 0;
-    sz_status_t const status = ((Device const *)self)->kind->capabilities_compiled(&capabilities);
-    return device_capabilities_reported_(status, capabilities);
+    return capabilities_read_(sz_cpu_capabilities_compiled, "cpu_capabilities_compiled()");
 }
 
-static char const doc_Device_capabilities_enabled[] =                                                     //
-    "Get the capabilities kernels run with on this device, unless a call passes `capabilities=`.\n\n"     //
-    "On the CPU it starts as `capabilities_detected() & capabilities_compiled()`, changes only through\n" //
-    "`capabilities_enable`, and always has SERIAL. On a GPU it is that intersection, the mask an\n"       //
-    "engine built with `device=` this device dispatches with.\n\n"                                        //
-    "Signature:\n"                                                                                        //
-    "    >>> def capabilities_enabled(self, /) -> sz.Capability: ...";
+static char const doc_cpu_capabilities_enabled[] =                                                  //
+    "Get the CPU capabilities kernels run with, unless a call passes `capabilities=`.\n\n"          //
+    "It is `cpu_capabilities_detected() & cpu_capabilities_compiled()`, and always has SERIAL.\n\n" //
+    "Signature:\n"                                                                                  //
+    "    >>> def cpu_capabilities_enabled() -> sz.Capability: ...";
 
-static PyObject *Device_capabilities_enabled(PyObject *self, PyObject *unused_args) {
+static PyObject *cpu_capabilities_enabled(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
     sz_unused_(unused_args);
-    Device const *device = (Device const *)self;
-    sz_capability_t capabilities = 0;
-    sz_status_t const status = device->kind->capabilities_enabled(device->ordinal, &capabilities);
-    return device_capabilities_reported_(status, capabilities);
+    return capabilities_read_(sz_cpu_capabilities_enabled, "cpu_capabilities_enabled()");
 }
 
-static char const doc_Device_capabilities_enable[] =                                                      //
-    "Make `wanted` the CPU capabilities kernels run with, and configure the calling thread for them.\n\n" //
-    "Capabilities this CPU cannot execute or this binary lacks are dropped and SERIAL is always kept,\n"  //
-    "so dispatch never reaches a kernel that cannot run here. Engines and stateful objects keep the\n"    //
-    "capabilities they were built with. Mostly useful for testing capabilities one by one. Raises\n"      //
-    "ValueError on a GPU.\n\n"                                                                            //
-    "Args:\n"                                                                                             //
-    "    wanted (Capability): Capabilities to dispatch between, for example `Capability.HASWELL`.\n\n"    //
-    "Returns:\n"                                                                                          //
-    "    Capability: The capabilities enabled after clamping.\n\n"                                        //
-    "Signature:\n"                                                                                        //
-    "    >>> def capabilities_enable(self, wanted, /) -> sz.Capability: ...";
+static char const doc_cpu_configure_thread[] =                                     //
+    "Prepare the calling thread for kernels of `capabilities`.\n\n"                //
+    "Call it on every thread that runs kernels, before the first of them.\n\n"     //
+    "Args:\n"                                                                      //
+    "    capabilities (Capability): The mask kernels on this thread run with.\n\n" //
+    "Signature:\n"                                                                 //
+    "    >>> def cpu_configure_thread(capabilities, /) -> None: ...";
 
-static PyObject *Device_capabilities_enable(PyObject *self, PyObject *wanted) {
-    if (((Device const *)self)->kind != &device_kinds[0])
-        return PyErr_Format(PyExc_ValueError, "capabilities_enable applies to the CPU only, not %R", self);
-    unsigned long long const wanted_bits = PyLong_AsUnsignedLongLong(wanted);
-    if (wanted_bits == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
-    sz_capability_t available = sz_cap_serial_k;
-    sz_cpu_capabilities_enabled(&available);
-    sz_capability_t const enabled = ((sz_capability_t)wanted_bits & available) | sz_cap_serial_k;
-    sz_status_t const status = sz_cpu_configure_thread(enabled);
-    if (status == sz_success_k) sz_py_enabled_capabilities = enabled;
-    return device_capabilities_reported_(status, enabled);
-}
-
-static char const doc_Device_configure_thread[] =                                                 //
-    "Prepare the calling thread for kernels of `capabilities`.\n\n"                               //
-    "`capabilities_enable` already does it for its own thread; call this on every other thread\n" //
-    "that runs kernels. Raises ValueError on a GPU.\n\n"                                          //
-    "Args:\n"                                                                                     //
-    "    capabilities (Capability): The mask kernels on this thread run with.\n\n"                //
-    "Signature:\n"                                                                                //
-    "    >>> def configure_thread(self, capabilities, /) -> None: ...";
-
-static PyObject *Device_configure_thread(PyObject *self, PyObject *capabilities) {
-    if (((Device const *)self)->kind != &device_kinds[0])
-        return PyErr_Format(PyExc_ValueError, "configure_thread applies to the CPU only, not %R", self);
+static PyObject *cpu_configure_thread(PyObject *unused_module, PyObject *capabilities) {
+    sz_unused_(unused_module);
     unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities);
     if (bits == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
     sz_status_t const status = sz_cpu_configure_thread((sz_capability_t)bits);
     if (status != sz_success_k) {
-        sz_py_raise_status(status, "configure_thread");
+        sz_py_raise_status(status, "cpu_configure_thread()");
         return NULL;
     }
     Py_RETURN_NONE;
 }
 
-static PyGetSetDef Device_getset[] = {
-    {"kind", Device_get_kind, NULL, "The kind of device: 'cpu', 'cuda', 'rocm' or 'metal'", NULL},
-    {"ordinal", Device_get_ordinal, NULL, "The device's ordinal in its runtime, always 0 for the CPU", NULL},
-    {NULL, NULL, NULL, NULL, NULL},
-};
+static char const doc_gpu_count_devices[] =                                                          //
+    "Count the devices of one GPU vendor this process sees: `cuda_count_devices`, and the `rocm_`\n" //
+    "and `metal_` ones alike.\n\n"                                                                   //
+    "Raises:\n"                                                                                      //
+    "    RuntimeError: No device of that vendor answers, or this build lacks its kernels.\n\n"       //
+    "Signature:\n"                                                                                   //
+    "    >>> def cuda_count_devices() -> int: ...";
 
-static PyMethodDef Device_methods[] = {
-    {"cpu", (PyCFunction)Device_cpu, METH_STATIC | METH_NOARGS, doc_Device_cpu},
-    {"count", (PyCFunction)Device_count, METH_STATIC | METH_O, doc_Device_count},
-    {"capabilities_detected", (PyCFunction)Device_capabilities_detected, METH_NOARGS, doc_Device_capabilities_detected},
-    {"capabilities_compiled", (PyCFunction)Device_capabilities_compiled, METH_NOARGS, doc_Device_capabilities_compiled},
-    {"capabilities_enabled", (PyCFunction)Device_capabilities_enabled, METH_NOARGS, doc_Device_capabilities_enabled},
-    {"capabilities_enable", (PyCFunction)Device_capabilities_enable, METH_O, doc_Device_capabilities_enable},
-    {"configure_thread", (PyCFunction)Device_configure_thread, METH_O, doc_Device_configure_thread},
-    {NULL, NULL, 0, NULL},
-};
+static char const doc_gpu_capabilities_detected[] =                                                  //
+    "Get the capabilities a GPU can execute, by its runtime's ordinal, whether or not the kernels\n" //
+    "were compiled in: `cuda_capabilities_detected`, and the `rocm_` and `metal_` ones alike.\n\n"   //
+    "Returns:\n"                                                                                     //
+    "    Capability: GPU bits sit above every member, so they print as a number.\n\n"                //
+    "Raises:\n"                                                                                      //
+    "    RuntimeError: No device with that ordinal answers.\n\n"                                     //
+    "Signature:\n"                                                                                   //
+    "    >>> def cuda_capabilities_detected(ordinal, /) -> sz.Capability: ...";
 
-PyTypeObject DeviceType = {
-    PyVarObject_HEAD_INIT(NULL, 0).tp_name = "stringzilla.Device",
-    .tp_doc = "One device StringZilla runs kernels on: a kind, 'cpu', 'cuda', 'rocm' or 'metal', and an ordinal.\n\n" //
-              "Raises ValueError for a negative or past-the-end ordinal, and RuntimeError when no device\n"           //
-              "of that kind answers.\n\n"                                                                             //
-              "Signature:\n"                                                                                          //
-              "    >>> def Device(kind, ordinal=0): ...",
-    .tp_basicsize = sizeof(Device),
-    .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_new = Device_new,
-    .tp_repr = Device_repr,
-    .tp_richcompare = Device_richcompare,
-    .tp_hash = Device_hash,
-    .tp_getset = Device_getset,
-    .tp_methods = Device_methods,
-};
+static char const doc_gpu_capabilities_compiled[] =                                                      //
+    "Get the capabilities of one GPU vendor whose kernels were compiled into this binary, whether or\n"  //
+    "not a device runs them: `cuda_capabilities_compiled`, and the `rocm_` and `metal_` ones alike.\n\n" //
+    "Signature:\n"                                                                                       //
+    "    >>> def cuda_capabilities_compiled() -> sz.Capability: ...";
+
+static char const doc_gpu_capabilities_enabled[] =                                                      //
+    "Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and\n"     //
+    "compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,\n"        //
+    "`Strs.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names\n" //
+    "the device.\n\n"                                                                                   //
+    "Raises:\n"                                                                                         //
+    "    RuntimeError: No device with that ordinal answers.\n\n"                                        //
+    "Signature:\n"                                                                                      //
+    "    >>> def cuda_capabilities_enabled(ordinal, /) -> sz.Capability: ...";
+
+static PyObject *cuda_count_devices(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return devices_counted_(sz_cuda_count_devices, "cuda_count_devices()");
+}
+
+static PyObject *cuda_capabilities_detected(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_cuda_capabilities_detected, ordinal, "cuda_capabilities_detected()");
+}
+
+static PyObject *cuda_capabilities_compiled(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return capabilities_read_(sz_cuda_capabilities_compiled, "cuda_capabilities_compiled()");
+}
+
+static PyObject *cuda_capabilities_enabled(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_cuda_capabilities_enabled, ordinal, "cuda_capabilities_enabled()");
+}
+
+static PyObject *rocm_count_devices(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return devices_counted_(sz_rocm_count_devices, "rocm_count_devices()");
+}
+
+static PyObject *rocm_capabilities_detected(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_rocm_capabilities_detected, ordinal, "rocm_capabilities_detected()");
+}
+
+static PyObject *rocm_capabilities_compiled(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return capabilities_read_(sz_rocm_capabilities_compiled, "rocm_capabilities_compiled()");
+}
+
+static PyObject *rocm_capabilities_enabled(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_rocm_capabilities_enabled, ordinal, "rocm_capabilities_enabled()");
+}
+
+static PyObject *metal_count_devices(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return devices_counted_(sz_metal_count_devices, "metal_count_devices()");
+}
+
+static PyObject *metal_capabilities_detected(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_metal_capabilities_detected, ordinal, "metal_capabilities_detected()");
+}
+
+static PyObject *metal_capabilities_compiled(PyObject *unused_module, PyObject *unused_args) {
+    sz_unused_(unused_module);
+    sz_unused_(unused_args);
+    return capabilities_read_(sz_metal_capabilities_compiled, "metal_capabilities_compiled()");
+}
+
+static PyObject *metal_capabilities_enabled(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return capabilities_of_ordinal_(sz_metal_capabilities_enabled, ordinal, "metal_capabilities_enabled()");
+}
+
+static char const doc_gpu_stream_init[] =                                                               //
+    "Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,\n"     //
+    "`Strs.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`\n" //
+    "ones alike. Free it with the matching `*_stream_free` once its work is synchronized.\n\n"          //
+    "Returns:\n"                                                                                        //
+    "    int: The `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>` handle.\n\n"                   //
+    "Raises:\n"                                                                                         //
+    "    RuntimeError: No device with that ordinal answers, or this build lacks its vendor.\n\n"        //
+    "Signature:\n"                                                                                      //
+    "    >>> def cuda_stream_init(ordinal, /) -> int: ...";
+
+static char const doc_gpu_stream_free[] =                                                        //
+    "Free a stream `cuda_stream_init` made, and the `rocm_` and `metal_` ones alike, once\n"     //
+    "`synchronize` joined whatever was queued on it; nothing may use the stream afterwards.\n\n" //
+    "Signature:\n"                                                                               //
+    "    >>> def cuda_stream_free(stream, /) -> None: ...";
+
+static PyObject *cuda_stream_init(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return stream_created_(sz_cuda_stream_init, ordinal, "cuda_stream_init()");
+}
+
+static PyObject *cuda_stream_free(PyObject *unused_module, PyObject *stream) {
+    sz_unused_(unused_module);
+    return stream_freed_(sz_cuda_stream_free, stream, "cuda_stream_free()");
+}
+
+static PyObject *rocm_stream_init(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return stream_created_(sz_rocm_stream_init, ordinal, "rocm_stream_init()");
+}
+
+static PyObject *rocm_stream_free(PyObject *unused_module, PyObject *stream) {
+    sz_unused_(unused_module);
+    return stream_freed_(sz_rocm_stream_free, stream, "rocm_stream_free()");
+}
+
+static PyObject *metal_stream_init(PyObject *unused_module, PyObject *ordinal) {
+    sz_unused_(unused_module);
+    return stream_created_(sz_metal_stream_init, ordinal, "metal_stream_init()");
+}
+
+static PyObject *metal_stream_free(PyObject *unused_module, PyObject *stream) {
+    sz_unused_(unused_module);
+    return stream_freed_(sz_metal_stream_free, stream, "metal_stream_free()");
+}
+
+static char const doc_synchronize[] =                                                                    //
+    "Wait for everything enqueued on one stream, releasing the GIL meanwhile.\n\n"                       //
+    "A GPU engine's verbs enqueue and return, so their outputs are read, and their inputs freed, only\n" //
+    "after this returns. Returns at once for CPU capabilities.\n\n"                                      //
+    "Args:\n"                                                                                            //
+    "    capabilities (Capability): A producer's mask, which names the vendor.\n"                        //
+    "    stream (int, optional): A stream of that vendor as an integer, or None for the default.\n\n"    //
+    "Raises:\n"                                                                                          //
+    "    BufferError: The stream belongs to another device.\n"                                           //
+    "    RuntimeError: A launch on the stream failed, or the device does not answer.\n\n"                //
+    "Signature:\n"                                                                                       //
+    "    >>> def synchronize(capabilities, stream=None) -> None: ...";
+
+static PyObject *module_synchronize(PyObject *unused_module, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
+    sz_unused_(unused_module);
+    if (positional_args_count > 2) {
+        PyErr_Format(PyExc_TypeError, "synchronize() takes at most 2 positional arguments, got %zd",
+                     positional_args_count);
+        return NULL;
+    }
+    PyObject *capabilities_object = positional_args_count > 0 ? args[0] : NULL;
+    PyObject *stream_object = positional_args_count > 1 ? args[1] : NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 ? &capabilities_object
+                          : PyUnicode_CompareWithASCIIString(key, "stream") == 0     ? &stream_object
+                                                                                     : NULL;
+        if (!slot) return PyErr_Format(PyExc_TypeError, "synchronize() got an unexpected keyword argument '%U'", key);
+        if (*slot) return PyErr_Format(PyExc_TypeError, "synchronize() got multiple values for argument '%U'", key);
+        *slot = args[positional_args_count + keyword_index];
+    }
+    if (!capabilities_object) {
+        PyErr_SetString(PyExc_TypeError, "synchronize() missing required argument 'capabilities'");
+        return NULL;
+    }
+    unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
+    if (bits == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
+    void *stream = NULL;
+    if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    status = sz_stream_synchronize_best((sz_capability_t)bits, stream);
+    Py_END_ALLOW_THREADS;
+    if (status != sz_success_k) {
+        sz_py_raise_status(status, "synchronize()");
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
 
 /** Builds the @c Capability IntFlag with one member per CPU capability, each spelled as the C
  *  library spells it, or returns @c NULL. */
@@ -429,7 +419,7 @@ static PyObject *capability_type_new_(void) {
     for (unsigned bit = 0; members && bit != 64; ++bit) {
         sz_capability_t const flag = (sz_capability_t)1 << bit;
         char name[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
-        if ((flag & sz_cap_devices_k) || !sz_capabilities_name(flag, name, sizeof(name))) continue;
+        if ((flag & sz_cap_gpus_k) || !sz_capabilities_name(flag, name, sizeof(name))) continue;
         for (char *letter = name; *letter; ++letter) *letter = (char)Py_TOUPPER(*letter);
         PyObject *value = PyLong_FromUnsignedLongLong(flag);
         if (!value || PyDict_SetItemString(members, name, value) < 0) Py_CLEAR(members);
@@ -454,7 +444,7 @@ static PyObject *capability_type_new_(void) {
     return type;
 }
 
-#pragma endregion Devices
+#pragma endregion Capabilities
 
 static void stringzilla_cleanup(PyObject *m) {
     // Drain both free-lists, releasing the headers parked for reuse during the interpreter's lifetime.
@@ -652,6 +642,31 @@ static PyMethodDef stringzilla_methods[] = {
     // Module-level functionality
     {"random", (PyCFunction)module_random, STRINGZILLA_METHOD_FLAGS, doc_random},
 
+    // Capability and stream producers, the only calls taking an ordinal, and the stream join
+    {"cpu_capabilities_detected", cpu_capabilities_detected, METH_NOARGS, doc_cpu_capabilities_detected},
+    {"cpu_capabilities_compiled", cpu_capabilities_compiled, METH_NOARGS, doc_cpu_capabilities_compiled},
+    {"cpu_capabilities_enabled", cpu_capabilities_enabled, METH_NOARGS, doc_cpu_capabilities_enabled},
+    {"cpu_configure_thread", cpu_configure_thread, METH_O, doc_cpu_configure_thread},
+    {"cuda_count_devices", cuda_count_devices, METH_NOARGS, doc_gpu_count_devices},
+    {"cuda_capabilities_detected", cuda_capabilities_detected, METH_O, doc_gpu_capabilities_detected},
+    {"cuda_capabilities_compiled", cuda_capabilities_compiled, METH_NOARGS, doc_gpu_capabilities_compiled},
+    {"cuda_capabilities_enabled", cuda_capabilities_enabled, METH_O, doc_gpu_capabilities_enabled},
+    {"rocm_count_devices", rocm_count_devices, METH_NOARGS, doc_gpu_count_devices},
+    {"rocm_capabilities_detected", rocm_capabilities_detected, METH_O, doc_gpu_capabilities_detected},
+    {"rocm_capabilities_compiled", rocm_capabilities_compiled, METH_NOARGS, doc_gpu_capabilities_compiled},
+    {"rocm_capabilities_enabled", rocm_capabilities_enabled, METH_O, doc_gpu_capabilities_enabled},
+    {"metal_count_devices", metal_count_devices, METH_NOARGS, doc_gpu_count_devices},
+    {"metal_capabilities_detected", metal_capabilities_detected, METH_O, doc_gpu_capabilities_detected},
+    {"metal_capabilities_compiled", metal_capabilities_compiled, METH_NOARGS, doc_gpu_capabilities_compiled},
+    {"metal_capabilities_enabled", metal_capabilities_enabled, METH_O, doc_gpu_capabilities_enabled},
+    {"cuda_stream_init", cuda_stream_init, METH_O, doc_gpu_stream_init},
+    {"cuda_stream_free", cuda_stream_free, METH_O, doc_gpu_stream_free},
+    {"rocm_stream_init", rocm_stream_init, METH_O, doc_gpu_stream_init},
+    {"rocm_stream_free", rocm_stream_free, METH_O, doc_gpu_stream_free},
+    {"metal_stream_init", metal_stream_init, METH_O, doc_gpu_stream_init},
+    {"metal_stream_free", metal_stream_free, METH_O, doc_gpu_stream_free},
+    {"synchronize", (PyCFunction)module_synchronize, STRINGZILLA_METHOD_FLAGS, doc_synchronize},
+
     {NULL, NULL, 0, NULL}};
 
 PyModuleDef stringzilla_module = {
@@ -702,7 +717,6 @@ static struct {
     {"LevenshteinEngine", &LevenshteinEngineType},
     {"OverlapEngine", &OverlapEngineType},
     {"SubstringsEngine", &SubstringsEngineType},
-    {"Device", &DeviceType},
 };
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {
@@ -745,8 +759,6 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
         Py_DECREF(capability_type);
         goto failed;
     }
-    sz_cpu_capabilities_enabled(&sz_py_enabled_capabilities);
-    sz_cpu_configure_thread(sz_py_enabled_capabilities);
 
     for (sz_size_t type_index = 0; type_index != types_count; ++type_index) {
         char const *const name = stringzilla_types[type_index].name;

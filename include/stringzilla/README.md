@@ -12,14 +12,14 @@ The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on 
 
 Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_cpu_capabilities_enabled` reports.
 There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
-An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and ordinal, so choosing a device is choosing the mask an engine is built with rather than setting a global.
+An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and a stream, which names the device, so choosing a device is choosing the mask and the stream an engine is built with rather than setting a global.
 Its rounds, such as `sz_levenshtein_distances`, take a trailing stream: null on the CPU, while on a GPU they enqueue there and return, leaving the join to the caller.
 A GPU engine's init uses its stream for its own work alone and sizes a round's device memory from the budgets it takes, so no compute verb allocates or joins, and a round carrying more haystacks than its budget, or on Metal more candidates, is refused with `sz_unexpected_dimensions_k`.
 Overlap and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
 
 The headers compile as freestanding C 99 — set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
 Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro.
-The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, and so on — which the library compiles once, one capability per unit in `c/cpu/`, and header-only builds include into every translation unit.
+The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, and so on — which the library compiles once, one capability per unit in `c/target/`, and header-only builds include into every translation unit.
 
 ## Installation
 
@@ -51,15 +51,15 @@ Each family can also be included on its own when you only need a slice of the AP
 ```
 
 The three engine families prepare a batch of queries once and score it against many batches of candidates, writing into a strided block the caller supplies rather than allocating one per round.
-Each init takes the mask, the device ordinal, the allocator and a stream last, and each round is a single verb with no `_best` twin, as the engine already holds the capability its init picked:
+Each init takes the mask, the allocator and a stream last, and each round is a single verb with no `_best` twin, as the engine already holds the capability its init picked:
 
 ```c
 sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                       sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream);
+                                       sz_memory_allocator_t *allocator, void *stream);
 sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
                                      sz_size_t *distances, sz_size_t distances_stride, void *stream);
-void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine);
+void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream);
 ```
 
 Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](levenshtein/README.md), [`overlap/README.md`](overlap/README.md), and [`substrings/README.md`](substrings/README.md).
@@ -164,13 +164,24 @@ NVCC with CUDA 12 builds the device backends of the engine families, reached by 
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_rocm_capabilities_enabled`.
 With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
-A device round reads memory the device reaches, so the library exports what builds it, each CUDA call with a `sz_rocm_*` twin:
+A device round reads memory the device reaches, so `memory.h` declares what builds it, each a `_best` dispatch point over a mask with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 
-- `sz_cuda_memory_allocator_init_unified`, `_device` and `_pinned` fill a `sz_memory_allocator_t` handing back memory on one device ordinal: shared with the host, device-only, or page-locked on the host.
-- `sz_cuda_memory_reaches_device` says whether a kernel can dereference a pointer.
-- `sz_cuda_sequence_from_string_views` wraps device-reachable views of device-reachable text in a `sz_sequence_t` the kernels can walk.
+- `sz_memory_allocator_init_unified_best` fills a stateless `sz_memory_allocator_t` whose blocks the host and the device share: the heap on the CPU, managed memory on CUDA and ROCm, shared buffers on Metal, each made on the device of the stream it is called with.
+- `sz_sequence_copy_best` copies any host sequence into one tape, `count + 1` offsets and then the bytes, read through the accessors of the mask's group, and only re-points a tape that already is one.
+- `sz_stream_synchronize_best` waits for one stream, after which what a round wrote is readable from the host.
 
-On Metal, `sz_metal_device_init(ordinal, arena_bytes, &device)` opens one GPU with an arena of that many bytes reserved, the engines take the `sz_metal_device_t *` where a stream would go, `sz_metal_device_synchronize` waits for the work committed since the last call, and `sz_metal_device_free` releases it.
+```c
+sz_cuda_capabilities_enabled(0, &caps);
+sz_memory_allocator_init_unified_best(&unified, caps);
+sz_sequence_copy_best(&candidates, &host_candidates, &unified, &candidates_bytes, caps, stream);
+sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
+sz_levenshtein_distances(&engine, &candidates, distances, candidates.count, stream);
+sz_stream_synchronize_best(caps, stream);
+sz_levenshtein_engine_free(&engine, stream);
+unified.free((void *)candidates.handle, candidates_bytes, unified.handle, stream);
+```
+
+A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_cuda_capabilities_enabled(ordinal, &caps)`.
 
 StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD kit, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
@@ -906,7 +917,7 @@ Within each architecture the bits ascend by preference, so the highest bit a mas
 - __LoongArch and Power__: `sz_cap_loongsonasx_k`, `sz_cap_powervsx_k`.
 - __GPUs__: one baseline per vendor above every CPU bit, `sz_cap_cuda_k` at bit 48, `sz_cap_rocm_k` at 56, and `sz_cap_metal_k` at 60.
 
-`sz_cap_cpus_k` and `sz_cap_devices_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
+`sz_cap_cpus_k` and `sz_cap_gpus_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
 
 ```c
 sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities); // what this CPU runs
@@ -914,9 +925,9 @@ sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities); // what
 sz_status_t sz_cpu_capabilities_enabled(sz_capability_t *capabilities);  // both at once, always with serial
 sz_status_t sz_cpu_configure_thread(sz_capability_t capabilities);       // once per dispatching thread
 sz_status_t sz_cuda_count_devices(sz_size_t *count);
-sz_status_t sz_cuda_capabilities_detected(sz_size_t device, sz_capability_t *capabilities);
+sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
 sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities);
-sz_status_t sz_cuda_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities);
+sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
 sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity); // "serial,haswell"
 char const *sz_status_name(sz_status_t status);
 ```

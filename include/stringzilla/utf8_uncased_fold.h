@@ -13,6 +13,8 @@
 
 #include "stringzilla/utf8_runes/serial.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
+#include "stringzilla/rocm.cuh"
 
 #ifdef __cplusplus
 extern "C" {
@@ -172,6 +174,8 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(                          
 #include "stringzilla/utf8_uncased_fold/rvv.h"
 #include "stringzilla/utf8_uncased_fold/loongsonasx.h"
 #include "stringzilla/utf8_uncased_fold/powervsx.h"
+#include "stringzilla/utf8_uncased_fold/cuda.cuh"
+#include "stringzilla/utf8_uncased_fold/rocm.cuh"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #pragma endregion

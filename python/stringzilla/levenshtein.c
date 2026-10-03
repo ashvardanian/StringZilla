@@ -14,7 +14,7 @@ typedef struct {
     sz_levenshtein_engine_t engine;
 
     /** Guards the round scratch a call grows. */
-    sz_engine_lock_field_
+    sz_py_mutex_t mutex;
 } LevenshteinEngine;
 
 #pragma region Construction
@@ -42,7 +42,8 @@ static int parse_levenshtein_symbol_(PyObject *symbol_obj, sz_levenshtein_symbol
 }
 
 static void LevenshteinEngine_dealloc(LevenshteinEngine *self) {
-    sz_levenshtein_engine_free(&self->engine);
+    sz_levenshtein_engine_free(&self->engine, STRINGZILLA_NULL);
+    sz_py_mutex_close_(&self->mutex);
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -55,7 +56,7 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
     }
     PyObject *const queries_obj = PyTuple_GET_ITEM(args, 0);
     PyObject *symbol_obj = positional_count > 1 ? PyTuple_GET_ITEM(args, 1) : NULL;
-    PyObject *capabilities_object = NULL, *device_object = NULL, *stream_object = NULL;
+    PyObject *capabilities_object = NULL, *stream_object = NULL;
     if (kwargs) {
         Py_ssize_t keyword_cursor = 0;
         PyObject *key = NULL, *value = NULL;
@@ -68,7 +69,6 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
                 symbol_obj = value;
             }
             else if (PyUnicode_CompareWithASCIIString(key, "capabilities") == 0) { capabilities_object = value; }
-            else if (PyUnicode_CompareWithASCIIString(key, "device") == 0) { device_object = value; }
             else if (PyUnicode_CompareWithASCIIString(key, "stream") == 0) { stream_object = value; }
             else {
                 PyErr_Format(PyExc_TypeError, "LevenshteinEngine() got an unexpected keyword argument '%U'", key);
@@ -80,19 +80,19 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
     sz_sequence_t queries;
     sz_levenshtein_symbol_t symbol;
     sz_capability_t capabilities;
-    sz_size_t ordinal;
     void *stream;
     if (sz_py_export_strings(queries_obj, "queries", &queries) != 0) return -1;
     if (parse_levenshtein_symbol_(symbol_obj, &symbol) != 0) return -1;
-    if (sz_py_export_engine_placement(device_object, capabilities_object, stream_object, &capabilities, &ordinal,
-                                      &stream) != 0)
-        return -1;
+    if (sz_py_export_engine_placement(capabilities_object, stream_object, &capabilities, &stream) != 0) return -1;
+    if (sz_py_mutex_open_(&self->mutex) != 0) return -1;
 
-    sz_engine_lock_(self);
-    sz_levenshtein_engine_free(&self->engine);
-    sz_status_t const status = sz_levenshtein_engine_init(&self->engine, &queries, symbol, capabilities, ordinal,
-                                                          STRINGZILLA_NULL, stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    sz_levenshtein_engine_free(&self->engine, STRINGZILLA_NULL);
+    status = sz_levenshtein_engine_init(&self->engine, &queries, symbol, capabilities, STRINGZILLA_NULL, stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     if (status != sz_success_k) {
         sz_py_raise_status(status, "LevenshteinEngine()");
         return -1;
@@ -110,7 +110,7 @@ static char const doc_LevenshteinEngine_distances[] =                           
     "Score every prepared query against every candidate, into `out`.\n"                            //
     "\n"                                                                                           //
     "Args:\n"                                                                                      //
-    "  candidates (Strs): Texts forming the matrix columns.\n"                                     //
+    "  candidates (Strs): Texts forming the matrix columns, from `Strs.copy` on a GPU.\n"          //
     "  out (buffer): Writable 2-D buffer of pointer-width unsigned integers like numpy.uintp,\n"   //
     "    at least (len(queries), len(candidates)), contiguous along its candidate axis.\n"         //
     "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"   //
@@ -158,10 +158,12 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
         return NULL;
     }
 
+    sz_capability_t const capability = self->engine.capability;
     sz_sequence_t candidates;
     void *stream = NULL;
-    if (sz_py_export_strings(candidates_obj, "candidates", &candidates) != 0) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+    if (!(capability & sz_cap_gpus_k)) stream = NULL;
+    if (sz_py_export_engine_strings(candidates_obj, "candidates", capability, stream, &candidates) != 0) return NULL;
 
     sz_size_t const extents[2] = {self->engine.count, candidates.count};
     sz_size_t strides[2];
@@ -175,10 +177,14 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
     }
 
     sz_size_t *const distances = (sz_size_t *)out_view.buf;
-    sz_engine_lock_(self);
-    if (!(self->engine.capability & sz_cap_devices_k)) stream = NULL;
-    sz_status_t const status = sz_levenshtein_distances(&self->engine, &candidates, distances, strides[0], stream);
-    sz_engine_unlock_(self);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    sz_py_mutex_lock_(&self->mutex);
+    // Another thread may have rebuilt the engine since the arguments were bound to its shape.
+    if (self->engine.capability != capability || self->engine.count != extents[0]) status = sz_unexpected_dimensions_k;
+    else status = sz_levenshtein_distances(&self->engine, &candidates, distances, strides[0], stream);
+    sz_py_mutex_unlock_(&self->mutex);
+    Py_END_ALLOW_THREADS;
     PyBuffer_Release(&out_view);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "distances()");
@@ -191,26 +197,26 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
 
 #pragma region Type Registration
 
-static char const doc_LevenshteinEngine[] =                                                        //
-    "LevenshteinEngine(queries, symbol='bytes', *, device=None, capabilities=None, stream=None)\n" //
-    "\n"                                                                                           //
-    "Prepare a batch of queries once and score it against many collections of candidates.\n"       //
-    "\n"                                                                                           //
-    "Unit-cost Myers bit-parallel edit distance: every query is packed into match masks at\n"      //
-    "construction, and each round streams the candidates past them.\n"                             //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  queries (Strs): Patterns every candidate is scored against.\n"                              //
-    "  symbol (str, optional): 'bytes' counts byte edits, 'runes' counts UTF-8 rune edits.\n"      //
-    "  device (Device, optional): Where the engine runs, defaulting to Device.cpu().\n"            //
-    "  capabilities (Capability, optional): A narrowing of the device's capabilities_enabled(),\n" //
-    "    which is the default.\n"                                                                  //
-    "  stream (int, optional): A stream of that device as an integer, or None for the default.\n"  //
-    "Example:\n"                                                                                   //
-    "  >>> engine = sz.LevenshteinEngine(sz.Strs(['hello']), symbol='bytes')\n"                    //
-    "  >>> out = memoryview(bytearray(8)).cast('Q', (1, 1))\n"                                     //
-    "  >>> engine.distances(sz.Strs(['hallo']), out)\n"                                            //
-    "  >>> out[0, 0]\n"                                                                            //
+static char const doc_LevenshteinEngine[] =                                                          //
+    "LevenshteinEngine(queries, symbol='bytes', *, capabilities=None, stream=None)\n"                //
+    "\n"                                                                                             //
+    "Prepare a batch of queries once and score it against many collections of candidates.\n"         //
+    "\n"                                                                                             //
+    "Unit-cost Myers bit-parallel edit distance: every query is packed into match masks at\n"        //
+    "construction, and each round streams the candidates past them.\n"                               //
+    "\n"                                                                                             //
+    "Args:\n"                                                                                        //
+    "  queries (Strs): Patterns every candidate is scored against.\n"                                //
+    "  symbol (str, optional): 'bytes' counts byte edits, 'runes' counts UTF-8 rune edits.\n"        //
+    "  capabilities (Capability, optional): A producer's mask, like cuda_capabilities_enabled(0),\n" //
+    "    defaulting to cpu_capabilities_enabled().\n"                                                //
+    "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"  //
+    "    for the default.\n"                                                                         //
+    "Example:\n"                                                                                     //
+    "  >>> engine = sz.LevenshteinEngine(sz.Strs(['hello']), symbol='bytes')\n"                      //
+    "  >>> out = memoryview(bytearray(8)).cast('Q', (1, 1))\n"                                       //
+    "  >>> engine.distances(sz.Strs(['hallo']), out)\n"                                              //
+    "  >>> out[0, 0]\n"                                                                              //
     "  1";
 
 static PyMethodDef LevenshteinEngine_methods[] = {

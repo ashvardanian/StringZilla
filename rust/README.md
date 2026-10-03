@@ -30,9 +30,9 @@ The crate ships the C sources, and its `build.rs` builds them into `stringzilla_
 ### Feature Flags
 
 - `std`, on by default: `std` support, without which the crate is `no_std`.
-- `cuda`: the CUDA backend, so `DeviceKind::Cuda` devices count and engines can be built on them.
-- `rocm`: the ROCm backend, compiled through HIP, so `DeviceKind::Rocm` devices count and engines can be built on them.
-- `metal`: the Metal backend on Apple platforms, linking the Metal and Foundation frameworks, so `DeviceKind::Metal` devices count and engines can be built on them.
+- `cuda`: the CUDA backend, so `Capabilities::cuda_count_devices` counts devices and engines can be built on a `Stream` of `Capabilities::cuda_enabled(ordinal)`.
+- `rocm`: the ROCm backend, compiled through HIP, so the `Capabilities::rocm_*` producers answer the same way.
+- `metal`: the Metal backend on Apple platforms, linking the Metal and Foundation frameworks, so the `Capabilities::metal_*` producers answer the same way.
 
 Every GPU feature implies `std`, which is also required for the `BuildSzHasher` integration with `HashMap`/`HashSet`.
 Without one, the engines are host-only and every other verb is unchanged:
@@ -52,7 +52,7 @@ use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension method
 
 ### SIMD Dispatch
 
-Every call picks its kernel from the capability mask it passes, the CPU's `capabilities_enabled()` (see [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
+Every call picks its kernel from the capability mask it passes, `Capabilities::cpu_enabled()` (see [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
 One binary runs optimally on any CPU of the target architecture, at the cost of one pick per operation.
 CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<kit>.c` — tiny programs calling one of the kit's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
 Every capability the toolchain can emit is built, and the enabled mask leaves out whatever the CPU lacks.
@@ -79,8 +79,9 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
 - `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `Utf8NormalForm` — uncased search and Unicode normalization helpers.
 - `SemVer`, `Status` — version and error types.
-- `Device`, `DeviceKind` — the host CPU or one GPU, by its runtime's ordinal.
-- `Capability`, `Capabilities` — one CPU or GPU capability, and a set of them printed as their names.
+- `Capability`, `Capabilities` — one CPU or GPU capability, and a set of them printed as their names, with the producers that report a device's set by its ordinal.
+- `Stream`, `Scope` — a stream of one device, which every engine, tape and allocator takes, and the span its engine verbs queue in before one join.
+- `Sequence`, `UnifiedAllocator` — a batch copied into one tape, and the memory the host and a GPU both address.
 - `ArgsortOptions` — knobs for sorting.
 
 `Status` is the error of every fallible call: one variant per failure code of C's `sz_status_t`, plus `Unrecognized` for a code this crate's header does not list.
@@ -624,12 +625,11 @@ assert_eq!(a, b); // identical nonce → identical bytes
 Preparation is the expensive half, so a long-lived engine amortizes it across every later round, and the round's scratch grows to fit the widest batch it has seen and is never shrunk.
 
 ```rust
-fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol) -> Result<LevenshteinEngine, Status>;
-unsafe fn new_on<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
-    device: Device, stream: *mut c_void) -> Result<LevenshteinEngine, Status>;
+fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
+    stream: &Stream) -> Result<LevenshteinEngine, Status>;
 
-fn distances<C: AsRef<[u8]>>(&mut self, candidates: &[C], distances: &mut [usize],
-    distances_stride: usize) -> Result<(), Status>;
+fn distances<'scope, C: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    candidates: &'scope C, distances: &'scope mut [usize], distances_stride: usize) -> Result<(), Status>;
 ```
 
 `LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, an ill-formed byte decoding to `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
@@ -639,23 +639,24 @@ The output is a `[queries, candidates]` block the caller owns: query `q` against
 A stride wider than the candidate count is what lets one round fill a sub-block of a larger matrix.
 
 ```rust
-use stringzilla::sz::{LevenshteinEngine, LevenshteinSymbol};
+use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream};
 
-let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes).unwrap();
+let cpu = Stream::default(Capabilities::cpu_enabled());
+let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 
 let mut distances = [0usize; 4];
-engine.distances(&["sitting", "sunday"], &mut distances, 2).unwrap();
+cpu.scope(|scope| engine.distances(scope, &["sitting", "sunday"], &mut distances, 2)).unwrap();
 assert_eq!(distances[0], 3); // kitten vs sitting
 assert_eq!(distances[3], 3); // saturday vs sunday
 
 // The same engine, a second round, no preparation repeated.
 let mut again = [0usize; 2];
-engine.distances(&["mitten"], &mut again, 1).unwrap();
+cpu.scope(|scope| engine.distances(scope, &["mitten"], &mut again, 1)).unwrap();
 
 // Runes rather than bytes, for text where a codepoint is the unit.
-let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes).unwrap();
+let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes, &cpu).unwrap();
 let mut one = [0usize; 1];
-unicode.distances(&["cafe"], &mut one, 1).unwrap();
+cpu.scope(|scope| unicode.distances(scope, &["cafe"], &mut one, 1)).unwrap();
 assert_eq!(one[0], 1);
 ```
 
@@ -666,11 +667,11 @@ A window is a fixed-width byte n-gram, and the overlap of two texts at that widt
 Nothing is stored per candidate, so the candidates may change round to round while the queries and the widths stay.
 
 ```rust
-fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize]) -> Result<OverlapEngine, Status>;
-unsafe fn new_on<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget: usize,
-    device: Device, stream: *mut c_void) -> Result<OverlapEngine, Status>;
+fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget: usize,
+    stream: &Stream) -> Result<OverlapEngine, Status>;
 
-fn scores<C: AsRef<[u8]>>(&mut self, candidates: &[C], scores: &mut [f32],
+fn scores<'scope, C: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    candidates: &'scope C, scores: &'scope mut [f32],
     scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
 ```
 
@@ -679,12 +680,13 @@ The output is a `[queries, candidates, widths]` block with the width axis unit-s
 The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
 
 ```rust
-use stringzilla::sz::OverlapEngine;
+use stringzilla::sz::{Capabilities, OverlapEngine, Stream};
 
-let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8]).unwrap();
+let cpu = Stream::default(Capabilities::cpu_enabled());
+let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 
 let mut scores = [0.0f32; 2];
-engine.scores(&["the quick brown cat"], &mut scores, 2, 2).unwrap();
+cpu.scope(|scope| engine.scores(scope, &["the quick brown cat"], &mut scores, 2, 2)).unwrap();
 assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 ```
 
@@ -695,26 +697,26 @@ Building it is the expensive half and the engine is reusable, so a long-lived on
 
 ```rust
 fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
-    overlap_policy: SubstringsOverlapPolicy, hot_states: usize, matches_budget: usize)
-    -> Result<SubstringsEngine, Status>;
-unsafe fn new_on<N: AsRef<[u8]>>(/* the same, plus */ haystacks_budget: usize,
-    device: Device, stream: *mut c_void) -> Result<SubstringsEngine, Status>;
+    overlap_policy: SubstringsOverlapPolicy, hot_states: usize, matches_budget: usize,
+    haystacks_budget: usize, stream: &Stream) -> Result<SubstringsEngine, Status>;
 
-fn counts<H: AsRef<[u8]>>(&mut self, haystacks: &[H], counts: &mut [usize],
-    counts_stride: usize) -> Result<(), Status>;
-fn find<H: AsRef<[u8]>>(&mut self, haystacks: &[H], matches: &mut [SubstringsMatch],
-    matches_offsets: &mut [usize]) -> Result<(), Status>;
-fn replace<H: AsRef<[u8]>, R: AsRef<[u8]>>(&mut self, haystacks: &[H], replacements: &[R],
-    target: &mut [u8], offsets: &mut [usize]) -> Result<(), Status>;
-fn bm25_scores<H: AsRef<[u8]>>(&mut self, haystacks: &[H], document_lengths: Option<&[f32]>,
-    parameters: &Bm25Params, needle_weights: &[f32], scores: &mut [f32],
-    scores_stride: usize) -> Result<(), Status>;
+fn counts<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: &'scope H, counts: &'scope mut [usize], counts_stride: usize) -> Result<(), Status>;
+fn find<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: &'scope H, matches: &'scope mut [SubstringsMatch],
+    matches_offsets: &'scope mut [usize]) -> Result<(), Status>;
+fn replace<'scope, H: Strings + ?Sized, R: Strings + ?Sized>(&'scope mut self,
+    scope: &'scope Scope<'scope, '_>, haystacks: &'scope H, replacements: &'scope R,
+    target: &'scope mut [u8], offsets: &'scope mut [usize]) -> Result<(), Status>;
+fn bm25_scores<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: &'scope H, document_lengths: Option<&'scope [f32]>, parameters: &'scope Bm25Params,
+    needle_weights: &'scope [f32], scores: &'scope mut [f32], scores_stride: usize) -> Result<(), Status>;
 
 fn report(&self) -> SubstringsReport;
 ```
 
 `hot_states` sizes the automaton's dense tier, or takes `SUBSTRINGS_HOT_STATES_AUTO` to fill a fixed byte budget instead, which holds more states the fewer byte classes the vocabulary spells.
-`matches_budget` bounds what one round may emit and is read by a device tier alone, so a host engine takes `SUBSTRINGS_MATCHES_BUDGET_AUTO` and walks straight into the caller's output.
+`matches_budget` bounds what one round may emit and `haystacks_budget` how many haystacks it may carry, and both are read by a device tier alone, so a host engine takes `SUBSTRINGS_MATCHES_BUDGET_AUTO` and zero and walks straight into the caller's output.
 
 `CaseSensitivity::Cased` matches bytes exactly and accepts arbitrary needles, while `CaseSensitivity::Uncased` folds both sides under full Unicode case folding and requires valid UTF-8.
 Folding is not a byte-length-preserving operation, so a 1-byte needle can match a 3-byte span — the Kelvin sign `U+212A` folds to `k` — which is why every `SubstringsMatch` carries its own `byte_length` rather than borrowing the needle's.
@@ -731,28 +733,31 @@ That is what lets one call with an empty output size the next one, with no walk 
 
 ```rust
 use stringzilla::sz::{
-    CaseSensitivity, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
+    Capabilities, CaseSensitivity, Stream, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
 
+let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = SubstringsEngine::new(
     &["cat", "catalog"],
     CaseSensitivity::Cased,
     SubstringsOverlapPolicy::Overlapping,
     SUBSTRINGS_HOT_STATES_AUTO,
     SUBSTRINGS_MATCHES_BUDGET_AUTO,
+    0,
+    &cpu,
 )
 .unwrap();
 
 let documents = ["a catalog of cats", "nothing here"];
 let mut counts = [0usize; 2];
-engine.counts(&documents, &mut counts, 1).unwrap();
+cpu.scope(|scope| engine.counts(scope, &documents, &mut counts, 1)).unwrap();
 assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 
 // `find` fills one boundary per haystack plus a final total, whether or not the matches fit.
 let mut matches = [SubstringsMatch::default(); 3];
 let mut offsets = [0usize; 3];
-engine.find(&documents, &mut matches, &mut offsets).unwrap();
+cpu.scope(|scope| engine.find(scope, &documents, &mut matches, &mut offsets)).unwrap();
 assert_eq!(offsets, [0, 3, 3]);
 assert_eq!(engine.report().matches_emitted, 3);
 assert_eq!(engine.report().shortfall, 0);
@@ -772,32 +777,34 @@ Rewriting is defined only under a cover, so an engine built with `SubstringsOver
 A `target` too small is not an error either: `report().target_length` names the bytes the rewrite needed and the buffer's contents are then unspecified, so an empty `target` is how the next call is sized.
 
 ```rust
-use stringzilla::sz::{Bm25Params, CaseSensitivity, SubstringsEngine, SubstringsOverlapPolicy,
+use stringzilla::sz::{Bm25Params, Capabilities, CaseSensitivity, Stream, SubstringsEngine, SubstringsOverlapPolicy,
                       SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
+let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = SubstringsEngine::new(
     &["cat", "dog"],
     CaseSensitivity::Cased,
     SubstringsOverlapPolicy::LeftmostLongest,
     SUBSTRINGS_HOT_STATES_AUTO,
     SUBSTRINGS_MATCHES_BUDGET_AUTO,
+    0,
+    &cpu,
 )
 .unwrap();
 
 let documents = ["cat and dog", "nothing here"];
 let mut scores = [0.0f32; 2];
 let parameters = Bm25Params::normalized(10.0);
-engine
-    .bm25_scores(&documents, None, &parameters, &[1.0, 1.0], &mut scores, 1)
+cpu.scope(|scope| engine.bm25_scores(scope, &documents, None, &parameters, &[1.0, 1.0], &mut scores, 1))
     .unwrap();
 assert_eq!(scores[1], 0.0);
 
-// One replacement per needle: an empty target sizes the rewrite, a second call performs it.
+// One replacement per needle: an empty target sizes the rewrite, a second scope performs it.
 let replacements = ["feline", "canine"];
 let mut offsets = [0usize; 3];
-engine.replace(&documents, &replacements, &mut [], &mut offsets).unwrap();
+cpu.scope(|scope| engine.replace(scope, &documents, &replacements, &mut [], &mut offsets)).unwrap();
 let mut target = vec![0u8; engine.report().target_length];
-engine.replace(&documents, &replacements, &mut target, &mut offsets).unwrap();
+cpu.scope(|scope| engine.replace(scope, &documents, &replacements, &mut target, &mut offsets)).unwrap();
 assert_eq!(&target[offsets[0]..offsets[1]], b"feline and canine");
 ```
 
@@ -899,62 +906,65 @@ assert_eq!(runes[0], 'H' as u32);
 
 ## Runtime Dispatch and Capabilities
 
-A `Device` is the host CPU or one GPU, named by its `DeviceKind` and its runtime's own ordinal.
+The producers report `Capabilities`, a set of `Capability` bits, for the CPU or for one GPU by its runtime's own ordinal.
 
 ```rust
-use stringzilla::sz::{self, Capability, Device, DeviceKind};
+use stringzilla::sz::{self, Capabilities, Capability};
 
 let v = sz::version();
 println!("StringZilla {}.{}.{}", v.major, v.minor, v.patch);
 
-let cpu = Device::cpu();
-let enabled = cpu.capabilities_enabled()?;
-cpu.configure_thread(enabled)?;
+let enabled = Capabilities::cpu_enabled();
+enabled.configure_thread()?;
 println!("dispatching to {enabled}"); // like "serial,neon,neonaes,neonsha"
 
-for ordinal in 0..Device::count(DeviceKind::Cuda).unwrap_or(0) {
-    let gpu = Device::new(DeviceKind::Cuda, ordinal)?;
-    println!("CUDA device {ordinal} runs {}", gpu.capabilities_enabled()?); // like "cuda"
+for ordinal in 0..Capabilities::cuda_count_devices().unwrap_or(0) {
+    println!("CUDA device {ordinal} runs {}", Capabilities::cuda_enabled(ordinal)?); // like "cuda"
 }
 ```
 
-A device reports its `Capabilities`, a set of `Capability` bits, along two independent axes, plus the set dispatch uses:
+Each group, `cpu`, `cuda`, `rocm` and `metal`, reports along two independent axes, plus the set dispatch uses:
 
-- `capabilities_detected()`: what the device can execute, from CPUID or HWCAP on the CPU and from the runtime on a GPU
-- `capabilities_compiled()`: what this binary contains, from the probes at build time
-- `capabilities_enabled()`: what dispatch uses, i.e. both axes at once unless narrowed
+- `cpu_detected()`, `cuda_detected(ordinal)`: what the device can execute, from CPUID or HWCAP on the CPU and from the runtime on a GPU
+- `cpu_compiled()`, `cuda_compiled()`: what this binary contains, from the probes at build time
+- `cpu_enabled()`, `cuda_enabled(ordinal)`: what dispatch uses, i.e. both axes at once
 
-Reach for `capabilities_enabled()` unless you specifically mean one of the raw axes.
-`capabilities_detected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
-Narrow CPU dispatch with `cpu.capabilities_enable(enabled.without(Capability::Haswell))`, which clamps to both axes, always keeps `Capability::Serial`, and returns the set that stuck; on a GPU it fails with `Status::MissingKernel`.
-It is the one piece of process state the crate keeps: every call passes the CPU's `capabilities_enabled()` as its capability mask, while an engine keeps the capability it was built with.
-`Device::count` is 1 for the CPU and fails with `Status::MissingGpu` for a vendor this build or machine has no device of, and `Device::new` fails the same way past the last device.
+Reach for the enabled set unless you specifically mean one of the raw axes.
+The detected set describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
+The crate keeps no process state: every call passes `Capabilities::CPUS`, which the library clamps to the enabled set, while an engine keeps the capability it was built with.
+`cuda_count_devices()` fails with `Status::MissingGpu` for a vendor this build or machine has no device of, and `cuda_enabled(ordinal)` fails the same way past the last device.
 
 Call `configure_thread` at the start of every thread that runs kernels, to prepare it for the capabilities it passes.
 In a thread-pool setting, each worker thread needs its own call.
-The function is idempotent and cheap to call more than once on the same thread, and fails with `Status::MissingKernel` on a GPU.
+The function is idempotent and cheap to call more than once on the same thread.
 
-### Engines on a Device
+### Engines on a GPU
 
-Every engine has a `new_on` constructor taking a `Device` and a stream beside the arguments its host constructor takes, plus `candidates_budget` for `OverlapEngine` and `haystacks_budget` for `SubstringsEngine`.
-It prepares the batch on that device with its `capabilities_enabled()` and fixes the launch geometry once, sizing a round's device memory from its budget where it takes one, and uses the stream for that work alone, so the engine keeps its device but no stream.
-The stream is a `cudaStream_t` or `hipStream_t` of that device, or null for its default one, on Metal a `sz_metal_device_t *` that the C library's `sz_metal_device_init(ordinal, arena_bytes, &device)` opened on it, which this crate does not wrap yet, and null on the CPU.
+Every engine constructor takes a `Stream`, whose capabilities it is built with, and a GPU stream builds it on that GPU, fixing the launch geometry once and sizing a round's device memory from `candidates_budget` for `OverlapEngine` and `haystacks_budget` for `SubstringsEngine`.
+The capabilities name the vendor and the stream names the device: `Stream::default(capabilities)` is the default stream of the default device, while `Stream::new(capabilities, ordinal)` makes one on any device by its ordinal and frees it on drop.
+`Stream::from_raw` borrows a `cudaStream_t`, a `hipStream_t` or an `id<MTLCommandQueue>` the caller made, and is `unsafe` because no type system checks that the handle is live and belongs to the vendor.
 
-It is `unsafe` because no type system checks that the stream is live and belongs to the device, and the constructor may join it.
+Every verb only queues its round on the stream of the `Scope` it takes, which `Stream::scope` hands its body and joins once the body returns, even when it fails.
+The verb borrows the engine, its inputs and its outputs for the whole scope, so none of them can be read or dropped before the device is done with them, and an engine runs one verb per scope.
+A stream of another group than the engine's is refused with `Status::DeviceMemoryMismatch`.
+
+A device engine reads its rounds where they lie, so its candidates and its outputs have to sit in memory the device reaches.
+`UnifiedAllocator::new(&stream)` is that memory on the stream's device, behind the standard `Allocator` trait, so `Vec::new_in` and any other allocator-aware collection lays an output out there.
+`Sequence::copy` copies a batch on the host into one tape of offsets and bytes in it, queuing only its migration to the device, and every engine reads that tape in place, while a batch of host strings is refused with `Status::DeviceMemoryMismatch`.
 
 ```rust
-use stringzilla::sz::{Device, DeviceKind, LevenshteinEngine, LevenshteinSymbol};
+use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Sequence, Stream, UnifiedAllocator};
 
-let gpu = Device::new(DeviceKind::Cuda, 0)?;
-// SAFETY: `stream` is a live stream of CUDA device 0.
-let mut engine = unsafe { LevenshteinEngine::new_on(&["kitten", "saturday"], LevenshteinSymbol::Bytes, gpu, stream)? };
-let mut distances = [0usize; 4];
-assert!(engine.distances(&["sitting", "sunday"], &mut distances, 2).is_err());
+let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
+let unified = UnifiedAllocator::new(&stream);
+let candidates = Sequence::copy(&["sitting", "kitten"], &unified, &stream)?;
+let mut distances = Vec::new_in(unified);
+distances.resize(2, 0usize);
+
+let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
+stream.scope(|scope| engine.distances(scope, &candidates, &mut distances, 2))?;
+assert_eq!(distances[..], [3, 0]);
 ```
 
-__One gap worth naming.__
-A device engine's rounds need candidates whose texts and accessors the device reaches, and outputs in memory it can write, which this crate cannot build yet.
-The C library exports what that takes, `sz_cuda_memory_allocator_init_unified` and `sz_cuda_sequence_from_string_views` with their ROCm twins, but this crate does not wrap them.
-Its verbs pass a null stream and host memory, so a device engine answers them with an error status such as `Status::DeviceMemoryMismatch`: this crate can construct a device engine but cannot yet drive it.
-
-A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and every one of them has returned by the time it answers.
+`stream.synchronize()` joins a stream outside any scope.
+A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and a `Sequence` copied for any capabilities reads there too.

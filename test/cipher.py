@@ -33,7 +33,6 @@ from base import (
     assert_backends_agree,
     capability_sweep,
     differential_bodies,
-    forced_capabilities,
     run_across_backends,
     scale_iterations,
 )
@@ -504,16 +503,15 @@ def test_unit_backend_differential_known_answers(vector):
     expected_ciphertext, expected_tag = bytes.fromhex(ciphertext_hex), bytes.fromhex(tag_hex)
 
     for config in capability_sweep():
-        with forced_capabilities(config):
-            # The schedule is expanded when the key is built, so the key must be built in here too.
-            key = sz.Aes256GcmKey(secret)
-            assert key.encrypt(plaintext, nonce, associated) == (expected_ciphertext, expected_tag)
-            assert key.decrypt(expected_ciphertext, nonce, expected_tag, associated) == plaintext
+        # The schedule is expanded when the key is built, so the key carries the mask.
+        key = sz.Aes256GcmKey(secret, capabilities=config)
+        assert key.encrypt(plaintext, nonce, associated) == (expected_ciphertext, expected_tag)
+        assert key.decrypt(expected_ciphertext, nonce, expected_tag, associated) == plaintext
 
-            counter_key = sz.Aes256CtrKey(COUNTER_VECTOR_SECRET)
-            offset = COUNTER_VECTOR_BLOCK_INDEX * 16
-            transformed = counter_key.xor(COUNTER_VECTOR_PLAINTEXT, COUNTER_VECTOR_NONCE, offset=offset)
-            assert transformed == COUNTER_VECTOR_CIPHERTEXT
+        counter_key = sz.Aes256CtrKey(COUNTER_VECTOR_SECRET, capabilities=config)
+        offset = COUNTER_VECTOR_BLOCK_INDEX * 16
+        transformed = counter_key.xor(COUNTER_VECTOR_PLAINTEXT, COUNTER_VECTOR_NONCE, offset=offset)
+        assert transformed == COUNTER_VECTOR_CIPHERTEXT
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
@@ -524,8 +522,9 @@ def test_unit_backend_differential_ctr(length: int, rng: Random):
         payload = body.encode()
         for offset in (0, 1, 15, 16, 17, 4096):
 
-            def transform(payload=payload, offset=offset):
-                return sz.Aes256CtrKey(COUNTER_SECRET).xor(payload, COUNTER_NONCE, offset=offset)
+            def transform(capabilities, payload=payload, offset=offset):
+                key = sz.Aes256CtrKey(COUNTER_SECRET, capabilities=capabilities)
+                return key.xor(payload, COUNTER_NONCE, offset=offset)
 
             assert_backends_agree(
                 run_across_backends(transform),
@@ -542,8 +541,9 @@ def test_unit_backend_differential_gcm(length: int, rng: Random):
         for associated_length in ASSOCIATED_LENGTHS:
             associated = random_bytes(rng, associated_length)
 
-            def encrypt(payload=payload, associated=associated):
-                return sz.Aes256GcmKey(AUTHENTICATED_SECRET).encrypt(payload, AUTHENTICATED_NONCE, associated)
+            def encrypt(capabilities=None, payload=payload, associated=associated):
+                key = sz.Aes256GcmKey(AUTHENTICATED_SECRET, capabilities=capabilities)
+                return key.encrypt(payload, AUTHENTICATED_NONCE, associated)
 
             assert_backends_agree(
                 run_across_backends(encrypt),
@@ -552,8 +552,8 @@ def test_unit_backend_differential_gcm(length: int, rng: Random):
 
             ciphertext, tag = encrypt()
 
-            def decrypt(ciphertext=ciphertext, tag=tag, associated=associated):
-                key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
+            def decrypt(capabilities, ciphertext=ciphertext, tag=tag, associated=associated):
+                key = sz.Aes256GcmKey(AUTHENTICATED_SECRET, capabilities=capabilities)
                 return key.decrypt(ciphertext, AUTHENTICATED_NONCE, tag, associated)
 
             assert_backends_agree(run_across_backends(decrypt), oracle=payload)
@@ -567,8 +567,8 @@ def test_unit_backend_differential_gcm_streaming(chunk_size: int, rng: Random):
     body = random_bytes(rng, span)
     associated = random_bytes(rng, 19)
 
-    def streamed(body=body, associated=associated):
-        key = sz.Aes256GcmKey(AUTHENTICATED_SECRET)
+    def streamed(capabilities, body=body, associated=associated):
+        key = sz.Aes256GcmKey(AUTHENTICATED_SECRET, capabilities=capabilities)
         encryptor = sz.Aes256GcmEncryptor(key, AUTHENTICATED_NONCE)
         encryptor.associate(associated)
         pieces = [encryptor.encrypt(body[start : start + chunk_size]) for start in range(0, span, chunk_size)]
@@ -586,11 +586,10 @@ def test_unit_backend_differential_ctr_seek(rng: Random):
     body = random_bytes(rng, span)
 
     for config in capability_sweep():
-        with forced_capabilities(config):
-            key = sz.Aes256CtrKey(COUNTER_SECRET)
-            whole = key.xor(body, COUNTER_NONCE)
-            for offset in range(0, 130):
-                assert key.xor(body[offset:], COUNTER_NONCE, offset=offset) == whole[offset:]
+        key = sz.Aes256CtrKey(COUNTER_SECRET, capabilities=config)
+        whole = key.xor(body, COUNTER_NONCE)
+        for offset in range(0, 130):
+            assert key.xor(body[offset:], COUNTER_NONCE, offset=offset) == whole[offset:]
 
 
 # endregion Backend differential

@@ -263,7 +263,9 @@ def test_utf8_linebreaks_backend_differential(text):
     """`utf8_linebreaks` agrees across every `capability_sweep()` backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps safely; a divergence
     is a kernel bug, not a binding bug."""
-    results = run_across_backends(lambda: [bytes(segment) for segment in sz.utf8_linebreaks(text)])
+    results = run_across_backends(
+        lambda capabilities: [bytes(segment) for segment in sz.utf8_linebreaks(text, capabilities=capabilities)]
+    )
     assert_backends_agree(results, format_inputs=lambda: f"text={text!r}")
 
 

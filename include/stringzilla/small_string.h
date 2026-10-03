@@ -329,7 +329,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t
     }
     else {
         // If we are not lucky, we need to allocate memory.
-        string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle);
+        string->external.start = (sz_ptr_t)allocator->allocate(space_needed, allocator->handle, STRINGZILLA_NULL);
         if (!string->external.start) return STRINGZILLA_NULL_CHAR;
         string->external.length = length;
         string->external.space = space_needed;
@@ -357,7 +357,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
     // `new_capacity` would allocate a smaller buffer and then overflow it with the old contents.
     if (new_space <= string_space) return string->external.start;
 
-    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
+    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle, STRINGZILLA_NULL);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
     sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
@@ -367,7 +367,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
     string->external.length = string_length;
 
     // Deallocate the old string.
-    if (string_is_external) allocator->free(string_start, string_space, allocator->handle);
+    if (string_is_external) allocator->free(string_start, string_space, allocator->handle, STRINGZILLA_NULL);
     return string->external.start;
 }
 
@@ -385,7 +385,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memo
     sz_size_t new_space = string_length + 1;
     if (string_space == new_space || !string_is_external) return string->external.start;
 
-    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle);
+    sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle, STRINGZILLA_NULL);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
     sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
@@ -395,7 +395,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memo
     string->external.length = string_length;
 
     // Deallocate the old string.
-    if (string_is_external) allocator->free(string_start, string_space, allocator->handle);
+    if (string_is_external) allocator->free(string_start, string_space, allocator->handle, STRINGZILLA_NULL);
     return string->external.start;
 }
 
@@ -484,7 +484,7 @@ STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offs
 
 STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
     if (!sz_string_is_on_stack(string))
-        allocator->free(string->external.start, string->external.space, allocator->handle);
+        allocator->free(string->external.start, string->external.space, allocator->handle, STRINGZILLA_NULL);
     sz_string_init(string);
 }
 

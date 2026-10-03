@@ -11,12 +11,13 @@
 //! - `std`: standard-library integration, such as `BuildSzHasher` for `HashMap`; without it the
 //!   crate is `no_std`.
 //! - `cuda`, `rocm`, `metal`: build the library through CMake with that GPU backend, so that
-//!   vendor's devices count and the engines' `new_on` constructors can prepare a batch on one.
+//!   vendor's devices count and make a `Stream`, on which engines, `Sequence` tapes and
+//!   `UnifiedAllocator` memory are built; without the feature those report `Status::MissingGpu`.
 //!
-//! Every call dispatches on the CPU's
-//! [`Device::capabilities_enabled`](stringzilla::Device::capabilities_enabled), which
-//! [`Device::capabilities_enable`](stringzilla::Device::capabilities_enable) narrows for the whole
-//! process.
+//! Every call dispatches on
+//! [`Capabilities::cpu_enabled`](stringzilla::Capabilities::cpu_enabled), what this CPU runs and
+//! this build compiled. Engine verbs queue on a [`Stream`](stringzilla::Stream) inside its
+//! [`Stream::scope`](stringzilla::Stream::scope), which joins the stream before returning.
 //!
 //! File: rust/lib.rs
 //! Author: Ash Vardanian

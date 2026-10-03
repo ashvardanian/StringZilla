@@ -75,6 +75,28 @@ STRINGZILLA_INLINE void sz_move_serial_(sz_ptr_t target, sz_cptr_t source, sz_si
     }
 }
 
+/** Writes @p source into a fresh tape from @p allocator and points @p target at it through the host
+ *  tape accessors, which every group's copy starts from and a device one then replaces. */
+STRINGZILLA_INLINE sz_status_t sz_sequence_copy_serial_(sz_sequence_t *target, sz_sequence_t const *source,
+                                                        sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                        void *stream) {
+    sz_size_t const count = source->count;
+    sz_size_t bytes = (count + 1) * sizeof(sz_u64_t);
+    for (sz_size_t index = 0; index != count; ++index) bytes += source->get_length(source->handle, index);
+    sz_u64_t *const offsets = (sz_u64_t *)allocator->allocate(bytes, allocator->handle, stream);
+    if (!offsets) return sz_bad_alloc_k;
+    offsets[0] = (count + 1) * sizeof(sz_u64_t);
+    for (sz_size_t index = 0; index != count; ++index) {
+        sz_size_t const length = source->get_length(source->handle, index);
+        sz_copy_serial_((sz_ptr_t)offsets + offsets[index], source->get_start(source->handle, index), length);
+        offsets[index + 1] = offsets[index] + length;
+    }
+    target->handle = offsets, target->count = count;
+    target->get_start = sz_sequence_tape_start, target->get_length = sz_sequence_tape_length;
+    *allocated_bytes = bytes;
+    return sz_success_k;
+}
+
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_lookup_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
@@ -99,6 +121,27 @@ STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz
 STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_move_serial_(target, source, length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_serial(sz_memory_allocator_t *allocator) {
+    sz_memory_allocator_init_default(allocator);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sequence_copy_serial(sz_sequence_t *target, sz_sequence_t const *source,
+                                                    sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                    void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (source->get_start != sz_sequence_tape_start)
+        return sz_sequence_copy_serial_(target, source, allocator, allocated_bytes, stream);
+    *target = *source;
+    *allocated_bytes = 0;
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     return sz_success_k;
 }
 

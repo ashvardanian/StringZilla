@@ -46,7 +46,7 @@ enum { sz_overlap_interleaved_chains_k = 4 };
 
 /** Widest window a GPU engine scores, and the most widths one holds, as its per-thread ring of
  *  prefix hashes and its register-held match counters bound them. */
-enum { sz_overlap_simt_widest_window_k = 31, sz_overlap_simt_widths_max_k = 8 };
+enum { sz_overlap_gpu_widest_window_k = 31, sz_overlap_gpu_widths_max_k = 8 };
 
 #pragma region Generic Public Helpers
 
@@ -227,9 +227,6 @@ typedef struct sz_overlap_engine_t {
     /** The capability whose init kernel prepared the forest, which picks every round's kernel. */
     sz_capability_t capability;
 
-    /** The device of that capability's vendor the blocks live on, zero on the CPU. */
-    sz_size_t ordinal;
-
     /** What built both blocks below and what grows the second. */
     sz_memory_allocator_t allocator;
 
@@ -289,7 +286,7 @@ STRINGZILLA_INLINE void *sz_overlap_engine_head_(sz_overlap_engine_t const *engi
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries, sz_size_t const *window_widths,
                                                        sz_size_t window_widths_count, sz_size_t head_bytes,
-                                                       sz_memory_allocator_t const *allocator,
+                                                       sz_memory_allocator_t const *allocator, void *stream,
                                                        sz_overlap_engine_t *engine) {
     if (!window_widths_count) return sz_unexpected_dimensions_k;
     sz_size_t const count = queries->count;
@@ -308,7 +305,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_sequence_t const *quer
 
     sz_size_t const total_bytes = 63 + head + (count + 1) * sizeof(sz_size_t) +
                                   (nodes_count + 2 * count + 2 * window_widths_count) * sizeof(sz_u32_t);
-    sz_ptr_t const allocation = (sz_ptr_t)allocator->allocate(total_bytes, allocator->handle);
+    sz_ptr_t const allocation = (sz_ptr_t)allocator->allocate(total_bytes, allocator->handle, stream);
     if (!allocation) return sz_bad_alloc_k;
 
     sz_ptr_t const aligned = (sz_ptr_t)(((sz_size_t)allocation + 63) & ~(sz_size_t)63);
@@ -340,7 +337,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_sequence_t const *quer
     engine->nodes = nodes, engine->nodes_offsets = nodes_offsets, engine->keys_counts = keys_counts;
     engine->widths = widths, engine->powers = powers, engine->lengths = lengths;
     engine->count = count, engine->widths_count = window_widths_count;
-    engine->capability = 0, engine->ordinal = 0;
+    engine->capability = 0;
     engine->allocator = *allocator;
     engine->memory = allocation, engine->memory_bytes = total_bytes;
     engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
@@ -353,12 +350,13 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_ca
     return (longest_candidate + 1) * chains * sizeof(sz_f64_t) + (longest_candidate + 1) * sizeof(sz_u32_t);
 }
 
-/** Grows @p engine 's round block to @p bytes, keeping whatever it already holds when
- *  that is enough. */
-STRINGZILLA_INLINE sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes) {
+/** Grows @p engine 's round block to @p bytes on the device of @p stream, keeping whatever it
+ *  already holds when that is enough. */
+STRINGZILLA_INLINE sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes, void *stream) {
     if (engine->scratch_bytes >= bytes) return sz_success_k;
-    if (engine->scratch) engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle);
-    engine->scratch = engine->allocator.allocate(bytes, engine->allocator.handle);
+    if (engine->scratch)
+        engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
+    engine->scratch = engine->allocator.allocate(bytes, engine->allocator.handle, stream);
     engine->scratch_bytes = engine->scratch ? bytes : 0;
     return engine->scratch ? sz_success_k : sz_bad_alloc_k;
 }
@@ -372,14 +370,15 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t co
     return sz_success_k;
 }
 
-/** Returns both of @p engine 's blocks to the allocator they were built with, and
- *  leaves it empty. */
-STRINGZILLA_INLINE void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
-    if (engine->scratch) engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle);
-    if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle);
+/** Returns both of @p engine 's blocks to the allocator they were built with, once the work queued
+ *  on @p stream is done with them, and leaves it empty. */
+STRINGZILLA_INLINE void sz_overlap_engine_close_(sz_overlap_engine_t *engine, void *stream) {
+    if (engine->scratch)
+        engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
+    if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle, stream);
     engine->nodes = STRINGZILLA_NULL, engine->nodes_offsets = STRINGZILLA_NULL, engine->keys_counts = STRINGZILLA_NULL;
     engine->widths = STRINGZILLA_NULL, engine->powers = STRINGZILLA_NULL, engine->lengths = STRINGZILLA_NULL;
-    engine->count = 0, engine->widths_count = 0, engine->capability = 0, engine->ordinal = 0;
+    engine->count = 0, engine->widths_count = 0, engine->capability = 0;
     engine->memory = STRINGZILLA_NULL, engine->memory_bytes = 0;
     engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
 }
@@ -567,14 +566,15 @@ STRINGZILLA_INLINE void sz_overlap_engine_fill_serial_(sz_overlap_engine_t *engi
  */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                           sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                          sz_size_t candidates_budget, sz_size_t ordinal,
-                                                          sz_memory_allocator_t *allocator, void *stream) {
-    sz_assert_(stream == STRINGZILLA_NULL && ordinal == 0);
+                                                          sz_size_t candidates_budget, sz_memory_allocator_t *allocator,
+                                                          void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
     sz_memory_allocator_t host;
     if (allocator) host = *allocator;
     else sz_memory_allocator_init_default(&host);
-    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, engine);
+    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, stream,
+                                                       engine);
     if (opened != sz_success_k) return opened;
 
     // The chain is the engine's own round block, so the first round reuses what the longest query
@@ -582,9 +582,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *e
     sz_size_t longest_query = 0;
     for (sz_size_t index = 0; index != engine->count; ++index)
         if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
-    sz_status_t const grown = sz_overlap_engine_grow_(engine, (longest_query + 1) * sizeof(sz_f64_t));
+    sz_status_t const grown = sz_overlap_engine_grow_(engine, (longest_query + 1) * sizeof(sz_f64_t), stream);
     if (grown != sz_success_k) {
-        sz_overlap_engine_close_(engine);
+        sz_overlap_engine_close_(engine, stream);
         return grown;
     }
 
@@ -608,8 +608,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine
         sz_size_t const length = candidates->get_length(candidates->handle, index);
         if (length > longest_candidate) longest_candidate = length;
     }
-    sz_status_t const grown = sz_overlap_engine_grow_(
-        engine, sz_overlap_engine_round_bytes_(longest_candidate, chains));
+    sz_status_t const grown = sz_overlap_engine_grow_(engine, sz_overlap_engine_round_bytes_(longest_candidate, chains),
+                                                      stream);
     if (grown != sz_success_k) return grown;
 
     sz_size_t const chain_stride = longest_candidate + 1;

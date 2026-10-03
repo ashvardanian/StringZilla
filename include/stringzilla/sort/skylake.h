@@ -197,7 +197,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_si
 
     // Allocate memory for partitioning the elements around the pivot.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *temporary_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
@@ -205,7 +205,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_si
     sz_sequence_argsort_quicksort_pgrams_skylake_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     // Deallocate the temporary memory used for partitioning.
-    allocator->free(temporary_pgrams, memory_usage, allocator->handle);
+    allocator->free(temporary_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
@@ -348,7 +348,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
 
     // Allocate memory for partitioning the elements around the pivot.
     sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
     if (!global_pgrams) return sz_bad_alloc_k;
@@ -358,7 +358,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
                                                    0, count, 0, top_count, reverse);
 
     // Free temporary storage.
-    allocator->free(global_pgrams, memory_usage, allocator->handle);
+    allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
@@ -382,7 +382,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
     // AVX-512 compress-store is exact, so no slack is needed. The folded export is stateless (re-folds the
     // prefix on demand), so unlike the earlier design there is no per-string cursor array.
     sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
-    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
@@ -390,7 +390,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
     sz_sequence_argsort_sort_casefold_windows_skylake_(sequence, global_pgrams, order, temporary_pgrams,
                                                        temporary_order, 0, count, 0, top_count, reverse);
 
-    allocator->free(global_pgrams, memory_usage, allocator->handle);
+    allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 

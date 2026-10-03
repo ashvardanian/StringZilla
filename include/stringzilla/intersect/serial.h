@@ -71,7 +71,7 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                   
     sz_assert_(hash_table_slots > small_sequence->count && "A full table leaves a missing key probing forever");
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *const table_positions = (sz_size_t *)allocator->allocate(hash_table_slots * bytes_per_entry,
-                                                                        allocator->handle);
+                                                                        allocator->handle, STRINGZILLA_NULL);
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *const table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
     sz_fill_serial_((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
@@ -135,7 +135,7 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                   
         }
     }
 
-    allocator->free(table_positions, hash_table_slots * bytes_per_entry, allocator->handle);
+    allocator->free(table_positions, hash_table_slots * bytes_per_entry, allocator->handle, STRINGZILLA_NULL);
     *intersection_count_ptr = intersection_count;
     return sz_success_k;
 }

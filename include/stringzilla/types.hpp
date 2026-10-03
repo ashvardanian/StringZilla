@@ -25,9 +25,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_cpu_capabilities_enabled`, `sz_cuda_capabilities_enabled`
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-#include "stringzilla/types.cuh" // the three allocators' helpers
-#endif
+#include "stringzilla/memory.h"       // `sz_memory_allocator_init_unified_best`
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
  *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
@@ -387,9 +385,9 @@ struct span {
 
 template <typename value_type_>
 struct span<value_type_, STRINGZILLA_SIZE_MAX> {
-    using value_type = value_type_;                  // ? For STL compatibility
-    using size_type = sz_size_t;                     // ? For STL compatibility
-    using difference_type = sz_ssize_t;              // ? For STL compatibility
+    using value_type = value_type_;                           // ? For STL compatibility
+    using size_type = sz_size_t;                              // ? For STL compatibility
+    using difference_type = sz_ssize_t;                       // ? For STL compatibility
     static constexpr sz_size_t extent = STRINGZILLA_SIZE_MAX; // ? For STL compatibility
 
     value_type *data_ {};
@@ -1496,16 +1494,20 @@ class safe_vector {
     operator span<value_type const>() const noexcept { return {data_, size_}; }
 };
 
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-#pragma region CUDA Allocators
+#pragma region Unified Allocators
 
 /**
- *  @brief Allocator over CUDA @b unified memory, which both the host and every device address.
+ *  @brief Allocator over the @b unified memory of one device group, which the host and that
+ *      group's devices all address.
  *
  *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
- *  take it. The @c ordinal it allocates on is the caller's, never a hidden one, and defaults to 0.
+ *  take it. Stateless: @p capabilities_ picks the vendor through
+ *  @ref sz_memory_allocator_init_unified_best, every allocation is made on the caller's current
+ *  device, and a library built without that vendor hands back null.
+ *
+ *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */
-template <typename value_type_>
+template <typename value_type_, sz_capability_t capabilities_>
 struct unified_alloc {
     using value_type = value_type_;
     using pointer = value_type *;
@@ -1514,137 +1516,36 @@ struct unified_alloc {
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
 
-    /** The runtime ordinal of the device every allocation and release switches to. */
-    std::size_t ordinal = 0;
-
     template <typename other_value_type_>
     struct rebind {
-        using other = unified_alloc<other_value_type_>;
+        using other = unified_alloc<other_value_type_, capabilities_>;
     };
 
     constexpr unified_alloc() noexcept = default;
-    constexpr explicit unified_alloc(std::size_t device) noexcept : ordinal(device) {}
-    constexpr unified_alloc(unified_alloc const &) noexcept = default;
-    constexpr unified_alloc &operator=(unified_alloc const &) noexcept = default;
     template <typename other_value_type_>
-    constexpr unified_alloc(unified_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
+    constexpr unified_alloc(unified_alloc<other_value_type_, capabilities_> const &) noexcept {}
 
     value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_unified_(count * sizeof(value_type), (void *)ordinal);
+        sz_memory_allocator_t unified;
+        if (sz_memory_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return nullptr;
+        return (value_type *)unified.allocate(count * sizeof(value_type), unified.handle, nullptr);
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_device_(start, count * sizeof(value_type), (void *)ordinal);
+        sz_memory_allocator_t unified;
+        if (sz_memory_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return;
+        unified.free(start, count * sizeof(value_type), unified.handle, nullptr);
     }
     template <typename other_type_>
-    bool operator==(unified_alloc<other_type_> const &other) const noexcept {
-        return ordinal == other.ordinal;
+    bool operator==(unified_alloc<other_type_, capabilities_> const &) const noexcept {
+        return true;
     }
     template <typename other_type_>
-    bool operator!=(unified_alloc<other_type_> const &other) const noexcept {
-        return ordinal != other.ordinal;
+    bool operator!=(unified_alloc<other_type_, capabilities_> const &) const noexcept {
+        return false;
     }
 };
 
-/**
- *  @brief Allocator over plain CUDA @b device memory, which no host code may dereference.
- *
- *  For scratch that only a kernel ever reads or writes, where unified memory would pay page
- *  migration on every access from the wrong side. @ref safe_vector is the only container that grows
- *  it, through @c resize_uninitialized, because moving elements on the host is exactly what
- *  @c host_accessible_k forbids.
- */
-template <typename value_type_>
-struct device_alloc {
-    using value_type = value_type_;
-    using pointer = value_type *;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-    using propagate_on_container_move_assignment = std::true_type;
-    using propagate_on_container_copy_assignment = std::false_type;
-
-    /** Plain device memory: a container must not move elements through it on the host to grow. */
-    static constexpr bool host_accessible_k = false;
-
-    /** The runtime ordinal of the device every allocation and release switches to. */
-    std::size_t ordinal = 0;
-
-    template <typename other_value_type_>
-    struct rebind {
-        using other = device_alloc<other_value_type_>;
-    };
-
-    constexpr device_alloc() noexcept = default;
-    constexpr explicit device_alloc(std::size_t device) noexcept : ordinal(device) {}
-    constexpr device_alloc(device_alloc const &) noexcept = default;
-    constexpr device_alloc &operator=(device_alloc const &) noexcept = default;
-    template <typename other_value_type_>
-    constexpr device_alloc(device_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
-
-    value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_device_(count * sizeof(value_type), (void *)ordinal);
-    }
-    void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_device_(start, count * sizeof(value_type), (void *)ordinal);
-    }
-    template <typename other_type_>
-    bool operator==(device_alloc<other_type_> const &other) const noexcept {
-        return ordinal == other.ordinal;
-    }
-    template <typename other_type_>
-    bool operator!=(device_alloc<other_type_> const &other) const noexcept {
-        return ordinal != other.ordinal;
-    }
-};
-
-/**
- *  @brief Allocator over CUDA @b pinned page-locked host memory, which the driver copies at
- *      the bus rate.
- *
- *  A kernel cannot address what this hands back - @ref sz_cuda_memory_reaches_device answers false
- *  for it - so it is the staging side of a transfer rather than anything a launch reads.
- */
-template <typename value_type_>
-struct pinned_alloc {
-    using value_type = value_type_;
-    using pointer = value_type *;
-    using size_type = std::size_t;
-    using difference_type = std::ptrdiff_t;
-    using propagate_on_container_move_assignment = std::true_type;
-    using propagate_on_container_copy_assignment = std::false_type;
-
-    /** The runtime ordinal of the device every allocation and release switches to. */
-    std::size_t ordinal = 0;
-
-    template <typename other_value_type_>
-    struct rebind {
-        using other = pinned_alloc<other_value_type_>;
-    };
-
-    constexpr pinned_alloc() noexcept = default;
-    constexpr explicit pinned_alloc(std::size_t device) noexcept : ordinal(device) {}
-    constexpr pinned_alloc(pinned_alloc const &) noexcept = default;
-    constexpr pinned_alloc &operator=(pinned_alloc const &) noexcept = default;
-    template <typename other_value_type_>
-    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &other) noexcept : ordinal(other.ordinal) {}
-
-    value_type *allocate(size_type count) const noexcept {
-        return (value_type *)sz_memory_allocate_pinned_(count * sizeof(value_type), (void *)ordinal);
-    }
-    void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_free_pinned_(start, count * sizeof(value_type), (void *)ordinal);
-    }
-    template <typename other_type_>
-    bool operator==(pinned_alloc<other_type_> const &other) const noexcept {
-        return ordinal == other.ordinal;
-    }
-    template <typename other_type_>
-    bool operator!=(pinned_alloc<other_type_> const &other) const noexcept {
-        return ordinal != other.ordinal;
-    }
-};
-
-#pragma endregion CUDA Allocators
-#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#pragma endregion Unified Allocators
 
 } // namespace stringzilla
 } // namespace ashvardanian

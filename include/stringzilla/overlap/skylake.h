@@ -488,24 +488,24 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_bt
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                            sz_size_t const *window_widths,
                                                            sz_size_t window_widths_count, sz_size_t candidates_budget,
-                                                           sz_size_t ordinal, sz_memory_allocator_t *allocator,
-                                                           void *stream) {
-    sz_assert_(stream == STRINGZILLA_NULL && ordinal == 0);
+                                                           sz_memory_allocator_t *allocator, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
     sz_size_t const step = sz_overlap_f64x8_positions_per_step_skylake_k;
     sz_memory_allocator_t host;
     if (allocator) host = *allocator;
     else sz_memory_allocator_init_default(&host);
-    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, engine);
+    sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, stream,
+                                                       engine);
     if (opened != sz_success_k) return opened;
 
     // The chain is the engine's own round block, so the first round reuses what the longest query already asked for.
     sz_size_t longest_query = 0;
     for (sz_size_t index = 0; index != engine->count; ++index)
         if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
-    sz_status_t const grown = sz_overlap_engine_grow_(engine, (longest_query + 1) * sizeof(sz_f64_t));
+    sz_status_t const grown = sz_overlap_engine_grow_(engine, (longest_query + 1) * sizeof(sz_f64_t), stream);
     if (grown != sz_success_k) {
-        sz_overlap_engine_close_(engine);
+        sz_overlap_engine_close_(engine, stream);
         return grown;
     }
 
@@ -569,8 +569,8 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
         sz_size_t const length = candidates->get_length(candidates->handle, index);
         if (length > longest_candidate) longest_candidate = length;
     }
-    sz_status_t const grown = sz_overlap_engine_grow_(
-        engine, sz_overlap_engine_round_bytes_(longest_candidate, chains));
+    sz_status_t const grown = sz_overlap_engine_grow_(engine, sz_overlap_engine_round_bytes_(longest_candidate, chains),
+                                                      stream);
     if (grown != sz_success_k) return grown;
 
     sz_size_t const chain_stride = longest_candidate + 1;

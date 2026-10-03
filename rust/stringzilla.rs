@@ -69,17 +69,38 @@ extern "C" {
     pub(crate) fn sz_cpu_capabilities_enabled(capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_cpu_configure_thread(capabilities: sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_cuda_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_cuda_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_rocm_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_rocm_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_rocm_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
     pub(crate) fn sz_metal_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_metal_capabilities_detected(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_metal_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
+        -> sz_status_t;
     pub(crate) fn sz_metal_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_metal_capabilities_enabled(device: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_metal_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_cuda_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_cuda_stream_free(stream: *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_rocm_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_rocm_stream_free(stream: *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_metal_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_metal_stream_free(stream: *mut c_void) -> sz_status_t;
+
+    pub(crate) fn sz_memory_allocator_init_unified_best(
+        allocator: *mut _SzMemoryAllocator,
+        capabilities: sz_capability_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_sequence_copy_best(
+        target: *mut _SzSequence,
+        source: *const _SzSequence,
+        allocator: *mut _SzMemoryAllocator,
+        allocated_bytes: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: *mut c_void,
+    ) -> sz_status_t;
+    pub(crate) fn sz_stream_synchronize_best(capabilities: sz_capability_t, stream: *mut c_void) -> sz_status_t;
 
     pub(crate) fn sz_copy_best(
         target: *mut c_void,
@@ -526,18 +547,17 @@ extern "C" {
         stream: *mut c_void,
     ) -> sz_status_t;
 
-    // Cross-product engines. The capability group picks the CPU or one GPU vendor and `ordinal` the
-    // device within it; a null allocator resolves to that device's default one.
+    // Cross-product engines. The capability group picks the CPU or one GPU vendor and the stream the
+    // device; a null allocator resolves to the unified one of those capabilities.
     pub(crate) fn sz_levenshtein_engine_init(
         engine: *mut LevenshteinEngine,
         queries: *const _SzSequence,
         symbol: LevenshteinSymbol,
         capabilities: sz_capability_t,
-        ordinal: sz_size_t,
         allocator: *const c_void,
         stream: *mut c_void,
     ) -> sz_status_t;
-    pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine);
+    pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine, stream: *mut c_void);
     pub(crate) fn sz_levenshtein_distances(
         engine: *mut LevenshteinEngine,
         candidates: *const _SzSequence,
@@ -553,11 +573,10 @@ extern "C" {
         window_widths_count: sz_size_t,
         candidates_budget: sz_size_t,
         capabilities: sz_capability_t,
-        ordinal: sz_size_t,
         allocator: *const c_void,
         stream: *mut c_void,
     ) -> sz_status_t;
-    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine);
+    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine, stream: *mut c_void);
     pub(crate) fn sz_overlap_scores(
         engine: *mut OverlapEngine,
         candidates: *const _SzSequence,
@@ -576,11 +595,10 @@ extern "C" {
         matches_budget: sz_size_t,
         haystacks_budget: sz_size_t,
         capabilities: sz_capability_t,
-        ordinal: sz_size_t,
         allocator: *const c_void,
         stream: *mut c_void,
     ) -> sz_status_t;
-    pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine);
+    pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine, stream: *mut c_void);
     pub(crate) fn sz_substrings_counts(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
@@ -619,13 +637,15 @@ extern "C" {
 }
 
 /// Mirror of `sz_memory_allocator_t`, carried by value inside every engine so a release cannot be
-/// handed the wrong allocator. Nothing on the Rust side reads it; the engines pass a null allocator
-/// and take whichever default their residency resolves to.
+/// handed the wrong allocator. The engines pass a null allocator and take the unified one of their
+/// capabilities; `UnifiedAllocator` fills one to hand its blocks out, and `Sequence` to free its tape.
 #[repr(C)]
-#[allow(dead_code)] // Every member is the C side's to write; the layout is what Rust keeps.
+#[derive(Clone, Copy)]
 pub(crate) struct _SzMemoryAllocator {
-    pub(crate) allocate: Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void) -> *mut c_void>,
-    pub(crate) free: Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void)>,
+    pub(crate) allocate:
+        Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void, stream: *mut c_void) -> *mut c_void>,
+    pub(crate) free:
+        Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void, stream: *mut c_void)>,
     pub(crate) handle: *mut c_void,
 }
 

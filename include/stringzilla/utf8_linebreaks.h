@@ -89,7 +89,7 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t le
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/cpu/`. */
+ *  every kernel once, in its capability's unit under `c/target/`. */
 #include "stringzilla/utf8_linebreaks/serial.h"
 #if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/utf8_linebreaks/haswell.h"

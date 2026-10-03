@@ -27,8 +27,8 @@ links = "stringzilla"
 name = "stringzilla"
 publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
-# The `Byteset` mutators are `const fn` taking `&mut self`, which needs `const_mut_refs`, stable since 1.83.
-rust-version = "1.83"
+# `UnifiedAllocator` implements the standard `Allocator`, stable since 1.100.
+rust-version = "1.100"
 version = "5.1.2"
 
 [lib]
@@ -57,9 +57,9 @@ aho-corasick = "1.1"
 
 [lints.clippy]
 # Catch platform-specific type issues like `c_char` differences
-cast-sign-loss = "warn"
+cast_sign_loss = "warn"
 # Catch potential FFI issues
-not-unsafe-ptr-arg-deref = "warn"
+not_unsafe_ptr_arg_deref = "warn"
 # Catch transmute issues
 transmute_ptr_to_ptr = "warn"
 

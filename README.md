@@ -132,7 +132,7 @@ Its C surface comes in 2 shapes:
 1. Single-string kernels, taking a pointer and a length, and answering with an offset, a digest, or an order.
 2. Stateful engines, preparing a batch of queries once and scoring it against many batches of candidates.
 
-An engine is prepared by `sz_<engine>_engine_init(engine, …, capabilities, ordinal, allocator, stream)` for one device, and every later round runs there, so choosing a device is choosing the mask an engine is built with rather than flipping a global.
+An engine is prepared by `sz_<engine>_engine_init(engine, …, capabilities, allocator, stream)` for the device its stream belongs to, and every later round runs there, so choosing a device is choosing the mask an engine is built with and the stream it queues on, rather than flipping a global.
 Each round is a single verb, like `sz_levenshtein_distances`, taking a trailing stream: null on the CPU, and on a GPU the stream it enqueues on before returning for the caller to join.
 Both shapes are designed to be extremely portable:
 
@@ -678,7 +678,7 @@ On the GPU a candidate's recurrence is a dependency chain, so it stays on one th
 The verticals live in the thread's own registers while the match masks are read-only and shared, every thread indexing the same plane by the class of the byte it is stepping, so the rows stay hot in cache instead of being rebuilt per candidate.
 Myers is add-with-carry and bitwise operations over 64-bit words, all of which the device runs at its integer rate, so each vendor has one GPU tier rather than a ladder of them: `cuda`, `rocm` and `metal`.
 A pair too long for the recurrence falls to `sz_levenshtein_distance_tiled_best`, whose wavefront parallelizes over the long text's tile-columns instead, on CUDA and ROCm.
-The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, compiled into the library by `c/nvidia/cuda.cu` and `c/amd/rocm.hip`, and the Metal ones live beside them in `simt.h` and `simt.metal`, compiled by `c/apple/metal.c`.
+The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, compiled into the library by `c/target/cuda.cu` and `c/target/rocm.hip`, and the Metal ones live beside them in `metal.h` and `metal.metal`, compiled by `c/target/metal.c`.
 
 ## Dynamic Dispatch
 
@@ -688,7 +688,7 @@ The libraries compile every one of them the toolchain builds, as one probe per k
 GPUs add one capability per vendor, `cuda`, `rocm` and `metal`, which `sz_cuda_capabilities_enabled` and its ROCm and Metal twins report for one device, named by that runtime's ordinal.
 In C, `sz_cpu_capabilities_detected` reports what the CPU runs as a bitmask, `sz_cpu_capabilities_compiled` what the binary holds kernels for, and `sz_cpu_capabilities_enabled` both at once, while `sz_capabilities_name` spells any mask into a buffer of `STRINGZILLA_CAPABILITIES_NAME_CAPACITY` bytes.
 Every verb has a dispatch point, like `sz_find_best`, which takes such a mask and a stream, and runs the best capability the mask shares with the verb's list, `serial` first on the CPU.
-The stream is null on the CPU.
+The stream is null on the CPU, and on a GPU names the device, null meaning the default one, while `sz_cuda_stream_init(ordinal, &stream)` and its ROCm and Metal twins make one on any other.
 Every dispatch point returns a status, `sz_missing_kernel_k` when no capability in the mask has the kernel.
 
 ```c
@@ -728,16 +728,13 @@ It picks exactly what the dispatch point picks for the same mask, and returns `s
 Each family exports its own finder over its kinds, like `sz_compare_find_kernel`, and `sz_find_kernel_punned` covers every family through one entry point.
 The kind names the verb, `sz_kernel_<verb>_k`, and the kernel is cast to that verb's pointer type, `sz_kernel_<verb>_t`.
 In C++, every wrapper that takes a mask defaults to `sz::default_capabilities()`, the enabled CPU mask, and `sz::device_t` answers the same three questions for any device and prepares a CPU thread through `configure_thread`.
-Similarly, in Python, `sz.Capability` flags carry the same masks, and one call or the whole process can be narrowed:
+Similarly, in Python, `sz.Capability` flags carry the same masks, and any call can be narrowed:
 
 ```python
 import stringzilla as sz
 
-cpu = sz.Device.cpu()
-cpu.capabilities_enabled()                                   # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
+sz.cpu_capabilities_enabled()                                # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
 sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
-cpu.capabilities_enable(sz.Capability.SERIAL)                # every later call on the scalar kernels
-cpu.capabilities_enable(cpu.capabilities_detected())         # back to everything this CPU and build run
 ```
 
 ## Contributing 👾

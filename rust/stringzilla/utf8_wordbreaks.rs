@@ -10,16 +10,7 @@ pub struct Wordbreaks;
 impl SegmenterKernel for Wordbreaks {
     unsafe fn segment(t: *const c_void, n: usize, l: *mut usize, c: usize) -> usize {
         let mut count = 0;
-        sz_utf8_wordbreaks_best(
-            t,
-            n,
-            l,
-            c,
-            &mut count,
-            enabled_cpu_capabilities_mask(),
-            core::ptr::null_mut(),
-        )
-        .infallible();
+        sz_utf8_wordbreaks_best(t, n, l, c, &mut count, Capabilities::CPUS.bits(), core::ptr::null_mut()).infallible();
         count
     }
 }

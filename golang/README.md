@@ -40,10 +40,9 @@ Every call runs on the CPU and dispatches to the best kernel of its enabled capa
 
 ```go
 cpu := sz.CPU()
-enabled, _ := cpu.CapabilitiesEnabled()       // what dispatch uses: detected on this CPU and compiled in
-fmt.Println(enabled)                          // like "serial,neon,neonaes,neonsha"
-fmt.Println(enabled.Has(sz.CapNeon))          // test one capability
-cpu.CapabilitiesEnable(enabled &^ sz.CapNeon) // narrow dispatch, returns what took effect
+enabled, _ := cpu.CapabilitiesEnabled() // what dispatch uses: detected on this CPU and compiled in
+fmt.Println(enabled)                    // like "serial,neon,neonaes,neonsha"
+fmt.Println(enabled.Has(sz.CapNeon))    // test one capability
 ```
 
 ```go
@@ -53,7 +52,6 @@ func NewDevice(kind DeviceKind, ordinal int) (Device, error)
 func (d Device) CapabilitiesDetected() (Capability, error)
 func (d Device) CapabilitiesCompiled() Capability
 func (d Device) CapabilitiesEnabled() (Capability, error)
-func (d Device) CapabilitiesEnable(wanted Capability) (Capability, error)
 func (d Device) ConfigureThread(capabilities Capability) (func(), error)
 func (c Capability) Has(capability Capability) bool
 func (c Capability) String() string
@@ -62,10 +60,9 @@ func (c Capability) String() string
 A `Device` is the host CPU or one GPU of a runtime, `DeviceCUDA`, `DeviceROCm` or `DeviceMetal`, named by that runtime's own ordinal.
 `CountDevices` counts them and fails without a GPU of that kind, and `NewDevice` fails past the last one.
 `CapabilitiesDetected` and `CapabilitiesCompiled` report the two raw axes, what the device executes and what this binary contains for its kind.
-`CapabilitiesEnable` makes its argument the CPU's enabled set, clamped to both axes and always keeping `CapSerial`, and returns what took effect.
-It fails on a GPU, which keeps no enabled set of its own: this package only reports GPU capabilities.
+`CapabilitiesEnabled` is both at once, and on the CPU always keeps `CapSerial`.
 `ConfigureThread` pins the goroutine to an OS thread and prepares it for the kernels of its argument, returning the function that unpins it; it fails on a GPU, which has no thread state to configure.
-Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNeon`, `CapSve2` or `CapCuda`, and `CapCpus`, `CapDevices` and `CapAny` group them.
+Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNeon`, `CapSve2` or `CapCuda`, and `CapCpus`, `CapGpus` and `CapAny` group them.
 A call that reports a failure status returns it as an `error` where the function has one, and panics otherwise.
 
 ## Searching and Counting

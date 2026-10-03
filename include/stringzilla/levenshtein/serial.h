@@ -307,14 +307,32 @@ enum { sz_levenshtein_tile_side_k = 128 };
 
 /** Query words a GPU engine reaches, a warp's thirty-two lanes at eight words each; a longer query
  *  is refused rather than silently truncated. */
-enum { sz_levenshtein_simt_words_max_k = 256 };
+enum { sz_levenshtein_gpu_words_max_k = 256 };
+
+/** Lanes a warped candidate is spread across, which is a warp or a simdgroup, and the query words
+ *  one lane keeps verticals for, so a warp at its widest reaches the family's word limit. */
+enum {
+    sz_levenshtein_gpu_warp_lanes_k = 32,
+    sz_levenshtein_gpu_warp_words_per_lane_max_k = sz_levenshtein_gpu_words_max_k / sz_levenshtein_gpu_warp_lanes_k,
+};
+
+/** Query words from which the warped rung is launched rather than the threaded one. Swept on XLSum
+ *  lines, the two cross between eight words and sixteen: at sixteen the warp leads by 1.5x in
+ *  corpus order and 1.8x sorted by length, at eight it trails. The crossing moves with the longest
+ *  candidate, not with the query, since a thread rung's warp costs the longest of its thirty-two
+ *  candidates while a warped candidate costs its own. */
+enum { sz_levenshtein_gpu_warp_words_min_k = 16 };
+
+/** Rows one launch's query axis spans, past which a rung is cut into several launches of the
+ *  same kernel. */
+enum { sz_levenshtein_gpu_grid_rows_max_k = 65535 };
 
 /** Times over the device's resident threads a batch must reach before a narrow rung is
  *  launched at all. Below it neither rung's grid fills the device and the narrower one loses
  *  the latency it cannot hide; swept on XLSum words, the two cross between two and four
  *  million candidates on a 188-multiprocessor device, at both lane widths rather than at a
  *  count that scales with the lanes. */
-enum { sz_levenshtein_simt_lanes_waves_min_k = 12 };
+enum { sz_levenshtein_gpu_lanes_waves_min_k = 12 };
 
 /** Bytes of device-reachable scratch @ref sz_levenshtein_distance_tiled_best needs: a frontier row
  *  across the shorter text, plus one progress counter per tile-column of the longer text. */
@@ -425,9 +443,6 @@ typedef struct sz_levenshtein_engine_t {
     /** The capability whose init kernel prepared the batch, which picks every round's kernel. */
     sz_capability_t capability;
 
-    /** The device of that capability's vendor the blocks live on, zero on the CPU. */
-    sz_size_t ordinal;
-
     /** What built both blocks below and what grows the second. */
     sz_memory_allocator_t allocator;
 
@@ -494,8 +509,7 @@ STRINGZILLA_CONSTEXPR sz_levenshtein_query_t sz_levenshtein_engine_row_(sz_leven
     row.masks = engine->masks + engine->masks_offsets[index];
     row.length = engine->lengths[index];
     row.stride = sz_levenshtein_query_stride(row.length);
-    row.classes =
-        row.stride ? (engine->masks_offsets[index + 1] - engine->masks_offsets[index]) / row.stride : 0;
+    row.classes = row.stride ? (engine->masks_offsets[index + 1] - engine->masks_offsets[index]) / row.stride : 0;
     if (engine->symbol == sz_levenshtein_bytes_k) {
         row.byte_to_class = (sz_u8_t const *)engine->symbol_to_class + index * sz_levenshtein_byte_classes_k;
         row.page_rows = STRINGZILLA_NULL, row.class_rows = STRINGZILLA_NULL;
@@ -541,9 +555,10 @@ STRINGZILLA_INLINE void *sz_levenshtein_engine_verticals_(sz_levenshtein_engine_
 /** Grows @p engine 's round block to @p bytes, which a round does once and never undoes. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_scratch_(sz_levenshtein_engine_t *engine, sz_size_t bytes) {
     if (engine->scratch_bytes >= bytes) return sz_success_k;
-    void *const grown = engine->allocator.allocate(bytes, engine->allocator.handle);
+    void *const grown = engine->allocator.allocate(bytes, engine->allocator.handle, STRINGZILLA_NULL);
     if (!grown) return sz_bad_alloc_k;
-    if (engine->scratch) engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle);
+    if (engine->scratch)
+        engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, STRINGZILLA_NULL);
     engine->scratch = grown, engine->scratch_bytes = bytes;
     return sz_success_k;
 }
@@ -591,7 +606,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_rune_classes_(sz_cptr_t text, sz_s
  *  then prepared into. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t const *queries,
                                                               sz_levenshtein_symbol_t symbol,
-                                                              sz_memory_allocator_t const *allocator,
+                                                              sz_memory_allocator_t const *allocator, void *stream,
                                                               sz_levenshtein_engine_shape_t *shapes) {
     if (queries->count == 0) return sz_success_k;
     if (symbol == sz_levenshtein_bytes_k) {
@@ -600,9 +615,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t cons
             sz_size_t const length = queries->get_length(queries->handle, index);
             sz_cptr_t const text = queries->get_start(queries->handle, index);
             shapes[index].length = (sz_u32_t)length;
-            shapes[index].classes = length != 0
-                                        ? (sz_u32_t)sz_levenshtein_engine_byte_classes_(text, length, seen)
-                                        : 0;
+            shapes[index].classes = length != 0 ? (sz_u32_t)sz_levenshtein_engine_byte_classes_(text, length, seen) : 0;
             shapes[index].rows = 0;
         }
         return sz_success_k;
@@ -612,14 +625,14 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t cons
     for (sz_size_t index = 0; index != queries->count; ++index)
         longest = sz_max_of_two(longest, queries->get_length(queries->handle, index));
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes_(longest);
-    sz_u16_t *const page_rows = (sz_u16_t *)allocator->allocate(pages_bytes, allocator->handle);
+    sz_u16_t *const page_rows = (sz_u16_t *)allocator->allocate(pages_bytes, allocator->handle, stream);
     if (!page_rows) return sz_bad_alloc_k;
     sz_u32_t *const class_rows = (sz_u32_t *)(page_rows + sz_levenshtein_utf8_pages_k);
     for (sz_size_t index = 0; index != queries->count; ++index)
         sz_levenshtein_engine_rune_classes_(queries->get_start(queries->handle, index),
                                             queries->get_length(queries->handle, index), page_rows, class_rows,
                                             shapes + index);
-    allocator->free(page_rows, pages_bytes, allocator->handle);
+    allocator->free(page_rows, pages_bytes, allocator->handle, stream);
     return sz_success_k;
 }
 
@@ -690,8 +703,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
         sz_levenshtein_query_t prepared = {
             STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
         if (engine->symbol == sz_levenshtein_bytes_k) {
-            sz_u8_t *const byte_to_class = (sz_u8_t *)engine->symbol_to_class +
-                                           index * sz_levenshtein_byte_classes_k;
+            sz_u8_t *const byte_to_class = (sz_u8_t *)engine->symbol_to_class + index * sz_levenshtein_byte_classes_k;
             sz_levenshtein_query_prepare(text, bytes, plane, byte_to_class, &prepared);
             continue;
         }
@@ -704,37 +716,37 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
  *  the planes unwritten. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_size_t head_bytes,
-                                                            sz_memory_allocator_t const *allocator,
+                                                            sz_memory_allocator_t const *allocator, void *stream,
                                                             sz_levenshtein_engine_t *engine) {
     sz_size_t const count = queries->count;
     sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
     sz_levenshtein_engine_shape_t *const shapes = (sz_levenshtein_engine_shape_t *)allocator->allocate(
-        shapes_bytes, allocator->handle);
+        shapes_bytes, allocator->handle, stream);
     if (!shapes) return sz_bad_alloc_k;
-    sz_status_t const measured = sz_levenshtein_engine_measure_(queries, symbol, allocator, shapes);
+    sz_status_t const measured = sz_levenshtein_engine_measure_(queries, symbol, allocator, stream, shapes);
     if (measured != sz_success_k) {
-        allocator->free(shapes, shapes_bytes, allocator->handle);
+        allocator->free(shapes, shapes_bytes, allocator->handle, stream);
         return measured;
     }
 
     sz_levenshtein_engine_layout_t layout;
     sz_levenshtein_engine_layout_(count, symbol, shapes, head_bytes, &layout);
-    void *const block = allocator->allocate(layout.total_bytes, allocator->handle);
+    void *const block = allocator->allocate(layout.total_bytes, allocator->handle, stream);
     if (!block) {
-        allocator->free(shapes, shapes_bytes, allocator->handle);
+        allocator->free(shapes, shapes_bytes, allocator->handle, stream);
         return sz_bad_alloc_k;
     }
 
     engine->count = count;
     engine->symbol = symbol;
-    engine->capability = sz_cap_serial_k, engine->ordinal = 0;
+    engine->capability = sz_cap_serial_k;
     engine->allocator = *allocator;
     engine->memory = block;
     engine->memory_bytes = layout.total_bytes;
     engine->scratch = STRINGZILLA_NULL;
     engine->scratch_bytes = 0;
     sz_levenshtein_engine_bind_(engine, &layout, shapes);
-    allocator->free(shapes, shapes_bytes, allocator->handle);
+    allocator->free(shapes, shapes_bytes, allocator->handle, stream);
     return sz_success_k;
 }
 
@@ -743,24 +755,25 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_capability_t capability, sz_size_t ordinal,
+                                                               sz_capability_t capability,
                                                                sz_memory_allocator_t *allocator, void *stream) {
-    sz_assert_(stream == STRINGZILLA_NULL && ordinal == 0);
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_memory_allocator_t host;
     if (allocator) host = *allocator;
     else sz_memory_allocator_init_default(&host);
-    sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, engine);
+    sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, stream, engine);
     if (built != sz_success_k) return built;
     sz_levenshtein_engine_fill_(engine, queries);
     engine->capability = capability;
     return sz_success_k;
 }
 
-/** Returns both of @p engine 's blocks to the allocator they were built with, and
- *  leaves it empty. */
-STRINGZILLA_INLINE void sz_levenshtein_engine_free_(sz_levenshtein_engine_t *engine) {
-    if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle);
-    if (engine->scratch) engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle);
+/** Returns both of @p engine 's blocks to the allocator they were built with, once the work queued
+ *  on @p stream is done with them, and leaves it empty. */
+STRINGZILLA_INLINE void sz_levenshtein_engine_free_(sz_levenshtein_engine_t *engine, void *stream) {
+    if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle, stream);
+    if (engine->scratch)
+        engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
     engine->masks = STRINGZILLA_NULL, engine->masks_offsets = STRINGZILLA_NULL;
     engine->symbol_to_class = STRINGZILLA_NULL, engine->lengths = STRINGZILLA_NULL;
     engine->count = 0;
@@ -951,9 +964,9 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_qu
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *queries,
-                                                              sz_levenshtein_symbol_t symbol, sz_size_t ordinal,
+                                                              sz_levenshtein_symbol_t symbol,
                                                               sz_memory_allocator_t *allocator, void *stream) {
-    return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_serial_k, ordinal, allocator, stream);
+    return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_serial_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,

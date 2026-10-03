@@ -126,14 +126,6 @@ extern PyTypeObject Aes256GcmDecryptorType;
 extern PyTypeObject LevenshteinEngineType;
 extern PyTypeObject OverlapEngineType;
 extern PyTypeObject SubstringsEngineType;
-extern PyTypeObject DeviceType;
-
-/** A @c stringzilla.Device: a kind of runtime from the table in `stringzilla.c`, and an ordinal. */
-typedef struct Device {
-    PyObject ob_base;
-    struct DeviceKind const *kind;
-    sz_size_t ordinal;
-} Device;
 
 extern struct PyModuleDef stringzilla_module;
 
@@ -268,6 +260,42 @@ typedef struct {
 
 } Strs;
 
+/* A lock some threads take with the GIL released, so a waiter never blocks a holder that needs the
+ * GIL. @c PyMutex is zero-initialized by @c tp_alloc and never torn down; before 3.13 it is a
+ * @c PyThread_type_lock that its owner opens before first use and closes when it dies. */
+#if PY_VERSION_HEX >= 0x030D0000
+
+typedef PyMutex sz_py_mutex_t;
+
+static inline int sz_py_mutex_open_(sz_py_mutex_t *mutex) {
+    sz_unused_(mutex);
+    return 0;
+}
+
+static inline void sz_py_mutex_close_(sz_py_mutex_t *mutex) { sz_unused_(mutex); }
+static inline void sz_py_mutex_lock_(sz_py_mutex_t *mutex) { PyMutex_Lock(mutex); }
+static inline void sz_py_mutex_unlock_(sz_py_mutex_t *mutex) { PyMutex_Unlock(mutex); }
+
+#else
+
+typedef PyThread_type_lock sz_py_mutex_t;
+
+static inline int sz_py_mutex_open_(sz_py_mutex_t *mutex) {
+    if (!*mutex) *mutex = PyThread_allocate_lock();
+    if (*mutex) return 0;
+    PyErr_NoMemory();
+    return -1;
+}
+
+static inline void sz_py_mutex_close_(sz_py_mutex_t *mutex) {
+    if (*mutex) PyThread_free_lock(*mutex);
+}
+
+static inline void sz_py_mutex_lock_(sz_py_mutex_t *mutex) { PyThread_acquire_lock(*mutex, WAIT_LOCK); }
+static inline void sz_py_mutex_unlock_(sz_py_mutex_t *mutex) { PyThread_release_lock(*mutex); }
+
+#endif
+
 /** Headers retained per interpreter, per type. */
 enum { sz_freelist_capacity_k = 64 };
 
@@ -281,7 +309,7 @@ enum { sz_freelist_capacity_k = 64 };
  *  dead object's own storage, @c Str::parent and @c Strs::data, so the state needs only a head
  *  pointer and a counter per type, never above @c sz_freelist_capacity_k. Living in module state
  *  keeps it per-interpreter, but on a free-threaded build the module state is shared by every
- *  thread in the interpreter, so all four fields are guarded by @c freelist_lock: without it,
+ *  thread in the interpreter, so all four fields are guarded by @c freelist_mutex: without it,
  *  concurrent @c alloc_ and @c dealloc calls race on the same linked list and can hand out one
  *  header to two live objects at once.
  */
@@ -293,9 +321,20 @@ typedef struct {
 
     /** Zero-initialized with the module state, so it starts unlocked. */
 #if defined(Py_GIL_DISABLED)
-    PyMutex freelist_lock;
+    sz_py_mutex_t freelist_mutex;
 #endif
 } stringzilla_state_t;
+
+/* On a free-threaded build the module state is shared by every thread in the interpreter, so the
+ * free-list head and count pairs need a lock around each read-modify-write; on a GIL build the GIL
+ * already serializes these calls, so the lock is not taken at all. */
+#if defined(Py_GIL_DISABLED)
+static inline void sz_freelist_lock_(stringzilla_state_t *state) { sz_py_mutex_lock_(&state->freelist_mutex); }
+static inline void sz_freelist_unlock_(stringzilla_state_t *state) { sz_py_mutex_unlock_(&state->freelist_mutex); }
+#else
+static inline void sz_freelist_lock_(stringzilla_state_t *state) { sz_unused_(state); }
+static inline void sz_freelist_unlock_(stringzilla_state_t *state) { sz_unused_(state); }
+#endif
 
 /* `shared.c` */
 
@@ -325,39 +364,6 @@ extern Strs **Strs_freelist_next_(Strs *node);
 
 /** Number of live elements in a @c Strs collection, regardless of layout. */
 extern Py_ssize_t Strs_len(Strs *self);
-
-/* On a free-threaded build the module state above is shared by every thread in the interpreter, so
- * the free-list head and count pairs need a lock around each read-modify-write; on a GIL build the
- * GIL already serializes these calls, so the lock and unlock compile away to nothing. */
-#if defined(Py_GIL_DISABLED)
-#define sz_freelist_lock_(state) PyMutex_Lock(&(state)->freelist_lock)
-#define sz_freelist_unlock_(state) PyMutex_Unlock(&(state)->freelist_lock)
-#else
-#define sz_freelist_lock_(state) \
-    do {                         \
-    } while (0)
-#define sz_freelist_unlock_(state) \
-    do {                           \
-    } while (0)
-#endif
-
-/* Each engine keeps a grow-only round scratch that every compute verb writes through, so two
- * threads calling into one engine would race on it. The GIL serializes them on a regular build; a
- * free-threaded build says so out loud with a per-object mutex, zero-initialized by @c tp_alloc and
- * never torn down. */
-#if defined(Py_GIL_DISABLED)
-#define sz_engine_lock_field_ PyMutex engine_lock;
-#define sz_engine_lock_(engine) PyMutex_Lock(&(engine)->engine_lock)
-#define sz_engine_unlock_(engine) PyMutex_Unlock(&(engine)->engine_lock)
-#else
-#define sz_engine_lock_field_
-#define sz_engine_lock_(engine) \
-    do {                        \
-    } while (0)
-#define sz_engine_unlock_(engine) \
-    do {                          \
-    } while (0)
-#endif
 
 /*  Cross-domain function and docstring declarations: every `Str_like_*` and `Strs_*` method and its
  *  `doc_*` docstring constant named by the `Str_methods[]`, `Strs_methods[]`, and
@@ -557,10 +563,6 @@ extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const
 
 /* `stringzilla.c` */
 
-/** The CPU capabilities a call dispatches with unless it passes its own, which
- *  @c capabilities_enable sets for the whole process. */
-extern sz_capability_t sz_py_enabled_capabilities;
-
 /**
  *  @brief Reads the `capabilities=` keyword of a call that runs kernels.
  *  @param[in] capabilities_object A @c Capability mask, or @c NULL or None for the enabled mask.
@@ -575,22 +577,28 @@ extern void sz_py_raise_status(sz_status_t status, char const *context);
 /** Exports @p object as a sequence of strings, or raises a @c TypeError naming @p name. */
 extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence);
 
+/**
+ *  @brief Exports @p object as the sequence an engine of @p capability reads on @p stream.
+ *  @return 0 with the accessors of a GPU engine's group for a whole tape from @c Strs.copy its device
+ *      reaches, and host accessors otherwise; or -1 with a Python exception set, a @c BufferError for
+ *      a tape that device would have to copy.
+ */
+extern int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability, void *stream,
+                                       sz_sequence_t *sequence);
+
 /** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
 extern int sz_py_export_stream(PyObject *stream_object, void **stream);
 
 /**
- *  @brief Reads where an engine is built: its `device=`, `capabilities=` and `stream=` keywords.
- *  @param[in] device_object A @c Device, or @c NULL or None for the CPU.
- *  @param[in] capabilities_object A mask narrowing the device's enabled one, or @c NULL or None.
+ *  @brief Reads how an engine is built: its `capabilities=` and `stream=` keywords.
+ *  @param[in] capabilities_object A producer's mask, or @c NULL or None for the CPU's enabled one.
  *  @param[out] capabilities The mask to build the engine with.
- *  @param[out] ordinal The device's ordinal within its kind.
- *  @param[out] stream A stream of that device, @c NULL when absent.
- *  @return 0 on success, or -1 with a Python exception set, refusing a device this build has no
- *      kernels for, capabilities beyond the device's, and a CPU engine given a stream.
+ *  @param[out] stream A stream of the device that mask names, @c NULL when absent.
+ *  @return 0 on success, or -1 with a Python exception set, refusing CPU capabilities this CPU
+ *      cannot run and a CPU engine given a stream.
  */
-extern int sz_py_export_engine_placement(PyObject *device_object, PyObject *capabilities_object,
-                                         PyObject *stream_object, sz_capability_t *capabilities, sz_size_t *ordinal,
-                                         void **stream);
+extern int sz_py_export_engine_placement(PyObject *capabilities_object, PyObject *stream_object,
+                                         sz_capability_t *capabilities, void **stream);
 
 /**
  *  @brief Binds @p object as a writable output of @p rank axes, each at least @p extents wide.

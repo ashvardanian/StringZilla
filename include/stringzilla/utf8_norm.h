@@ -18,6 +18,8 @@
 
 #include "stringzilla/types.h"        // `sz_normal_form_t`, `sz_size_t`, `sz_cptr_t`
 #include "stringzilla/capabilities.h" // `sz_capability_t`
+#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
+#include "stringzilla/rocm.cuh"
 
 #ifdef __cplusplus
 extern "C" {
@@ -254,6 +256,8 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_rocm(                                  
 #include "stringzilla/utf8_norm/v128relaxed.h" // includes v128.h; the guard makes the double-include safe
 #include "stringzilla/utf8_norm/loongsonasx.h"
 #include "stringzilla/utf8_norm/powervsx.h"
+#include "stringzilla/utf8_norm/cuda.cuh"
+#include "stringzilla/utf8_norm/rocm.cuh"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #pragma endregion

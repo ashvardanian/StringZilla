@@ -1809,12 +1809,12 @@ inline void raise(status_t status) noexcept(false) {
 /** Allocates @p n bytes through the C++ allocator behind @p allocator_state, reading its throw as
  *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
 template <typename allocator_type_>
-inline void *allocate_through_(sz_size_t n, void *allocator_state) noexcept {
+inline void *allocate_through_(sz_size_t n, void *allocator_state, void *) noexcept {
     return allocate_or_null_(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
 }
 
 template <typename allocator_type_>
-inline void free_through_(void *ptr, sz_size_t n, void *allocator_state) noexcept {
+inline void free_through_(void *ptr, sz_size_t n, void *allocator_state, void *) noexcept {
     using value_type_ = typename allocator_type_::value_type;
     return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }

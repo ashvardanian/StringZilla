@@ -227,7 +227,7 @@ inline sz_status_t substrings_init_host(substrings_dictionary_t const &dictionar
     sz_memory_allocator_t host;
     sz_memory_allocator_init_default(&host);
     return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
-                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), 0, &host,
+                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), &host,
                                      nullptr);
 }
 
@@ -242,13 +242,13 @@ inline sz_status_t substrings_init_device(substrings_dictionary_t const &diction
     if (sz::failed(make_status)) return static_cast<sz_status_t>(make_status);
     return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
                                      STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, dictionary.matches_budget,
-                                     dictionary.haystacks_budget, device.capabilities_enabled().value, 0, &allocator,
+                                     dictionary.haystacks_budget, device.capabilities_enabled().value, &allocator,
                                      nullptr);
 }
 
 /** Joins the default stream if a device engine could have enqueued on it; host engines never do. */
 inline void substrings_join(sz_substrings_engine_t const &engine) {
-    if (engine.capability & sz_cap_devices_k) sz_unused_(cudaStreamSynchronize(nullptr));
+    if (engine.capability & sz_cap_gpus_k) sz_unused_(sz_stream_synchronize_best(engine.capability, nullptr));
 }
 #else
 
@@ -283,7 +283,7 @@ struct substrings_engine_t {
     }
     substrings_engine_t(substrings_engine_t const &) = delete;
     substrings_engine_t &operator=(substrings_engine_t const &) = delete;
-    ~substrings_engine_t() noexcept { sz_substrings_engine_free(&engine); }
+    ~substrings_engine_t() noexcept { sz_substrings_engine_free(&engine, nullptr); }
 };
 
 /** The corpus as one sequence of haystacks, over views the device reaches in a device build. */

@@ -2,9 +2,9 @@
  *  @file include/stringzilla/utf8_uncased_fold/simt.cuh
  *  @author Ash Vardanian
  *  @date October 2, 2026
- *  @brief CUDA and ROCm backend for UTF-8 case folding: a text cut into tiles, every thread
- *      folding one stretch of a tile twice, once to measure it and once to write it where the
- *      tiles before it end.
+ *  @brief The kernel CUDA and ROCm share for UTF-8 case folding: a text cut into tiles, every
+ *      thread folding one stretch of a tile twice, once to measure it and once to write it where
+ *      the tiles before it end.
  *
  *  The fold is the serial tier's, held as tables rather than as its ladder of comparisons: a
  *  warp's lanes fold different letters, and each switch of the ladder becomes an indirect branch
@@ -16,9 +16,12 @@
  *  in turn through the caller's own length slot, as the @b Chained @b Tiles of `types.cuh` do, so a
  *  round needs no scratch beyond the slot it reports into.
  *
- *  Written in C, as every `.cuh` in this library is.
+ *  Written in C, as every `.cuh` in this library is. Only device code lives here; each vendor
+ *  launches the kernel from its own host side, in `cuda.cuh` and `rocm.cuh` beside this file.
  *
  *  @sa include/stringzilla/utf8_uncased_fold.h
+ *  @sa include/stringzilla/utf8_uncased_fold/cuda.cuh
+ *  @sa include/stringzilla/utf8_uncased_fold/rocm.cuh
  */
 #ifndef STRINGZILLA_UTF8_UNCASED_FOLD_SIMT_CUH_
 #define STRINGZILLA_UTF8_UNCASED_FOLD_SIMT_CUH_
@@ -691,14 +694,8 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_fold_next_simt_(sz_u8_t const *text, sz_u8_
 
 #pragma region Fold Kernel
 
-enum {
-
-    /** Threads one block folds a tile with. */
-    sz_utf8_uncased_fold_threads_simt_k = 256,
-
-    /** Bytes one thread folds at the least, which keeps a short text to few tiles. */
-    sz_utf8_uncased_fold_thread_bytes_simt_k = 64,
-};
+/** Threads one block folds a tile with, which every vendor's launch passes as its block size. */
+enum { sz_utf8_uncased_fold_threads_simt_k = 256 };
 
 /** Folds @p source from @p begin to @p end into @p target, or only measures it when @p target is
  *  null, decoding against the whole text's @p length as the serial walk does. */
@@ -735,71 +732,7 @@ static __global__ void sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, 
     sz_utf8_uncased_fold_span_simt_(source, length, begin, end, target + tile_offset + preceding);
 }
 
-/**
- *  @brief Folds @p source into @p target on the caller's current device, the length landing in
- *      @p target_length once @p stream is joined.
- *  @return @c sz_success_k once enqueued, @c sz_unexpected_dimensions_k for a text whose fold the
- *      length slot cannot count, or @c sz_device_memory_mismatch_k when a buffer or the slot is not
- *      memory the device reaches.
- *  @note Enqueues and returns, allocating nothing and joining nothing.
- */
-STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_simt_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                          sz_size_t *target_length, void *stream) {
-    sz_u8_t const *launch_source = (sz_u8_t const *)source;
-    sz_u8_t *launch_target = (sz_u8_t *)target;
-    sz_size_t *launch_target_length = target_length;
-    sz_size_t launch_length = source_length, tile_bytes, tiles;
-    void *arguments[6];
-    dim3 grid, block;
-    sz_status_t status;
-    if ((sz_u64_t)source_length > ((sz_u64_t)1 << sz_chain_chained_shift_k) / sz_utf8_fold_max_expansion_k)
-        return sz_unexpected_dimensions_k;
-    if (!sz_memory_reaches_simt_(target_length)) return sz_device_memory_mismatch_k;
-    if (source_length && (!sz_memory_reaches_simt_(source) || !sz_memory_reaches_simt_(target)))
-        return sz_device_memory_mismatch_k;
-    status = sz_fill_simt_(target_length, sizeof(sz_size_t), 0, stream);
-    if (status != sz_success_k || !source_length) return status;
-
-    tiles = sz_chain_tiles_simt_(
-        source_length, (sz_size_t)sz_utf8_uncased_fold_threads_simt_k * sz_utf8_uncased_fold_thread_bytes_simt_k,
-        &tile_bytes);
-    grid.x = (unsigned)tiles, grid.y = 1, grid.z = 1;
-    block.x = sz_utf8_uncased_fold_threads_simt_k, block.y = 1, block.z = 1;
-    arguments[0] = &launch_source, arguments[1] = &launch_length, arguments[2] = &tile_bytes;
-    arguments[3] = &tiles, arguments[4] = &launch_target, arguments[5] = &launch_target_length;
-    return sz_launch_simt_((void const *)sz_utf8_uncased_fold_simt_kernel_, grid, block, arguments, 0, stream);
-}
-
-STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_scoped_simt_(sz_cptr_t source, sz_size_t source_length,
-                                                                 sz_ptr_t target, sz_size_t *target_length,
-                                                                 void *stream) {
-    int caller = 0;
-    sz_status_t status = sz_device_enter_simt_(stream, &caller);
-    if (status != sz_success_k) return status;
-    status = sz_utf8_uncased_fold_simt_(source, source_length, target, target_length, stream);
-    sz_device_leave_simt_(caller);
-    return status;
-}
-
 #pragma endregion Fold Kernel
-
-#if STRINGZILLA_TARGET_CUDA
-
-STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_cuda(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                      sz_size_t *target_length, void *stream) {
-    return sz_utf8_uncased_fold_scoped_simt_(source, source_length, target, target_length, stream);
-}
-
-#endif // STRINGZILLA_TARGET_CUDA
-
-#if STRINGZILLA_TARGET_ROCM
-
-STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                      sz_size_t *target_length, void *stream) {
-    return sz_utf8_uncased_fold_scoped_simt_(source, source_length, target, target_length, stream);
-}
-
-#endif // STRINGZILLA_TARGET_ROCM
 
 #ifdef __cplusplus
 }

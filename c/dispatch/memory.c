@@ -3,7 +3,9 @@
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief Raw memory dispatch points, @c sz_copy_best, @c sz_move_best, @c sz_fill_best, and
- *      @c sz_lookup_best, and their finder.
+ *      @c sz_lookup_best, and their finder, then the unified memory ones each capability group
+ *      answers once, @c sz_memory_allocator_init_unified_best, @c sz_sequence_copy_best and
+ *      @c sz_stream_synchronize_best.
  */
 #include <stringzilla/memory.h>
 
@@ -233,4 +235,55 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
     *kernel = lists ? sz_kernel_pick_(capabilities, lists) : (sz_kernel_punned_t)STRINGZILLA_NULL;
     *capability = *kernel ? sz_capability_pick_(capabilities, lists) : 0;
     return *kernel ? sz_success_k : sz_missing_kernel_k;
+}
+
+STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_best(sz_memory_allocator_t *allocator,
+                                                                  sz_capability_t capabilities) {
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k: return sz_memory_allocator_init_unified_serial(allocator);
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_memory_allocator_init_unified_cuda(allocator);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_memory_allocator_init_unified_rocm(allocator);
+#endif
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_memory_allocator_init_unified_metal(allocator);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}
+
+STRINGZILLA_API sz_status_t sz_sequence_copy_best(sz_sequence_t *target, sz_sequence_t const *source,
+                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                  sz_capability_t capabilities, void *stream) {
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k: return sz_sequence_copy_serial(target, source, allocator, allocated_bytes, stream);
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_sequence_copy_cuda(target, source, allocator, allocated_bytes, stream);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_sequence_copy_rocm(target, source, allocator, allocated_bytes, stream);
+#endif
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_sequence_copy_metal(target, source, allocator, allocated_bytes, stream);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}
+
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream) {
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k: return sz_stream_synchronize_serial(stream);
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_stream_synchronize_cuda(stream);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_stream_synchronize_rocm(stream);
+#endif
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_stream_synchronize_metal(stream);
+#endif
+    default: return sz_missing_gpu_k;
+    }
 }

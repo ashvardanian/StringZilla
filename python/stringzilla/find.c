@@ -173,7 +173,7 @@ int Str_in(Str *self, PyObject *needle_obj) {
     if (needle.length == 0) return 1; // CPython: the empty string is a substring of every string
     sz_cptr_t match = NULL;
     sz_status_t const status = sz_find_best(self->memory.start, self->memory.length, needle.start, needle.length,
-                                            &match, sz_py_enabled_capabilities, NULL);
+                                            &match, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "in");
         return -1;

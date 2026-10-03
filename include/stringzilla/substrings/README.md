@@ -38,12 +38,13 @@ The NEON tier is cross-compiled but not yet measured on hardware.
 
 ## The Device
 
-The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh` and which `c/nvidia/cuda.cu` and `c/amd/rocm.hip` compile into the library, and `metal`, whose kernels live in `simt.h` with the `simt.metal` shaders, which `c/apple/metal.c` compiles.
+The device backends are `cuda` and `rocm`, whose kernels share `simt.cuh`, each launched from its own host code in `cuda.cuh` and `rocm.cuh`, which `c/target/cuda.cu` and `c/target/rocm.hip` compile into the library, and `metal`, whose kernels live in `metal.h` with the `metal.metal` shaders, which `c/target/metal.c` compiles.
 All three parallelize over haystack __chunks__ rather than over haystacks, so a corpus of one long document and a corpus of a million short ones fill the device the same way.
 A chunk reports every match ending inside it and primes itself from the bytes before its own start, clamped to its own haystack, so every match is found exactly once.
 A leftmost cover is settled after the walk instead, since inside it would cost every thread a ring wide enough for the longest match.
 On CUDA and ROCm each block stages the class map and as much of the hot tier as fits beside its own scratch into shared memory.
 BM25 gives each block one haystack and a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, and sums in fixed point so thread order cannot move a score.
+A batch of fewer haystacks than the device holds clusters of blocks gives each haystack a whole cluster instead, every block counting into the first one's tally through distributed shared memory.
 A device engine's arena is sized once, by `sz_substrings_engine_init` from `matches_budget` and `haystacks_budget`, so a round carrying more haystacks is refused with `sz_unexpected_dimensions_k` and matches past the budget surface as the report's `shortfall`.
 Every round of one engine shares that arena and its report, so the caller orders them, on one stream or with events between two, and reads the report only after joining the round that wrote it.
 A device round over no haystacks returns at once and leaves the report as the round before it wrote it.
@@ -52,18 +53,9 @@ A case-insensitive vocabulary is refused there at init with `sz_device_code_mism
 
 ## Methodology
 
-Numbers are haystack throughput in MB/s, measured with `stringzilla_cpu_bench` from the kernel rows of `bench/cross.hpp`, and with `stringzilla_cuda_bench` and `stringzilla_rocm_bench` from `bench/cross_simt.cuh`, over lines of two corpora.
-- __Text:__ the first 64 MB of `xlsum.csv`, 128 MB for the device, multilingual news in many scripts.
-- __Nucleotides:__ 64 MB of uniformly random `ACGT` in 4,096-byte lines, 256 MB for the device.
-
-Vocabularies come in three slices:
-- __Frequent__ and __Rare__ are one percent of the corpus's words, from either end of the frequency ranking after stopwords and hapaxes are removed.
-  Frequent stresses reporting, and Rare measures the transition alone.
-- __Sampled__ is 1,000 distinct substrings of the corpus itself, 4 to 16 bytes long, which exists for any alphabet, with words or without.
-
-Each CPU tier registers its own row in one binary, and the device rows fill at least one residency wave of chunks.
-There is no Standard row, since no standard library ships a multi-pattern search.
-A `…` cell is genuinely missing data, on hardware not yet measured.
+Cells are haystack MB/s over lines of two corpora: 64 MB of `xlsum.csv` text, 128 MB on a GPU, and 64 MB of random `ACGT` in 4,096-byte lines, 256 MB on a GPU.
+Vocabularies are the Frequent and Rare one percent of the corpus's words, and 1,000 Sampled substrings of 4 to 16 bytes.
+A `…` cell is not measured yet.
 
 ## Overlapping Matches
 
@@ -76,6 +68,7 @@ Every match of every needle, including nested ones, over text.
 | Ice Lake @ Xeon 6776P |           397.1 |     3,235.8 |          340.1 |    2,795.5 |
 | NEON @ Graviton4      |               … |           … |              … |          … |
 | CUDA @ SM90           |               … |           … |              … |          … |
+| CUDA @ SM103 MIG      |         8,735.0 |    15,440.0 |        4,895.0 |   11,020.0 |
 | CUDA @ SM120          |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
 
 ## Leftmost Cover
@@ -89,6 +82,7 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 | Ice Lake @ Xeon 6776P |           273.7 |     2,723.8 |          276.1 |    2,744.3 |
 | NEON @ Graviton4      |               … |           … |              … |          … |
 | CUDA @ SM90           |               … |           … |              … |          … |
+| CUDA @ SM103 MIG      |         4,468.0 |     9,405.0 |        4,688.0 |    9,413.0 |
 | CUDA @ SM120          |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
 
 ## Rewriting
@@ -102,6 +96,7 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 | Ice Lake @ Xeon 6776P |             239.3 |       2,109.4 |
 | NEON @ Graviton4      |                 … |             … |
 | CUDA @ SM90           |                 … |             … |
+| CUDA @ SM103 MIG      |           3,276.0 |       4,152.0 |
 | CUDA @ SM120          |           7,024.6 |      15,923.2 |
 
 ## Scoring
@@ -116,6 +111,7 @@ A CPU sums each haystack's terms in ascending needle order and a device in fixed
 | Ice Lake @ Xeon 6776P |          319.7 |    2,416.6 |
 | NEON @ Graviton4      |              … |          … |
 | CUDA @ SM90           |              … |          … |
+| CUDA @ SM103 MIG      |        2,728.0 |   10,460.0 |
 | CUDA @ SM120          |        8,140.8 |   31,037.4 |
 
 ## Nucleotides
@@ -130,6 +126,7 @@ Short needles over four letters match about 0.4 times per byte, so every column 
 | Ice Lake @ Xeon 6776P |    878.1 |   121.7 |            64.2 |   112.0 |
 | NEON @ Graviton4      |        … |       … |               … |       … |
 | CUDA @ SM90           |        … |       … |               … |       … |
+| CUDA @ SM103 MIG      | 12,300.0 | 4,861.0 |         1,337.0 | 5,171.0 |
 | CUDA @ SM120          | 22,732.8 | 1,566.7 |           908.2 | 7,833.6 |
 
 ## Case Folding
@@ -143,6 +140,7 @@ The frequent slice with both sides folded, which is the cost of matching a vocab
 | Ice Lake @ Xeon 6776P |   135.9 |   124.1 |   118.3 |
 | NEON @ Graviton4      |       … |       … |       … |
 | CUDA @ SM90           |       … |       … |       … |
+| CUDA @ SM103 MIG      | 2,955.0 | 1,528.0 | 1,212.0 |
 | CUDA @ SM120          | 9,523.2 | 4,587.5 | 3,215.4 |
 
 ## Compilation

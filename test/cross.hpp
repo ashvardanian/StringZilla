@@ -1880,11 +1880,11 @@ struct levenshtein_engine_t {
 
     levenshtein_engine_t(levenshtein_backend_t const &backend, sz_sequence_t const &queries,
                          sz_levenshtein_symbol_t symbol) {
-        if (backend.init(&engine, &queries, symbol, 0, &heap.allocator, nullptr) != sz_success_k)
+        if (backend.init(&engine, &queries, symbol, &heap.allocator, nullptr) != sz_success_k)
             fail_backend_(backend.name, "the builder refused a well-formed batch of queries");
     }
     ~levenshtein_engine_t() {
-        sz_levenshtein_engine_free(&engine);
+        sz_levenshtein_engine_free(&engine, nullptr);
         verify(heap.live_allocations == 0);
     }
     levenshtein_engine_t(levenshtein_engine_t const &) = delete;
@@ -2014,7 +2014,7 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     sz_sequence_t const refused_sequence = sequence_from_(refused_queries);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
         sz_levenshtein_engine_t engine {};
-        if (backend.init(&engine, &refused_sequence, symbol, 0, &refusing, nullptr) != sz_bad_alloc_k)
+        if (backend.init(&engine, &refused_sequence, symbol, &refusing, nullptr) != sz_bad_alloc_k)
             fail_backend_(backend.name, "the builder did not report the refused allocation");
         if (engine.memory != nullptr) fail_backend_(backend.name, "a refused build still kept a block");
     }
@@ -2213,14 +2213,14 @@ inline std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, s
     sz_sequence_t const query_sequence = sequence_from_(queries);
     sz_sequence_t const candidate_sequence = sequence_from_(candidates);
     sz_overlap_engine_t engine {};
-    if (backend.init(&engine, &query_sequence, widths.data(), widths.size(), 0, 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &query_sequence, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
     std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
     if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(), widths.size(),
                        nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
-    sz_overlap_engine_free(&engine);
+    sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
     return scores;
 }
@@ -2417,13 +2417,12 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     sz_sequence_t const kitten_sequence = sequence_from_(kitten);
     sz_sequence_t const words_sequence = sequence_from_(words);
     sz_overlap_engine_t engine {};
-    if (backend.init(&engine, &kitten_sequence, widths.data(), 0, 0, 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &kitten_sequence, widths.data(), 0, 0, &heap.allocator, nullptr) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted zero widths");
-    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, 0, &refusing, nullptr) !=
-        sz_bad_alloc_k)
+    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, &refusing, nullptr) != sz_bad_alloc_k)
         fail_backend_(backend.name, "the engine did not report the refused allocation");
-    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
@@ -2436,7 +2435,7 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
         fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
     for (sz_f32_t const untouched : refused)
         if (untouched != -1.0f) fail_backend_(backend.name, "a refused call still wrote a score");
-    sz_overlap_engine_free(&engine);
+    sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
 }
 
@@ -2705,7 +2704,7 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
     sz_sequence_t const needle_sequence = sequence_over_(needles, needle_views);
 
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &needle_sequence, sensitivity, policy, hot_states, 0, 0, 0, &heap.allocator, nullptr) ==
+    verify(tier.init(&engine, &needle_sequence, sensitivity, policy, hot_states, 0, 0, &heap.allocator, nullptr) ==
            sz_success_k);
     verify(engine.needles_count == needles.size());
     verify(engine.root == 0);
@@ -2757,7 +2756,7 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
         }
     }
 
-    sz_substrings_engine_free(&engine);
+    sz_substrings_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
 }
 
@@ -2850,10 +2849,10 @@ inline void check_substrings_unit_(substrings_tier_t const &tier) {
     std::vector<sz_string_view_t> views;
     sz_sequence_t const sequence = sequence_over_(needles, views);
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &sequence, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0, 0, 0,
-                     &heap.allocator, nullptr) == sz_success_k);
+    verify(tier.init(&engine, &sequence, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0, 0, &heap.allocator,
+                     nullptr) == sz_success_k);
     verify(engine.hot_count == 0);
-    sz_substrings_engine_free(&engine);
+    sz_substrings_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
 }
 

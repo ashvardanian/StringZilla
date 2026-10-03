@@ -10,7 +10,6 @@ import "C"
 import (
 	"errors"
 	"runtime"
-	"sync/atomic"
 )
 
 // Capability is one capability of a CPU or a GPU, or a set of them.
@@ -41,9 +40,9 @@ const (
 	CapRocm  Capability = C.sz_cap_rocm_k  // Any ROCm device
 	CapMetal Capability = C.sz_cap_metal_k // Any Metal device
 
-	CapCpus    Capability = C.sz_cap_cpus_k    // Every CPU capability
-	CapDevices Capability = C.sz_cap_devices_k // Every GPU capability
-	CapAny     Capability = ^Capability(0)     // Every capability
+	CapCpus Capability = C.sz_cap_cpus_k // Every CPU capability
+	CapGpus Capability = C.sz_cap_gpus_k // Every GPU capability
+	CapAny  Capability = ^Capability(0)  // Every capability
 )
 
 // DeviceKind is the runtime a device belongs to, as the `sz_<kind>_*` C functions name it.
@@ -64,10 +63,6 @@ type Device struct {
 	Kind    DeviceKind
 	Ordinal int
 }
-
-// enabled holds the mask every call passes, zero until the CPU's [Device.CapabilitiesEnabled] or
-// a call first reads it.
-var enabled atomic.Uint64
 
 // CPU returns the host CPU, which every build has.
 func CPU() Device { return Device{Kind: DeviceCPU} }
@@ -138,15 +133,14 @@ func (d Device) CapabilitiesCompiled() Capability {
 }
 
 // CapabilitiesEnabled returns the mask for d's calls: [Device.CapabilitiesDetected] and
-// [Device.CapabilitiesCompiled] at once. On the CPU it is the mask every call of this package
-// passes, narrowed by [Device.CapabilitiesEnable], and always has [CapSerial].
+// [Device.CapabilitiesCompiled] at once. On the CPU it always has [CapSerial].
 func (d Device) CapabilitiesEnabled() (Capability, error) {
 	var capabilities C.sz_capability_t
 	ordinal := C.sz_size_t(d.Ordinal)
 	var status C.sz_status_t
 	switch d.Kind {
 	case DeviceCPU:
-		return Capability(cpuEnabled()), nil
+		status = C.sz_cpu_capabilities_enabled(&capabilities)
 	case DeviceCUDA:
 		status = C.sz_cuda_capabilities_enabled(ordinal, &capabilities)
 	case DeviceROCm:
@@ -159,17 +153,6 @@ func (d Device) CapabilitiesEnabled() (Capability, error) {
 	return Capability(capabilities), statusError(status)
 }
 
-// CapabilitiesEnable makes wanted the CPU's enabled set, clamped to what it detects and this binary
-// compiled and keeping [CapSerial], and returns the set that took effect. GPUs keep no such set.
-func (d Device) CapabilitiesEnable(wanted Capability) (Capability, error) {
-	if d.Kind != DeviceCPU {
-		return 0, statusError(C.sz_missing_kernel_k)
-	}
-	mask := wanted&available() | CapSerial
-	enabled.Store(uint64(mask))
-	return mask, nil
-}
-
 // ConfigureThread pins the goroutine to an OS thread, configures it for capabilities, usually the
 // CPU's [Device.CapabilitiesEnabled], and returns the unlock function. Call it, typically via
 // defer, once the work is done. GPUs have no thread state to configure.
@@ -180,25 +163,6 @@ func (d Device) ConfigureThread(capabilities Capability) (func(), error) {
 	runtime.LockOSThread()
 	return runtime.UnlockOSThread, statusError(C.sz_cpu_configure_thread(C.sz_capability_t(capabilities)))
 }
-
-// cpuEnabled returns the CPU's enabled mask, reading it on first use.
-func cpuEnabled() uint64 {
-	if mask := enabled.Load(); mask != 0 {
-		return mask
-	}
-	enabled.CompareAndSwap(0, uint64(available()))
-	return enabled.Load()
-}
-
-// available returns the capabilities this CPU supports and this binary contains.
-func available() Capability {
-	capabilities := C.sz_capability_t(CapSerial)
-	C.sz_cpu_capabilities_enabled(&capabilities)
-	return Capability(capabilities)
-}
-
-// capabilities returns the CPU's enabled mask as a call takes it.
-func capabilities() C.sz_capability_t { return C.sz_capability_t(cpuEnabled()) }
 
 // statusError names a failed call's status, or returns nil on success.
 func statusError(status C.sz_status_t) error {

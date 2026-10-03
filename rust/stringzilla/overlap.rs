@@ -27,13 +27,15 @@ use super::*;
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::OverlapEngine;
+/// use stringzilla::sz::{Capabilities, OverlapEngine, Stream};
 ///
-/// let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8]).unwrap();
+/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 ///
 /// // A `[queries, candidates, widths]` block with the width axis unit-strided.
 /// let mut scores = [0.0f32; 2];
-/// engine.scores(&["the quick brown cat"], &mut scores, 2, 2).unwrap();
+/// cpu.scope(|scope| engine.scores(scope, &["the quick brown cat"], &mut scores, 2, 2))
+///     .unwrap();
 /// assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 /// ```
 #[repr(C)]
@@ -47,8 +49,7 @@ pub struct OverlapEngine {
     lengths: *const u32,
     count: usize,
     widths_count: usize,
-    capability: u64,
-    ordinal: usize,
+    capability: Capabilities,
     allocator: _SzMemoryAllocator,
     memory: *mut c_void,
     memory_bytes: usize,
@@ -57,60 +58,24 @@ pub struct OverlapEngine {
 }
 
 impl OverlapEngine {
-    /// Sorts `queries` into one forest on the host, on the CPU's [`Device::capabilities_enabled`],
-    /// fixing the CPU capability once.
+    /// Sorts `queries` into one forest with the capabilities of `stream`, like
+    /// [`Capabilities::cpu_enabled`] or a GPU's [`Capabilities::cuda_enabled`], fixing the
+    /// capability once, on the device `stream` names, which it may join.
     ///
     /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past
-    /// a text scores zero for every pair it spans. Zero widths are refused.
-    pub fn new<Query>(queries: &[Query], window_widths: &[usize]) -> Result<Self, Status>
-    where
-        Query: AsRef<[u8]>,
-    {
-        let mut engine = MaybeUninit::<Self>::uninit();
-        with_sequence(queries, |sequence| unsafe {
-            sz_overlap_engine_init(
-                engine.as_mut_ptr(),
-                sequence,
-                window_widths.as_ptr(),
-                window_widths.len(),
-                0,
-                enabled_cpu_capabilities_mask(),
-                0,
-                core::ptr::null(),
-                core::ptr::null_mut(),
-            )
-        })
-        .check()?;
-        Ok(unsafe { engine.assume_init() })
-    }
-
-    /// Sorts `queries` into one forest on `device`, with its [`Device::capabilities_enabled`],
-    /// fixing the capability once; the engine keeps the device.
-    ///
-    /// A width the device backend's per-thread ring cannot hold is refused here rather than at the
-    /// first round. `candidates_budget` bounds one round for a backend that keeps state per
-    /// candidate, zero asking for its default, and is ignored by one that keeps none.
-    ///
-    /// `stream` serves this call's own work alone: a `cudaStream_t` or `hipStream_t` of `device`,
-    /// or null for its default one, on Metal a `sz_metal_device_t *` opened on `device`, and null
-    /// on the CPU. The verbs below pass a null stream and host candidates, so a GPU engine answers
-    /// them with an error status such as `Status::DeviceMemoryMismatch` until this crate can build
-    /// device-resident candidates.
-    ///
-    /// # Safety
-    ///
-    /// `stream` must be a live stream or Metal device of `device`, or null; this call may join it.
-    pub unsafe fn new_on<Query>(
+    /// a text scores zero for every pair it spans. Zero widths are refused, and so is a width the
+    /// device backend's per-thread ring cannot hold, here rather than at the first round.
+    /// `candidates_budget` bounds one round for a backend that keeps state per candidate, zero
+    /// asking for its default, and is ignored by one that keeps none.
+    pub fn new<Query>(
         queries: &[Query],
         window_widths: &[usize],
         candidates_budget: usize,
-        device: Device,
-        stream: *mut c_void,
+        stream: &Stream,
     ) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
     {
-        let capabilities = device.capabilities_enabled()?;
         let mut engine = MaybeUninit::<Self>::uninit();
         with_sequence(queries, |sequence| unsafe {
             sz_overlap_engine_init(
@@ -119,10 +84,9 @@ impl OverlapEngine {
                 window_widths.as_ptr(),
                 window_widths.len(),
                 candidates_budget,
-                capabilities.bits(),
-                device.ordinal(),
+                stream.capabilities().bits(),
                 core::ptr::null(),
-                stream,
+                stream.as_raw(),
             )
         })
         .check()?;
@@ -139,70 +103,78 @@ impl OverlapEngine {
         self.widths_count
     }
 
-    /// Window overlap of every prepared query with every candidate, at every width of the batch.
+    /// Queues on the stream of `scope` the window overlap of every prepared query with every
+    /// candidate, at every width of the batch.
     ///
     /// `scores` receives a `[queries, candidates, widths]` block: share `[q, c, w]` lands at
     /// `scores[q * scores_query_stride + c * scores_candidate_stride + w]`, each in `[0, 1]`,
     /// with the width axis unit-strided. Both strides count entries rather than bytes, the
     /// candidate stride being at least the width count and the query stride at least the
     /// candidates times that.
-    pub fn scores<Candidate>(
-        &mut self,
-        candidates: &[Candidate],
-        scores: &mut [f32],
+    ///
+    /// A GPU engine takes a [`Sequence`] and `scores` in memory its device reaches, such as a
+    /// `Vec` in a [`UnifiedAllocator`]. A stream of another group than the engine's is refused
+    /// with [`Status::DeviceMemoryMismatch`].
+    pub fn scores<'scope, Candidates>(
+        &'scope mut self,
+        scope: &'scope Scope<'scope, '_>,
+        candidates: &'scope Candidates,
+        scores: &'scope mut [f32],
         scores_query_stride: usize,
         scores_candidate_stride: usize,
     ) -> Result<(), Status>
     where
-        Candidate: AsRef<[u8]>,
+        Candidates: Strings + ?Sized,
     {
-        if scores_candidate_stride < self.widths_count {
-            return Err(Status::UnexpectedDimensions);
-        }
-        let candidates_span = candidates
-            .len()
-            .checked_mul(scores_candidate_stride)
-            .ok_or(Status::OverflowRisk)?;
-        if scores_query_stride < candidates_span {
-            return Err(Status::UnexpectedDimensions);
-        }
-        let span = match (self.count, candidates.len()) {
-            (0, _) | (_, 0) => 0,
-            (queries, candidates_count) => {
-                let planes = (queries - 1)
-                    .checked_mul(scores_query_stride)
-                    .ok_or(Status::OverflowRisk)?;
-                let rows = (candidates_count - 1)
-                    .checked_mul(scores_candidate_stride)
-                    .ok_or(Status::OverflowRisk)?;
-                planes
-                    .checked_add(rows)
-                    .and_then(|offset| offset.checked_add(self.widths_count))
-                    .ok_or(Status::OverflowRisk)?
-            }
-        };
-        if scores.len() < span {
-            return Err(Status::UnexpectedDimensions);
-        }
-
+        let stream = scope.stream_for(self.capability)?;
+        let (queries, widths_count) = (self.count, self.widths_count);
         let engine = self as *mut Self;
-        let output = scores.as_mut_ptr();
-        with_sequence(candidates, |sequence| unsafe {
-            sz_overlap_scores(
-                engine,
-                sequence,
-                output,
-                scores_query_stride,
-                scores_candidate_stride,
-                core::ptr::null_mut(),
-            )
-        })
-        .check()
+        candidates.with_sequence(stream, |sequence| {
+            if scores_candidate_stride < widths_count {
+                return Err(Status::UnexpectedDimensions);
+            }
+            let candidates_span = sequence
+                .count
+                .checked_mul(scores_candidate_stride)
+                .ok_or(Status::OverflowRisk)?;
+            if scores_query_stride < candidates_span {
+                return Err(Status::UnexpectedDimensions);
+            }
+            let span = match (queries, sequence.count) {
+                (0, _) | (_, 0) => 0,
+                (queries, candidates_count) => {
+                    let planes = (queries - 1)
+                        .checked_mul(scores_query_stride)
+                        .ok_or(Status::OverflowRisk)?;
+                    let rows = (candidates_count - 1)
+                        .checked_mul(scores_candidate_stride)
+                        .ok_or(Status::OverflowRisk)?;
+                    planes
+                        .checked_add(rows)
+                        .and_then(|offset| offset.checked_add(widths_count))
+                        .ok_or(Status::OverflowRisk)?
+                }
+            };
+            if scores.len() < span {
+                return Err(Status::UnexpectedDimensions);
+            }
+            unsafe {
+                sz_overlap_scores(
+                    engine,
+                    sequence,
+                    scores.as_mut_ptr(),
+                    scores_query_stride,
+                    scores_candidate_stride,
+                    stream.as_raw(),
+                )
+            }
+            .check()
+        })?
     }
 }
 
 impl Drop for OverlapEngine {
     fn drop(&mut self) {
-        unsafe { sz_overlap_engine_free(self as *mut Self) };
+        unsafe { sz_overlap_engine_free(self as *mut Self, core::ptr::null_mut()) };
     }
 }

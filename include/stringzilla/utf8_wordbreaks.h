@@ -161,7 +161,7 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_
 #pragma endregion
 
 /*  Header-only builds define each kernel inline from its tier header, while the library defines
- *  every kernel once, in its capability's unit under `c/cpu/`. */
+ *  every kernel once, in its capability's unit under `c/target/`. */
 #include "stringzilla/utf8_wordbreaks/serial.h"
 #if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/utf8_wordbreaks/icelake.h"

@@ -41,35 +41,22 @@ func TestCapabilityNames(t *testing.T) {
 	}
 }
 
-func TestCapabilitiesEnable(t *testing.T) {
+func TestCapabilitiesEnabled(t *testing.T) {
 	cpu := sz.CPU()
 	enabled, err := cpu.CapabilitiesEnabled()
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("StringZilla enabled capabilities: %v", enabled)
-	defer cpu.CapabilitiesEnable(enabled)
 	detected, _ := cpu.CapabilitiesDetected()
 	if enabled != detected&cpu.CapabilitiesCompiled() || !enabled.Has(sz.CapSerial) {
 		t.Fatalf("CapabilitiesEnabled() = %v, expected serial plus detected and compiled capabilities", enabled)
 	}
-	if got, _ := cpu.CapabilitiesEnable(0); got != sz.CapSerial {
-		t.Fatalf("CapabilitiesEnable(0) = %v, expected serial alone", got)
-	}
-	if got, _ := cpu.CapabilitiesEnabled(); got != sz.CapSerial {
-		t.Fatalf("CapabilitiesEnabled() after narrowing = %v, expected serial alone", got)
-	}
-	if got := sz.Index("hello world", "world"); got != 6 {
-		t.Errorf("Index on the serial capability: expected 6, got %d", got)
-	}
-	if got, _ := cpu.CapabilitiesEnable(sz.CapAny); got != enabled {
-		t.Errorf("CapabilitiesEnable(CapAny) = %v, expected the original set %v back", got, enabled)
-	}
 }
 
 func TestDevices(t *testing.T) {
-	if sz.CapCpus&sz.CapDevices != 0 || sz.CapCpus|sz.CapDevices|sz.CapAny != sz.CapAny {
-		t.Errorf("CapCpus %v and CapDevices %v overlap or escape CapAny", sz.CapCpus, sz.CapDevices)
+	if sz.CapCpus&sz.CapGpus != 0 || sz.CapCpus|sz.CapGpus|sz.CapAny != sz.CapAny {
+		t.Errorf("CapCpus %v and CapGpus %v overlap or escape CapAny", sz.CapCpus, sz.CapGpus)
 	}
 	if count, err := sz.CountDevices(sz.DeviceCPU); count != 1 || err != nil {
 		t.Errorf("CountDevices(DeviceCPU) = %d, %v, expected one CPU", count, err)
@@ -91,9 +78,6 @@ func TestDevices(t *testing.T) {
 		gpu, err := sz.NewDevice(kind, 0)
 		if err != nil || gpu.CapabilitiesCompiled()&sz.CapCpus != 0 {
 			t.Errorf("NewDevice(%d, 0) = %v, compiling %v", kind, err, gpu.CapabilitiesCompiled())
-		}
-		if _, err := gpu.CapabilitiesEnable(sz.CapAny); err == nil {
-			t.Errorf("a GPU of kind %d took a CPU enabled set", kind)
 		}
 		if _, err := gpu.ConfigureThread(sz.CapAny); err == nil {
 			t.Errorf("a GPU of kind %d configured a CPU thread", kind)

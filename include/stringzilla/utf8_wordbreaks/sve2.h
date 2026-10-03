@@ -239,7 +239,7 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_word_break_lane_dn1_sve2_(svuint8_t a_u8x) 
 /** The @c svext lane-shift amount must be an integer-constant expression, so the variable-k helpers
  *  are function-like macros rather than functions: the literal k at each call site reaches the
  *  intrinsic unchanged. Macros also keep this header a single code path for C99 and C++, as it is
- *  compiled into the C99 library (`c/cpu/sve2.c`), which cannot parse C++ templates or an
+ *  compiled into the C99 library (`c/target/sve2.c`), which cannot parse C++ templates or an
  *  `extern "C++"` island. */
 #define sz_utf8_word_break_lane_up_sve2_(v, k) svrev_u8(svext_u8(svrev_u8((v)), svdup_n_u8(0), (k)))
 #define sz_utf8_word_break_lane_dn_sve2_(v, k) svext_u8((v), svdup_n_u8(0), (k))

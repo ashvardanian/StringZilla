@@ -78,8 +78,7 @@ PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
         Py_RETURN_NOTIMPLEMENTED;
 
     sz_ordering_t ordering = sz_equal_k;
-    sz_status_t const status = sz_order_best(a_start, a_length, b_start, b_length, &ordering,
-                                             sz_py_enabled_capabilities, NULL);
+    sz_status_t const status = sz_order_best(a_start, a_length, b_start, b_length, &ordering, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "Str comparison");
         return NULL;

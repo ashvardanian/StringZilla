@@ -179,8 +179,14 @@ def assert_sort_family_matches_oracles(native_list: list, *, top=None, reverse: 
     permutation/order relationship, and (for both byte and uncased modes) a CPython oracle."""
     strs = Strs(native_list)
 
-    sorted_results = run_across_backends(lambda: list(map(str, strs.sorted(top=top, reverse=reverse, uncased=uncased))))
-    argsort_results = run_across_backends(lambda: strs.argsort(top=top, reverse=reverse, uncased=uncased))
+    sorted_results = run_across_backends(
+        lambda capabilities: list(
+            map(str, strs.sorted(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities))
+        )
+    )
+    argsort_results = run_across_backends(
+        lambda capabilities: strs.argsort(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities)
+    )
 
     assert_backends_agree(sorted_results)
     assert_backends_agree(argsort_results)

@@ -217,8 +217,6 @@ A `StringZilla.Device` reports those masks for the host CPU, or for a GPU by its
 StringZilla.Device cpu = StringZilla.Device.cpu();
 long enabled = cpu.capabilitiesEnabled();                  // what dispatch uses
 System.out.println(StringZilla.capabilitiesName(enabled)); // e.g. "serial,haswell,skylake,icelake"
-cpu.capabilitiesEnable(1);                                 // dispatch to the serial kernels only
-cpu.capabilitiesEnable(enabled);                           // and back, returning what took effect
 System.out.println(StringZilla.version());
 ```
 
@@ -226,8 +224,7 @@ System.out.println(StringZilla.version());
 
 - `capabilitiesDetected()`: what this device can execute.
 - `capabilitiesCompiled()`: what this build contains for devices of its kind, from the ISA probes at build time.
-- `capabilitiesEnabled()`: what dispatch uses, both axes at once unless narrowed.
-- `capabilitiesEnable(wanted)`: makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `capabilitiesEnabled()`: what dispatch uses, both axes at once.
 
 `capabilitiesDetected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
 The enabled set always keeps the serial fallback, bit `1`.
@@ -244,4 +241,4 @@ System.out.println(StringZilla.capabilitiesName(gpu.capabilitiesEnabled())); // 
 
 `Device.count(kind)` is one for the CPU and whatever the GPU runtime counts otherwise.
 Constructing a `Device` past the last ordinal of its kind throws a `StatusException` with `sz_missing_gpu_k`.
-`capabilitiesEnable` and `configureThread` on a GPU throw one with `sz_missing_kernel_k`, as GPUs keep no enabled set or thread state of their own.
+`configureThread` on a GPU throws one with `sz_missing_kernel_k`, as GPUs keep no thread state of their own.

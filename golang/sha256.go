@@ -16,13 +16,13 @@ import (
 // HashSha256 computes the SHA-256 cryptographic hash of the input data.
 func HashSha256(data []byte) [32]byte {
 	var state C.sz_sha256_state_t
-	check(C.sz_sha256_state_init_best(&state, capabilities(), nil))
+	check(C.sz_sha256_state_init_best(&state, C.sz_cap_cpus_k, nil))
 	if len(data) > 0 {
 		check(C.sz_sha256_state_update_best(&state, (*C.char)(unsafe.Pointer(&data[0])), C.sz_size_t(len(data)),
-			capabilities(), nil))
+			C.sz_cap_cpus_k, nil))
 	}
 	var digest [32]byte
-	check(C.sz_sha256_state_digest_best(&state, (*C.uchar)(unsafe.Pointer(&digest[0])), capabilities(), nil))
+	check(C.sz_sha256_state_digest_best(&state, (*C.uchar)(unsafe.Pointer(&digest[0])), C.sz_cap_cpus_k, nil))
 	return digest
 }
 
@@ -46,7 +46,7 @@ func NewSha256() *Sha256 {
 func (h *Sha256) Write(p []byte) (n int, err error) {
 	if len(p) > 0 {
 		if err := statusError(C.sz_sha256_state_update_best(&h.state, (*C.char)(unsafe.Pointer(&p[0])),
-			C.sz_size_t(len(p)), capabilities(), nil)); err != nil {
+			C.sz_size_t(len(p)), C.sz_cap_cpus_k, nil)); err != nil {
 			return 0, err
 		}
 	}
@@ -62,7 +62,7 @@ func (h *Sha256) Sum(b []byte) []byte {
 
 // Reset resets the hasher to its initial state. Implements hash.Hash.
 func (h *Sha256) Reset() {
-	check(C.sz_sha256_state_init_best(&h.state, capabilities(), nil))
+	check(C.sz_sha256_state_init_best(&h.state, C.sz_cap_cpus_k, nil))
 }
 
 // Size returns the number of bytes Sum will return. Implements hash.Hash.
@@ -79,7 +79,7 @@ func (h *Sha256) BlockSize() int {
 // This is a convenience method in addition to the standard hash.Hash interface.
 func (h *Sha256) Digest() [32]byte {
 	var digest [32]byte
-	check(C.sz_sha256_state_digest_best(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])), capabilities(), nil))
+	check(C.sz_sha256_state_digest_best(&h.state, (*C.uchar)(unsafe.Pointer(&digest[0])), C.sz_cap_cpus_k, nil))
 	return digest
 }
 

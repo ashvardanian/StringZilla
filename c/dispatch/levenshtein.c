@@ -121,15 +121,14 @@ static sz_capability_kernels_t const *sz_levenshtein_distance_tiled_capabilities
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                                       sz_size_t ordinal, sz_memory_allocator_t *allocator,
-                                                       void *stream) {
+                                                       sz_memory_allocator_t *allocator, void *stream) {
     sz_kernel_levenshtein_engine_init_t const kernel = (sz_kernel_levenshtein_engine_init_t)sz_kernel_pick_(
         capabilities, sz_levenshtein_engine_init_capabilities());
-    return kernel ? kernel(engine, queries, symbol, ordinal, allocator, stream) : sz_missing_kernel_k;
+    return kernel ? kernel(engine, queries, symbol, allocator, stream) : sz_missing_kernel_k;
 }
 
-STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine) {
-    sz_levenshtein_engine_free_(engine);
+STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream) {
+    sz_levenshtein_engine_free_(engine, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,

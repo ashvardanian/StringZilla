@@ -48,7 +48,7 @@ where
             needle_pointer,
             needle_length,
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -100,7 +100,7 @@ where
             needle_pointer,
             needle_length,
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -166,7 +166,7 @@ where
             haystack_length,
             &needles as *const _ as *const c_void,
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -206,7 +206,7 @@ where
             haystack_length,
             &needles as *const _ as *const c_void,
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

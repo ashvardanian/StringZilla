@@ -1074,13 +1074,17 @@ STRINGZILLA_CONSTEXPR void sz_byteset_invert(sz_byteset_t *s) {
 
 #pragma region Memory Management
 
-typedef void *(*sz_memory_allocate_t)(sz_size_t, void *);
-typedef void (*sz_memory_free_t)(void *, sz_size_t, void *);
+typedef void *(*sz_memory_allocate_t)(sz_size_t bytes, void *handle, void *stream);
+typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, void *stream);
 
 /**
  *  @brief Some complex pattern matching algorithms may require memory allocations. This structure
  *      passes the memory allocator to those functions.
- *  @sa sz_memory_allocator_init_fixed
+ *
+ *  Both functions take the caller's stream, which on a GPU names the device a block is made on and
+ *  the work a release waits behind; host allocators ignore it, and on the CPU it is null.
+ *
+ *  @sa sz_memory_allocator_init_fixed, sz_memory_allocator_init_unified_best
  */
 typedef struct sz_memory_allocator_t {
     sz_memory_allocate_t allocate;
@@ -1941,12 +1945,12 @@ enum { sz_memory_alignment_k = 64 };
  *  own buffer is: pass one aligned to 64 and every block is, and a malloc'd buffer still carries
  *  its own guarantee.
  */
-STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle) {
-
+STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle, void *stream) {
+    sz_unused_(stream);
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
-    sz_size_t const aligned_capacity =
-        (consumed_capacity + sz_memory_alignment_k - 1) & ~(sz_size_t)(sz_memory_alignment_k - 1);
+    sz_size_t const aligned_capacity = (consumed_capacity + sz_memory_alignment_k - 1) &
+                                       ~(sz_size_t)(sz_memory_alignment_k - 1);
     if (aligned_capacity + length > capacity) return STRINGZILLA_NULL_CHAR;
     // Increase the consumed capacity.
     *((sz_size_t *)handle + 1) = aligned_capacity + length;
@@ -1954,8 +1958,8 @@ STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void 
 }
 
 /** Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle) {
-    sz_unused_(start && length && handle);
+STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle, void *stream) {
+    sz_unused_(start && length && handle && stream);
 }
 
 #if defined(__GNUC__)
@@ -1969,13 +1973,13 @@ STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t lengt
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-STRINGZILLA_INLINE void *sz_memory_allocate_default_(sz_size_t length, void *handle) {
-    sz_unused_(handle);
+STRINGZILLA_INLINE void *sz_memory_allocate_default_(sz_size_t length, void *handle, void *stream) {
+    sz_unused_(handle && stream);
     if (length == 0) return STRINGZILLA_NULL;
     return malloc(length);
 }
-STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle) {
-    sz_unused_(handle && length);
+STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle, void *stream) {
+    sz_unused_(handle && length && stream);
     free(start);
 }
 
@@ -2050,6 +2054,25 @@ STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *vi
     sequence->get_start = sz_sequence_from_string_views_get_start_;
     sequence->get_length = sz_sequence_from_string_views_get_length_;
 }
+
+/** Reads one string out of a tape: one block of count + 1 @c sz_u64_t offsets from the block's own
+ *  start, then the bytes, string @p i spanning `[offsets[i], offsets[i + 1])`. Exported once, so
+ *  every unit of the library knows a tape by this one address. */
+STRINGZILLA_API sz_cptr_t sz_sequence_tape_start(void const *handle, sz_size_t i);
+
+/** Reads one length out of a tape, laid out as @ref sz_sequence_tape_start reads it. */
+STRINGZILLA_API sz_size_t sz_sequence_tape_length(void const *handle, sz_size_t i);
+
+#if STRINGZILLA_HEADER_ONLY
+STRINGZILLA_API sz_cptr_t sz_sequence_tape_start(void const *handle, sz_size_t i) {
+    sz_u64_t const *offsets = (sz_u64_t const *)handle;
+    return (sz_cptr_t)handle + offsets[i];
+}
+STRINGZILLA_API sz_size_t sz_sequence_tape_length(void const *handle, sz_size_t i) {
+    sz_u64_t const *offsets = (sz_u64_t const *)handle;
+    return (sz_size_t)(offsets[i + 1] - offsets[i]);
+}
+#endif
 
 #pragma endregion
 

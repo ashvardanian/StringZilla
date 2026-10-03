@@ -80,7 +80,7 @@ impl Hasher {
             sz_hash_state_init_best(
                 &mut state as *mut _ as *mut c_void,
                 seed,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -95,7 +95,7 @@ impl Hasher {
                 self as *mut _ as *mut c_void,
                 data.as_ptr() as *const c_void,
                 data.len(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -110,7 +110,7 @@ impl Hasher {
             sz_hash_state_digest_best(
                 self as *const _ as *const c_void,
                 &mut hash,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -139,7 +139,7 @@ impl Sha256 {
         unsafe {
             sz_sha256_state_init_best(
                 &mut state as *mut _ as *mut c_void,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -154,7 +154,7 @@ impl Sha256 {
                 self as *mut _ as *mut c_void,
                 data.as_ptr() as *const c_void,
                 data.len(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -169,7 +169,7 @@ impl Sha256 {
             sz_sha256_state_digest_best(
                 self as *const _ as *const c_void,
                 digest.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -270,7 +270,7 @@ where
         sz_sha256_multistate_update_best(
             states.as_mut_ptr() as *mut c_void,
             texts,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     })
@@ -295,7 +295,7 @@ pub fn sha256_multistate_digest(states: &[Sha256], digests: &mut [Sha256Digest])
             states.as_ptr() as *const c_void,
             states.len(),
             digests.as_mut_ptr() as *mut u8,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -545,7 +545,7 @@ where
             text_ref.as_ptr() as *const c_void,
             text_ref.len(),
             &mut checksum,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -579,7 +579,7 @@ where
             text_ref.len(),
             seed,
             &mut hash,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -637,7 +637,7 @@ where
             seeds.as_ptr(),
             seeds.len(),
             out.as_mut_ptr(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

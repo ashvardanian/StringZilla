@@ -5,10 +5,10 @@
  *  @brief GPU engine benchmarks - the Metal kernels against the CPU tiers this build carries, the
  *      twin of `cross_simt.cuh`.
  *
- *  Metal kernels reach only the device's arena, so the corpus is copied into it once - texts, views
- *  and the scores - and every call scores that resident slice in place. The engine is built before
- *  the timing on both sides; only the round is timed, including the wait for the device, as the
- *  CUDA twin times its stream synchronization.
+ *  Metal kernels reach only the device's unified memory, so the corpus is copied into it once, as a
+ *  tape beside the scores, and every call scores that resident slice in place. The engine is built
+ *  before the timing on both sides; only the round is timed, including the wait for the queue, as
+ *  the CUDA twin times its stream synchronization.
  *
  *  A round scores @c STRINGWARS_BATCH_PER_CORE candidates per GPU core, or 2048 without it, the
  *  core count coming from IOKit, as Metal reports none.
@@ -19,8 +19,7 @@
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines build_metal/stringzilla_metal_bench
  *  @endcode
  */
-#include <cmath>   // `std::ceil`, `std::log2`
-#include <cstring> // `std::memcpy`
+#include <cmath> // `std::ceil`, `std::log2`
 
 #include <dlfcn.h> // `dlopen`, `dlsym`
 
@@ -85,53 +84,50 @@ static std::size_t overlap_metal_count_(environment_t const &env, corpus_t const
     return std::min<std::size_t>(corpus.tokens.size(), per_core * metal_core_count_());
 }
 
-/** Arena bytes the resident corpus needs - texts, views and scores - plus room for the engine. */
-static std::size_t overlap_metal_arena_bytes_(environment_t const &env, corpus_t const &corpus) {
-    std::size_t const count = overlap_metal_count_(env, corpus);
-    std::size_t texts_bytes = 0;
-    for (std::size_t index = 0; index != count; ++index) texts_bytes += corpus.tokens[index].size();
-    return texts_bytes + count * (sizeof(sz_string_view_t) + sizeof(sz_f32_t)) + (64u << 20);
-}
-
-/** The corpus as @c device sees it: texts, views and one round's scores, all inside its arena. */
+/** The corpus as the device of @c queue sees it: one tape of the candidates and one round's scores,
+ *  both in its unified memory. */
 struct overlap_metal_corpus_t {
-    sz_metal_device_t &device;
-    sz_memory_allocator_t arena {};
-    char *texts = nullptr;
-    sz_string_view_t *views = nullptr;
-    sz_f32_t *scores = nullptr;
-    std::size_t count = 0, texts_bytes = 0;
+    void *queue;
+    sz_memory_allocator_t unified {};
     sz_sequence_t candidates {};
+    sz_size_t candidates_bytes = 0;
+    sz_f32_t *scores = nullptr;
+    std::size_t count = 0;
 
     /** Candidate bytes one round touches, which throughput divides by. */
     std::size_t bytes = 0;
 
     std::size_t windows_at(std::size_t width) const noexcept {
         std::size_t total = 0;
-        for (std::size_t index = 0; index != count; ++index)
-            total += width <= views[index].length ? views[index].length - width + 1 : 0;
+        for (std::size_t index = 0; index != count; ++index) {
+            sz_size_t const length = candidates.get_length(candidates.handle, index);
+            total += width <= length ? length - width + 1 : 0;
+        }
         return total;
     }
 
-    overlap_metal_corpus_t(environment_t const &env, corpus_t const &corpus, sz_metal_device_t &device)
-        : device(device) {
+    overlap_metal_corpus_t(environment_t const &env, corpus_t const &corpus, void *queue) : queue(queue) {
         count = overlap_metal_count_(env, corpus);
-        for (std::size_t index = 0; index != count; ++index) texts_bytes += corpus.tokens[index].size();
-        sz_memory_allocator_init_metal(&arena, &device);
-        texts = static_cast<char *>(arena.allocate(texts_bytes ? texts_bytes : 1, arena.handle));
-        views = static_cast<sz_string_view_t *>(arena.allocate(count * sizeof(sz_string_view_t), arena.handle));
-        scores = static_cast<sz_f32_t *>(arena.allocate(count * sizeof(sz_f32_t), arena.handle));
-        if (!texts || !views || !scores) throw std::runtime_error("The arena could not hold the corpus.");
-        char *cursor = texts;
+        std::vector<sz_string_view_t> views(count);
         for (std::size_t index = 0; index != count; ++index) {
             token_view_t const token = corpus.tokens[index];
-            std::memcpy(cursor, token.data(), token.size());
-            views[index].start = cursor, views[index].length = token.size();
-            cursor += token.size();
+            views[index].start = token.data(), views[index].length = token.size();
+            bytes += token.size();
         }
-        bytes = texts_bytes;
-        sz_sequence_from_string_views(views, count, &candidates);
+        sz_sequence_t host {};
+        sz_sequence_from_string_views(views.data(), count, &host);
+        sz_memory_allocator_init_unified_metal(&unified);
+        scores = static_cast<sz_f32_t *>(unified.allocate(count * sizeof(sz_f32_t), unified.handle, queue));
+        if (!scores || sz_sequence_copy_metal(&candidates, &host, &unified, &candidates_bytes, queue) != sz_success_k)
+            throw std::runtime_error("Unified memory could not hold the corpus.");
     }
+    ~overlap_metal_corpus_t() noexcept {
+        if (candidates_bytes)
+            unified.free(const_cast<void *>(candidates.handle), candidates_bytes, unified.handle, queue);
+        if (scores) unified.free(scores, count * sizeof(sz_f32_t), unified.handle, queue);
+    }
+    overlap_metal_corpus_t(overlap_metal_corpus_t const &) = delete;
+    overlap_metal_corpus_t &operator=(overlap_metal_corpus_t const &) = delete;
 };
 
 static std::string overlap_query_text_(corpus_t const &corpus, std::size_t query_bytes) {
@@ -161,19 +157,19 @@ struct overlap_scores_from_metal {
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const scored_width = width;
-        if (sz_overlap_engine_init_metal(&engine, &queries, &scored_width, 1, resident.count, 0, &resident.arena,
-                                         &resident.device) != sz_success_k)
+        if (sz_overlap_engine_init_metal(&engine, &queries, &scored_width, 1, resident.count, &resident.unified,
+                                         resident.queue) != sz_success_k)
             throw std::runtime_error("The device forest could not be prepared.");
     }
-    ~overlap_scores_from_metal() { sz_overlap_engine_free(&engine); }
+    ~overlap_scores_from_metal() { sz_overlap_engine_free(&engine, resident.queue); }
     overlap_scores_from_metal(overlap_scores_from_metal const &) = delete;
     overlap_scores_from_metal &operator=(overlap_scores_from_metal const &) = delete;
 
     call_result_t operator()(std::size_t) {
         if (sz_overlap_scores_metal(&engine, &resident.candidates, resident.scores, resident.count, 1,
-                                    &resident.device) != sz_success_k)
+                                    resident.queue) != sz_success_k)
             throw std::runtime_error("The GPU round failed.");
-        if (sz_metal_device_synchronize(&resident.device) != sz_success_k)
+        if (sz_stream_synchronize_metal(resident.queue) != sz_success_k)
             throw std::runtime_error("The GPU round did not finish.");
         return call_result_t(resident.bytes, overlap_check_value_(resident.scores, resident.count), windows);
     }
@@ -198,10 +194,10 @@ struct overlap_scores_from_sz {
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const scored_width = width;
-        if (init_(&engine, &queries, &scored_width, 1, 0, 0, &allocator, nullptr) != sz_success_k)
+        if (init_(&engine, &queries, &scored_width, 1, 0, &allocator, nullptr) != sz_success_k)
             throw std::runtime_error("The host forest could not be prepared.");
     }
-    ~overlap_scores_from_sz() { sz_overlap_engine_free(&engine); }
+    ~overlap_scores_from_sz() { sz_overlap_engine_free(&engine, nullptr); }
     overlap_scores_from_sz(overlap_scores_from_sz const &) = delete;
     overlap_scores_from_sz &operator=(overlap_scores_from_sz const &) = delete;
 
@@ -238,24 +234,21 @@ int main() {
     install_bench_signal_handlers();
     environment_t env {read_settings(), probe_machine()};
     print(env.machine);
-    sz_metal_device_t device {};
+    print(env.settings);
+    void *queue = nullptr;
+    if (sz_metal_stream_init(0, &queue) != sz_success_k) return 0;
     try {
         corpus_t const &corpus = env.corpora.multilingual_lines();
-        // ? Left zeroed, and so printed as no device, on a machine without a GPU
-        sz_metal_device_init(0, overlap_metal_arena_bytes_(env, corpus), &device);
-        print(device);
-        print(env.settings);
-        if (!device.device) return 0;
-        overlap_metal_corpus_t resident(env, corpus, device);
+        overlap_metal_corpus_t resident(env, corpus, queue);
         fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.count);
         bench_overlap_scores(env, corpus, resident, median_token_bytes(corpus));
     }
     catch (std::exception const &e) {
-        sz_metal_device_free(&device);
+        sz_metal_stream_free(queue);
         fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
-    sz_metal_device_free(&device);
+    sz_metal_stream_free(queue);
 
     fmt::println("All benchmarks passed.");
     return 0;

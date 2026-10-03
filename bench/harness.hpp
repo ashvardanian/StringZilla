@@ -98,32 +98,11 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h> // `std::byte`
 
-#include "stringzilla/metal.h" // `sz_metal_device_t`
+#include "stringzilla/metal.h" // The Metal layer the Metal benchmarks drive
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/types.hpp"
 #if !STRINGZILLA_HEADER_ONLY
 #include "stringzilla/stringzilla.hpp" // `sz::string_view_t::split`, which `tokenize` scans with
-#endif
-
-/*  The GPU benchmarks call the CUDA runtime by name, and HIP answers those calls under its own. */
-#if STRINGZILLA_ARCH_ROCM_
-using cudaError_t = hipError_t;
-using cudaDeviceProp = hipDeviceProp_t;
-inline constexpr hipError_t cudaSuccess = hipSuccess, cudaErrorInvalidValue = hipErrorInvalidValue;
-inline constexpr hipMemcpyKind cudaMemcpyHostToDevice = hipMemcpyHostToDevice;
-inline constexpr hipMemcpyKind cudaMemcpyDeviceToHost = hipMemcpyDeviceToHost;
-inline hipError_t cudaGetDevice(int *device) { return hipGetDevice(device); }
-inline hipError_t cudaGetDeviceCount(int *count) { return hipGetDeviceCount(count); }
-inline hipError_t cudaGetDeviceProperties(hipDeviceProp_t *properties, int device) {
-    return hipGetDeviceProperties(properties, device);
-}
-inline hipError_t cudaMemGetInfo(std::size_t *free_bytes, std::size_t *total_bytes) {
-    return hipMemGetInfo(free_bytes, total_bytes);
-}
-inline hipError_t cudaMemcpy(void *destination, void const *source, std::size_t bytes, hipMemcpyKind kind) {
-    return hipMemcpy(destination, source, bytes, kind);
-}
-inline hipError_t cudaStreamSynchronize(hipStream_t stream) { return hipStreamSynchronize(stream); }
 #endif
 
 namespace sz = ashvardanian::stringzilla;
@@ -265,12 +244,117 @@ template <auto best_>
 inline constexpr auto cpu_best =
     [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
 
+/*  The one place a benchmark picks a GPU vendor's runtime, by its compiler: the baseline and the
+ *  helpers the rows reach past the library. */
+#if STRINGZILLA_ARCH_ROCM_
+inline constexpr sz_capability_t gpu_baseline_k = sz_cap_rocm_k;
+inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
+inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
+inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_rocm_;
+inline constexpr auto gpu_copy = &sz_copy_rocm_;
+inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_rocm_;
+inline constexpr auto gpu_free_device = &sz_memory_free_device_rocm_;
+inline constexpr auto gpu_allocate_pinned = &sz_memory_allocate_pinned_rocm_;
+inline constexpr auto gpu_free_pinned = &sz_memory_free_pinned_rocm_;
+#elif STRINGZILLA_ARCH_CUDA_
+inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
+inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
+inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
+inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_cuda_;
+inline constexpr auto gpu_copy = &sz_copy_cuda_;
+inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_cuda_;
+inline constexpr auto gpu_free_device = &sz_memory_free_device_cuda_;
+inline constexpr auto gpu_allocate_pinned = &sz_memory_allocate_pinned_cuda_;
+inline constexpr auto gpu_free_pinned = &sz_memory_free_pinned_cuda_;
+#endif
+
 #if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_baseline_k>>;
+
+/**
+ *  @brief Allocator over plain @b device memory, which no host code may dereference.
+ *
+ *  For scratch that only a kernel ever reads or writes, where unified memory would pay page
+ *  migration on every access from the wrong side. @ref safe_vector is the only container that grows
+ *  it, through @c resize_uninitialized, because moving elements on the host is exactly what
+ *  @c host_accessible_k forbids.
+ */
+template <typename value_type_>
+struct device_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
+    /** Plain device memory: a container must not move elements through it on the host to grow. */
+    static constexpr bool host_accessible_k = false;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = device_alloc<other_value_type_>;
+    };
+
+    constexpr device_alloc() noexcept = default;
+    template <typename other_value_type_>
+    constexpr device_alloc(device_alloc<other_value_type_> const &) noexcept {}
+
+    value_type *allocate(size_type count) const noexcept {
+        return (value_type *)gpu_allocate_device(count * sizeof(value_type), nullptr, nullptr);
+    }
+    void deallocate(pointer start, size_type count) const noexcept {
+        gpu_free_device(start, count * sizeof(value_type), nullptr, nullptr);
+    }
+    template <typename other_type_>
+    bool operator==(device_alloc<other_type_> const &) const noexcept {
+        return true;
+    }
+    template <typename other_type_>
+    bool operator!=(device_alloc<other_type_> const &) const noexcept {
+        return false;
+    }
+};
+
+/** Allocator over @b pinned page-locked host memory, which the driver copies at the bus rate and
+ *  which no kernel can address: the staging side of a transfer. */
+template <typename value_type_>
+struct pinned_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_copy_assignment = std::false_type;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = pinned_alloc<other_value_type_>;
+    };
+
+    constexpr pinned_alloc() noexcept = default;
+    template <typename other_value_type_>
+    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &) noexcept {}
+
+    value_type *allocate(size_type count) const noexcept {
+        return (value_type *)gpu_allocate_pinned(count * sizeof(value_type), nullptr, nullptr);
+    }
+    void deallocate(pointer start, size_type count) const noexcept {
+        gpu_free_pinned(start, count * sizeof(value_type), nullptr, nullptr);
+    }
+    template <typename other_type_>
+    bool operator==(pinned_alloc<other_type_> const &) const noexcept {
+        return true;
+    }
+    template <typename other_type_>
+    bool operator!=(pinned_alloc<other_type_> const &) const noexcept {
+        return false;
+    }
+};
 
 /** Page-locked host memory, which the driver reports as host and every engine refuses. */
 template <typename value_type_>
@@ -286,26 +370,15 @@ template <typename value_type_>
 using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
 
 /**
- *  @brief Drains a device-resident buffer into @p destination, forwarding the runtime's status.
+ *  @brief Queues a copy of a device-resident buffer into @p destination on the default stream,
+ *      which the caller joins.
  *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
 template <typename value_type_>
-inline cudaError_t copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
-    if (source.size() == 0) return cudaSuccess;
-    if (destination.size() < source.size()) return cudaErrorInvalidValue;
-    return cudaMemcpy(destination.data(), source.data(), source.size() * sizeof(value_type_), cudaMemcpyDeviceToHost);
-}
-
-/**
- *  @brief Fills a device-resident buffer from @p source, forwarding the runtime's status.
- *  @param[in] source At least as many elements as @p destination holds; only that prefix is read.
- */
-template <typename value_type_>
-inline cudaError_t copy_host_to_device(span<value_type_ const> source, device_vector<value_type_> &destination) {
-    if (destination.size() == 0) return cudaSuccess;
-    if (source.size() < destination.size()) return cudaErrorInvalidValue;
-    return cudaMemcpy(destination.data(), source.data(), destination.size() * sizeof(value_type_),
-                      cudaMemcpyHostToDevice);
+inline sz_status_t copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+    if (source.size() == 0) return sz_success_k;
+    if (destination.size() < source.size()) return sz_unexpected_dimensions_k;
+    return gpu_copy(destination.data(), source.data(), source.size() * sizeof(value_type_), nullptr);
 }
 #endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
@@ -327,16 +400,6 @@ inline std::string read_file(std::string const &path, std::optional<bytes_t> rea
     content.resize(read_bytes);
     return content;
 }
-
-#if STRINGZILLA_WITH_METAL
-
-/** Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened. */
-inline void print(sz_metal_device_t const &device) {
-    if (!device.device) return fmt::println("- Metal: no device");
-    void *const name = sz_metal_get_(device.device, "name");
-    fmt::println("- Metal: {}", static_cast<char const *>(sz_metal_get_(name, "UTF8String")));
-}
-#endif // STRINGZILLA_WITH_METAL
 
 /** Prints a backtrace on a fatal signal, so a crashing kernel self-localizes instead of dying
  *  silently under output redirection. Writes raw, since the crashing thread may already hold the
@@ -556,9 +619,9 @@ using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
 #else
-using dataset_t = std::basic_string<char, std::char_traits<char>, unified_alloc<char>>;
+using dataset_t = std::basic_string<char, std::char_traits<char>, unified_alloc<char, gpu_baseline_k>>;
 using token_view_t = stringzilla::span<char const>;
-using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t>>;
+using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t, gpu_baseline_k>>;
 #endif
 
 /**
@@ -822,9 +885,10 @@ struct machine_t {
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
     sz::cpu_specs_t specs;
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
 
-    /** The first visible device and its architecture, like @c sm_90 or @c gfx942, or empty. */
+    /** The first visible device, with the architecture CUDA and ROCm name, like @c sm_90 or
+     *  @c gfx942, or empty. */
     std::string device_name;
 #endif
 };
@@ -833,22 +897,32 @@ struct machine_t {
 inline machine_t probe_machine() noexcept {
     machine_t machine;
     sz_cpu_capabilities_compiled(&machine.compiled), sz_cpu_capabilities_detected(&machine.detected);
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_ARCH_ROCM_
+    int device_count = 0;
+    hipDeviceProp_t properties;
+    if (hipGetDeviceCount(&device_count) == hipSuccess && device_count != 0 &&
+        hipGetDeviceProperties(&properties, 0) == hipSuccess)
+        machine.device_name = fmt::format("{} {}", properties.name, properties.gcnArchName);
+#elif STRINGZILLA_ARCH_CUDA_
     int device_count = 0;
     cudaDeviceProp properties;
     if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count != 0 &&
         cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
-#if STRINGZILLA_ARCH_ROCM_
-        machine.device_name = fmt::format("{} {}", properties.name, properties.gcnArchName);
-#else
         machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
-#endif
+#elif STRINGZILLA_WITH_METAL
+    void *queue = nullptr;
+    if (sz_metal_stream_init(0, &queue) == sz_success_k) {
+        void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
+        void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
+        machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
+        sz_metal_stream_free(queue);
+    }
 #endif
     return machine;
 }
 
 /** Prints the version line, then "- Compiled for:", "- This machine:", "- Caches:", and in GPU
- *  builds "- CUDA:" or "- ROCm:". */
+ *  builds "- CUDA:", "- ROCm:" or "- Metal:". */
 inline void print(machine_t const &machine) {
     char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
     sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
@@ -858,8 +932,8 @@ inline void print(machine_t const &machine) {
     fmt::println("- This machine: {}", detected);
     fmt::println("- Caches: {} first-level, assumed, and {} confined to a compute domain",
                  spell_size({machine.specs.l1_bytes}), spell_size({machine.specs.l3_bytes}));
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-    fmt::println("- {}: {}", STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA",
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
+    fmt::println("- {}: {}", STRINGZILLA_WITH_METAL ? "Metal" : (STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA"),
                  machine.device_name.empty() ? std::string_view("no device") : machine.device_name);
 #endif
 }
@@ -1011,12 +1085,10 @@ inline std::size_t candidates_per_call(environment_t const &env, corpus_t const 
 /** Candidates one device call scores: @c STRINGWARS_BATCH_PER_CORE per multiprocessor if set, else
  *  one per resident thread of the bound device. */
 inline std::size_t resident_candidates_per_call(environment_t const &env) {
-    int device = 0;
-    cudaDeviceProp properties;
-    if (cudaGetDevice(&device) != cudaSuccess || cudaGetDeviceProperties(&properties, device) != cudaSuccess)
-        throw std::runtime_error("The device would not report its geometry.");
-    std::size_t const per_core = env.settings.candidates_per_core.value_or(properties.maxThreadsPerMultiProcessor);
-    return per_core * (std::size_t)properties.multiProcessorCount;
+    std::size_t const multiprocessors = gpu_multiprocessors();
+    if (multiprocessors == 0) throw std::runtime_error("The device would not report its geometry.");
+    std::size_t const per_core = env.settings.candidates_per_core.value_or(gpu_threads_per_multiprocessor());
+    return per_core * multiprocessors;
 }
 #endif
 

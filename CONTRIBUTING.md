@@ -10,16 +10,16 @@ Depending on the type of contribution, you may need to follow different steps.
 
 ```
 include/stringzilla/      C and C++ headers — one .h per kernel family declaring its dispatch points, kernels and finder, stringzilla.hpp for C++
-include/stringzilla/*/    Kernels, one file per CPU capability — serial, haswell, neon, rvv, etc. — plus the engines' GPU simt.* sources
+include/stringzilla/*/    Kernels, one file per CPU capability — serial, haswell, neon, rvv, etc. — plus the engines' GPU simt.cuh and metal.* sources
 c/stringzilla.c           Library exports shared by every family — versions, statuses, capability queries, the kernel finder
-c/cpu/                    Library units, one per CPU capability, each defining that capability's kernels once
+c/target/*.c              Library units, one per CPU capability, each defining that capability's kernels once
 c/dispatch/               Library units, one per kernel family, with its capability lists, dispatch points and finder
 c/dispatch.h              The capability lists' shape and the kernel pick the dispatch units share, internal to the library
-c/nvidia/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_BUILD_CUDA
-c/amd/rocm.hip            The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_BUILD_ROCM
-c/apple/metal.c           The engines' metal kernels and the Metal device exports, under STRINGZILLA_BUILD_METAL
+c/target/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_BUILD_CUDA
+c/target/rocm.hip         The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_BUILD_ROCM
+c/target/metal.c          The engines' metal kernels and the Metal device exports, under STRINGZILLA_BUILD_METAL
 c/parallel.h, .c          Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
-probes/                   ISA probe sources, one per kit mirroring c/cpu/, each calling one of its kernels as the library compiles it
+probes/                   ISA probe sources, one per kit mirroring c/target/, each calling one of its kernels as the library compiles it
 test/                     C++ and Python tests — see test/README.md
 bench/                    C++ benchmarks — see bench/README.md
 python/                   CPython extension, one unit per kernel family, with python/stringzilla/stringzilla.h as its private header
@@ -115,6 +115,47 @@ A GPU platform holds beside the host's architecture in both compiler passes, so 
 Metal has no compiler macro on the host side, so its host API is a switch the build sets where it links Metal and Foundation.
 Every name in these families is always defined, as 0 or 1, and tested with `#if`, never with `defined(...)`.
 
+C names put the capability last, `sz_<family>_<what>_<capability>`, like `sz_find_haswell`.
+Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_simt_kernel_`.
+A dispatch point puts `best` in the capability's place, like `sz_copy_best`, and the kernels it picks from are its twins, like `sz_copy_haswell`.
+
+Code that several capabilities share belongs to one of three layers, named in the capability's place:
+
+- `serial`, portable and capability-neutral, in each family's `serial.h`.
+- `simt`, the single C source that CUDA and HIP both compile, in each family's `simt.cuh`.
+- `metal`, what every Metal tier shares, in each family's `metal.h` and the `metal.metal` shaders it embeds.
+
+A constant identical across the GPU layers is defined once in `serial.h` with the adjective `gpu`, like `sz_levenshtein_gpu_warp_lanes_k`.
+One whose value differs per layer takes its layer instead, like `sz_substrings_tally_slot_bits_simt_k` and `sz_substrings_tally_slot_bits_metal_k`.
+
+The GPU capability groups are `cuda`, `rocm` and `metal`, beside the CPU's `cpu`.
+Each word names its group's baseline bit, like `sz_cap_cuda_k`, its functions and its library unit, like `c/target/cuda.cu`, and no symbol or source path names a vendor, like `nvidia`, `amd` or `apple`.
+A function that touches a device is either a producer or a consumer:
+
+- A __producer__ reports a device's capabilities or opens a stream on it.
+  It starts with its group, and it is the only kind of function that takes a device's `ordinal`: `sz_cuda_count_devices(&count)`, `sz_cuda_capabilities_enabled(ordinal, &capabilities)` and `sz_cuda_stream_init(ordinal, &stream)`.
+- A __consumer__ takes the `capabilities` it picks from and, where it queues work, a trailing `void *stream`, but never an ordinal, since the stream names its device: `sz_stream_synchronize_best(capabilities, stream)`.
+  It ends in `best` like any dispatch point, and its twins end in their capability, like `sz_stream_synchronize_cuda(stream)`.
+
+A null stream is the default stream of the default device: the calling thread's current device on CUDA and ROCm, and the system default device on Metal.
+On the CPU the stream must be null.
+Each of these words has one meaning across the library:
+
+| Word                                   | Meaning                                                                          | Appears as                                                                      |
+| :------------------------------------- | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| `cpu`, `cuda`, `rocm`, `metal`         | A capability group and its baseline bit                                          | Producer prefix, twin and kernel suffix, `c/<group>/`                           |
+| `simt`                                 | The single C source CUDA and HIP both compile                                    | `<family>/simt.cuh`, the suffixes `_simt_`, `_simt_t`, `_simt_k`                |
+| `metal`, as a layer                    | What every Metal tier shares                                                     | `<family>/metal.h`, `<family>/metal.metal`, the suffix `_metal_`                |
+| `gpu`                                  | Adjective for every GPU group                                                    | `sz_cap_gpus_k`, `sz_missing_gpu_k`, `sz_levenshtein_gpu_warp_lanes_k`          |
+| `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_cuda_count_devices`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
+| `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                        |
+| `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                   |
+| `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                               |
+| `unified`                              | Memory both the host and the stream's device address                             | `sz_memory_allocator_init_unified_best`                                         |
+| `tape`                                 | One block holding a sequence's offsets and bytes                                 | What `sz_sequence_copy_best` writes                                             |
+| A capability, like `haswell` or `cuda` | One bit of a mask                                                                | The last token before the role suffix                                           |
+| `kernel`                               | A GPU entry point                                                                | `_kernel_`, right after the capability                                          |
+
 For C++ code:
 
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
@@ -160,7 +201,7 @@ Without a preset, a configure builds the libraries alone, as every binding's bui
 Every binding builds the libraries through `CMakeLists.txt`, so CMake is the one place that probes which kits the toolchain builds.
 Each kit's probe, `probes/<kit>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
 Every tier header scopes its kernels to their kit with `#pragma clang attribute` or `#pragma GCC target`, on every platform.
-LASX and POWER9 also need `-mlasx` and `-mcpu=power9` file-wide, as `lasxintrin.h` and `altivec.h` hide their contents without them, so that flag reaches the kit's probe, its `c/cpu/` unit and, in the header-only suites, the `cross_<arch>.cpp` checks of its architecture, and nothing else.
+LASX and POWER9 also need `-mlasx` and `-mcpu=power9` file-wide, as `lasxintrin.h` and `altivec.h` hide their contents without them, so that flag reaches the kit's probe, its `c/target/` unit and, in the header-only suites, the `cross_<arch>.cpp` checks of its architecture, and nothing else.
 The libraries compile every kit the toolchain builds and dispatch by runtime detection, so one artifact runs on any CPU of its architecture.
 `-D STRINGZILLA_TARGET_<KIT>=0` drops a kit, and `=1` keeps one only where its probe compiles.
 
@@ -626,7 +667,7 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-`STRINGZILLA_BUILD_CUDA` adds `c/nvidia/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports, like `sz_cuda_memory_allocator_init_unified` and `sz_cuda_sequence_from_string_views`.
+`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_cuda_count_devices`, `sz_cuda_capabilities_detected` and `sz_cuda_stream_init`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_memory_allocator_init_unified_cuda` and `sz_sequence_copy_cuda`.
 `stringzilla_cuda_test`, built from `test/main_cuda.cu` and `test/cross_cuda.cu` over the static library, checks the CUDA kernels and the dispatch points over them against the serial answers:
 
 ```sh
@@ -646,8 +687,8 @@ cuda-memcheck ./build_debug/stringzilla_cuda_test
 
 ## Metal and ROCm
 
-`STRINGZILLA_BUILD_METAL` adds `c/apple/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `simt.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, `sz_metal_device_init(ordinal, arena_bytes, &device)` with its `synchronize` and `free` twins.
-`STRINGZILLA_BUILD_ROCM` adds `c/amd/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
+`STRINGZILLA_BUILD_METAL` adds `c/target/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `memory.h` dispatch points, like `sz_stream_synchronize_metal`.
+`STRINGZILLA_BUILD_ROCM` adds `c/target/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
 
 The Metal backends of all three engine families build into `stringzilla_metal_test` on Apple platforms, which needs `STRINGZILLA_BUILD_METAL` on and checks them against the serial answers:
 
@@ -690,7 +731,7 @@ STRINGZILLA_TARGET_ARCH=native uv pip install .                                 
 To check the installed version and capabilities, try:
 
 ```bash
-uv run --no-project python -c "import stringzilla as sz; print(sz.__version__, repr(sz.Device.cpu().capabilities_enabled()))"
+uv run --no-project python -c "import stringzilla as sz; print(sz.__version__, repr(sz.cpu_capabilities_enabled()))"
 ```
 
 To clean up code before pushing:
@@ -752,11 +793,10 @@ You may need root privileges for multi-architecture builds:
 sudo $(which cibuildwheel) --platform linux
 ```
 
-To avoid QEMU issues on SVE, tell the PyTest suite that it runs emulated, and it masks out the SVE capabilities.
-`STRINGZILLA_IN_QEMU=1` or `true` turns that on:
+To avoid QEMU issues on SVE, have the emulator hide it, as `QEMU_CPU=max,sve=off` does on AArch64, and set `STRINGZILLA_IN_QEMU=1` so the PyTest header reports the run as emulated:
 
 ```bash
-STRINGZILLA_IN_QEMU=1 sudo $(which cibuildwheel) --platform linux --archs s390x
+CIBW_ENVIRONMENT_LINUX="STRINGZILLA_IN_QEMU=1 QEMU_CPU=max,sve=off" sudo -E $(which cibuildwheel) --platform linux --archs aarch64
 ```
 
 On Windows and macOS, to avoid frequent path resolution issues, you may want to use:
@@ -837,7 +877,7 @@ Other options include:
 - `rocm`: the AMD counterpart, which implies `std`.
 - `metal`: the Metal backend for Apple GPUs, which implies `std`.
 
-Each GPU feature unlocks every engine's `new_on` constructor.
+Each GPU feature lets `Stream::new` make a stream on that vendor's devices, which every engine constructor takes.
 `build.rs` builds `stringzilla_static` through CMake, with every capability the toolchain can emit, picked per call by the capability mask, and each GPU feature switches on its `STRINGZILLA_BUILD_*` option.
 It forwards `STRINGZILLA_TARGET_ARCH`, the `STRINGZILLA_TARGET_<KIT>` overrides and the GPU architecture lists from the environment, rebuilding when one changes.
 `STRINGZILLA_LIBRARY_DIR=<directory>` links an archive CMake already built there instead:
@@ -959,7 +999,7 @@ It's important to keep compiler support in mind when extending to new instructio
 Check the most recent CI pipeline configurations in `prerelease.yml` and `release.yml` to see which compilers are used.
 When extending capability detection, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
 Instead, use inline assembly to read the feature flags, and report them through `sz_cpu_capabilities_detected`.
-A new capability's kernels then go into a unit of their own, `c/cpu/<capability>.c`, and into the lists in `c/dispatch/<family>.c` of every family that has them.
+A new capability's kernels then go into a unit of their own, `c/target/<capability>.c`, and into the lists in `c/dispatch/<family>.c` of every family that has them.
 
 ### Working on Faster Edit Distances
 

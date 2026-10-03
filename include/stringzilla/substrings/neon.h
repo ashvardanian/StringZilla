@@ -75,11 +75,11 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_neon(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_size_t ordinal,
-                                                           sz_memory_allocator_t *allocator, void *stream) {
+                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           void *stream) {
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
-                                          sz_cap_neon_k, ordinal, allocator, stream);
+                                          sz_cap_neon_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,

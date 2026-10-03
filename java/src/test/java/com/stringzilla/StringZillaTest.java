@@ -116,19 +116,12 @@ class StringZillaTest {
     }
 
     @Test
-    void capabilities_enableClampsAndKeepsSerial() {
+    void capabilities_enabledIsDetectedAndCompiledWithSerial() {
         StringZilla.Device cpu = StringZilla.Device.cpu();
         long enabled = cpu.capabilitiesEnabled();
         assertEquals("serial", StringZilla.capabilitiesName(1));
         assertEquals(1, enabled & 1);
-        assertEquals(0, enabled & ~(cpu.capabilitiesDetected() & cpu.capabilitiesCompiled()));
-        try {
-            assertEquals(1, cpu.capabilitiesEnable(0));
-            assertEquals(1, cpu.capabilitiesEnabled());
-            assertEquals(4, StringZilla.indexOf(b("the quick"), b("quick")));
-        } finally {
-            assertEquals(enabled, cpu.capabilitiesEnable(enabled));
-        }
+        assertEquals(enabled, cpu.capabilitiesDetected() & cpu.capabilitiesCompiled());
     }
 
     @Test
@@ -148,7 +141,6 @@ class StringZillaTest {
             assertThrows(StringZilla.StatusException.class, () -> new StringZilla.Device(kind, count));
             StringZilla.Device gpu = new StringZilla.Device(kind, 0);
             assertEquals(0, gpu.capabilitiesCompiled() & ((1L << 48) - 1));
-            assertThrows(StringZilla.StatusException.class, () -> gpu.capabilitiesEnable(-1));
             assertThrows(StringZilla.StatusException.class, () -> gpu.configureThread(-1));
         }
     }

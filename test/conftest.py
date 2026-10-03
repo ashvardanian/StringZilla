@@ -1,8 +1,8 @@
 """
 Shared pytest configuration for the StringZilla per-family test modules.
 
-Hosts the settings header, the `STRINGZILLA_FILTER` hook, the `seed`/`rng` fixtures and the QEMU
-capability mask, so every split test file (string_types.py, find.py, utf8_wordbreaks.py, …) inherits them
+Hosts the settings header, the `STRINGZILLA_FILTER` hook and the `seed`/`rng` fixtures,
+so every split test file (string_types.py, find.py, utf8_wordbreaks.py, …) inherits them
 without importing anything. The settings themselves are parsed once into `SETTINGS` in `base`.
 
 File: test/conftest.py
@@ -46,15 +46,6 @@ if pyarrow_available:
     import pyarrow as pa
 
 
-def pytest_configure(config: pytest.Config) -> None:
-    """Masks out SVE and SVE2 under QEMU, whose emulation of them is flaky."""
-    if not SETTINGS.in_qemu:
-        return
-    sve_like = sz.Capability.SVE | sz.Capability.SVE2 | sz.Capability.SVE2AES
-    current = sz.Device.cpu().capabilities_enabled()
-    sz.Device.cpu().capabilities_enable(current & ~sve_like)
-
-
 def pytest_report_header() -> list[str]:
     """What this run exercises, printed where pytest prints its own header, which shows without `-s`."""
     return [
@@ -62,7 +53,7 @@ def pytest_report_header() -> list[str]:
         f"- Architecture: {platform.machine()}",
         f"- Python: {platform.python_version()}",
         f"- StringZilla: {sz.__version__}",
-        f"- Capabilities: {sz.Device.cpu().capabilities_enabled()!r}",
+        f"- Capabilities: {sz.cpu_capabilities_enabled()!r}",
         f"- NumPy: {np.__version__ if numpy_available else 'none'}",
         f"- PyArrow: {pa.__version__ if pyarrow_available else 'none'}",
         f"- Seed: {SETTINGS.seed}",

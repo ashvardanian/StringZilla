@@ -170,8 +170,6 @@ Every call of this binding dispatches to the best kernel among the CPU's enabled
 Device cpu = Device.Cpu;
 ulong enabled = cpu.CapabilitiesEnabled;                      // what dispatch uses
 Console.WriteLine(Sz.CapabilitiesName(enabled));              // like "serial,neon,neonaes,neonsha"
-cpu.CapabilitiesEnable(1);                                    // narrow dispatch to the serial kernels
-cpu.CapabilitiesEnable(ulong.MaxValue);                       // back to everything this CPU and binary support
 ulong gpus = Device.Count(DeviceKind.Metal);                  // throws StatusException without a Metal GPU
 ulong metal = new Device(DeviceKind.Metal, 0).CapabilitiesEnabled;
 Console.WriteLine(Sz.Version);
@@ -181,12 +179,10 @@ Console.WriteLine(Sz.Version);
 - `Device.Count(kind)` is how many devices of `kind` the process sees: one CPU, or the GPUs its runtime counts.
 - `CapabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
 - `CapabilitiesCompiled` is what this binary contains for devices of that kind, from the ISA probes at build time.
-- `CapabilitiesEnabled` is what calls pass, both axes at once; on the CPU it is what dispatch uses, narrowed by `CapabilitiesEnable`, and always contains serial.
-- `CapabilitiesEnable(wanted)` makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `CapabilitiesEnabled` is what dispatch uses, both axes at once, and on the CPU always contains serial.
 - `ConfigureThread(capabilities)` prepares the calling thread for the kernels of `capabilities`, usually `CapabilitiesEnabled`, once per thread that runs them.
 - `Sz.CapabilitiesName(capabilities)` spells a mask as comma-separated capability names.
 
 Reach for `CapabilitiesEnabled` unless you specifically mean one of the raw axes.
 `CapabilitiesDetected` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
-The CPU's enabled set is process-wide and shared by every thread.
-A `StatusException` reports misuse: `sz_missing_gpu_k` for a GPU kind without devices or an ordinal past the last one, and `sz_missing_kernel_k` for `CapabilitiesEnable` or `ConfigureThread` on a GPU, which keeps no such set or thread state.
+A `StatusException` reports misuse: `sz_missing_gpu_k` for a GPU kind without devices or an ordinal past the last one, and `sz_missing_kernel_k` for `ConfigureThread` on a GPU, which keeps no thread state.

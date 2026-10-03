@@ -101,7 +101,7 @@ where
                 &mut intersection_count,
                 positions1.as_mut_ptr(),
                 positions2.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         })

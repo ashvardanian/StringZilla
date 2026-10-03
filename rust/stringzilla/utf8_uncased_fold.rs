@@ -55,7 +55,7 @@ where
             source_ref.len(),
             target_slice.as_mut_ptr() as *mut c_void,
             &mut written,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

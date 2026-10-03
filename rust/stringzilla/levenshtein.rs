@@ -24,24 +24,26 @@ pub enum LevenshteinSymbol {
 ///
 /// Myers' bit-parallel masks are built once per batch and reused by every round, so the preparation
 /// a one-shot distance repeats per pair is paid here exactly once. Construction also fixes the
-/// capability and, under `new_on`, the device and its launch geometry.
+/// capability and, on a GPU, the launch geometry.
 ///
-/// The fields mirror `sz_levenshtein_engine_t` one for one and only `count` and `symbol` are read
-/// from Rust, so the layout is load-bearing and the engine travels to C by pointer. Owning raw
-/// pointers makes it neither `Send` nor `Sync`, which is what the C contract wants: a compute
-/// verb grows the engine's round scratch, so it mutates, and every verb below takes `&mut self`
-/// for that reason.
+/// The fields mirror `sz_levenshtein_engine_t` one for one and only `count`, `symbol` and
+/// `capability` are read from Rust, so the layout is load-bearing and the engine travels to C by
+/// pointer. Owning raw pointers makes it neither `Send` nor `Sync`, which is what the C contract
+/// wants: a compute verb grows the engine's round scratch, so it mutates, and every verb below
+/// takes `&mut self` for that reason.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{LevenshteinEngine, LevenshteinSymbol};
+/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream};
 ///
-/// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes).unwrap();
+/// let cpu = Stream::default(Capabilities::cpu_enabled());
+/// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 ///
 /// // A `[queries, candidates]` block, query `q` starting at `q * stride`.
 /// let mut distances = [0usize; 4];
-/// engine.distances(&["sitting", "sunday"], &mut distances, 2).unwrap();
+/// cpu.scope(|scope| engine.distances(scope, &["sitting", "sunday"], &mut distances, 2))
+///     .unwrap();
 /// assert_eq!(distances[0], 3); // kitten vs sitting
 /// assert_eq!(distances[3], 3); // saturday vs sunday
 /// ```
@@ -54,8 +56,7 @@ pub struct LevenshteinEngine {
     lengths: *const u32,
     count: usize,
     symbol: LevenshteinSymbol,
-    capability: u64,
-    ordinal: usize,
+    capability: Capabilities,
     allocator: _SzMemoryAllocator,
     memory: *mut c_void,
     memory_bytes: usize,
@@ -64,81 +65,26 @@ pub struct LevenshteinEngine {
 }
 
 impl LevenshteinEngine {
-    /// Prepares `queries` on the host, on the CPU's [`Device::capabilities_enabled`], fixing the
-    /// CPU capability once for every round that follows.
-    ///
-    /// Ice Lake answers a [`LevenshteinSymbol::Runes`] batch through its Skylake kernel, because
-    /// Ice Lake's byte lanes have no rune arm.
-    pub fn new<Query>(queries: &[Query], symbol: LevenshteinSymbol) -> Result<Self, Status>
-    where
-        Query: AsRef<[u8]>,
-    {
-        let mut engine = MaybeUninit::<Self>::uninit();
-        with_sequence(queries, |sequence| unsafe {
-            sz_levenshtein_engine_init(
-                engine.as_mut_ptr(),
-                sequence,
-                symbol,
-                enabled_cpu_capabilities_mask(),
-                0,
-                core::ptr::null(),
-                core::ptr::null_mut(),
-            )
-        })
-        .check()?;
-        Ok(unsafe { engine.assume_init() })
-    }
-
-    /// Prepares `queries` on `device`, with its [`Device::capabilities_enabled`], fixing the
-    /// capability and launch geometry once; the engine keeps the device.
+    /// Prepares `queries` with the capabilities of `stream`, like [`Capabilities::cpu_enabled`] or
+    /// a GPU's [`Capabilities::cuda_enabled`], fixing the capability and, on a GPU, the launch
+    /// geometry once for every round that follows, on the device `stream` names, which it may join.
     ///
     /// The queries themselves are read on the host, so they need no device residency; everything
-    /// the engine builds from them does.
-    ///
-    /// `stream` serves this call's own work alone: a `cudaStream_t` or `hipStream_t` of `device`,
-    /// or null for its default one, on Metal a `sz_metal_device_t *` opened on `device`, and null
-    /// on the CPU. The verbs below pass a null stream and host candidates, so a GPU engine answers
-    /// them with an error status such as `Status::DeviceMemoryMismatch` until this crate can build
-    /// device-resident candidates.
-    ///
-    /// # Safety
-    ///
-    /// `stream` must be a live stream or Metal device of `device`, or null; this call may join it.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use stringzilla::sz::{Device, LevenshteinEngine, LevenshteinSymbol};
-    ///
-    /// // SAFETY: the CPU takes a null stream.
-    /// let mut engine = unsafe {
-    ///     LevenshteinEngine::new_on(&["kitten"], LevenshteinSymbol::Bytes, Device::cpu(), core::ptr::null_mut())
-    /// }?;
-    /// let mut distances = [0usize; 1];
-    /// engine.distances(&["sitting"], &mut distances, 1)?;
-    /// assert_eq!(distances[0], 3);
-    /// # Ok::<(), stringzilla::sz::Status>(())
-    /// ```
-    pub unsafe fn new_on<Query>(
-        queries: &[Query],
-        symbol: LevenshteinSymbol,
-        device: Device,
-        stream: *mut c_void,
-    ) -> Result<Self, Status>
+    /// the engine builds from them does. Ice Lake answers a [`LevenshteinSymbol::Runes`] batch
+    /// through its Skylake kernel, because Ice Lake's byte lanes have no rune arm.
+    pub fn new<Query>(queries: &[Query], symbol: LevenshteinSymbol, stream: &Stream) -> Result<Self, Status>
     where
         Query: AsRef<[u8]>,
     {
-        let capabilities = device.capabilities_enabled()?;
         let mut engine = MaybeUninit::<Self>::uninit();
         with_sequence(queries, |sequence| unsafe {
             sz_levenshtein_engine_init(
                 engine.as_mut_ptr(),
                 sequence,
                 symbol,
-                capabilities.bits(),
-                device.ordinal(),
+                stream.capabilities().bits(),
                 core::ptr::null(),
-                stream,
+                stream.as_raw(),
             )
         })
         .check()?;
@@ -155,47 +101,60 @@ impl LevenshteinEngine {
         self.symbol
     }
 
-    /// Edit distances from every prepared query to every candidate, on the capability
-    /// the constructor fixed.
+    /// Queues on the stream of `scope` the edit distances from every prepared query to every
+    /// candidate, on the capability the constructor fixed.
     ///
     /// `distances` receives a `[queries, candidates]` block: query `q` against candidate `c` lands
     /// at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and
     /// being at least the candidate count. The round's scratch grows here when a batch needs more
     /// than the last one did, and is never shrunk.
-    pub fn distances<Candidate>(
-        &mut self,
-        candidates: &[Candidate],
-        distances: &mut [usize],
+    ///
+    /// A GPU engine takes a [`Sequence`] and `distances` in memory its device reaches, such as a
+    /// `Vec` in a [`UnifiedAllocator`]. A stream of another group than the engine's is refused
+    /// with [`Status::DeviceMemoryMismatch`].
+    pub fn distances<'scope, Candidates>(
+        &'scope mut self,
+        scope: &'scope Scope<'scope, '_>,
+        candidates: &'scope Candidates,
+        distances: &'scope mut [usize],
         distances_stride: usize,
     ) -> Result<(), Status>
     where
-        Candidate: AsRef<[u8]>,
+        Candidates: Strings + ?Sized,
     {
-        if distances_stride < candidates.len() {
-            return Err(Status::UnexpectedDimensions);
-        }
-        let span = match self.count {
-            0 => 0,
-            count => (count - 1)
-                .checked_mul(distances_stride)
-                .and_then(|rows| rows.checked_add(candidates.len()))
-                .ok_or(Status::OverflowRisk)?,
-        };
-        if distances.len() < span {
-            return Err(Status::UnexpectedDimensions);
-        }
-
+        let stream = scope.stream_for(self.capability)?;
+        let queries = self.count;
         let engine = self as *mut Self;
-        let output = distances.as_mut_ptr();
-        with_sequence(candidates, |sequence| unsafe {
-            sz_levenshtein_distances(engine, sequence, output, distances_stride, core::ptr::null_mut())
-        })
-        .check()
+        candidates.with_sequence(stream, |sequence| {
+            if distances_stride < sequence.count {
+                return Err(Status::UnexpectedDimensions);
+            }
+            let span = match queries {
+                0 => 0,
+                count => (count - 1)
+                    .checked_mul(distances_stride)
+                    .and_then(|rows| rows.checked_add(sequence.count))
+                    .ok_or(Status::OverflowRisk)?,
+            };
+            if distances.len() < span {
+                return Err(Status::UnexpectedDimensions);
+            }
+            unsafe {
+                sz_levenshtein_distances(
+                    engine,
+                    sequence,
+                    distances.as_mut_ptr(),
+                    distances_stride,
+                    stream.as_raw(),
+                )
+            }
+            .check()
+        })?
     }
 }
 
 impl Drop for LevenshteinEngine {
     fn drop(&mut self) {
-        unsafe { sz_levenshtein_engine_free(self as *mut Self) };
+        unsafe { sz_levenshtein_engine_free(self as *mut Self, core::ptr::null_mut()) };
     }
 }

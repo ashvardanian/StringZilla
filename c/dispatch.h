@@ -30,9 +30,9 @@ static sz_kernel_punned_t const sz_no_kernels_[1] = {STRINGZILLA_NULL};
 /** The capability groups a binary may hold: its CPU's, and one per GPU vendor it was built for. */
 typedef enum sz_capability_group_t {
     sz_capability_group_cpu_k,
-    sz_capability_group_nvidia_k,
-    sz_capability_group_amd_k,
-    sz_capability_group_apple_k,
+    sz_capability_group_cuda_k,
+    sz_capability_group_rocm_k,
+    sz_capability_group_metal_k,
     sz_capability_groups_k,
 } sz_capability_group_t;
 
@@ -48,19 +48,26 @@ STRINGZILLA_CONSTEXPR sz_capability_group_t sz_capability_group_of_(sz_capabilit
                                    (capabilities >= sz_cap_metal_k));
 }
 
-/** The best capability @p capabilities shares with its group's kernels, or zero if none. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_capability_pick_(
-    sz_capability_t capabilities, sz_capability_kernels_t const groups[sz_capability_groups_k]) {
-    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities &
-                                                    groups[sz_capability_group_of_(capabilities)].capabilities);
+/** What each group runs: the CPU entry starts at serial and widens once the library loads, and
+ *  each GPU entry stays all-ones, as a GPU mask comes from its own device's producer. */
+extern sz_capability_t sz_capabilities_runnable_[sz_capability_groups_k];
+
+/** The best capability @p capabilities shares with its group's runnable kernels, or zero if none. */
+STRINGZILLA_INLINE sz_capability_t sz_capability_pick_(sz_capability_t capabilities,
+                                                       sz_capability_kernels_t const groups[sz_capability_groups_k]) {
+    sz_capability_group_t const group_index = sz_capability_group_of_(capabilities);
+    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & groups[group_index].capabilities &
+                                                    sz_capabilities_runnable_[group_index]);
     return at_or_below ^ (at_or_below >> 1);
 }
 
-/** The kernel of the best capability @p capabilities shares with its group's kernels, or null. */
-STRINGZILLA_CONSTEXPR sz_kernel_punned_t sz_kernel_pick_(sz_capability_t capabilities,
-                                                         sz_capability_kernels_t const groups[sz_capability_groups_k]) {
-    sz_capability_kernels_t const *group = &groups[sz_capability_group_of_(capabilities)];
-    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & group->capabilities);
+/** The kernel of the best capability @p capabilities shares with its group's runnable kernels. */
+STRINGZILLA_INLINE sz_kernel_punned_t sz_kernel_pick_(sz_capability_t capabilities,
+                                                      sz_capability_kernels_t const groups[sz_capability_groups_k]) {
+    sz_capability_group_t const group_index = sz_capability_group_of_(capabilities);
+    sz_capability_kernels_t const *group = &groups[group_index];
+    sz_u64_t const at_or_below = sz_u64_smear_down_(capabilities & group->capabilities &
+                                                    sz_capabilities_runnable_[group_index]);
     return group->kernels[sz_u64_popcount(group->capabilities & at_or_below)];
 }
 

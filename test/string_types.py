@@ -971,6 +971,7 @@ def test_invalid_utf8_handling():
 
 # region Interop
 
+
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
 def test_str_to_pyarrow_conversion():
     """`Str.address`/`Str.nbytes` expose a valid buffer for `pa.foreign_buffer`, which reconstructs
@@ -1002,9 +1003,9 @@ def test_strs_to_pyarrow_conversion():
 
     # Calculate expected tape size (sum of all string lengths)
     expected_tape_nbytes = sum(len(s) for s in native_list)
-    assert (
-        strs.tape_nbytes == expected_tape_nbytes
-    ), f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+    assert strs.tape_nbytes == expected_tape_nbytes, (
+        f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+    )
 
     # For 5 strings, we should have 6 offsets (N+1 format)
     # Offsets should be either 4 bytes (u32) or 8 bytes (u64) each
@@ -1013,9 +1014,9 @@ def test_strs_to_pyarrow_conversion():
         expected_offsets_nbytes = expected_offsets_count * 8
     else:
         expected_offsets_nbytes = expected_offsets_count * 4
-    assert (
-        strs.offsets_nbytes == expected_offsets_nbytes
-    ), f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+    assert strs.offsets_nbytes == expected_offsets_nbytes, (
+        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+    )
 
     # Create PyArrow buffers from the properties
     tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
@@ -1469,16 +1470,22 @@ TRANSLATE_TABLES = (_TRANSLATE_IDENTITY_TABLE, _TRANSLATE_INVERT_TABLE, _TRANSLA
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_equal(length: int, rng: Random):
-    """`Str.__eq__` and `sz.equal` (the compare kernel) must agree across every backend and match
-    Python's byte-level `==`, for random/tiled/all-same-char bodies at every SIMD-relevant length."""
+    """`sz.equal` (the compare kernel) must agree across every backend and match Python's byte-level
+    `==`, as must `Str.__eq__`, for random/tiled/all-same-char bodies at every SIMD-relevant length."""
     for body in differential_bodies(length, rng):
         matching = body
         mismatching = body[:-1] + ("z" if body[-1:] != "z" else "y") if length > 0 else "nonempty"
 
-        assert_backends_agree(run_across_backends(lambda body=body: Str(body) == matching), oracle=True)
-        assert_backends_agree(run_across_backends(lambda body=body: Str(body) == mismatching), oracle=False)
-        assert_backends_agree(run_across_backends(lambda body=body: sz.equal(body, matching)), oracle=True)
-        assert_backends_agree(run_across_backends(lambda body=body: sz.equal(body, mismatching)), oracle=False)
+        assert Str(body) == matching
+        assert Str(body) != mismatching
+        assert_backends_agree(
+            run_across_backends(lambda capabilities, body=body: sz.equal(body, matching, capabilities=capabilities)),
+            oracle=True,
+        )
+        assert_backends_agree(
+            run_across_backends(lambda capabilities, body=body: sz.equal(body, mismatching, capabilities=capabilities)),
+            oracle=False,
+        )
 
 
 def test_unit_equal_compares_both_operands():
@@ -1500,63 +1507,75 @@ def test_unit_backend_differential_equal_unaligned(offset):
     for _offset, view in unaligned_views(text, offsets=(offset,)):
         matching = text[offset:]
         mismatching = "z" + text[offset + 1 :] if len(matching) > 0 else "nonempty"
-        assert_backends_agree(run_across_backends(lambda view=view, matching=matching: view == matching), oracle=True)
         assert_backends_agree(
-            run_across_backends(lambda view=view, mismatching=mismatching: view == mismatching), oracle=False
+            run_across_backends(
+                lambda capabilities, view=view, matching=matching: sz.equal(view, matching, capabilities=capabilities)
+            ),
+            oracle=True,
+        )
+        assert_backends_agree(
+            run_across_backends(
+                lambda capabilities, view=view, mismatching=mismatching: sz.equal(
+                    view, mismatching, capabilities=capabilities
+                )
+            ),
+            oracle=False,
         )
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_contains(length: int, rng: Random):
-    """`needle in Str(haystack)` (the compare/find kernel) must agree across every backend, for present
-    and absent needles, over random/tiled/all-same-char needles at every SIMD-relevant length."""
+    """`sz.find`, the kernel behind `needle in Str(haystack)`, must agree across every backend, for
+    present and absent needles, over random/tiled/all-same-char needles at every SIMD-relevant length."""
     for needle in differential_bodies(length, rng):
         haystack = f"head_{needle}_tail"
         absent_needle = needle + "\x01"  # a byte that never appears in any of the three alphabets
 
+        assert needle in Str(haystack) and absent_needle not in Str(haystack)
         assert_backends_agree(
-            run_across_backends(lambda needle=needle: needle in Str(haystack)), oracle=needle in haystack
+            run_across_backends(
+                lambda capabilities, needle=needle: sz.find(haystack, needle, capabilities=capabilities)
+            ),
+            oracle=haystack.find(needle),
         )
         assert_backends_agree(
-            run_across_backends(lambda absent_needle=absent_needle: absent_needle in Str(haystack)),
-            oracle=absent_needle in haystack,
+            run_across_backends(
+                lambda capabilities, absent_needle=absent_needle: sz.find(
+                    haystack, absent_needle, capabilities=capabilities
+                )
+            ),
+            oracle=-1,
         )
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_copy_slice(length: int, rng: Random):
-    """`bytes(Str)` and `Str(s)[a:b]` (the copy kernel) must agree across every backend and match Python's
-    own byte-level slicing, including overlapping/odd windows, over random/tiled/all-same-char bodies."""
+def test_unit_copy_slice(length: int, rng: Random):
+    """`bytes(Str)` and `Str(s)[a:b]` (the copy kernel) must match Python's own byte-level slicing,
+    including overlapping/odd windows, over random/tiled/all-same-char bodies."""
     for body in differential_bodies(length, rng):
         body_bytes = body.encode()
-        assert_backends_agree(run_across_backends(lambda body=body: bytes(Str(body))), oracle=body_bytes)
-
+        assert bytes(Str(body)) == body_bytes
         for start, stop in safe_windows(length):
-            oracle = body_bytes[start:stop]
-            assert_backends_agree(
-                run_across_backends(lambda body=body, start=start, stop=stop: bytes(Str(body)[start:stop])),
-                oracle=oracle,
-            )
+            assert bytes(Str(body)[start:stop]) == body_bytes[start:stop]
 
 
 @pytest.mark.parametrize("offset", [0, 1, 3, 7, 15])
-def test_unit_backend_differential_copy_unaligned(offset):
-    """Copying out of a misaligned (sliced) view must agree across every backend."""
+def test_unit_copy_unaligned(offset):
+    """Copying out of a misaligned (sliced) view must match Python's own bytes."""
     text = "xy" * 200
     for _offset, view in unaligned_views(text, offsets=(offset,)):
-        oracle = text[offset:].encode()
-        assert_backends_agree(run_across_backends(lambda view=view: bytes(view)), oracle=oracle)
+        assert bytes(view) == text[offset:].encode()
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_concat(length: int, rng: Random):
-    """`Str + Str` (the concat/copy kernel) must agree across every backend and match Python's `+`, over
-    random/tiled/all-same-char left-hand operands at every SIMD-relevant length."""
+def test_unit_concat(length: int, rng: Random):
+    """`Str + Str` (the concat/copy kernel) must match Python's `+`, over random/tiled/all-same-char
+    left-hand operands at every SIMD-relevant length."""
     right = get_random_string(rng, length=37)
     for left in differential_bodies(length, rng):
         oracle = (left + right).encode()
-        assert_backends_agree(run_across_backends(lambda left=left: bytes(Str(left) + Str(right))), oracle=oracle)
-        assert_backends_agree(run_across_backends(lambda left=left: bytes(Str(left) + right)), oracle=oracle)
+        assert bytes(Str(left) + Str(right)) == oracle
+        assert bytes(Str(left) + right) == oracle
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
@@ -1568,7 +1587,11 @@ def test_unit_backend_differential_translate(length: int, rng: Random):
         for table in TRANSLATE_TABLES:
             full_oracle = lookup_table_oracle(body_bytes, table)
             assert_backends_agree(
-                run_across_backends(lambda body_bytes=body_bytes, table=table: sz.translate(body_bytes, table)),
+                run_across_backends(
+                    lambda capabilities, body_bytes=body_bytes, table=table: sz.translate(
+                        body_bytes, table, capabilities=capabilities
+                    )
+                ),
                 oracle=full_oracle,
             )
 
@@ -1579,14 +1602,14 @@ def test_unit_backend_differential_translate(length: int, rng: Random):
                 windowed_full_oracle = bytearray(body_bytes)
                 windowed_full_oracle[start:stop] = windowed_slice_oracle
 
-                def windowed_copy(body_bytes=body_bytes, table=table, start=start, stop=stop):
-                    return sz.translate(body_bytes, table, False, start, stop)
+                def windowed_copy(capabilities, body_bytes=body_bytes, table=table, start=start, stop=stop):
+                    return sz.translate(body_bytes, table, False, start, stop, capabilities=capabilities)
 
                 assert_backends_agree(run_across_backends(windowed_copy), oracle=windowed_slice_oracle)
 
-                def windowed_inplace(body_bytes=body_bytes, table=table, start=start, stop=stop):
+                def windowed_inplace(capabilities, body_bytes=body_bytes, table=table, start=start, stop=stop):
                     mutable = bytearray(body_bytes)
-                    sz.translate(mutable, table, True, start, stop)
+                    sz.translate(mutable, table, True, start, stop, capabilities=capabilities)
                     return bytes(mutable)
 
                 assert_backends_agree(run_across_backends(windowed_inplace), oracle=bytes(windowed_full_oracle))
@@ -1599,7 +1622,10 @@ def test_unit_backend_differential_translate_unaligned(offset):
     for _offset, view in unaligned_views(text, offsets=(offset,)):
         oracle = lookup_table_oracle(str(view).encode(), _TRANSLATE_INVERT_TABLE)
         assert_backends_agree(
-            run_across_backends(lambda view=view: sz.translate(view, _TRANSLATE_INVERT_TABLE)), oracle=oracle
+            run_across_backends(
+                lambda capabilities, view=view: sz.translate(view, _TRANSLATE_INVERT_TABLE, capabilities=capabilities)
+            ),
+            oracle=oracle,
         )
 
 
@@ -1609,9 +1635,9 @@ def test_unit_backend_differential_fill_random(length, nonce):
     """`sz.fill_random` (the fill+lookup kernel) must produce identical bytes from every backend for a
     fixed nonce; there is no Python oracle, so backend self-agreement is the only correctness signal."""
 
-    def fill():
+    def fill(capabilities):
         buffer = bytearray(length)
-        sz.fill_random(buffer, nonce=nonce)
+        sz.fill_random(buffer, nonce=nonce, capabilities=capabilities)
         return bytes(buffer)
 
     assert_backends_agree(run_across_backends(fill))
@@ -1624,9 +1650,9 @@ def test_unit_backend_differential_fill_random_windowed(start, end):
     buffer_length = 96
     nonce = 2026
 
-    def fill():
+    def fill(capabilities):
         buffer = bytearray(buffer_length)
-        sz.fill_random(buffer, nonce=nonce, start=start, end=end)
+        sz.fill_random(buffer, nonce=nonce, start=start, end=end, capabilities=capabilities)
         return bytes(buffer)
 
     assert_backends_agree(run_across_backends(fill))

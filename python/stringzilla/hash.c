@@ -99,8 +99,7 @@ static PyObject *Sha256_digests_to_list_(sz_u8_t const *digests, sz_size_t diges
 
 Py_hash_t Str_hash(Str *self) {
     sz_u64_t hash = 0;
-    sz_status_t const status = sz_hash_best(self->memory.start, self->memory.length, 0, &hash,
-                                            sz_py_enabled_capabilities, NULL);
+    sz_status_t const status = sz_hash_best(self->memory.start, self->memory.length, 0, &hash, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "hash()");
         return -1;
@@ -985,7 +984,7 @@ static PyObject *Hasher_new(PyTypeObject *type, PyObject *args, PyObject *kwds) 
     Hasher *self = (Hasher *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     self->seed = 0;
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t const status = sz_hash_state_init_best(&self->state, self->seed, self->capabilities, NULL);
     if (status != sz_success_k) {
         Py_DECREF(self);
@@ -1195,7 +1194,7 @@ static PyObject *Sha256_new(PyTypeObject *type, PyObject *args, PyObject *kwds) 
     sz_unused_(args), sz_unused_(kwds);
     Sha256 *self = (Sha256 *)type->tp_alloc(type, 0);
     if (!self) return NULL;
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t const status = sz_sha256_state_init_best(&self->state, self->capabilities, NULL);
     if (status != sz_success_k) {
         Py_DECREF(self);
@@ -1421,7 +1420,7 @@ static PyObject *Sha256s_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
     Sha256s *self = (Sha256s *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     self->states = NULL, self->chunks = NULL, self->lanes_count = 0;
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     return (PyObject *)self;
 }
 

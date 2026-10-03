@@ -4,7 +4,7 @@ StringZilla for Python wraps SIMD- and SWAR-accelerated native kernels behind `s
 The `stringzilla` module covers single-string search, slicing, splitting, trimming, translation, hashing, checksums, sorting, sampling, random generation, UTF-8 segmentation, Unicode case-folding, and Unicode normalization.
 The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA or ROCm device.
 
-Every call runs the best kernel of the capabilities it is given, by default `sz.Device.cpu().capabilities_enabled()`, which `sz.Device.cpu().capabilities_enable` narrows for the whole process, and the batch engines release the GIL around native work.
+Every call runs the best kernel of the capabilities it is given, by default every CPU capability, which the library clamps to `sz.cpu_capabilities_enabled()`, and the batch engines release the GIL around native work.
 The module is also marked safe for free-threaded `Py_GIL_DISABLED` CPython builds.
 
 Throughout this document the `stringzilla` package is imported as `sz`, and NumPy as `np`:
@@ -69,6 +69,7 @@ assert isinstance(text.address, int)
 `Strs(sequence, view=False)` is an ordered, indexable, sliceable collection of `Str` views.
 It is produced by the splitting and sorting methods, and can also be built directly from a `list`, `tuple`, generator, or a `pyarrow.Array`.
 With `view=True` it references the original data instead of copying it.
+`strs.copy(capabilities, stream=None)` copies the strings into one tape in the unified memory of `capabilities`, as [Engines on a GPU](#engines-on-a-gpu) describes; the host reads it as a normal read-only `Strs`.
 
 
 `Strs` keeps its parts on a single contiguous "tape" with an offsets array, so `sorted`, `argsort`, `intersect`, `sample`, and `shuffled` reorder offsets rather than bytes.
@@ -468,7 +469,7 @@ Each engine writes into a writable buffer the caller supplies as `out`, so nothi
 | `SubstringsEngine`         | a vocabulary of needles and an overlap policy     | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
 
 Queries, candidates, and haystacks all arrive as `sz.Strs`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
-An engine holds its own state and grows its round scratch, so one engine is not safe to call from two threads at once; build one per worker and shard the candidates between them.
+Engine calls release the GIL, and calls into one engine take turns on its lock, so build one engine per thread to score in parallel.
 
 ### Edit Distances
 
@@ -573,11 +574,10 @@ assert out[1] == 0.0
 
 ### Engines on a GPU
 
-Every engine constructor takes keyword-only `device=`, `capabilities=` and `stream=`.
-`device=` is an `sz.Device`, `sz.Device.cpu()` by default, or `sz.Device("cuda", n)` or `sz.Device("rocm", n)` for a GPU.
-`capabilities=` defaults to that device's `capabilities_enabled()` and may only narrow it, so a mask of another device's capabilities raises `ValueError`, and a CPU engine takes no stream.
-Choosing a device is choosing that constructor: it prepares the batch where a kernel reaches it and resolves the launch geometry once, and every later round of that engine runs there.
-`stream=` is a `cudaStream_t` or `hipStream_t` of that device as an integer, or `None` for its default stream, and it carries only the preparation: the engine does not keep it.
+Every engine constructor takes keyword-only `capabilities=` and `stream=`.
+`capabilities=` defaults to every CPU capability, clamped to what this CPU runs, and a GPU producer's mask, like `sz.cuda_capabilities_enabled(0)`, builds the engine on that vendor.
+It prepares the batch where a kernel reaches it and resolves the launch geometry once, and every later round of that engine runs there.
+`stream=` is a `cudaStream_t`, a `hipStream_t` or an `id<MTLCommandQueue>` as an integer, which names the device, or `None` for the default stream of the default device, and it carries only the preparation: the engine does not keep it; a CPU engine takes no stream.
 `SubstringsEngine` also takes a `haystacks_budget` and `OverlapEngine` a `candidates_budget`, the most one round may carry on a device, which the CPU ignores.
 The device arena is sized once from those budgets and no verb allocates, so a substrings round past its budget is refused, while CUDA overlap keeps no per-candidate arena and ignores its budget.
 
@@ -585,15 +585,23 @@ Every verb then takes its own keyword-only `stream`, so one engine can be scored
 `LevenshteinEngine` and `OverlapEngine` keep no round state on the device, so their rounds may run on any number of streams at once.
 `SubstringsEngine` rounds share one arena and one report, so the caller orders them, on one stream or with events between two.
 
+A device engine reads its inputs in place, so they come from `sz.Strs(texts).copy(gpu)`, and a host `Strs` raises `BufferError`, while a host engine reads a copy made for any capabilities.
+`sz.cuda_stream_init(ordinal)` makes a stream on any device, and `sz.cuda_stream_free(stream)` frees it once synchronized, with `rocm_` and `metal_` twins.
+
 ```python
 import stringzilla as sz
 
-engine = sz.LevenshteinEngine(sz.Strs(["kitten", "saturday"]), device=sz.Device("cuda", 0))
-engine.distances(sz.Strs(["sitting", "sunday"]), device_out, stream=handle)
-# cudaStreamSynchronize(handle) belongs here, before `device_out` is read.
+gpu = sz.cuda_capabilities_enabled(0)
+stream = sz.cuda_stream_init(0)
+engine = sz.LevenshteinEngine(sz.Strs(["kitten", "saturday"]), capabilities=gpu, stream=stream)
+candidates = sz.Strs(["sitting", "sunday"]).copy(gpu, stream)
+engine.distances(candidates, unified_out, stream=stream)
+sz.synchronize(gpu, stream)  # before `unified_out` is read or `candidates` dropped
+sz.cuda_stream_free(stream)
 ```
 
-A device round enqueues and returns, so its `out` buffer has to be memory the device reaches, has to outlive the launch, and must not be read before the caller joins the stream itself.
+A device round enqueues and returns, so its `out` buffer has to be memory the device reaches, has to outlive the launch, and must not be read before the caller joins the stream.
+A plain NumPy array is host memory and is refused; a NumPy array over a `cudaMallocManaged` allocation works.
 `SubstringsEngine.report` is written by the device too, so it obeys the same rule.
 A host engine ignores `stream`, imposes no such requirement, and has always finished writing by the time it answers.
 
@@ -684,30 +692,28 @@ assert sz.utf8_find_denormalized("café", "NFC") is None   # already NFC
 StringZilla detects the running CPU's SIMD features and routes every kernel to the fastest capability both the CPU and this build have, without recompilation.
 Capabilities are `sz.Capability` flags, one member per CPU capability, like `sz.Capability.HASWELL` or `sz.Capability.NEON`; GPU bits sit above every member, so a GPU mask prints as a number.
 
-An `sz.Device` names where kernels run: a kind, `"cpu"`, `"cuda"`, `"rocm"` or `"metal"`, and an ordinal among the devices of that kind.
+The producers report capabilities for the CPU, or for one GPU by its runtime's ordinal, or make a stream on that GPU, and are the only calls taking an ordinal.
 
 - `sz.__version__` — the package version string.
-- `sz.Device.cpu()` — the CPU, the one device every process has; `sz.Device(kind, ordinal=0)` names another and raises `ValueError` for a negative or past-the-end ordinal.
-- `sz.Device.count(kind)` — one for the CPU and the number of GPUs of that kind; it raises `RuntimeError` when no device of that kind answers, as when this build lacks its kernels, and so does `sz.Device(kind, ...)`.
-- `device.kind`, `device.ordinal` — which device it is; devices compare and hash by value.
-- `device.capabilities_detected()` — what the device can execute, whether or not its kernels were compiled in.
-- `device.capabilities_compiled()` — what this build holds kernels for, whether or not the device runs them.
-- `device.capabilities_enabled()` — what calls dispatch with, both of the above; on the CPU it changes only through `capabilities_enable` and always has `SERIAL`.
-- `device.capabilities_enable(wanted)` — make `wanted` the process-wide CPU default, dropping what this CPU or build lacks and always keeping `SERIAL`, and return what stuck; it raises `ValueError` on a GPU.
-- `device.configure_thread(capabilities)` — prepare the calling thread for the kernels of `capabilities`, as `capabilities_enable` does for its own; call it on every other thread that runs kernels, and it raises `ValueError` on a GPU.
+- `sz.cpu_capabilities_detected()`, `sz.cuda_capabilities_detected(ordinal)` — what the device can execute, whether or not its kernels were compiled in.
+- `sz.cpu_capabilities_compiled()`, `sz.cuda_capabilities_compiled()` — what this build holds kernels for, whether or not the device runs them.
+- `sz.cpu_capabilities_enabled()`, `sz.cuda_capabilities_enabled(ordinal)` — what calls dispatch with, both of the above; on the CPU it always has `SERIAL`.
+- `sz.cuda_count_devices()` — the number of CUDA devices; it raises `RuntimeError` when none answers, as when this build lacks its kernels, and so does an ordinal past the last device.
+- `sz.cpu_configure_thread(capabilities)` — prepare the calling thread for the kernels of `capabilities`; call it on every thread that runs kernels.
+- `sz.cuda_stream_init(ordinal)`, `sz.cuda_stream_free(stream)` — make a stream on one device, as the integer every `stream=` takes, and free it once nothing queued on it remains.
+- `sz.synchronize(capabilities, stream=None)` — wait for one stream of the vendor `capabilities` names, or its default one.
 
-Every function that runs kernels also takes a keyword-only `capabilities=`, narrowing that one call and leaving the default of every other call alone.
-Unlike `capabilities_enable`, the keyword keeps no serial fallback, so a mask with no kernel for the call raises `LookupError`.
+ROCm and Metal have the same `rocm_` and `metal_` producers.
+Every function that runs kernels also takes a keyword-only `capabilities=`, narrowing that one call and leaving every other call alone.
+The keyword keeps no serial fallback, so a mask with no kernel for the call raises `LookupError`.
 
 ```python
 import stringzilla as sz
 
-cpu = sz.Device.cpu()
-cpu.capabilities_enabled()                                   # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
-sz.find("haystack", "st", capabilities=sz.Capability.SERIAL) # one call on the scalar kernel
-cpu.capabilities_enable(sz.Capability.SERIAL)                # every later call on the scalar kernels
-cpu.configure_thread(cpu.capabilities_enabled())             # on another thread that runs kernels
-[sz.Device("cuda", ordinal) for ordinal in range(sz.Device.count("cuda"))]  # raises without CUDA
+sz.cpu_capabilities_enabled()                                 # e.g. <Capability.SERIAL|NEON|NEONAES|NEONSHA: 449>
+sz.find("haystack", "st", capabilities=sz.Capability.SERIAL)  # one call on the scalar kernel
+sz.cpu_configure_thread(sz.cpu_capabilities_enabled())        # on a thread that runs kernels
+[sz.cuda_capabilities_enabled(ordinal) for ordinal in range(sz.cuda_count_devices())]  # raises without CUDA
 ```
 
-Engines and the stateful objects, like `Hasher`, `Sha256` and the AES keys, dispatch every call with the capabilities they were constructed with, so `capabilities_enable` affects the ones built after the call rather than the ones already holding state.
+Engines and the stateful objects, like `Hasher`, `Sha256` and the AES keys, dispatch every call with the capabilities they were constructed with.

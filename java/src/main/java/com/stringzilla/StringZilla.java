@@ -220,9 +220,9 @@ public final class StringZilla {
 
     // endregion
 
-    /** The mask every call dispatches on; see {@link Device#capabilitiesEnabled()}. */
-    private static volatile long enabledCapabilities =
-            query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled");
+    /** Every CPU capability, {@code sz_cap_cpus_k}, which every call passes and the library clamps to what this CPU
+     *  runs. */
+    private static final long CPUS = (1L << 48) - 1;
 
     private static MethodHandle down(String name, FunctionDescriptor desc, Linker.Option... opts) {
         MemorySegment addr = LOOKUP.find(name).orElseThrow(() -> new UnsatisfiedLinkError("missing symbol: " + name));
@@ -253,7 +253,7 @@ public final class StringZilla {
                     needle,
                     n,
                     MemorySegment.ofArray(match),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
@@ -275,7 +275,7 @@ public final class StringZilla {
                     needle,
                     n,
                     MemorySegment.ofArray(match),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
@@ -349,7 +349,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(b),
                     (long) a.length,
                     MemorySegment.ofArray(equal),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return equal[0] != 0;
         } catch (Throwable t) {
@@ -367,7 +367,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(b),
                     (long) b.length,
                     MemorySegment.ofArray(ordering),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return ordering[0];
         } catch (Throwable t) {
@@ -393,7 +393,7 @@ public final class StringZilla {
         try {
             long[] hash = new long[1];
             check("sz_hash_best", (int) STRINGZILLA_HASH.invokeExact(
-                    data, data.byteSize(), seed, MemorySegment.ofArray(hash), enabledCapabilities, MemorySegment.NULL));
+                    data, data.byteSize(), seed, MemorySegment.ofArray(hash), CPUS, MemorySegment.NULL));
             return hash[0];
         } catch (Throwable t) {
             throw rethrow(t);
@@ -407,7 +407,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(data),
                     (long) data.length,
                     MemorySegment.ofArray(checksum),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return checksum[0];
         } catch (Throwable t) {
@@ -430,7 +430,7 @@ public final class StringZilla {
         try {
             long[] count = new long[1];
             check("sz_utf8_count_best", (int) STRINGZILLA_UTF8_COUNT.invokeExact(
-                    text, text.byteSize(), MemorySegment.ofArray(count), enabledCapabilities, MemorySegment.NULL));
+                    text, text.byteSize(), MemorySegment.ofArray(count), CPUS, MemorySegment.NULL));
             return count[0];
         } catch (Throwable t) {
             throw rethrow(t);
@@ -444,7 +444,7 @@ public final class StringZilla {
             MemorySegment.copy(text, 0, t, JAVA_BYTE, 0, text.length);
             MemorySegment position = a.allocate(ADDRESS);
             check("sz_utf8_seek_best", (int) STRINGZILLA_UTF8_SEEK.invokeExact(
-                    t, (long) text.length, index, position, enabledCapabilities, MemorySegment.NULL));
+                    t, (long) text.length, index, position, CPUS, MemorySegment.NULL));
             long found = position.get(ADDRESS, 0).address();
             return found == 0 ? -1 : found - t.address();
         } catch (Throwable e) {
@@ -470,7 +470,7 @@ public final class StringZilla {
                     (long) destination.length,
                     MemorySegment.ofArray(unpacked),
                     MemorySegment.ofArray(consumedIgnored),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return (int) unpacked[0];
         } catch (Throwable t) {
@@ -550,7 +550,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(lengths),
                     (long) lengths.length,
                     MemorySegment.ofArray(count),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return (int) count[0];
         } catch (Throwable t) {
@@ -573,7 +573,7 @@ public final class StringZilla {
                     (long) offsets.length,
                     MemorySegment.ofArray(count),
                     MemorySegment.ofArray(consumed),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return (int) count[0];
         } catch (Throwable t) {
@@ -597,7 +597,7 @@ public final class StringZilla {
                     (long) text.length,
                     MemorySegment.ofArray(destination),
                     MemorySegment.ofArray(written),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return (int) written[0];
         } catch (Throwable t) {
@@ -637,7 +637,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(b),
                     (long) b.length,
                     MemorySegment.ofArray(ordering),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return ordering[0];
         } catch (Throwable t) {
@@ -651,7 +651,7 @@ public final class StringZilla {
         MemorySegment prepared = arena.allocate(UNCASED_NEEDLE);
         try {
             check("sz_utf8_uncased_needle_init_best", (int) STRINGZILLA_UTF8_UNCASED_NEEDLE_INIT.invokeExact(
-                    needle, needle.byteSize(), prepared, enabledCapabilities, MemorySegment.NULL));
+                    needle, needle.byteSize(), prepared, CPUS, MemorySegment.NULL));
             return prepared;
         } catch (Throwable t) {
             throw rethrow(t);
@@ -668,7 +668,7 @@ public final class StringZilla {
                     prepared,
                     MemorySegment.ofArray(found),
                     MemorySegment.ofArray(found).asSlice(JAVA_LONG.byteSize()),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return found[0] == 0 ? -1 : found[0] - haystack.address();
         } catch (Throwable t) {
@@ -697,7 +697,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(seeds),
                     (long) seeds.length,
                     MemorySegment.ofArray(hashes),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
@@ -718,7 +718,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(buffer),
                     (long) buffer.length,
                     nonce,
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
@@ -735,7 +735,7 @@ public final class StringZilla {
                     MemorySegment.ofArray(source),
                     (long) source.length,
                     MemorySegment.ofArray(lut),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
@@ -775,7 +775,7 @@ public final class StringZilla {
                     formCode(form),
                     MemorySegment.ofArray(destination),
                     MemorySegment.ofArray(written),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return (int) written[0];
         } catch (Throwable t) {
@@ -801,7 +801,7 @@ public final class StringZilla {
                     (long) text.length,
                     formCode(form),
                     MemorySegment.ofArray(violation),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return violation[0] == 0;
         } catch (Throwable t) {
@@ -833,7 +833,7 @@ public final class StringZilla {
                     reverse ? 1 : 0,
                     MemorySegment.NULL,
                     orderSeg,
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             int count = top > 0 ? (int) Math.min(top, n) : n;
             MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
@@ -878,7 +878,7 @@ public final class StringZilla {
                     reverse ? 1 : 0,
                     MemorySegment.NULL,
                     orderSeg,
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             int count = top > 0 ? (int) Math.min(top, n) : n;
             MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
@@ -918,7 +918,7 @@ public final class StringZilla {
                     size,
                     fp,
                     sp,
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             int count = (int) size.get(JAVA_LONG, 0);
             MemorySegment.copy(fp, JAVA_LONG, 0, firstPositions, 0, count);
@@ -1172,26 +1172,15 @@ public final class StringZilla {
             };
         }
 
-        /** What this device's calls pass, as a bitmask: {@link #capabilitiesDetected()} and
-         *  {@link #capabilitiesCompiled()} at once. On the CPU it is what every call of this class passes,
-         *  narrowed by {@link #capabilitiesEnable(long)}, and always includes the serial bit, {@code 1}. */
+        /** What this device's calls run, as a bitmask: {@link #capabilitiesDetected()} and
+         *  {@link #capabilitiesCompiled()} at once. On the CPU it always includes the serial bit, {@code 1}. */
         public long capabilitiesEnabled() {
             return switch (kind) {
-                case CPU -> enabledCapabilities;
+                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled");
                 case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_ENABLED, "sz_cuda_capabilities_enabled", ordinal);
                 case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_ENABLED, "sz_rocm_capabilities_enabled", ordinal);
                 case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_ENABLED, "sz_metal_capabilities_enabled", ordinal);
             };
-        }
-
-        /** Makes {@code wanted} the CPU's {@link #capabilitiesEnabled()} set, clamped to what it detects and this
-         *  binary compiled and keeping the serial bit, and returns the set that took effect. Throws
-         *  {@link StatusException} on a GPU, which keeps no such set. */
-        public long capabilitiesEnable(long wanted) {
-            if (kind != DeviceKind.CPU) throw new StatusException(this + ".capabilitiesEnable", STATUS_MISSING_KERNEL);
-            long enabled = (wanted & query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled")) | 1;
-            enabledCapabilities = enabled;
-            return enabled;
         }
 
         /** Prepares the calling thread for the kernels of {@code capabilities}, usually
@@ -1342,7 +1331,7 @@ public final class StringZilla {
             state = arena.allocate(256, 64);
             try {
                 check("sz_hash_state_init_best", (int)
-                        STRINGZILLA_HASH_STATE_INIT.invokeExact(state, seed, enabledCapabilities, MemorySegment.NULL));
+                        STRINGZILLA_HASH_STATE_INIT.invokeExact(state, seed, CPUS, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1354,7 +1343,7 @@ public final class StringZilla {
                         state,
                         MemorySegment.ofArray(data),
                         (long) data.length,
-                        enabledCapabilities,
+                        CPUS,
                         MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
@@ -1367,7 +1356,7 @@ public final class StringZilla {
             try {
                 long[] hash = new long[1];
                 check("sz_hash_state_digest_best", (int) STRINGZILLA_HASH_STATE_DIGEST.invokeExact(
-                        state, MemorySegment.ofArray(hash), enabledCapabilities, MemorySegment.NULL));
+                        state, MemorySegment.ofArray(hash), CPUS, MemorySegment.NULL));
                 return hash[0];
             } catch (Throwable t) {
                 throw rethrow(t);
@@ -1412,7 +1401,7 @@ public final class StringZilla {
             state = arena.allocate(128, 64); // sz_sha256_state_t is 112 bytes
             try {
                 check("sz_sha256_state_init_best", (int)
-                        STRINGZILLA_SHA256_INIT.invokeExact(state, enabledCapabilities, MemorySegment.NULL));
+                        STRINGZILLA_SHA256_INIT.invokeExact(state, CPUS, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1424,7 +1413,7 @@ public final class StringZilla {
                         state,
                         MemorySegment.ofArray(data),
                         (long) data.length,
-                        enabledCapabilities,
+                        CPUS,
                         MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
@@ -1437,7 +1426,7 @@ public final class StringZilla {
             if (destination.length < 32) throw new IllegalArgumentException("destination must hold at least 32 bytes");
             try {
                 check("sz_sha256_state_digest_best", (int) STRINGZILLA_SHA256_DIGEST.invokeExact(
-                        state, MemorySegment.ofArray(destination), enabledCapabilities, MemorySegment.NULL));
+                        state, MemorySegment.ofArray(destination), CPUS, MemorySegment.NULL));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1498,7 +1487,7 @@ public final class StringZilla {
                     haystack.byteSize(),
                     bytesetSeg,
                     MemorySegment.ofArray(match),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
@@ -1515,7 +1504,7 @@ public final class StringZilla {
                     haystack.byteSize(),
                     bytesetSeg,
                     MemorySegment.ofArray(match),
-                    enabledCapabilities,
+                    CPUS,
                     MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {

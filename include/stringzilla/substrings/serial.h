@@ -217,9 +217,6 @@ typedef struct sz_substrings_engine_t {
     /** The capability that compiled the vocabulary, whose kernels every round then runs. */
     sz_capability_t capability;
 
-    /** The device of that capability's vendor the blocks live on, zero on the CPU. */
-    sz_size_t ordinal;
-
     /** The copy kernel host rewrites splice with, the best @ref sz_substrings_engine_init found. */
     sz_kernel_copy_t copy;
 
@@ -238,6 +235,39 @@ typedef struct sz_substrings_engine_t {
     /** Bytes of that block. */
     sz_size_t scratch_bytes;
 } sz_substrings_engine_t;
+
+/** What a GPU chunk walk does at each match: size the output so the caller can scan it, write it,
+ *  or tally it. */
+typedef enum sz_substrings_gpu_pass_t {
+
+    /** Store each chunk's match count, so a scan can hand every chunk a private output range. */
+    sz_substrings_gpu_sizing_k = 0,
+
+    /** Write each match at the offset that scan left behind. */
+    sz_substrings_gpu_writing_k = 1,
+
+    /** Count each match against its needle in the block's tally, for scoring. */
+    sz_substrings_gpu_tallying_k = 2,
+} sz_substrings_gpu_pass_t;
+
+/** Fraction bits of the fixed-point sums a GPU BM25 block accumulates, so every order of adding
+ *  them gives the same score. */
+enum { sz_substrings_gpu_bm25_fraction_bits_k = 32 };
+
+/** Tiles a GPU scan cuts its input into. The carry across tiles is serial by construction, so past
+ *  this a wider grid only lengthens the one block that walks it. */
+enum { sz_substrings_gpu_scan_tiles_max_k = 1024 };
+
+/** Output bytes one block of a GPU rewrite's copy owns, so no block's work scales with
+ *  one run's width. */
+enum { sz_substrings_gpu_rewrite_tile_bytes_k = 4096 };
+
+/** Matches one GPU round may emit when the caller names no budget, which is 32 MB of match arena,
+ *  and haystacks it carries, three boundary entries apiece, so 24 MB of arena beside them. */
+enum {
+    sz_substrings_gpu_matches_budget_default_k = 1u << 20,
+    sz_substrings_gpu_haystacks_budget_default_k = 1u << 20,
+};
 
 /**
  *  @brief How faithfully a backend's leftmost cover reproduces the serial one.
@@ -820,29 +850,40 @@ typedef struct sz_substrings_builder_t {
 
     /** The allocator every buffer above came from, and the one they go back to. */
     sz_memory_allocator_t *allocator;
+
+    /** The stream every one of those allocations and releases is made on. */
+    void *stream;
 } sz_substrings_builder_t;
 
 /** Hands every buffer the build took back to its allocator, leaving the builder empty. */
 STRINGZILLA_INLINE void sz_substrings_builder_free_(sz_substrings_builder_t *builder) {
     sz_memory_allocator_t *const allocator = builder->allocator;
+    void *const stream = builder->stream;
     if (builder->nodes)
-        allocator->free(builder->nodes, builder->nodes_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle);
+        allocator->free(builder->nodes, builder->nodes_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle,
+                        stream);
     if (builder->needle_next)
-        allocator->free(builder->needle_next, builder->needles_count * sizeof(sz_u32_t), allocator->handle);
+        allocator->free(builder->needle_next, builder->needles_count * sizeof(sz_u32_t), allocator->handle, stream);
     if (builder->needle_folded_bytes)
-        allocator->free(builder->needle_folded_bytes, builder->needles_count * sizeof(sz_u32_t), allocator->handle);
-    if (builder->fold_scratch) allocator->free(builder->fold_scratch, builder->fold_scratch_bytes, allocator->handle);
-    if (builder->order) allocator->free(builder->order, builder->nodes_count * sizeof(sz_u32_t), allocator->handle);
+        allocator->free(builder->needle_folded_bytes, builder->needles_count * sizeof(sz_u32_t), allocator->handle,
+                        stream);
+    if (builder->fold_scratch)
+        allocator->free(builder->fold_scratch, builder->fold_scratch_bytes, allocator->handle, stream);
+    if (builder->order)
+        allocator->free(builder->order, builder->nodes_count * sizeof(sz_u32_t), allocator->handle, stream);
     if (builder->order_scratch)
-        allocator->free(builder->order_scratch, builder->nodes_count * sizeof(sz_u32_t), allocator->handle);
+        allocator->free(builder->order_scratch, builder->nodes_count * sizeof(sz_u32_t), allocator->handle, stream);
     if (builder->root_row)
-        allocator->free(builder->root_row, (STRINGZILLA_U8_MAX + 1) * sizeof(sz_u32_t), allocator->handle);
-    if (builder->base) allocator->free(builder->base, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle);
-    if (builder->check) allocator->free(builder->check, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle);
+        allocator->free(builder->root_row, (STRINGZILLA_U8_MAX + 1) * sizeof(sz_u32_t), allocator->handle, stream);
+    if (builder->base)
+        allocator->free(builder->base, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+    if (builder->check)
+        allocator->free(builder->check, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle, stream);
     if (builder->state_of_slot)
-        allocator->free(builder->state_of_slot, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle);
+        allocator->free(builder->state_of_slot, builder->slots_capacity * sizeof(sz_u32_t), allocator->handle, stream);
     if (builder->occupied)
-        allocator->free(builder->occupied, ((builder->slots_capacity >> 6) + 8) * sizeof(sz_u64_t), allocator->handle);
+        allocator->free(builder->occupied, ((builder->slots_capacity >> 6) + 8) * sizeof(sz_u64_t), allocator->handle,
+                        stream);
     builder->nodes = STRINGZILLA_NULL, builder->needle_next = STRINGZILLA_NULL,
     builder->needle_folded_bytes = STRINGZILLA_NULL;
     builder->fold_scratch = STRINGZILLA_NULL, builder->order = STRINGZILLA_NULL,
@@ -854,6 +895,7 @@ STRINGZILLA_INLINE void sz_substrings_builder_free_(sz_substrings_builder_t *bui
 /** Grows the trie to hold one more state, doubling so insertion stays amortized linear. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_grow_nodes_(sz_substrings_builder_t *builder) {
     sz_memory_allocator_t *const allocator = builder->allocator;
+    void *const stream = builder->stream;
     sz_size_t const old_capacity = builder->nodes_capacity;
     sz_size_t const new_capacity = old_capacity ? old_capacity * 2 : 1024;
     sz_substrings_trie_node_t *grown;
@@ -861,11 +903,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_grow_nodes_(sz_substrings_b
     if (new_capacity >= (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
 
     grown = (sz_substrings_trie_node_t *)allocator->allocate(new_capacity * sizeof(sz_substrings_trie_node_t),
-                                                             allocator->handle);
+                                                             allocator->handle, stream);
     if (!grown) return sz_bad_alloc_k;
     if (builder->nodes) {
         sz_copy_serial_((sz_ptr_t)grown, (sz_cptr_t)builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t));
-        allocator->free(builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle);
+        allocator->free(builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle, stream);
     }
     builder->nodes = grown;
     builder->nodes_capacity = new_capacity;
@@ -1063,13 +1105,15 @@ STRINGZILLA_INLINE sz_u32_t sz_substrings_builder_chase_(sz_substrings_builder_t
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substrings_builder_t *builder) {
     sz_memory_allocator_t *const allocator = builder->allocator;
+    void *const stream = builder->stream;
     sz_size_t const states = builder->nodes_count;
     sz_size_t band_first, band_last, discovered, byte;
     sz_u32_t child;
 
-    builder->order = (sz_u32_t *)allocator->allocate(states * sizeof(sz_u32_t), allocator->handle);
-    builder->order_scratch = (sz_u32_t *)allocator->allocate(states * sizeof(sz_u32_t), allocator->handle);
-    builder->root_row = (sz_u32_t *)allocator->allocate((STRINGZILLA_U8_MAX + 1) * sizeof(sz_u32_t), allocator->handle);
+    builder->order = (sz_u32_t *)allocator->allocate(states * sizeof(sz_u32_t), allocator->handle, stream);
+    builder->order_scratch = (sz_u32_t *)allocator->allocate(states * sizeof(sz_u32_t), allocator->handle, stream);
+    builder->root_row = (sz_u32_t *)allocator->allocate((STRINGZILLA_U8_MAX + 1) * sizeof(sz_u32_t), allocator->handle,
+                                                        stream);
     if (!builder->order || !builder->order_scratch || !builder->root_row) return sz_bad_alloc_k;
 
     // Every chase ends at the root's dense row, so it has to exist before the first of them.
@@ -1109,6 +1153,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substring
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_builder_t *builder,
                                                                     sz_size_t minimum) {
     sz_memory_allocator_t *const allocator = builder->allocator;
+    void *const stream = builder->stream;
     sz_size_t const old_capacity = builder->slots_capacity;
     sz_size_t const new_capacity = sz_size_bit_ceil(minimum);
     sz_size_t const old_words = old_capacity ? (old_capacity >> 6) + 8 : 0;
@@ -1119,16 +1164,16 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
     if (minimum <= old_capacity) return sz_success_k;
     if (new_capacity >= (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
 
-    base = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle);
-    check = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle);
-    state_of_slot = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle);
+    base = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+    check = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+    state_of_slot = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
     // Four words of headroom past the capacity, so a 256-bit feasibility window never reads off the end.
-    occupied = (sz_u64_t *)allocator->allocate(new_words * sizeof(sz_u64_t), allocator->handle);
+    occupied = (sz_u64_t *)allocator->allocate(new_words * sizeof(sz_u64_t), allocator->handle, stream);
     if (!base || !check || !state_of_slot || !occupied) {
-        if (base) allocator->free(base, new_capacity * sizeof(sz_u32_t), allocator->handle);
-        if (check) allocator->free(check, new_capacity * sizeof(sz_u32_t), allocator->handle);
-        if (state_of_slot) allocator->free(state_of_slot, new_capacity * sizeof(sz_u32_t), allocator->handle);
-        if (occupied) allocator->free(occupied, new_words * sizeof(sz_u64_t), allocator->handle);
+        if (base) allocator->free(base, new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        if (check) allocator->free(check, new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        if (state_of_slot) allocator->free(state_of_slot, new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        if (occupied) allocator->free(occupied, new_words * sizeof(sz_u64_t), allocator->handle, stream);
         return sz_bad_alloc_k;
     }
 
@@ -1137,10 +1182,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
         sz_copy_serial_((sz_ptr_t)check, (sz_cptr_t)builder->check, old_capacity * sizeof(sz_u32_t));
         sz_copy_serial_((sz_ptr_t)state_of_slot, (sz_cptr_t)builder->state_of_slot, old_capacity * sizeof(sz_u32_t));
         sz_copy_serial_((sz_ptr_t)occupied, (sz_cptr_t)builder->occupied, old_words * sizeof(sz_u64_t));
-        allocator->free(builder->base, old_capacity * sizeof(sz_u32_t), allocator->handle);
-        allocator->free(builder->check, old_capacity * sizeof(sz_u32_t), allocator->handle);
-        allocator->free(builder->state_of_slot, old_capacity * sizeof(sz_u32_t), allocator->handle);
-        allocator->free(builder->occupied, old_words * sizeof(sz_u64_t), allocator->handle);
+        allocator->free(builder->base, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        allocator->free(builder->check, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        allocator->free(builder->state_of_slot, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+        allocator->free(builder->occupied, old_words * sizeof(sz_u64_t), allocator->handle, stream);
     }
     // The bitmap is the only record of what is claimed, so a stale set bit would hide a free slot.
     for (word = old_words; word < new_words; ++word) occupied[word] = 0;
@@ -1525,10 +1570,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_bui
 
 #pragma region Building
 
-STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engine) {
+STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engine, void *stream) {
     sz_memory_allocator_t *const allocator = &engine->allocator;
-    if (engine->memory) allocator->free(engine->memory, engine->memory_bytes, allocator->handle);
-    if (engine->scratch) allocator->free(engine->scratch, engine->scratch_bytes, allocator->handle);
+    if (engine->memory) allocator->free(engine->memory, engine->memory_bytes, allocator->handle, stream);
+    if (engine->scratch) allocator->free(engine->scratch, engine->scratch_bytes, allocator->handle, stream);
     engine->memory = STRINGZILLA_NULL, engine->memory_bytes = 0;
     engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
     engine->hot_rows = STRINGZILLA_NULL, engine->base = STRINGZILLA_NULL, engine->check = STRINGZILLA_NULL,
@@ -1540,7 +1585,7 @@ STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engin
     engine->hot_count = 0, engine->state_count = 0, engine->root = 0, engine->needles_count = 0;
     engine->max_source_match_bytes = 0, engine->min_source_match_bytes = 0, engine->max_outputs_per_state = 0;
     engine->matches_budget = 0, engine->chunk_budget = 0, engine->haystacks_budget = 0;
-    engine->report = STRINGZILLA_NULL, engine->capability = sz_cap_serial_k, engine->ordinal = 0;
+    engine->report = STRINGZILLA_NULL, engine->capability = sz_cap_serial_k;
 }
 
 /** The serial copy in the kernel's shape, which an engine splices with until its dispatch unit
@@ -1560,10 +1605,13 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_substrings_copy_serial_(sz_ptr_t target, sz
  *  this settles, so a tier sizes its own scratch afterwards rather than passing the
  *  vocabulary around twice.
  */
-STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
-    sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
-    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_capability_t capability, sz_memory_allocator_t const *requested_allocator, sz_substrings_engine_t *engine) {
+STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const *needles,
+                                                             sz_substrings_case_sensitivity_t case_sensitivity,
+                                                             sz_substrings_overlap_policy_t overlap_policy,
+                                                             sz_size_t hot_states, sz_size_t matches_budget,
+                                                             sz_capability_t capability,
+                                                             sz_memory_allocator_t const *requested_allocator,
+                                                             void *stream, sz_substrings_engine_t *engine) {
     sz_substrings_builder_t builder;
     sz_substrings_layout_t layout;
     sz_memory_allocator_t resolved;
@@ -1586,6 +1634,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
     builder.needles_count = needles->count;
     builder.max_source_match_bytes = 0, builder.min_source_match_bytes = 0, builder.max_outputs_per_state = 0;
     builder.case_sensitivity = case_sensitivity, builder.hot_count = 0, builder.allocator = allocator;
+    builder.stream = stream;
     if (!needles->count) return sz_unexpected_dimensions_k;
 
     for (needle_index = 0; needle_index != needles->count; ++needle_index) {
@@ -1595,8 +1644,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
     }
     if (needles->count > (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
 
-    builder.needle_next = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle);
-    builder.needle_folded_bytes = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle);
+    builder.needle_next = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle, stream);
+    builder.needle_folded_bytes = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle,
+                                                                  stream);
     if (!builder.needle_next || !builder.needle_folded_bytes) {
         sz_substrings_builder_free_(&builder);
         return sz_bad_alloc_k;
@@ -1605,7 +1655,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
     // of the longest needle; a cased vocabulary folds to itself and needs none of it.
     if (case_sensitivity == sz_substrings_uncased_k) {
         builder.fold_scratch_bytes = longest_needle * (sz_size_t)sz_utf8_fold_max_expansion_k;
-        builder.fold_scratch = (sz_u8_t *)allocator->allocate(builder.fold_scratch_bytes, allocator->handle);
+        builder.fold_scratch = (sz_u8_t *)allocator->allocate(builder.fold_scratch_bytes, allocator->handle, stream);
         if (!builder.fold_scratch) {
             sz_substrings_builder_free_(&builder);
             return sz_bad_alloc_k;
@@ -1652,7 +1702,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
     slots_count = state_count_published + STRINGZILLA_U8_MAX;
 
     layout = sz_substrings_publish_layout_(builder.hot_count, builder.classes_count, slots_count, outputs_total);
-    block = (sz_ptr_t)allocator->allocate(layout.total, allocator->handle);
+    block = (sz_ptr_t)allocator->allocate(layout.total, allocator->handle, stream);
     if (!block) {
         sz_substrings_builder_free_(&builder);
         return sz_bad_alloc_k;
@@ -1696,7 +1746,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
         sz_substrings_publish_outputs_(&builder, outputs);
         status = sz_substrings_publish_hot_rows_(&builder, hot_rows);
         if (status != sz_success_k) {
-            allocator->free(block, layout.total, allocator->handle);
+            allocator->free(block, layout.total, allocator->handle, stream);
             sz_substrings_builder_free_(&builder);
             return status;
         }
@@ -1727,7 +1777,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(
     engine->matches_budget = matches_budget;
     engine->chunk_budget = 0, engine->haystacks_budget = 0;
     engine->report = STRINGZILLA_NULL;
-    engine->capability = capability, engine->ordinal = 0;
+    engine->capability = capability;
     engine->copy = &sz_substrings_copy_serial_;
     engine->allocator = resolved;
     engine->memory = block;
@@ -1884,8 +1934,8 @@ STRINGZILLA_INLINE void sz_substrings_find_ascending_(sz_substrings_engine_t con
             for (index = 0; index != pending_counts[chain]; ++index) {
                 sz_substrings_pending_end_t const end = pending[chain][index];
                 sz_size_t const end_offset = round + chain * STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW + end.delta;
-                if (sz_substrings_report_outputs_(engine, end.state, engine->outputs_counts[end.state],
-                                                  end_offset, reporter, context) == sz_substrings_stop_k)
+                if (sz_substrings_report_outputs_(engine, end.state, engine->outputs_counts[end.state], end_offset,
+                                                  reporter, context) == sz_substrings_stop_k)
                     return;
             }
         state = states[STRINGZILLA_SUBSTRINGS_CHAINS - 1];
@@ -2469,8 +2519,8 @@ STRINGZILLA_INLINE sz_substrings_host_arena_t sz_substrings_host_arena_(sz_size_
                                                                         sz_size_t max_source_match_bytes,
                                                                         sz_substrings_overlap_policy_t overlap_policy) {
     sz_size_t const ring_width = sz_substrings_pending_starts_width(max_source_match_bytes);
-    sz_size_t const ring_bytes =
-        overlap_policy == sz_substrings_overlapping_k ? 0 : sz_substrings_ring_bytes_(ring_width);
+    sz_size_t const ring_bytes = overlap_policy == sz_substrings_overlapping_k ? 0
+                                                                               : sz_substrings_ring_bytes_(ring_width);
     sz_substrings_host_arena_t arena;
     arena.report = 0;
     arena.ring = sizeof(sz_substrings_report_t);
@@ -2482,8 +2532,8 @@ STRINGZILLA_INLINE sz_substrings_host_arena_t sz_substrings_host_arena_(sz_size_
 /** Binds the leftmost ring onto the engine's arena, empty, or leaves it unbound under
  *  an overlapping policy. */
 STRINGZILLA_INLINE void sz_substrings_ring_bind_(sz_substrings_engine_t const *engine, sz_substrings_ring_t *ring) {
-    sz_substrings_host_arena_t const arena =
-        sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
+    sz_substrings_host_arena_t const arena = sz_substrings_host_arena_(
+        engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
     ring->starts = STRINGZILLA_NULL, ring->claimed = STRINGZILLA_NULL, ring->width = 0;
     if (engine->overlap_policy == sz_substrings_overlapping_k) return;
     ring->width = sz_substrings_pending_starts_width(engine->max_source_match_bytes);
@@ -2502,11 +2552,11 @@ STRINGZILLA_INLINE void sz_substrings_report_clear_(sz_substrings_report_t *repo
 }
 
 /** Allocates and zeroes the host arena, which is the second and last block an engine owns. */
-STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engine_t *engine) {
+STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engine_t *engine, void *stream) {
     sz_substrings_host_arena_t const arena = sz_substrings_host_arena_(
         engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
     sz_memory_allocator_t *const allocator = &engine->allocator;
-    sz_u8_t *block = (sz_u8_t *)allocator->allocate(arena.total, allocator->handle);
+    sz_u8_t *block = (sz_u8_t *)allocator->allocate(arena.total, allocator->handle, stream);
     sz_size_t index;
     if (!block) return sz_bad_alloc_k;
     for (index = 0; index != arena.total; ++index) block[index] = 0;
@@ -2524,13 +2574,13 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_en
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_capability_t capability, sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream) {
-    sz_assert_(stream == STRINGZILLA_NULL && ordinal == 0);
+    sz_capability_t capability, sz_memory_allocator_t *allocator, void *stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states,
-                                                       matches_budget, capability, allocator, engine);
+                                                       matches_budget, capability, allocator, stream, engine);
     if (status != sz_success_k) return status;
-    status = sz_substrings_engine_arena_host_(engine);
-    if (status != sz_success_k) sz_substrings_engine_free_(engine);
+    status = sz_substrings_engine_arena_host_(engine, stream);
+    if (status != sz_success_k) sz_substrings_engine_free_(engine, stream);
     return status;
 }
 
@@ -2594,8 +2644,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *
         sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
         matches_offsets[haystack_index] = collector.count;
         collector.haystack_index = haystack_index;
-        sz_substrings_visit_(engine, walks, haystack, length, &ring, engine->overlap_policy,
-                             sz_substrings_unordered_k, &sz_substrings_collect_report_, &collector);
+        sz_substrings_visit_(engine, walks, haystack, length, &ring, engine->overlap_policy, sz_substrings_unordered_k,
+                             &sz_substrings_collect_report_, &collector);
     }
     matches_offsets[haystacks->count] = collector.count;
     report->matches_emitted = collector.count;
@@ -2769,8 +2819,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
     sz_substrings_engine_t *engine, sz_substrings_walks_t const *walks, sz_sequence_t const *haystacks,
     sz_f32_t const *document_lengths, sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights,
     sz_f32_t *scores, sz_size_t scores_stride) {
-    sz_substrings_host_arena_t const arena =
-        sz_substrings_host_arena_(engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
+    sz_substrings_host_arena_t const arena = sz_substrings_host_arena_(
+        engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
     sz_size_t const needles_count = engine->needles_count;
     sz_u32_t *const counters = (sz_u32_t *)((sz_u8_t *)engine->scratch + arena.bm25_counts);
     sz_substrings_frequencies_t frequencies;
@@ -2794,8 +2844,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
         sz_f64_t const norm = sz_substrings_bm25_norm(
             parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
         sz_substrings_bm25_count_(engine, walks, haystack, length, &frequencies);
-        scores[haystack_index * scores_stride] =
-            (sz_f32_t)sz_substrings_bm25_total_(parameters, norm, needle_weights, &frequencies);
+        scores[haystack_index * scores_stride] = (sz_f32_t)sz_substrings_bm25_total_(parameters, norm, needle_weights,
+                                                                                     &frequencies);
     }
     return sz_success_k;
 }
@@ -2805,10 +2855,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_size_t ordinal, sz_memory_allocator_t *allocator, void *stream) {
+    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream) {
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
-                                          sz_cap_serial_k, ordinal, allocator, stream);
+                                          sz_cap_serial_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,

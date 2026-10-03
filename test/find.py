@@ -9,8 +9,8 @@ mirrors of every Str method; empty-needle and empty-byteset degenerate offsets a
 count, and utf8_uncased_search; fuzzed substring search over random alphabets; and cross-backend
 agreement across SIMD lane boundaries, vector-width haystacks, unaligned views, and random fuzzing.
 Compares against: CPython str find/rfind/count/in/partition/split, hand-written non-SIMD oracle
-functions for the byteset family, and cross-backend self-consistency via capability_sweep and
-forced_capabilities.
+functions for the byteset family, and cross-backend self-consistency via capability_sweep and the
+capabilities= keyword.
 
 Run:
     uv pip install numpy pyarrow pytest pytest-repeat
@@ -334,9 +334,9 @@ def check_identical(
     if check_iterators:
         for i in range(len(native_strings)):
             assert len(native_strings[i]) == len(big_strings[i])
-            assert (
-                native_strings[i] == big_strings[i]
-            ), f"Mismatch between `{native_strings[i]}` and `{str(big_strings[i])}`"
+            assert native_strings[i] == big_strings[i], (
+                f"Mismatch between `{native_strings[i]}` and `{str(big_strings[i])}`"
+            )
             assert [c for c in native_strings[i]] == [c for c in big_strings[i]]
 
     is_equal_strings(native_strings, big_strings)
@@ -365,12 +365,12 @@ def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability
     native = get_random_string(rng, variability=variability, length=haystack_length)
     big = Str(native)
     pattern = get_random_string(rng, variability=variability, length=pattern_length)
-    assert (pattern in native) == big.contains(
-        pattern
-    ), f"Failed to check if {pattern} at offset {native.find(pattern)} is present in {native}"
-    assert native.find(pattern) == big.find(
-        pattern
-    ), f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
+    assert (pattern in native) == big.contains(pattern), (
+        f"Failed to check if {pattern} at offset {native.find(pattern)} is present in {native}"
+    )
+    assert native.find(pattern) == big.find(pattern), (
+        f"Failed to locate {pattern} at offset {native.find(pattern)} in {native}"
+    )
 
 
 # endregion Oracles
@@ -423,27 +423,38 @@ def oracle_count_byteset(haystack: str, chars: str) -> int:
 
 def assert_find_family_matches_oracles(haystack: str, needle: str):
     """Sweep every backend for the full `find`-family on one (haystack, needle) pair, asserting
-    backend parity and oracle agreement for `find`, `rfind`, `count`, byteset family, and `in`."""
-    assert_backends_agree(run_across_backends(lambda: sz.find(haystack, needle)), oracle=haystack.find(needle))
-    assert_backends_agree(run_across_backends(lambda: sz.rfind(haystack, needle)), oracle=haystack.rfind(needle))
-    assert_backends_agree(run_across_backends(lambda: sz.count(haystack, needle)), oracle=haystack.count(needle))
-    assert_backends_agree(run_across_backends(lambda: needle in Str(haystack)), oracle=needle in haystack)
+    backend parity and oracle agreement for `find`, `rfind`, `count`, and the byteset family."""
     assert_backends_agree(
-        run_across_backends(lambda: sz.find_first_of(haystack, needle)), oracle=oracle_find_first_of(haystack, needle)
+        run_across_backends(lambda capabilities: sz.find(haystack, needle, capabilities=capabilities)),
+        oracle=haystack.find(needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda: sz.find_last_of(haystack, needle)), oracle=oracle_find_last_of(haystack, needle)
+        run_across_backends(lambda capabilities: sz.rfind(haystack, needle, capabilities=capabilities)),
+        oracle=haystack.rfind(needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda: sz.find_first_not_of(haystack, needle)),
+        run_across_backends(lambda capabilities: sz.count(haystack, needle, capabilities=capabilities)),
+        oracle=haystack.count(needle),
+    )
+    assert_backends_agree(
+        run_across_backends(lambda capabilities: sz.find_first_of(haystack, needle, capabilities=capabilities)),
+        oracle=oracle_find_first_of(haystack, needle),
+    )
+    assert_backends_agree(
+        run_across_backends(lambda capabilities: sz.find_last_of(haystack, needle, capabilities=capabilities)),
+        oracle=oracle_find_last_of(haystack, needle),
+    )
+    assert_backends_agree(
+        run_across_backends(lambda capabilities: sz.find_first_not_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_first_not_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda: sz.find_last_not_of(haystack, needle)),
+        run_across_backends(lambda capabilities: sz.find_last_not_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_last_not_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda: sz.count_byteset(haystack, needle)), oracle=oracle_count_byteset(haystack, needle)
+        run_across_backends(lambda capabilities: sz.count_byteset(haystack, needle, capabilities=capabilities)),
+        oracle=oracle_count_byteset(haystack, needle),
     )
 
 
@@ -522,17 +533,16 @@ def test_unit_backend_differential_unaligned_views(needle):
     for offset, view in unaligned_views(parent_text):
         native_slice = parent_text[offset:]
         assert_backends_agree(
-            run_across_backends(lambda view=view: sz.find(view, needle)), oracle=native_slice.find(needle)
+            run_across_backends(lambda capabilities, view=view: sz.find(view, needle, capabilities=capabilities)),
+            oracle=native_slice.find(needle),
         )
         assert_backends_agree(
-            run_across_backends(lambda view=view: sz.rfind(view, needle)), oracle=native_slice.rfind(needle)
+            run_across_backends(lambda capabilities, view=view: sz.rfind(view, needle, capabilities=capabilities)),
+            oracle=native_slice.rfind(needle),
         )
         assert_backends_agree(
-            run_across_backends(lambda view=view: sz.count(view, needle)), oracle=native_slice.count(needle)
-        )
-        assert_backends_agree(
-            run_across_backends(lambda view=view: needle in view),
-            oracle=needle in native_slice,
+            run_across_backends(lambda capabilities, view=view: sz.count(view, needle, capabilities=capabilities)),
+            oracle=native_slice.count(needle),
         )
 
 

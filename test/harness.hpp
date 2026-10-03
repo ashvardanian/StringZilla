@@ -97,29 +97,8 @@
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 
-#include "stringzilla/metal.h" // `sz_metal_device_t`
+#include "stringzilla/metal.h" // The Metal layer the Metal suites drive
 #include "stringzilla/types.hpp"
-
-/*  The GPU tests call the CUDA runtime by name, and HIP answers the same calls under its own. */
-#if STRINGZILLA_ARCH_ROCM_
-using cudaStream_t = hipStream_t;
-inline constexpr hipError_t cudaSuccess = hipSuccess, cudaErrorNotReady = hipErrorNotReady;
-inline constexpr unsigned cudaStreamNonBlocking = hipStreamNonBlocking;
-inline hipError_t cudaStreamCreate(hipStream_t *stream) { return hipStreamCreate(stream); }
-inline hipError_t cudaStreamCreateWithFlags(hipStream_t *stream, unsigned flags) {
-    return hipStreamCreateWithFlags(stream, flags);
-}
-inline hipError_t cudaStreamDestroy(hipStream_t stream) { return hipStreamDestroy(stream); }
-inline hipError_t cudaStreamQuery(hipStream_t stream) { return hipStreamQuery(stream); }
-inline hipError_t cudaStreamSynchronize(hipStream_t stream) { return hipStreamSynchronize(stream); }
-inline hipError_t cudaMallocAsync(void **pointer, std::size_t bytes, hipStream_t stream) {
-    return hipMallocAsync(pointer, bytes, stream);
-}
-inline hipError_t cudaFreeAsync(void *pointer, hipStream_t stream) { return hipFreeAsync(pointer, stream); }
-inline hipError_t cudaMemsetAsync(void *pointer, int value, std::size_t bytes, hipStream_t stream) {
-    return hipMemsetAsync(pointer, value, bytes, stream);
-}
-#endif
 
 namespace sz = ashvardanian::stringzilla;
 
@@ -325,48 +304,42 @@ result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... argum
 
 using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
 
+/*  The one place a test picks a GPU vendor, by its compiler: the baseline, the producers, and the
+ *  vendor's runtime helpers the checks reach past the library. */
+#if STRINGZILLA_ARCH_ROCM_
+inline constexpr sz_capability_t gpu_baseline_k = sz_cap_rocm_k;
+inline constexpr auto gpu_capabilities_enabled = &sz_rocm_capabilities_enabled;
+inline constexpr auto gpu_stream_init = &sz_rocm_stream_init;
+inline constexpr auto gpu_stream_free = &sz_rocm_stream_free;
+inline constexpr auto gpu_stream_query = &sz_stream_query_rocm_;
+inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
+inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
+inline constexpr auto gpu_memory_reaches = &sz_memory_reaches_rocm_;
+inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_rocm_;
+inline constexpr auto gpu_free_device = &sz_memory_free_device_rocm_;
+inline constexpr auto gpu_fill = &sz_fill_rocm_;
+#elif STRINGZILLA_ARCH_CUDA_
+inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
+inline constexpr auto gpu_capabilities_enabled = &sz_cuda_capabilities_enabled;
+inline constexpr auto gpu_stream_init = &sz_cuda_stream_init;
+inline constexpr auto gpu_stream_free = &sz_cuda_stream_free;
+inline constexpr auto gpu_stream_query = &sz_stream_query_cuda_;
+inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
+inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
+inline constexpr auto gpu_memory_reaches = &sz_memory_reaches_cuda_;
+inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_cuda_;
+inline constexpr auto gpu_free_device = &sz_memory_free_device_cuda_;
+inline constexpr auto gpu_fill = &sz_fill_cuda_;
+#endif
+
 #if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
-using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char>>;
+using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char, gpu_baseline_k>>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
-#endif
-
-#if STRINGZILLA_WITH_METAL
-
-/** Memory in @c device's arena, which both sides address, so any @c std::vector can hold what a
- *  kernel reads. */
-template <typename value_type_>
-struct metal_arena_alloc {
-    using value_type = value_type_;
-    using is_always_equal = std::false_type;
-
-    sz_metal_device_t *device;
-
-    explicit metal_arena_alloc(sz_metal_device_t &device) noexcept : device(&device) {}
-    template <typename other_type_>
-    metal_arena_alloc(metal_arena_alloc<other_type_> const &other) noexcept : device(other.device) {}
-    value_type *allocate(std::size_t count) {
-        sz_memory_allocator_t arena;
-        sz_memory_allocator_init_metal(&arena, device);
-        return static_cast<value_type *>(arena.allocate(count * sizeof(value_type), arena.handle));
-    }
-    void deallocate(value_type *pointer, std::size_t count) {
-        sz_memory_allocator_t arena;
-        sz_memory_allocator_init_metal(&arena, device);
-        arena.free(pointer, count * sizeof(value_type), arena.handle);
-    }
-    template <typename other_type_>
-    bool operator==(metal_arena_alloc<other_type_> const &other) const noexcept {
-        return device == other.device;
-    }
-};
-
-template <typename value_type_>
-using arena_vector = std::vector<value_type_, metal_arena_alloc<value_type_>>;
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_baseline_k>>;
 #endif
 
 /**
@@ -650,8 +623,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
  *  its outputs alone. */
 inline sz_memory_allocator_t refusing_allocator_() noexcept {
     sz_memory_allocator_t refusing;
-    refusing.allocate = +[](sz_size_t, void *) -> void * { return nullptr; };
-    refusing.free = +[](void *, sz_size_t, void *) {};
+    refusing.allocate = +[](sz_size_t, void *, void *) -> void * { return nullptr; };
+    refusing.free = +[](void *, sz_size_t, void *, void *) {};
     refusing.handle = nullptr;
     return refusing;
 }
@@ -665,13 +638,13 @@ struct handle_checked_heap_t {
     sz_memory_allocator_t allocator {};
 
     handle_checked_heap_t() noexcept {
-        allocator.allocate = +[](sz_size_t length, void *handle) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
             handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
             if (heap.self != &heap) return nullptr;
             ++heap.live_allocations;
             return std::malloc(length);
         };
-        allocator.free = +[](void *pointer, sz_size_t, void *handle) {
+        allocator.free = +[](void *pointer, sz_size_t, void *handle, void *) {
             --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
             std::free(pointer);
         };
@@ -788,9 +761,10 @@ struct machine_t {
                                      STRINGZILLA_H_VERSION_PATCH};
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
 
-    /** The first visible device and its architecture, like @c sm_90 or @c gfx942, or empty. */
+    /** The first visible device, with the architecture CUDA and ROCm name, like @c sm_90 or
+     *  @c gfx942, or empty. */
     std::string device_name;
 #endif
 };
@@ -811,12 +785,20 @@ inline machine_t probe_machine() noexcept {
     if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count != 0 &&
         cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
         machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
+#elif STRINGZILLA_WITH_METAL
+    void *queue = nullptr;
+    if (sz_metal_stream_init(0, &queue) == sz_success_k) {
+        void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
+        void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
+        machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
+        sz_metal_stream_free(queue);
+    }
 #endif
     return machine;
 }
 
 /** Prints the version line, the capabilities as "- Compiled for:" and "- This machine:", and in
- *  GPU builds "- CUDA:" or "- ROCm:". */
+ *  GPU builds "- CUDA:", "- ROCm:" or "- Metal:". */
 inline void print(machine_t const &machine) {
     char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
     sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
@@ -824,8 +806,8 @@ inline void print(machine_t const &machine) {
     fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
     fmt::println("- Compiled for: {}", compiled);
     fmt::println("- This machine: {}", detected);
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-    fmt::println("- {}: {}", STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA",
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
+    fmt::println("- {}: {}", STRINGZILLA_WITH_METAL ? "Metal" : (STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA"),
                  machine.device_name.empty() ? std::string_view("no device") : machine.device_name);
 #endif
 }
@@ -838,36 +820,45 @@ struct environment_t {
 
 #if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
-/** The baseline capability of the GPU vendor this translation unit is compiled for. */
-inline constexpr sz_capability_t gpu_baseline_k = STRINGZILLA_ARCH_ROCM_ ? sz_cap_rocm_k : sz_cap_cuda_k;
-
 /** The capabilities device 0 of this translation unit's GPU vendor runs, or zero without one. */
 inline sz_capability_t gpu_capabilities() {
     sz_capability_t capabilities = 0;
-    if constexpr (STRINGZILLA_ARCH_ROCM_) sz_rocm_capabilities_enabled(0, &capabilities);
-    else sz_cuda_capabilities_enabled(0, &capabilities);
+    gpu_capabilities_enabled(0, &capabilities);
     return capabilities;
 }
 
-/** The device exports of the GPU vendor this translation unit is compiled for. */
-inline constexpr auto gpu_sequence_from_string_views = STRINGZILLA_ARCH_ROCM_ ? &sz_rocm_sequence_from_string_views
-                                                                              : &sz_cuda_sequence_from_string_views;
-inline constexpr auto gpu_memory_allocator_init_unified = STRINGZILLA_ARCH_ROCM_
-                                                              ? &sz_rocm_memory_allocator_init_unified
-                                                              : &sz_cuda_memory_allocator_init_unified;
-inline constexpr auto gpu_memory_reaches_device = STRINGZILLA_ARCH_ROCM_ ? &sz_rocm_memory_reaches_device
-                                                                         : &sz_cuda_memory_reaches_device;
+/** A stream on device 0 of this translation unit's GPU vendor, opened and freed by the library. */
+struct gpu_stream_t {
+    void *handle = nullptr;
+
+    gpu_stream_t() { verify(gpu_stream_init(0, &handle) == sz_success_k); }
+    gpu_stream_t(gpu_stream_t const &) = delete;
+    gpu_stream_t &operator=(gpu_stream_t const &) = delete;
+    ~gpu_stream_t() noexcept { gpu_stream_free(handle); }
+};
+
+/** A sequence copied into one unified tape a kernel reads, through @ref sz_sequence_copy_best, and
+ *  returned to its allocator with it. */
+struct gpu_tape_t {
+    sz_memory_allocator_t unified {};
+    sz_sequence_t sequence {};
+    sz_size_t bytes = 0;
+
+    gpu_tape_t() = default;
+    gpu_tape_t(gpu_tape_t const &) = delete;
+    gpu_tape_t &operator=(gpu_tape_t const &) = delete;
+    ~gpu_tape_t() noexcept {
+        if (bytes) unified.free((void *)sequence.handle, bytes, unified.handle, nullptr);
+    }
+
+    /** Copies @p source in, once; the tape owns its bytes, so @p source may go right after. */
+    void copy(sz_sequence_t const &source) {
+        verify(sz_memory_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
+        verify(sz_sequence_copy_best(&sequence, &source, &unified, &bytes, gpu_capabilities(), nullptr) ==
+               sz_success_k);
+    }
+};
 #endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-
-#if STRINGZILLA_WITH_METAL
-
-/** Prints the "- Metal:" line naming @p device, or "- Metal: no device" when none opened. */
-inline void print(sz_metal_device_t const &device) {
-    if (!device.device) return fmt::println("- Metal: no device");
-    void *const name = sz_metal_get_(device.device, "name");
-    fmt::println("- Metal: {}", static_cast<char const *>(sz_metal_get_(name, "UTF8String")));
-}
-#endif // STRINGZILLA_WITH_METAL
 
 #pragma region Test Runner
 

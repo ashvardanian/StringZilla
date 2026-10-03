@@ -205,7 +205,7 @@ def test_utf8_sentence_differential_icu(rng: Random):
 
     # Restrict the palette to characters ICU/pysbd and StringZilla agree on the meaning of: terminators,
     # letters, spaces and newlines. Emoji/RI sentence behavior is not portable across segmenters.
-    palette = list("abZ59 \t\n.,;:!?'\"()éαаカ中" "\u2028\u2029")
+    palette = list("abZ59 \t\n.,;:!?'\"()éαаカ中\u2028\u2029")
 
     iterations = scale_iterations(500)
     failures = []
@@ -312,7 +312,9 @@ SENTENCE_REALISTIC_TEXTS = [
 def test_utf8_sentences_backend_differential(text):
     """utf8_sentences must segment identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
-    results = run_across_backends(lambda: [bytes(segment) for segment in sz.utf8_sentences(text)])
+    results = run_across_backends(
+        lambda capabilities: [bytes(segment) for segment in sz.utf8_sentences(text, capabilities=capabilities)]
+    )
     assert_backends_agree(results, format_inputs=lambda: f"text={text!r}")
 
 

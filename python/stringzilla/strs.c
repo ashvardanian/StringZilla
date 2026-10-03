@@ -138,23 +138,24 @@ static sz_bool_t sz_py_replace_u32_tape_allocator(Strs *strs, sz_memory_allocato
     sz_size_t const offsets_size = (data->count + 1) * sizeof(sz_u32_t);
 
     // Allocate new string data with new allocator
-    sz_ptr_t new_string_data = string_data_size ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle)
-                                                : (sz_ptr_t)NULL;
+    sz_ptr_t new_string_data = string_data_size
+                                   ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle, NULL)
+                                   : (sz_ptr_t)NULL;
     if (string_data_size && !new_string_data) return sz_false_k;
     memcpy(new_string_data, data->data, string_data_size);
 
     // Allocate new offsets array
-    sz_u32_t *new_offsets = offsets_size ? (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle)
+    sz_u32_t *new_offsets = offsets_size ? (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle, NULL)
                                          : (sz_u32_t *)NULL;
     if (offsets_size && !new_offsets) {
-        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle);
+        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle, NULL);
         return sz_false_k;
     }
     memcpy(new_offsets, data->offsets, offsets_size);
 
     // Free old memory with old allocator (tapes always own their data)
-    old_allocator->free(data->data, string_data_size, old_allocator->handle);
-    old_allocator->free(data->offsets, offsets_size, old_allocator->handle);
+    old_allocator->free(data->data, string_data_size, old_allocator->handle, NULL);
+    old_allocator->free(data->offsets, offsets_size, old_allocator->handle, NULL);
 
     // Update pointers and allocator
     data->data = new_string_data;
@@ -172,23 +173,24 @@ static sz_bool_t sz_py_replace_u64_tape_allocator(Strs *strs, sz_memory_allocato
     sz_size_t offsets_size = (data->count + 1) * sizeof(sz_u64_t);
 
     // Allocate new string data with new allocator
-    sz_ptr_t new_string_data = string_data_size ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle)
-                                                : (sz_ptr_t)NULL;
+    sz_ptr_t new_string_data = string_data_size
+                                   ? (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle, NULL)
+                                   : (sz_ptr_t)NULL;
     if (string_data_size && !new_string_data) return sz_false_k;
     memcpy(new_string_data, data->data, string_data_size);
 
     // Allocate new offsets array
-    sz_u64_t *new_offsets = offsets_size ? (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle)
+    sz_u64_t *new_offsets = offsets_size ? (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle, NULL)
                                          : (sz_u64_t *)NULL;
     if (offsets_size && !new_offsets) {
-        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle);
+        if (string_data_size) allocator->free(new_string_data, string_data_size, allocator->handle, NULL);
         return sz_false_k;
     }
     memcpy(new_offsets, data->offsets, offsets_size);
 
     // Free old memory with old allocator (tapes always own their data)
-    old_allocator->free(data->data, string_data_size, old_allocator->handle);
-    old_allocator->free(data->offsets, offsets_size, old_allocator->handle);
+    old_allocator->free(data->data, string_data_size, old_allocator->handle, NULL);
+    old_allocator->free(data->offsets, offsets_size, old_allocator->handle, NULL);
 
     // Update pointers and allocator
     data->data = new_string_data;
@@ -207,7 +209,7 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
     // Allocate new string data with new allocator
     sz_ptr_t new_string_data = NULL;
     if (string_data_size > 0) {
-        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle, NULL);
         if (!new_string_data) return sz_false_k;
         memcpy(new_string_data, view->data + slice_start_offset, string_data_size);
     }
@@ -215,9 +217,9 @@ static sz_bool_t sz_py_replace_u32_tape_view_allocator(Strs *strs, sz_memory_all
     // Allocate new offsets array and adjust to be relative to slice start
     sz_u32_t *new_offsets = NULL;
     if (offsets_size > 0) {
-        new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle);
+        new_offsets = (sz_u32_t *)allocator->allocate(offsets_size, allocator->handle, NULL);
         if (!new_offsets) {
-            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
+            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle, NULL);
             return sz_false_k;
         }
         for (sz_size_t i = 0; i <= view->count; ++i) new_offsets[i] = view->offsets[i] - slice_start_offset;
@@ -245,7 +247,7 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
     // Allocate new string data with new allocator
     sz_ptr_t new_string_data = NULL;
     if (string_data_size > 0) {
-        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle);
+        new_string_data = (sz_ptr_t)allocator->allocate(string_data_size, allocator->handle, NULL);
         if (!new_string_data) return sz_false_k;
         memcpy(new_string_data, view->data + slice_start_offset, string_data_size);
     }
@@ -253,9 +255,9 @@ static sz_bool_t sz_py_replace_u64_tape_view_allocator(Strs *strs, sz_memory_all
     // Allocate new offsets array and adjust to be relative to slice start
     sz_u64_t *new_offsets = NULL;
     if (offsets_size > 0) {
-        new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle);
+        new_offsets = (sz_u64_t *)allocator->allocate(offsets_size, allocator->handle, NULL);
         if (!new_offsets) {
-            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle);
+            if (string_data_size > 0) allocator->free(new_string_data, string_data_size, allocator->handle, NULL);
             return sz_false_k;
         }
         for (sz_size_t i = 0; i <= view->count; ++i) new_offsets[i] = view->offsets[i] - slice_start_offset;
@@ -289,7 +291,8 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
     // Skip allocation if there's no data to allocate (empty strings case)
     if (total_bytes == 0) {
         // Convert to empty tape layout
-        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle,
+                            NULL);
         Py_XDECREF(fragmented->parent);
 
         strs->layout = STRS_U32_TAPE;
@@ -301,14 +304,14 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
     }
 
     // Allocate consolidated data buffer and offsets array
-    sz_ptr_t new_data = (sz_ptr_t)allocator->allocate(total_bytes, allocator->handle);
+    sz_ptr_t new_data = (sz_ptr_t)allocator->allocate(total_bytes, allocator->handle, NULL);
     if (!new_data) return sz_false_k;
 
     if (use_64bit) {
         sz_u64_t *new_offsets = (sz_u64_t *)allocator->allocate((fragmented->count + 1) * sizeof(sz_u64_t),
-                                                                allocator->handle);
+                                                                allocator->handle, NULL);
         if (!new_offsets) {
-            allocator->free(new_data, total_bytes, allocator->handle);
+            allocator->free(new_data, total_bytes, allocator->handle, NULL);
             return sz_false_k;
         }
 
@@ -323,7 +326,8 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
         }
 
         // Free old fragmented data and convert to 64-bit tape
-        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle,
+                            NULL);
         Py_XDECREF(fragmented->parent);
 
         strs->layout = STRS_U64_TAPE;
@@ -334,9 +338,9 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
     }
     else {
         sz_u32_t *new_offsets = (sz_u32_t *)allocator->allocate((fragmented->count + 1) * sizeof(sz_u32_t),
-                                                                allocator->handle);
+                                                                allocator->handle, NULL);
         if (!new_offsets) {
-            allocator->free(new_data, total_bytes, allocator->handle);
+            allocator->free(new_data, total_bytes, allocator->handle, NULL);
             return sz_false_k;
         }
 
@@ -349,15 +353,16 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_memory_alloca
             current_offset += len;
             // Ensure we don't overflow 32-bit offset
             if (current_offset > UINT32_MAX) {
-                allocator->free(new_data, total_bytes, allocator->handle);
-                allocator->free(new_offsets, (fragmented->count + 1) * sizeof(sz_u32_t), allocator->handle);
+                allocator->free(new_data, total_bytes, allocator->handle, NULL);
+                allocator->free(new_offsets, (fragmented->count + 1) * sizeof(sz_u32_t), allocator->handle, NULL);
                 return sz_false_k;
             }
             new_offsets[i + 1] = (sz_u32_t)current_offset;
         }
 
         // Free old fragmented data and convert to 32-bit tape
-        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle);
+        old_allocator->free(fragmented->spans, fragmented->count * sizeof(sz_string_view_t), old_allocator->handle,
+                            NULL);
         Py_XDECREF(fragmented->parent);
 
         strs->layout = STRS_U32_TAPE;
@@ -569,26 +574,26 @@ static PyObject *Strs_get_tape_nbytes(Strs *self, void *closure) {
     case STRS_U32_TAPE_VIEW: {
         sz_size_t count = self->data.u32_tape_view.count;
         sz_u32_t *offsets = self->data.u32_tape_view.offsets;
-        // The tape size is the last offset (offsets[count])
-        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        // The tape spans up to its last offset, whatever the first one is
+        tape_nbytes = offsets ? offsets[count] : 0;
         break;
     }
     case STRS_U32_TAPE: {
         sz_size_t count = self->data.u32_tape.count;
         sz_u32_t *offsets = self->data.u32_tape.offsets;
-        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        tape_nbytes = offsets ? offsets[count] : 0;
         break;
     }
     case STRS_U64_TAPE_VIEW: {
         sz_size_t count = self->data.u64_tape_view.count;
         sz_u64_t *offsets = self->data.u64_tape_view.offsets;
-        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        tape_nbytes = offsets ? offsets[count] : 0;
         break;
     }
     case STRS_U64_TAPE: {
         sz_size_t count = self->data.u64_tape.count;
         sz_u64_t *offsets = self->data.u64_tape.offsets;
-        tape_nbytes = (count > 0) ? offsets[count] : 0;
+        tape_nbytes = offsets ? offsets[count] : 0;
         break;
     }
     default: PyErr_SetString(PyExc_RuntimeError, "Unknown Strs layout"); return NULL;
@@ -807,9 +812,9 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
             Py_XDECREF(result);
             return NULL;
         }
-        sz_status_t const status = sz_copy_best(
-            (sz_ptr_t)result->data.fragmented.spans, (sz_cptr_t)(self->data.fragmented.spans + start),
-            sizeof(sz_string_view_t) * result_count, sz_py_enabled_capabilities, NULL);
+        sz_status_t const status = sz_copy_best((sz_ptr_t)result->data.fragmented.spans,
+                                                (sz_cptr_t)(self->data.fragmented.spans + start),
+                                                sizeof(sz_string_view_t) * result_count, sz_cap_cpus_k, NULL);
         if (status != sz_success_k) {
             Py_XDECREF(result);
             sz_py_raise_status(status, "Strs slicing");
@@ -858,8 +863,7 @@ static int Strs_in(Str *self, PyObject *needle_obj) {
         getter(self, i, count, &parent, &start, &length);
         if (length != needle.length) continue;
         sz_bool_t equal = sz_false_k;
-        sz_status_t const status = sz_equal_best(start, needle.start, needle.length, &equal, sz_py_enabled_capabilities,
-                                                 NULL);
+        sz_status_t const status = sz_equal_best(start, needle.start, needle.length, &equal, sz_cap_cpus_k, NULL);
         if (status != sz_success_k) {
             sz_py_raise_status(status, "in");
             return -1;
@@ -910,8 +914,8 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 
             // When dealing with arrays, early exists make sense only in some cases
             sz_ordering_t ordering = sz_equal_k;
-            sz_status_t const status = sz_order_best(ai_start, ai_length, bi_start, bi_length, &ordering,
-                                                     sz_py_enabled_capabilities, NULL);
+            sz_status_t const status = sz_order_best(ai_start, ai_length, bi_start, bi_length, &ordering, sz_cap_cpus_k,
+                                                     NULL);
             if (status != sz_success_k) {
                 sz_py_raise_status(status, "Strs comparison");
                 return NULL;
@@ -994,8 +998,8 @@ static PyObject *Strs_richcompare(PyObject *self, PyObject *other, int op) {
 
         // When dealing with arrays, early exists make sense only in some cases
         sz_ordering_t ordering = sz_equal_k;
-        sz_status_t const status = sz_order_best(ai_start, ai_length, bi.start, bi.length, &ordering,
-                                                 sz_py_enabled_capabilities, NULL);
+        sz_status_t const status = sz_order_best(ai_start, ai_length, bi.start, bi.length, &ordering, sz_cap_cpus_k,
+                                                 NULL);
         if (status != sz_success_k) {
             Py_DECREF(other_item);
             Py_DECREF(other_iter);
@@ -1136,7 +1140,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     if (substrings_count == 0) return (PyObject *)strs_make_empty_fragmented_();
 
     sz_string_view_t *new_spans = (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t),
-                                                                         allocator.handle);
+                                                                         allocator.handle, NULL);
     if (new_spans == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
         return NULL;
@@ -1155,7 +1159,7 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     // Create a new Strs object for the reordered layout
     Strs *result = Strs_alloc_();
     if (!result) {
-        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle, NULL);
         PyErr_NoMemory();
         return NULL;
     }
@@ -1305,7 +1309,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     if (substrings_count == 0) return (PyObject *)strs_make_empty_fragmented_();
 
     sz_string_view_t *new_spans = (sz_string_view_t *)allocator.allocate(substrings_count * sizeof(sz_string_view_t),
-                                                                         allocator.handle);
+                                                                         allocator.handle, NULL);
     if (new_spans == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for reordered slices");
         return NULL;
@@ -1323,7 +1327,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 
     sz_sorted_idx_t *order = (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * substrings_count);
     if (!order) {
-        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle, NULL);
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
         return NULL;
     }
@@ -1337,7 +1341,7 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     sz_status_t status = Strs_run_argsort_(uncased, &sequence, order, top, reverse, capabilities);
     if (status != sz_success_k) {
         free(order);
-        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle, NULL);
         sz_py_raise_status(status, "sorted()");
         return NULL;
     }
@@ -1347,10 +1351,10 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
 
     // Apply the new order to create sorted spans
     sz_string_view_t *sorted_spans = (sz_string_view_t *)allocator.allocate(result_count * sizeof(sz_string_view_t),
-                                                                            allocator.handle);
+                                                                            allocator.handle, NULL);
     if (sorted_spans == NULL && result_count) {
         free(order);
-        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle, NULL);
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for sorted slices");
         return NULL;
     }
@@ -1360,12 +1364,12 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     free(order);
 
     // Free the temporary spans array
-    allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle);
+    allocator.free(new_spans, substrings_count * sizeof(sz_string_view_t), allocator.handle, NULL);
 
     // Create a new Strs object for the sorted layout
     Strs *result = Strs_alloc_();
     if (!result) {
-        allocator.free(sorted_spans, result_count * sizeof(sz_string_view_t), allocator.handle);
+        allocator.free(sorted_spans, result_count * sizeof(sz_string_view_t), allocator.handle, NULL);
         PyErr_NoMemory();
         return NULL;
     }
@@ -1622,7 +1626,7 @@ static PyObject *Strs_repr(Strs *self) {
     sz_cptr_t const repr_buffer_end = repr_buffer_ptr + 1024;
 
     // Start of the array
-    sz_status_t status = sz_copy_best(repr_buffer_ptr, "sz.Strs([", 9, sz_py_enabled_capabilities, NULL);
+    sz_status_t status = sz_copy_best(repr_buffer_ptr, "sz.Strs([", 9, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "repr()");
         return NULL;
@@ -1658,8 +1662,8 @@ static PyObject *Strs_repr(Strs *self) {
 
         // If it didn't fit, let's put an ellipsis
         if (!did_fit) {
-            status = sz_copy_best(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length,
-                                  sz_py_enabled_capabilities, NULL);
+            status = sz_copy_best(repr_buffer_ptr, non_fitting_array_tail, non_fitting_array_tail_length, sz_cap_cpus_k,
+                                  NULL);
             if (status != sz_success_k) {
                 sz_py_raise_status(status, "repr()");
                 return NULL;
@@ -1706,8 +1710,8 @@ static PyObject *Strs_str(Strs *self) {
             while (scan_length) {
                 char quote = '\'';
                 sz_cptr_t next_quote = NULL;
-                sz_status_t const status = sz_find_byte_best(scan_ptr, scan_length, &quote, &next_quote,
-                                                             sz_py_enabled_capabilities, NULL);
+                sz_status_t const status = sz_find_byte_best(scan_ptr, scan_length, &quote, &next_quote, sz_cap_cpus_k,
+                                                             NULL);
                 if (status != sz_success_k) {
                     sz_py_raise_status(status, "str()");
                     return NULL;
@@ -1893,13 +1897,14 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             sz_size_t total_bytes = offsets_64[length] - offsets_64[0];
 
             // Allocate new buffer and offsets using the allocator
-            sz_ptr_t new_data = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle)
+            sz_ptr_t new_data = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle, NULL)
                                             : (sz_ptr_t)NULL;
-            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate((length + 1) * sizeof(sz_u64_t), allocator.handle);
+            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate((length + 1) * sizeof(sz_u64_t), allocator.handle,
+                                                                   NULL);
             int const failed_to_allocate_data = total_bytes && !new_data;
             if (failed_to_allocate_data || !new_offsets) {
-                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
-                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle, NULL);
+                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle, NULL);
                 Py_DECREF(capsules);
                 PyErr_NoMemory();
                 return -1;
@@ -1908,11 +1913,11 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             // Copy data and adjust offsets (Apache Arrow format)
             sz_size_t actual_bytes = offsets_64[length] - offsets_64[0];
             sz_status_t const status = actual_bytes ? sz_copy_best(new_data, data_buffer + offsets_64[0], actual_bytes,
-                                                                   sz_py_enabled_capabilities, NULL)
+                                                                   sz_cap_cpus_k, NULL)
                                                     : sz_success_k;
             if (status != sz_success_k) {
-                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
-                allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle, NULL);
+                allocator.free(new_offsets, (length + 1) * sizeof(sz_u64_t), allocator.handle, NULL);
                 Py_DECREF(capsules);
                 sz_py_raise_status(status, "Strs()");
                 return -1;
@@ -1935,13 +1940,14 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             sz_size_t total_bytes = offsets_32[length] - offsets_32[0];
 
             // Allocate new buffer and offsets using the allocator
-            sz_ptr_t new_data = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle)
+            sz_ptr_t new_data = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle, NULL)
                                             : (sz_ptr_t)NULL;
-            sz_u32_t *new_offsets = (sz_u32_t *)allocator.allocate((length + 1) * sizeof(sz_u32_t), allocator.handle);
+            sz_u32_t *new_offsets = (sz_u32_t *)allocator.allocate((length + 1) * sizeof(sz_u32_t), allocator.handle,
+                                                                   NULL);
             int const failed_to_allocate_data = total_bytes && !new_data;
             if (failed_to_allocate_data || !new_offsets) {
-                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
-                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle, NULL);
+                if (new_offsets) allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle, NULL);
                 Py_DECREF(capsules);
                 PyErr_NoMemory();
                 return -1;
@@ -1950,11 +1956,11 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
             // Copy data and adjust offsets (Apache Arrow format)
             sz_size_t actual_bytes = offsets_32[length] - offsets_32[0];
             sz_status_t const status = actual_bytes ? sz_copy_best(new_data, data_buffer + offsets_32[0], actual_bytes,
-                                                                   sz_py_enabled_capabilities, NULL)
+                                                                   sz_cap_cpus_k, NULL)
                                                     : sz_success_k;
             if (status != sz_success_k) {
-                if (new_data) allocator.free(new_data, total_bytes, allocator.handle);
-                allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle);
+                if (new_data) allocator.free(new_data, total_bytes, allocator.handle, NULL);
+                allocator.free(new_offsets, (length + 1) * sizeof(sz_u32_t), allocator.handle, NULL);
                 Py_DECREF(capsules);
                 sz_py_raise_status(status, "Strs()");
                 return -1;
@@ -1999,7 +2005,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         sz_memory_allocator_init_default(&allocator);
 
         sz_string_view_t *parts = (sz_string_view_t *)allocator.allocate(count * sizeof(sz_string_view_t),
-                                                                         allocator.handle);
+                                                                         allocator.handle, NULL);
         if (!parts) {
             PyErr_NoMemory();
             return -1;
@@ -2011,7 +2017,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
             sz_cptr_t item_start;
             sz_size_t item_length;
             if (!sz_py_export_string_like(item, &item_start, &item_length)) {
-                allocator.free(parts, count * sizeof(sz_string_view_t), allocator.handle);
+                allocator.free(parts, count * sizeof(sz_string_view_t), allocator.handle, NULL);
                 PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", i);
                 return -1;
             }
@@ -2048,7 +2054,7 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         sz_memory_allocator_init_default(&allocator);
 
         // Allocate data buffer using allocator
-        sz_ptr_t data_buffer = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle)
+        sz_ptr_t data_buffer = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle, NULL)
                                            : (sz_ptr_t)NULL;
         int const failed_to_allocate_data = total_bytes && !data_buffer;
         if (failed_to_allocate_data) {
@@ -2058,9 +2064,9 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
 
         if (use_64bit) {
             // Apache Arrow format: N+1 offsets for N strings
-            sz_u64_t *offsets = (sz_u64_t *)allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle);
+            sz_u64_t *offsets = (sz_u64_t *)allocator.allocate((count + 1) * sizeof(sz_u64_t), allocator.handle, NULL);
             if (!offsets) {
-                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle, NULL);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -2073,11 +2079,11 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 sz_size_t item_length;
                 sz_py_export_string_like(item, &item_start, &item_length);
 
-                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length,
-                                                        sz_py_enabled_capabilities, NULL);
+                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length, sz_cap_cpus_k,
+                                                        NULL);
                 if (status != sz_success_k) {
-                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle);
-                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle, NULL);
+                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle, NULL);
                     sz_py_raise_status(status, "Strs()");
                     return -1;
                 }
@@ -2093,9 +2099,9 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         }
         else {
             // Apache Arrow format: N+1 offsets for N strings
-            sz_u32_t *offsets = (sz_u32_t *)allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle);
+            sz_u32_t *offsets = (sz_u32_t *)allocator.allocate((count + 1) * sizeof(sz_u32_t), allocator.handle, NULL);
             if (!offsets) {
-                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle, NULL);
                 PyErr_NoMemory();
                 return -1;
             }
@@ -2108,11 +2114,11 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
                 sz_size_t item_length;
                 sz_py_export_string_like(item, &item_start, &item_length);
 
-                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length,
-                                                        sz_py_enabled_capabilities, NULL);
+                sz_status_t const status = sz_copy_best(data_buffer + offset, item_start, item_length, sz_cap_cpus_k,
+                                                        NULL);
                 if (status != sz_success_k) {
-                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle);
-                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle);
+                    allocator.free(offsets, (count + 1) * sizeof(offsets[0]), allocator.handle, NULL);
+                    if (data_buffer) allocator.free(data_buffer, total_bytes, allocator.handle, NULL);
                     sz_py_raise_status(status, "Strs()");
                     return -1;
                 }
@@ -2181,12 +2187,13 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
     sz_size_t total_bytes = 0;
     int use_64bit = 0; // Start with 32-bit
 
-    sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(data_capacity, allocator.handle);
-    void *offsets = allocator.allocate(offsets_capacity * sizeof(sz_u32_t), allocator.handle); // Start with 32-bit
+    sz_ptr_t data_buffer = (sz_ptr_t)allocator.allocate(data_capacity, allocator.handle, NULL);
+    void *offsets = allocator.allocate(offsets_capacity * sizeof(sz_u32_t), allocator.handle,
+                                       NULL); // Start with 32-bit
 
     if (!data_buffer || !offsets) {
-        if (data_buffer) allocator.free(data_buffer, data_capacity, allocator.handle);
-        if (offsets) allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+        if (data_buffer) allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+        if (offsets) allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle, NULL);
         Py_DECREF(iterator);
         PyErr_NoMemory();
         return -1;
@@ -2203,9 +2210,9 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
         sz_size_t item_length;
         if (!sz_py_export_string_like(item, &item_start, &item_length)) {
             Py_DECREF(item);
-            allocator.free(data_buffer, data_capacity, allocator.handle);
+            allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
             allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
-                           allocator.handle);
+                           allocator.handle, NULL);
             Py_DECREF(iterator);
             PyErr_Format(PyExc_TypeError, "Item %zd is not a string-like object", count);
             return -1;
@@ -2215,11 +2222,11 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
         if (!use_64bit && total_bytes + item_length > UINT32_MAX) {
             // Convert offsets from 32-bit to 64-bit
             sz_size_t new_offsets_size = offsets_capacity * sizeof(sz_u64_t);
-            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate(new_offsets_size, allocator.handle);
+            sz_u64_t *new_offsets = (sz_u64_t *)allocator.allocate(new_offsets_size, allocator.handle, NULL);
             if (!new_offsets) {
                 Py_DECREF(item);
-                allocator.free(data_buffer, data_capacity, allocator.handle);
-                allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+                allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+                allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle, NULL);
                 Py_DECREF(iterator);
                 PyErr_NoMemory();
                 return -1;
@@ -2229,7 +2236,7 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
             sz_u32_t *old_offsets = (sz_u32_t *)offsets;
             for (sz_size_t i = 0; i <= count; i++) { new_offsets[i] = old_offsets[i]; }
 
-            allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+            allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle, NULL);
             offsets = new_offsets;
             use_64bit = 1;
         }
@@ -2237,18 +2244,18 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
         // Grow data buffer if needed (doubling strategy)
         while (total_bytes + item_length > data_capacity) {
             sz_size_t new_capacity = data_capacity * 2;
-            sz_ptr_t new_buffer = (sz_ptr_t)allocator.allocate(new_capacity, allocator.handle);
+            sz_ptr_t new_buffer = (sz_ptr_t)allocator.allocate(new_capacity, allocator.handle, NULL);
             if (!new_buffer) {
                 Py_DECREF(item);
-                allocator.free(data_buffer, data_capacity, allocator.handle);
+                allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
                 allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)),
-                               allocator.handle);
+                               allocator.handle, NULL);
                 Py_DECREF(iterator);
                 PyErr_NoMemory();
                 return -1;
             }
             memcpy(new_buffer, data_buffer, total_bytes);
-            allocator.free(data_buffer, data_capacity, allocator.handle);
+            allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
             data_buffer = new_buffer;
             data_capacity = new_capacity;
         }
@@ -2260,24 +2267,24 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
             sz_size_t element_size = use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
             if (new_capacity > SIZE_MAX / element_size) {
                 Py_DECREF(item);
-                allocator.free(data_buffer, data_capacity, allocator.handle);
-                allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+                allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+                allocator.free(offsets, offsets_capacity * element_size, allocator.handle, NULL);
                 Py_DECREF(iterator);
                 PyErr_SetString(PyExc_MemoryError, "Too many strings");
                 return -1;
             }
 
-            void *new_offsets = allocator.allocate(new_capacity * element_size, allocator.handle);
+            void *new_offsets = allocator.allocate(new_capacity * element_size, allocator.handle, NULL);
             if (!new_offsets) {
                 Py_DECREF(item);
-                allocator.free(data_buffer, data_capacity, allocator.handle);
-                allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+                allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+                allocator.free(offsets, offsets_capacity * element_size, allocator.handle, NULL);
                 Py_DECREF(iterator);
                 PyErr_NoMemory();
                 return -1;
             }
             memcpy(new_offsets, offsets, (count + 1) * element_size);
-            allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+            allocator.free(offsets, offsets_capacity * element_size, allocator.handle, NULL);
             offsets = new_offsets;
             offsets_capacity = new_capacity;
         }
@@ -2298,15 +2305,16 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
 
     // Check for errors during iteration
     if (PyErr_Occurred()) {
-        allocator.free(data_buffer, data_capacity, allocator.handle);
-        allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)), allocator.handle);
+        allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+        allocator.free(offsets, offsets_capacity * (use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t)), allocator.handle,
+                       NULL);
         return -1;
     }
 
     // Handle empty iterator
     if (count == 0) {
-        allocator.free(data_buffer, data_capacity, allocator.handle);
-        allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle);
+        allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
+        allocator.free(offsets, offsets_capacity * sizeof(sz_u32_t), allocator.handle, NULL);
         self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
@@ -2316,19 +2324,19 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
     }
 
     // Shrink buffers to actual size
-    sz_ptr_t final_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle);
+    sz_ptr_t final_buffer = (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle, NULL);
     if (final_buffer) {
         memcpy(final_buffer, data_buffer, total_bytes);
-        allocator.free(data_buffer, data_capacity, allocator.handle);
+        allocator.free(data_buffer, data_capacity, allocator.handle, NULL);
         data_buffer = final_buffer;
     }
 
     sz_size_t element_size = use_64bit ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
     sz_size_t final_offsets_size = (count + 1) * element_size;
-    void *final_offsets = allocator.allocate(final_offsets_size, allocator.handle);
+    void *final_offsets = allocator.allocate(final_offsets_size, allocator.handle, NULL);
     if (final_offsets) {
         memcpy(final_offsets, offsets, final_offsets_size);
-        allocator.free(offsets, offsets_capacity * element_size, allocator.handle);
+        allocator.free(offsets, offsets_capacity * element_size, allocator.handle, NULL);
         offsets = final_offsets;
     }
 
@@ -2393,37 +2401,161 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
     self->layout = STRS_U32_TAPE_VIEW;
     memset(&self->data, 0, sizeof(self->data));
 
-    // If no sequence provided, create empty Strs
+    int status = 0;
+    PyObject *arrow_method = sequence_obj ? PyObject_GetAttrString(sequence_obj, "__arrow_c_array__") : NULL;
+    PyErr_Clear(); // Clear the attribute error from checking for `__arrow_c_array__`
     if (!sequence_obj) {
         self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         sz_memory_allocator_init_default(&self->data.fragmented.allocator);
         self->data.fragmented.parent = NULL;
-        return 0;
     }
-
-    // Check if it's an Arrow array (has `__arrow_c_array__` method)
-    PyObject *arrow_method = PyObject_GetAttrString(sequence_obj, "__arrow_c_array__");
-    if (arrow_method) {
+    else if (arrow_method) {
         Py_DECREF(arrow_method);
-        return Strs_init_from_pyarrow(self, sequence_obj, view);
+        status = Strs_init_from_pyarrow(self, sequence_obj, view);
     }
-
-    // Handle more traditional Python sequences
-    PyErr_Clear(); // Clear the attribute error from checking for `__arrow_c_array__`
-
-    if (PyTuple_Check(sequence_obj)) { return Strs_init_from_tuple(self, sequence_obj, view); }
-    else if (PyList_Check(sequence_obj)) { return Strs_init_from_list(self, sequence_obj, view); }
+    else if (PyTuple_Check(sequence_obj)) { status = Strs_init_from_tuple(self, sequence_obj, view); }
+    else if (PyList_Check(sequence_obj)) { status = Strs_init_from_list(self, sequence_obj, view); }
     else if (PyObject_HasAttrString(sequence_obj, "__iter__")) {
-        return Strs_init_from_iterable(self, sequence_obj, view);
+        status = Strs_init_from_iterable(self, sequence_obj, view);
     }
     else {
         PyErr_SetString(PyExc_TypeError, "Strs() argument must be a tuple, list, or iterable");
         return -1;
     }
+    return status;
+}
 
-    return 0;
+/** The tape a @c Strs.copy made, owned by the capsule its view keeps as a parent. */
+typedef struct sz_py_tape_t {
+    /** What @c sz_sequence_copy_best pointed at the tape: its block as the handle, and accessors. */
+    sz_sequence_t sequence;
+    /** The unified allocator of the copy's capabilities, which frees the block. */
+    sz_memory_allocator_t allocator;
+    /** Bytes of the block, zero when nothing was allocated. */
+    sz_size_t allocated_bytes;
+} sz_py_tape_t;
+
+static char const sz_py_tape_name_[] = "stringzilla.tape";
+
+static void sz_py_tape_free_(sz_py_tape_t *tape) {
+    if (tape->allocated_bytes)
+        tape->allocator.free((void *)tape->sequence.handle, tape->allocated_bytes, tape->allocator.handle, NULL);
+    PyMem_Free(tape);
+}
+
+static void sz_py_tape_capsule_free_(PyObject *capsule) {
+    sz_py_tape_free_((sz_py_tape_t *)PyCapsule_GetPointer(capsule, sz_py_tape_name_));
+}
+
+int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability, void *stream,
+                                sz_sequence_t *sequence) {
+    if (sz_py_export_strings(object, name, sequence) != 0) return -1;
+    // The host reads a tape of any group through these accessors, while a GPU's own run only there.
+    if (capability < sz_cap_cuda_k) return 0;
+    Strs const *strs = (Strs const *)object;
+    if (strs->layout != STRS_U64_TAPE_VIEW || !PyCapsule_IsValid(strs->data.u64_tape_view.parent, sz_py_tape_name_))
+        return 0;
+    sz_py_tape_t const *tape = (sz_py_tape_t const *)PyCapsule_GetPointer(strs->data.u64_tape_view.parent,
+                                                                          sz_py_tape_name_);
+    // A slice of the tape is no tape, so it keeps the host accessors a device engine refuses.
+    if ((void const *)strs->data.u64_tape_view.offsets != tape->sequence.handle ||
+        strs->data.u64_tape_view.count != tape->sequence.count)
+        return 0;
+    sz_memory_allocator_t allocator = tape->allocator;
+    sz_size_t allocated_bytes = 0;
+    sz_status_t status = sz_sequence_copy_best(sequence, &tape->sequence, &allocator, &allocated_bytes, capability,
+                                               stream);
+    // A tape the device reaches is only re-pointed, so one it would have to copy is refused.
+    if (status == sz_success_k && allocated_bytes) {
+        allocator.free((void *)sequence->handle, allocated_bytes, allocator.handle, stream);
+        status = sz_device_memory_mismatch_k;
+    }
+    if (status == sz_success_k) return 0;
+    sz_py_raise_status(status, name);
+    return -1;
+}
+
+static char const doc_Strs_copy[] =                                                                 //
+    "copy(capabilities, stream=None) -> Strs\n"                                                     //
+    "\n"                                                                                            //
+    "Copy the strings into one tape of the unified memory of `capabilities`, offsets then bytes,\n" //
+    "which engines read in place and the host reads as a normal read-only Strs.\n"                  //
+    "\n"                                                                                            //
+    "Args:\n"                                                                                       //
+    "  capabilities (int): A producer's mask, like sz.cuda_capabilities_enabled(0).\n"              //
+    "  stream (int, optional): A stream of that device as an integer, or None for the default.\n"   //
+    "Returns:\n"                                                                                    //
+    "  Strs: A view of the tape, which is freed with it.\n"                                         //
+    "Example:\n"                                                                                    //
+    "  >>> tape = sz.Strs(['kitten', 'sitting']).copy(sz.cpu_capabilities_enabled())\n"             //
+    "  >>> [str(text) for text in tape]\n"                                                          //
+    "  ['kitten', 'sitting']";
+
+static PyObject *Strs_copy(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
+    if (positional_args_count > 2) {
+        PyErr_Format(PyExc_TypeError, "copy() takes at most 2 positional arguments, got %zd", positional_args_count);
+        return NULL;
+    }
+    PyObject *capabilities_object = positional_args_count > 0 ? args[0] : NULL;
+    PyObject *stream_object = positional_args_count > 1 ? args[1] : NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 ? &capabilities_object
+                          : PyUnicode_CompareWithASCIIString(key, "stream") == 0     ? &stream_object
+                                                                                     : NULL;
+        if (!slot) return PyErr_Format(PyExc_TypeError, "copy() got an unexpected keyword argument '%U'", key);
+        if (*slot) return PyErr_Format(PyExc_TypeError, "copy() got multiple values for argument '%U'", key);
+        *slot = args[positional_args_count + keyword_index];
+    }
+    if (!capabilities_object) {
+        PyErr_SetString(PyExc_TypeError, "copy() missing required argument 'capabilities'");
+        return NULL;
+    }
+    unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
+    if (PyErr_Occurred()) return NULL;
+    void *stream = NULL;
+    if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
+
+    sz_py_tape_t *tape = (sz_py_tape_t *)PyMem_Malloc(sizeof(sz_py_tape_t));
+    if (!tape) return PyErr_NoMemory();
+    tape->allocated_bytes = 0;
+    sz_sequence_t source;
+    sz_py_export_strings_as_sequence(self, &source);
+    sz_status_t status;
+    Py_BEGIN_ALLOW_THREADS;
+    status = sz_memory_allocator_init_unified_best(&tape->allocator, (sz_capability_t)bits);
+    if (status == sz_success_k)
+        status = sz_sequence_copy_best(&tape->sequence, &source, &tape->allocator, &tape->allocated_bytes,
+                                       (sz_capability_t)bits, stream);
+    Py_END_ALLOW_THREADS;
+    if (status != sz_success_k) {
+        PyMem_Free(tape);
+        sz_py_raise_status(status, "copy()");
+        return NULL;
+    }
+
+    PyObject *owner = PyCapsule_New(tape, sz_py_tape_name_, sz_py_tape_capsule_free_);
+    if (!owner) {
+        sz_py_tape_free_(tape);
+        return NULL;
+    }
+    Strs *result = Strs_alloc_();
+    if (!result) {
+        Py_DECREF(owner);
+        return NULL;
+    }
+    // The block holds the `count + 1` offsets, then the bytes, every offset counted from the block's start.
+    sz_u64_t *const offsets = (sz_u64_t *)tape->sequence.handle;
+    result->layout = STRS_U64_TAPE_VIEW;
+    result->data.u64_tape_view.count = tape->sequence.count;
+    result->data.u64_tape_view.offsets = offsets;
+    result->data.u64_tape_view.data = (sz_cptr_t)offsets;
+    result->data.u64_tape_view.parent = owner;
+    return (PyObject *)result;
 }
 
 /** Frees the owned data/offsets/spans and releases the parent reference held by a @c Strs, per its
@@ -2435,12 +2567,12 @@ static void Strs_release_(Strs *self) {
         if (self->data.u32_tape.data) {
             sz_size_t data_size = self->data.u32_tape.offsets[self->data.u32_tape.count];
             self->data.u32_tape.allocator.free((sz_ptr_t)self->data.u32_tape.data, data_size,
-                                               self->data.u32_tape.allocator.handle);
+                                               self->data.u32_tape.allocator.handle, NULL);
         }
         if (self->data.u32_tape.offsets) {
             sz_size_t offsets_size = (self->data.u32_tape.count + 1) * sizeof(sz_u32_t);
             self->data.u32_tape.allocator.free(self->data.u32_tape.offsets, offsets_size,
-                                               self->data.u32_tape.allocator.handle);
+                                               self->data.u32_tape.allocator.handle, NULL);
         }
         break;
 
@@ -2449,12 +2581,12 @@ static void Strs_release_(Strs *self) {
         if (self->data.u64_tape.data) {
             sz_size_t data_size = self->data.u64_tape.offsets[self->data.u64_tape.count];
             self->data.u64_tape.allocator.free((sz_ptr_t)self->data.u64_tape.data, data_size,
-                                               self->data.u64_tape.allocator.handle);
+                                               self->data.u64_tape.allocator.handle, NULL);
         }
         if (self->data.u64_tape.offsets) {
             sz_size_t offsets_size = (self->data.u64_tape.count + 1) * sizeof(sz_u64_t);
             self->data.u64_tape.allocator.free(self->data.u64_tape.offsets, offsets_size,
-                                               self->data.u64_tape.allocator.handle);
+                                               self->data.u64_tape.allocator.handle, NULL);
         }
         break;
 
@@ -2473,7 +2605,7 @@ static void Strs_release_(Strs *self) {
         if (self->data.fragmented.spans) {
             sz_size_t spans_size = self->data.fragmented.count * sizeof(sz_string_view_t);
             self->data.fragmented.allocator.free(self->data.fragmented.spans, spans_size,
-                                                 self->data.fragmented.allocator.handle);
+                                                 self->data.fragmented.allocator.handle, NULL);
         }
         Py_XDECREF(self->data.fragmented.parent);
         break;
@@ -2531,6 +2663,7 @@ static PyMethodDef Strs_methods[] = {
     {"argsort", Strs_argsort, STRINGZILLA_METHOD_FLAGS, doc_argsort},            //
     {"sample", Strs_sample, STRINGZILLA_METHOD_FLAGS, doc_Strs_sample},          //
     {"intersect", Strs_intersect, STRINGZILLA_METHOD_FLAGS, doc_Strs_intersect}, //
+    {"copy", Strs_copy, STRINGZILLA_METHOD_FLAGS, doc_Strs_copy},                //
     {NULL, NULL, 0, NULL}                                                        // Sentinel
 };
 

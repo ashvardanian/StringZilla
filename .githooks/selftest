@@ -2389,6 +2389,35 @@ assert_accepts "C in a CUDA tier, and prose naming templates" include/stringzill
 extern "C" void sz_probe_cuda(void);
 FIXTURE
 
+assert_rejects "chevron launch in a library unit" "launches with <<< >>>" c/target/probe.cu <<'FIXTURE'
+void probe(void) { sz_probe_simt_kernel_<<<1, 32>>>(); }
+FIXTURE
+
+assert_accepts "launch API in a library unit, and prose naming chevrons" c/target/probe.cu <<'FIXTURE'
+/* Never <<< >>>, which drops the status. */
+void probe(void) { cudaLaunchKernel(kernel, grid, block, arguments, 0, stream); }
+FIXTURE
+
+assert_rejects "vendor test in a host file" "tests the GPU compiler in host code" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_TARGET_CUDA && defined(__CUDACC__) && !defined(__HIP__)
+#if defined(__HIP__)
+void probe(void) { hipFree(0); }
+#endif
+#endif
+FIXTURE
+
+assert_accepts "one top guard in a vendor file" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
+#if STRINGZILLA_TARGET_ROCM && defined(__HIP__)
+void probe(void) { hipFree(0); }
+#endif // STRINGZILLA_TARGET_ROCM && defined(__HIP__)
+FIXTURE
+
+assert_accepts "vendor spelling in a shared kernel" include/stringzilla/probe/simt.cuh <<'FIXTURE'
+#if defined(__HIP__)
+void probe(void) { __builtin_amdgcn_s_barrier(); }
+#endif
+FIXTURE
+
 assert_rejects "export macro in a binding" "exports a binding-internal definition" python/probe.c <<'FIXTURE'
 STRINGZILLA_API void probe(void) {}
 FIXTURE

@@ -60,7 +60,7 @@ where
             form,
             target_slice.as_mut_ptr() as *mut c_void,
             &mut written,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -107,7 +107,7 @@ where
             source_ref.len(),
             form,
             &mut ptr,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

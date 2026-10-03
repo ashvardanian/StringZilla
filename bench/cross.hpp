@@ -1430,10 +1430,10 @@ struct levenshtein_distances_from_sz {
         }
         sz_sequence_t queries;
         sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
-        if (init_(&engine, &queries, symbol, 0, nullptr, nullptr) != sz_success_k)
+        if (init_(&engine, &queries, symbol, nullptr, nullptr) != sz_success_k)
             throw std::runtime_error("The engine could not be prepared.");
     }
-    ~levenshtein_distances_from_sz() { sz_levenshtein_engine_free(&engine); }
+    ~levenshtein_distances_from_sz() { sz_levenshtein_engine_free(&engine, nullptr); }
     levenshtein_distances_from_sz(levenshtein_distances_from_sz const &) = delete;
     levenshtein_distances_from_sz &operator=(levenshtein_distances_from_sz const &) = delete;
 
@@ -1805,10 +1805,10 @@ struct scores_from_sz {
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
         sz_size_t const width = query.width;
-        if (init_(&engine, &queries, &width, 1, 0, 0, &allocator, nullptr) != sz_success_k)
+        if (init_(&engine, &queries, &width, 1, 0, &allocator, nullptr) != sz_success_k)
             throw std::runtime_error("The query forest could not be prepared.");
     }
-    ~scores_from_sz() { sz_overlap_engine_free(&engine); }
+    ~scores_from_sz() { sz_overlap_engine_free(&engine, nullptr); }
     scores_from_sz(scores_from_sz const &) = delete;
     scores_from_sz &operator=(scores_from_sz const &) = delete;
 

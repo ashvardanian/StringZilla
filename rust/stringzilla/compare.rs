@@ -36,7 +36,7 @@ where
             second_ref.as_ptr() as *const c_void,
             second_ref.len(),
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -76,7 +76,7 @@ where
             second_ref.as_ptr() as *const c_void,
             first_ref.len(),
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

@@ -48,9 +48,9 @@ namespace ashvardanian::stringzilla::bench {
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
 sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
-                                         sz_levenshtein_symbol_t symbol, sz_size_t ordinal,
-                                         sz_memory_allocator_t *allocator, void *stream) {
-    return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), ordinal, allocator, stream);
+                                         sz_levenshtein_symbol_t symbol, sz_memory_allocator_t *allocator,
+                                         void *stream) {
+    return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), allocator, stream);
 }
 
 #pragma region One Pair
@@ -80,12 +80,12 @@ struct levenshtein_pair_from_sz {
         sz_sequence_from_string_views(&candidate_view, 1, &candidates);
 
         sz_levenshtein_engine_t engine {};
-        if (sz_levenshtein_engine_init(&engine, &queries, symbol, sz::default_capabilities(), 0, nullptr, nullptr) !=
+        if (sz_levenshtein_engine_init(&engine, &queries, symbol, sz::default_capabilities(), nullptr, nullptr) !=
             sz_success_k)
             throw std::runtime_error("The engine could not be prepared.");
         sz_size_t distance = 0;
         sz_status_t const status = sz_levenshtein_distances(&engine, &candidates, &distance, 1, nullptr);
-        sz_levenshtein_engine_free(&engine);
+        sz_levenshtein_engine_free(&engine, nullptr);
         if (status != sz_success_k) throw std::runtime_error("The one-pair round failed.");
         return call_result_t(query.size() + candidate.size(), distance, query.size() * candidate.size());
     }

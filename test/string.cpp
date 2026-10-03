@@ -310,16 +310,16 @@ void test_allocator_unit() {
     {
         sz_memory_allocator_t allocator;
         sz_memory_allocator_init_default(&allocator);
-        verify(allocator.allocate(0, allocator.handle) == nullptr);
+        verify(allocator.allocate(0, allocator.handle, nullptr) == nullptr);
     }
 
     // Non-NULL allocation
     {
         sz_memory_allocator_t allocator;
         sz_memory_allocator_init_default(&allocator);
-        void *byte = allocator.allocate(1, allocator.handle);
+        void *byte = allocator.allocate(1, allocator.handle, nullptr);
         verify(byte != nullptr && "Default allocator returned NULL for a non-zero-length allocation");
-        allocator.free(byte, 1, allocator.handle);
+        allocator.free(byte, 1, allocator.handle, nullptr);
     }
 
     // Use a fixed buffer
@@ -327,9 +327,9 @@ void test_allocator_unit() {
         char buffer[1024];
         sz_memory_allocator_t allocator;
         sz_memory_allocator_init_fixed(&allocator, buffer, sizeof(buffer));
-        void *byte = allocator.allocate(1, allocator.handle);
+        void *byte = allocator.allocate(1, allocator.handle, nullptr);
         verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
-        allocator.free(byte, 1, allocator.handle);
+        allocator.free(byte, 1, allocator.handle, nullptr);
     }
 }
 
@@ -1438,12 +1438,12 @@ void test_string_reserve_unit() {
     {
         // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
         sz_memory_allocator_t allocator;
-        allocator.allocate = +[](sz_size_t length, void *) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *, void *) -> void * {
             void *const block = std::malloc(length);
             if (block) std::memset(block, '#', length);
             return block;
         };
-        allocator.free = +[](void *block, sz_size_t, void *) { std::free(block); };
+        allocator.free = +[](void *block, sz_size_t, void *, void *) { std::free(block); };
         allocator.handle = nullptr;
 
         sz_string_t str;

@@ -56,7 +56,7 @@ impl TokenizerKernel for Newlines {
             c,
             &mut count,
             u,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
         .infallible();
@@ -77,7 +77,7 @@ impl TokenizerKernel for Whitespaces {
             c,
             &mut count,
             u,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
         .infallible();
@@ -98,7 +98,7 @@ impl TokenizerKernel for Delimiters {
             c,
             &mut count,
             u,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
         .infallible();

@@ -145,6 +145,7 @@ def test_unit_utf8_find_denormalized():
     with _pytest.raises(ValueError, match="unknown form"):
         sz.utf8_find_denormalized("hello", "XYZ")
 
+
 # endregion Unit
 
 
@@ -191,6 +192,7 @@ def test_utf8_norm_canonical_ordering(rng: Random, combining_classes):
                 " ".join(f"{ord(c):04X}" for c in text), " ".join(f"{ord(c):04X}" for c in normalized)
             )
             previous_class = combining_class
+
 
 # endregion Conformance
 
@@ -294,6 +296,7 @@ def test_utf8_norm_prose():
         for form in ("NFC", "NFD", "NFKC", "NFKD"):
             assert sz.utf8_norm(text, form) == icu_normalizer(form)(text).encode("utf-8")
 
+
 # endregion Oracles
 
 
@@ -323,7 +326,7 @@ def test_utf8_norm_backend_differential(text, form):
     every config, for precomposed/decomposed forms, ligatures, combining-mark stacks, and inputs
     straddling the 16/32/64-byte SIMD lanes."""
     expected = unicodedata.normalize(form, text).encode("utf-8")
-    results = run_across_backends(lambda: sz.utf8_norm(text, form))
+    results = run_across_backends(lambda capabilities: sz.utf8_norm(text, form, capabilities=capabilities))
     assert_backends_agree(results, oracle=expected, format_inputs=lambda: f"{text!r} form={form}")
 
 
@@ -331,7 +334,7 @@ def test_utf8_norm_backend_differential(text, form):
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
 def test_utf8_norm_backend_differential_malformed(raw, form):
     """Malformed UTF-8 must normalize identically and never crash across every SIMD backend."""
-    results = run_across_backends(lambda: sz.utf8_norm(raw, form))
+    results = run_across_backends(lambda capabilities: sz.utf8_norm(raw, form, capabilities=capabilities))
     assert_backends_agree(results, format_inputs=lambda: f"{raw.hex()} form={form}")
 
 
@@ -339,8 +342,8 @@ def test_utf8_norm_backend_differential_malformed(raw, form):
 def test_utf8_norm_backend_differential_random(rng: Random, form):
     """Random ASCII corpora must normalize identically across every SIMD backend."""
     text = get_random_string(rng)
-    results = run_across_backends(lambda: sz.utf8_norm(text, form))
+    results = run_across_backends(lambda capabilities: sz.utf8_norm(text, form, capabilities=capabilities))
     assert_backends_agree(results, format_inputs=lambda: f"{text!r} form={form}")
 
-# endregion Backend differential
 
+# endregion Backend differential

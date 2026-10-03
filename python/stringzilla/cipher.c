@@ -106,7 +106,7 @@ static PyObject *Aes256CtrKey_new(PyTypeObject *type, PyObject *args, PyObject *
     Aes256CtrKey *self = (Aes256CtrKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t const status = sz_aes256_key_init_best(&self->key, placeholder_secret, self->capabilities, NULL);
     if (status != sz_success_k) {
         Py_DECREF(self);
@@ -233,7 +233,7 @@ static PyObject *Aes256GcmKey_new(PyTypeObject *type, PyObject *args, PyObject *
     Aes256GcmKey *self = (Aes256GcmKey *)type->tp_alloc(type, 0);
     if (!self) return NULL;
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t const status = sz_aes256_gcm_key_init_best(&self->key, placeholder_secret, self->capabilities, NULL);
     if (status != sz_success_k) {
         Py_DECREF(self);
@@ -534,7 +534,7 @@ static PyObject *Aes256GcmEncryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t status = sz_aes256_gcm_key_init_best(&placeholder_key, placeholder_secret, self->capabilities, NULL);
     if (status == sz_success_k)
         status = sz_aes256_gcm_encryptor_init_best(&self->encryptor, &placeholder_key, placeholder_nonce,
@@ -623,7 +623,7 @@ static PyObject *Aes256GcmDecryptor_new(PyTypeObject *type, PyObject *args, PyOb
     sz_u8_t const placeholder_secret[STRINGZILLA_AES256_KEY_LENGTH] = {0};
     sz_u8_t const placeholder_nonce[STRINGZILLA_AES256_NONCE_LENGTH] = {0};
     sz_aes256_gcm_key_t placeholder_key;
-    self->capabilities = sz_py_enabled_capabilities;
+    self->capabilities = sz_cap_cpus_k;
     sz_status_t status = sz_aes256_gcm_key_init_best(&placeholder_key, placeholder_secret, self->capabilities, NULL);
     if (status == sz_success_k)
         status = sz_aes256_gcm_decryptor_init_best(&self->decryptor, &placeholder_key, placeholder_nonce,

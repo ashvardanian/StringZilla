@@ -231,13 +231,12 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
-                                                      sz_size_t ordinal, sz_memory_allocator_t *allocator,
-                                                      void *stream) {
+                                                      sz_memory_allocator_t *allocator, void *stream) {
     sz_kernel_substrings_engine_init_t const kernel = (sz_kernel_substrings_engine_init_t)sz_kernel_pick_(
         capabilities, sz_substrings_engine_init_capabilities());
     if (!kernel) return sz_missing_kernel_k;
     sz_status_t const status = kernel(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
-                                      haystacks_budget, ordinal, allocator, stream);
+                                      haystacks_budget, allocator, stream);
     if (status != sz_success_k) return status;
     // Init kernels leave the serial copy, which a device mask, finding no copy kernel, never calls.
     sz_kernel_punned_t copy;
@@ -247,7 +246,9 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
     return sz_success_k;
 }
 
-STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine) { sz_substrings_engine_free_(engine); }
+STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine, void *stream) {
+    sz_substrings_engine_free_(engine, stream);
+}
 
 STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                  sz_size_t *counts, sz_size_t counts_stride, void *stream) {

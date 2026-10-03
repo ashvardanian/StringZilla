@@ -70,7 +70,7 @@ pub fn utf8_decode(text: &[u8], runes: &mut [u32]) -> (usize, usize) {
             runes.len(),
             &mut runes_count,
             &mut bytes_consumed,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -116,7 +116,7 @@ where
             text_ref.as_ptr() as *const c_void,
             text_ref.len(),
             &mut count,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -168,7 +168,7 @@ where
             text_length,
             n,
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

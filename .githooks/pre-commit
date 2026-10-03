@@ -14,6 +14,7 @@
 
 set -u
 export LC_ALL=C # Byte-wise regexes, immune to the committer's locale
+unset FORCE_COLOR CLICOLOR_FORCE # Plain tool output, since the checks parse it by its colons
 
 rejection_count=0
 
@@ -2814,6 +2815,29 @@ check_cuda_headers_stay_c() {
         "            write C, and launch with cudaLaunchKernel and an explicit dim3 instead of <<< >>>:"
 }
 
+# Rejects a `<<< >>>` launch in a c/ unit, because it drops the launch status that every library launch reports.
+check_launches_report_status() {
+    local launches
+    launches=$(added_code_text | grep -F '<<<' || true)
+    [ -z "$launches" ] || reject_with_reason "$launches" \
+        "$staged_path launches with <<< >>>, which loses the launch status; call the vendor's launch API:"
+}
+
+# Rejects `__CUDACC__`, `__HIP__` and `__HIP_DEVICE_COMPILE__` in host-side files, because each vendor's host
+# code lives in its own `cuda.cuh` or `rocm.cuh` behind one top guard; only shared kernels in `simt.cuh` and
+# `types.cuh` may spell a device helper per vendor, and types.h derives the target macros from the compiler.
+check_vendor_tested_only_in_kernels() {
+    local tests
+    tests=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        grep -nE '__CUDACC__|__HIP__|__HIP_DEVICE_COMPILE__' |
+        added_list="$staged_added_line_numbers_list" guarded="${staged_path##*/}" awk -F: '
+            BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+            !guard_seen && ENVIRON["guarded"] ~ /^(cuda|rocm)\.cuh$/ && $2 ~ /^#if / { guard_seen = 1; next }
+            ($1 + 0) in added' || true)
+    [ -z "$tests" ] || reject_with_reason "$tests" \
+        "$staged_path tests the GPU compiler in host code; put the body in the vendor's cuda.cuh or rocm.cuh:"
+}
+
 # Rejects an export macro on a binding definition, because the binding declares its helpers plain `extern`
 # and MSVC rejects the mismatched pair as C2375.
 check_binding_exports_absent() {
@@ -2949,12 +2973,12 @@ check_ceiling_divisions_use_helpers() {
     ceilings=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
         added_list="$staged_added_line_numbers_list" awk '
             BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-            /^(STRINGZILLA_CONSTEXPR|constexpr)[^(]*[[:space:]](sz_[a-z0-9]+_)?divide_round_up_?\(/ { helper = 1; next }
+            /^(STRINGZILLA_CONSTEXPR|constexpr)[^(]*[[:space:]](sz_[a-z0-9]+_)?divide_round_up(_[a-z0-9]+)?_?\(/ { helper = 1; next }
             helper { if (/^}/) helper = 0; next }
             (FNR in added) && /\(([^()]|\([^()]*\))+\+([^()]|\([^()]*\))+-[[:space:]]*1[uUlL]*[[:space:]]*\)[[:space:]]*\// { printf "line %d: %s\n", FNR, $0 }' || true)
     [ -z "$ceilings" ] || reject_with_reason "$ceilings" \
         "$staged_path hand-rolls a ceiling division; write sz_size_divide_round_up(value, divisor) in C," \
-        "            divide_round_up(value, divisor) in C++, or sz_metal_divide_round_up_(value, divisor) in Metal:"
+        "            divide_round_up(value, divisor) in C++, or sz_size_divide_round_up_metal_(value, divisor) in Metal:"
 }
 
 # Rejects a format-string shortcut of the CPython API in the binding glue: `Py_BuildValue`, `PyArg_Parse*`,
@@ -3002,14 +3026,22 @@ run_project_checks() {
     esac
     case "${staged_path##*/}" in
     serial.* | westmere.* | goldmont.* | haswell.* | skylake.* | icelake.* | neon.* | neonaes.* | neonsha.* | \
-        sve.* | sve2.* | sve2aes.* | simt.* | blackwell.* | rocm.* | cdna.* | \
+        sve.* | sve2.* | sve2aes.* | simt.* | metal.* | blackwell.* | rocm.* | cdna.* | \
         loongsonasx.* | powervsx.* | rvv.* | rvvcrypto.* | v128.* | v128relaxed.*)
         case "$staged_path" in include/stringzilla/*/*) check_copydoc_absent_in_backends ;; esac
         ;;
     esac
     case "$staged_path" in
     include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_cuda_headers_stay_c ;;
+    c/*.cu | c/*.hip) check_launches_report_status ;;
     python/*.c | python/*/*.c | javascript/*.c) check_binding_exports_absent ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/types.h | include/stringzilla/types.cuh | include/stringzilla/*/simt.cuh) ;;
+    include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/cuda.cuh | include/stringzilla/rocm.cuh | \
+        include/stringzilla/*/cuda.cuh | include/stringzilla/*/rocm.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip)
+        check_vendor_tested_only_in_kernels
+        ;;
     esac
     case "$staged_path" in
     python/*.c | python/*.h) check_cpython_format_shortcuts_absent ;;

@@ -203,15 +203,13 @@ print(try cpu.capabilitiesEnabled.contains(.neon)) // `Capabilities` is an `Opti
 let onThisCpu = try cpu.capabilitiesDetected
 let inThisBinary = cpu.capabilitiesCompiled
 
-// Narrow dispatch before starting threads, and prepare each thread that runs kernels:
-try cpu.capabilitiesEnable(cpu.capabilitiesEnabled.subtracting(.neon))
+// Prepare each thread that runs kernels:
 try cpu.configureThread(cpu.capabilitiesEnabled)
 ```
 
 - `capabilitiesDetected` is what the device can execute, from CPUID or HWCAP on the CPU.
 - `capabilitiesCompiled` is what this binary contains for devices of its kind, from the ISA probes at build time.
-- `capabilitiesEnabled` is what dispatch uses, both axes at once unless narrowed, and on the CPU always contains `.serial`.
-- `capabilitiesEnable(_:)` makes its argument the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `capabilitiesEnabled` is what dispatch uses, both axes at once, and on the CPU always contains `.serial`.
 - `configureThread(_:)` prepares the calling thread for the kernels of its argument, once per thread that runs them.
 
 Reach for `capabilitiesEnabled` unless you specifically mean one of the raw axes.
@@ -225,5 +223,5 @@ let gpu = try Device(kind: .metal, ordinal: 0) // throws past the last one
 print(try gpu.capabilitiesEnabled)             // like "metal"
 ```
 
-`capabilitiesEnable(_:)` and `configureThread(_:)` throw a `StringZilla.Error` on a GPU, which keeps no enabled set or thread state of its own: this package only reports GPU capabilities.
-`.cpus`, `.devices` and `.any` group the CPU capabilities, the GPU ones, and all of them.
+`configureThread(_:)` throws a `StringZilla.Error` on a GPU, which keeps no thread state of its own: this package only reports GPU capabilities.
+`.cpus`, `.gpus` and `.any` group the CPU capabilities, the GPU ones, and all of them.

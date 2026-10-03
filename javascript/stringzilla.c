@@ -15,9 +15,6 @@
 
 #include <stringzilla/stringzilla.h> // `sz_*` functions
 
-/** The mask kernels run with: detected and compiled, unless @c capabilitiesEnable narrows it. */
-static sz_capability_t default_capabilities = sz_cap_serial_k;
-
 /** Throws the @c sz_status_name of a failed @p status; returns whether it succeeded. */
 static bool check_status(napi_env env, sz_status_t status) {
     if (status == sz_success_k) return true;
@@ -94,7 +91,7 @@ napi_value indexOfAPI(napi_env env, napi_callback_info info) {
     else {
         sz_cptr_t result;
         if (!check_status(env, sz_find_best((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle_data,
-                                            needle_length, &result, default_capabilities, NULL)))
+                                            needle_length, &result, sz_cap_cpus_k, NULL)))
             return NULL;
         if (result == NULL) { napi_create_bigint_int64(env, -1, &js_result); }
         else { napi_create_bigint_uint64(env, result - (sz_cptr_t)haystack_data, &js_result); }
@@ -139,7 +136,7 @@ napi_value utf8UncasedFoldAPI(napi_env env, napi_callback_info info) {
     sz_size_t out_length = 0;
     if (source_length &&
         !check_status(env, sz_utf8_uncased_fold_best((sz_cptr_t)source_data, source_length, (sz_ptr_t)destination,
-                                                     &out_length, default_capabilities, NULL))) {
+                                                     &out_length, sz_cap_cpus_k, NULL))) {
         free(destination);
         return NULL;
     }
@@ -196,9 +193,9 @@ napi_value utf8UncasedFindAPI(napi_env env, napi_callback_info info) {
     sz_cptr_t match;
     sz_size_t match_length = 0;
     if (!check_status(env, sz_utf8_uncased_needle_init_best((sz_cptr_t)needle_data, needle_length, &prepared,
-                                                            default_capabilities, NULL)) ||
+                                                            sz_cap_cpus_k, NULL)) ||
         !check_status(env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length, &prepared, &match,
-                                                       &match_length, default_capabilities, NULL)))
+                                                       &match_length, sz_cap_cpus_k, NULL)))
         return NULL;
 
     if (!match) return makeFindResultObject(env, -1, 0);
@@ -239,10 +236,8 @@ napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
         return NULL;
     }
     sz_ptr_t const needle_copy = (sz_ptr_t)(needle + 1);
-    if (!check_status(env,
-                      sz_copy_best(needle_copy, (sz_cptr_t)needle_data, needle_length, default_capabilities, NULL)) ||
-        !check_status(
-            env, sz_utf8_uncased_needle_init_best(needle_copy, needle_length, needle, default_capabilities, NULL))) {
+    if (!check_status(env, sz_copy_best(needle_copy, (sz_cptr_t)needle_data, needle_length, sz_cap_cpus_k, NULL)) ||
+        !check_status(env, sz_utf8_uncased_needle_init_best(needle_copy, needle_length, needle, sz_cap_cpus_k, NULL))) {
         free(needle);
         return NULL;
     }
@@ -283,7 +278,7 @@ napi_value utf8UncasedNeedleFindIn(napi_env env, napi_callback_info info) {
     sz_cptr_t match;
     sz_size_t match_length = 0;
     if (!check_status(env, sz_utf8_uncased_search_best((sz_cptr_t)haystack_data, haystack_length, needle, &match,
-                                                       &match_length, default_capabilities, NULL)))
+                                                       &match_length, sz_cap_cpus_k, NULL)))
         return NULL;
     if (!match) return makeFindResultObject(env, -1, 0);
     return makeFindResultObject(env, (int64_t)(match - (sz_cptr_t)haystack_data), (uint64_t)match_length);
@@ -333,7 +328,7 @@ napi_value utf8NormAPI(napi_env env, napi_callback_info info) {
     sz_size_t out_length = 0;
     if (source_length &&
         !check_status(env, sz_utf8_norm_best((sz_cptr_t)source_data, source_length, form, (sz_ptr_t)destination,
-                                             &out_length, default_capabilities, NULL))) {
+                                             &out_length, sz_cap_cpus_k, NULL))) {
         free(destination);
         return NULL;
     }
@@ -383,7 +378,7 @@ napi_value utf8FindDenormalizedAPI(napi_env env, napi_callback_info info) {
 
     sz_cptr_t violation;
     if (!check_status(env, sz_utf8_find_denormalized_best((sz_cptr_t)source_data, source_length, form, &violation,
-                                                          default_capabilities, NULL)))
+                                                          sz_cap_cpus_k, NULL)))
         return NULL;
 
     napi_value js_result;
@@ -478,7 +473,7 @@ napi_value utf8SegmentsNext(napi_env env, napi_callback_info info) {
         sz_size_t count = 0;
         if (!check_status(env, segments->kernel(segments->text_data + segments->cursor,
                                                 segments->text_length - segments->cursor, segments->batch_lengths,
-                                                sz_iterators_default_steps_k, &count, default_capabilities, NULL)))
+                                                sz_iterators_default_steps_k, &count, sz_cap_cpus_k, NULL)))
             return NULL;
         segments->batch_count = count;
         segments->batch_index = 0;
@@ -534,7 +529,7 @@ napi_value countAPI(napi_env env, napi_callback_info info) {
     while (needle.length && haystack.length) {
         sz_cptr_t match;
         if (!check_status(env, sz_find_best(haystack.start, haystack.length, needle.start, needle.length, &match,
-                                            default_capabilities, NULL)))
+                                            sz_cap_cpus_k, NULL)))
             return NULL;
         if (!match) break;
         ++count;
@@ -568,8 +563,8 @@ napi_value hashAPI(napi_env env, napi_callback_info info) {
 
     // Compute hash using StringZilla
     sz_u64_t hash_result;
-    if (!check_status(
-            env, sz_hash_best((sz_cptr_t)buffer_data, buffer_length, seed, &hash_result, default_capabilities, NULL)))
+    if (!check_status(env,
+                      sz_hash_best((sz_cptr_t)buffer_data, buffer_length, seed, &hash_result, sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert result to JavaScript BigInt
@@ -602,7 +597,7 @@ napi_value hasherConstructor(napi_env env, napi_callback_info info) {
         return NULL;
     }
     hasher->seed = seed;
-    if (!check_status(env, sz_hash_state_init_best(&hasher->state, seed, default_capabilities, NULL))) {
+    if (!check_status(env, sz_hash_state_init_best(&hasher->state, seed, sz_cap_cpus_k, NULL))) {
         free(hasher);
         return NULL;
     }
@@ -628,8 +623,8 @@ napi_value hasherUpdate(napi_env env, napi_callback_info info) {
         return NULL;
     }
 
-    if (!check_status(env, sz_hash_state_update_best(&hasher->state, (sz_cptr_t)buffer_data, buffer_length,
-                                                     default_capabilities, NULL)))
+    if (!check_status(
+            env, sz_hash_state_update_best(&hasher->state, (sz_cptr_t)buffer_data, buffer_length, sz_cap_cpus_k, NULL)))
         return NULL;
     return js_this;
 }
@@ -642,7 +637,7 @@ napi_value hasherDigest(napi_env env, napi_callback_info info) {
     if (!hasher) return NULL;
 
     sz_u64_t hash;
-    if (!check_status(env, sz_hash_state_digest_best(&hasher->state, &hash, default_capabilities, NULL))) return NULL;
+    if (!check_status(env, sz_hash_state_digest_best(&hasher->state, &hash, sz_cap_cpus_k, NULL))) return NULL;
     napi_value js_result;
     napi_create_bigint_uint64(env, hash, &js_result);
 
@@ -656,8 +651,7 @@ napi_value hasherReset(napi_env env, napi_callback_info info) {
     hasher_t *hasher = unwrap_this(env, js_this);
     if (!hasher) return NULL;
 
-    if (!check_status(env, sz_hash_state_init_best(&hasher->state, hasher->seed, default_capabilities, NULL)))
-        return NULL;
+    if (!check_status(env, sz_hash_state_init_best(&hasher->state, hasher->seed, sz_cap_cpus_k, NULL))) return NULL;
     return js_this;
 }
 
@@ -678,10 +672,10 @@ napi_value sha256API(napi_env env, napi_callback_info info) {
     // Compute SHA-256 using StringZilla
     sz_u8_t digest[32];
     sz_sha256_state_t state;
-    if (!check_status(env, sz_sha256_state_init_best(&state, default_capabilities, NULL)) ||
-        !check_status(env, sz_sha256_state_update_best(&state, (sz_cptr_t)buffer_data, buffer_length,
-                                                       default_capabilities, NULL)) ||
-        !check_status(env, sz_sha256_state_digest_best(&state, digest, default_capabilities, NULL)))
+    if (!check_status(env, sz_sha256_state_init_best(&state, sz_cap_cpus_k, NULL)) ||
+        !check_status(
+            env, sz_sha256_state_update_best(&state, (sz_cptr_t)buffer_data, buffer_length, sz_cap_cpus_k, NULL)) ||
+        !check_status(env, sz_sha256_state_digest_best(&state, digest, sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert result to JavaScript Buffer
@@ -706,7 +700,7 @@ napi_value sha256HasherConstructor(napi_env env, napi_callback_info info) {
         napi_throw_error(env, NULL, "Memory allocation failed");
         return NULL;
     }
-    if (!check_status(env, sz_sha256_state_init_best(&hasher->state, default_capabilities, NULL))) {
+    if (!check_status(env, sz_sha256_state_init_best(&hasher->state, sz_cap_cpus_k, NULL))) {
         free(hasher);
         return NULL;
     }
@@ -733,7 +727,7 @@ napi_value sha256HasherUpdate(napi_env env, napi_callback_info info) {
     }
 
     if (!check_status(env, sz_sha256_state_update_best(&hasher->state, (sz_cptr_t)buffer_data, buffer_length,
-                                                       default_capabilities, NULL)))
+                                                       sz_cap_cpus_k, NULL)))
         return NULL;
     return js_this;
 }
@@ -746,8 +740,7 @@ napi_value sha256HasherDigest(napi_env env, napi_callback_info info) {
     if (!hasher) return NULL;
 
     sz_u8_t digest[32];
-    if (!check_status(env, sz_sha256_state_digest_best(&hasher->state, digest, default_capabilities, NULL)))
-        return NULL;
+    if (!check_status(env, sz_sha256_state_digest_best(&hasher->state, digest, sz_cap_cpus_k, NULL))) return NULL;
 
     // Convert result to JavaScript Buffer
     napi_value js_result;
@@ -765,8 +758,7 @@ napi_value sha256HasherHexdigest(napi_env env, napi_callback_info info) {
     if (!hasher) return NULL;
 
     sz_u8_t digest[32];
-    if (!check_status(env, sz_sha256_state_digest_best(&hasher->state, digest, default_capabilities, NULL)))
-        return NULL;
+    if (!check_status(env, sz_sha256_state_digest_best(&hasher->state, digest, sz_cap_cpus_k, NULL))) return NULL;
 
     // Convert to hex string
     char hex[65];
@@ -786,7 +778,7 @@ napi_value sha256HasherReset(napi_env env, napi_callback_info info) {
     sha256_hasher_t *hasher = unwrap_this(env, js_this);
     if (!hasher) return NULL;
 
-    if (!check_status(env, sz_sha256_state_init_best(&hasher->state, default_capabilities, NULL))) return NULL;
+    if (!check_status(env, sz_sha256_state_init_best(&hasher->state, sz_cap_cpus_k, NULL))) return NULL;
     return js_this;
 }
 
@@ -819,7 +811,7 @@ napi_value findLastAPI(napi_env env, napi_callback_info info) {
     else {
         sz_cptr_t result;
         if (!check_status(env, sz_rfind_best((sz_cptr_t)haystack_data, haystack_length, (sz_cptr_t)needle_data,
-                                             needle_length, &result, default_capabilities, NULL)))
+                                             needle_length, &result, sz_cap_cpus_k, NULL)))
             return NULL;
 
         // In JavaScript, if `lastIndexOf` is unable to find the specified value, then it should return -1
@@ -858,7 +850,7 @@ napi_value findByteAPI(napi_env env, napi_callback_info info) {
     char byte_char = (char)byte_value;
     sz_cptr_t result;
     if (!check_status(env, sz_find_byte_best((sz_cptr_t)haystack_data, haystack_length, &byte_char, &result,
-                                             default_capabilities, NULL)))
+                                             sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert the result to JavaScript BigInt and return
@@ -897,7 +889,7 @@ napi_value findLastByteAPI(napi_env env, napi_callback_info info) {
     char byte_char = (char)byte_value;
     sz_cptr_t result;
     if (!check_status(env, sz_rfind_byte_best((sz_cptr_t)haystack_data, haystack_length, &byte_char, &result,
-                                              default_capabilities, NULL)))
+                                              sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert the result to JavaScript BigInt and return
@@ -937,7 +929,7 @@ napi_value findByteFromAPI(napi_env env, napi_callback_info info) {
     for (size_t i = 0; i < allowed_length; i++) { sz_byteset_add_u8(&byteset, ((sz_u8_t *)allowed_data)[i]); }
     sz_cptr_t result;
     if (!check_status(env, sz_find_byteset_best((sz_cptr_t)haystack_data, haystack_length, &byteset, &result,
-                                                default_capabilities, NULL)))
+                                                sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert the result to JavaScript BigInt and return
@@ -977,7 +969,7 @@ napi_value findLastByteFromAPI(napi_env env, napi_callback_info info) {
     for (size_t i = 0; i < allowed_length; i++) { sz_byteset_add_u8(&byteset, ((sz_u8_t *)allowed_data)[i]); }
     sz_cptr_t result;
     if (!check_status(env, sz_rfind_byteset_best((sz_cptr_t)haystack_data, haystack_length, &byteset, &result,
-                                                 default_capabilities, NULL)))
+                                                 sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert the result to JavaScript BigInt and return
@@ -1015,7 +1007,7 @@ napi_value equalAPI(napi_env env, napi_callback_info info) {
     sz_bool_t equal = first_length == second_length ? sz_true_k : sz_false_k;
     if (equal && first_length &&
         !check_status(env, sz_equal_best((sz_cptr_t)first_data, (sz_cptr_t)second_data, first_length, &equal,
-                                         default_capabilities, NULL)))
+                                         sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert to JavaScript boolean and return
@@ -1051,7 +1043,7 @@ napi_value compareAPI(napi_env env, napi_callback_info info) {
     // Compare using sz_order_best
     sz_ordering_t order;
     if (!check_status(env, sz_order_best((sz_cptr_t)first_data, first_length, (sz_cptr_t)second_data, second_length,
-                                         &order, default_capabilities, NULL)))
+                                         &order, sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert to JavaScript number and return
@@ -1077,7 +1069,7 @@ napi_value byteSumAPI(napi_env env, napi_callback_info info) {
 
     // Compute byte sum using sz_bytesum_best
     sz_u64_t sum;
-    if (!check_status(env, sz_bytesum_best((sz_cptr_t)buffer_data, buffer_length, &sum, default_capabilities, NULL)))
+    if (!check_status(env, sz_bytesum_best((sz_cptr_t)buffer_data, buffer_length, &sum, sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert to JavaScript BigInt and return
@@ -1103,8 +1095,7 @@ napi_value utf8CountAPI(napi_env env, napi_callback_info info) {
 
     // Count the UTF-8 codepoints using `sz_utf8_count_best`
     sz_size_t codepoints;
-    if (!check_status(
-            env, sz_utf8_count_best((sz_cptr_t)buffer_data, buffer_length, &codepoints, default_capabilities, NULL)))
+    if (!check_status(env, sz_utf8_count_best((sz_cptr_t)buffer_data, buffer_length, &codepoints, sz_cap_cpus_k, NULL)))
         return NULL;
 
     // Convert to JavaScript BigInt and return
@@ -1152,8 +1143,8 @@ napi_value utf8SeekAPI(napi_env env, napi_callback_info info) {
     // Resolve the codepoint index to a byte offset, or -1 when the text is too short
     sz_cptr_t start = (sz_cptr_t)buffer_data;
     sz_cptr_t found;
-    if (!check_status(env, sz_utf8_seek_best(start, buffer_length, (sz_size_t)codepoint_index, &found,
-                                             default_capabilities, NULL)))
+    if (!check_status(env,
+                      sz_utf8_seek_best(start, buffer_length, (sz_size_t)codepoint_index, &found, sz_cap_cpus_k, NULL)))
         return NULL;
 
     napi_value js_result;
@@ -1245,10 +1236,10 @@ napi_value capabilitiesCompiledAPI(napi_env env, napi_callback_info info) {
 napi_value capabilitiesEnabledAPI(napi_env env, napi_callback_info info) {
     uint32_t kind, ordinal;
     if (!read_device_arguments(env, info, 2, &kind, &ordinal, NULL)) return NULL;
-    sz_capability_t capabilities = default_capabilities;
+    sz_capability_t capabilities = 0;
     sz_status_t status;
     switch (kind) {
-    case device_cpu_k: status = sz_success_k; break;
+    case device_cpu_k: status = sz_cpu_capabilities_enabled(&capabilities); break;
     case device_cuda_k: status = sz_cuda_capabilities_enabled(ordinal, &capabilities); break;
     case device_rocm_k: status = sz_rocm_capabilities_enabled(ordinal, &capabilities); break;
     case device_metal_k: status = sz_metal_capabilities_enabled(ordinal, &capabilities); break;
@@ -1257,21 +1248,8 @@ napi_value capabilitiesEnabledAPI(napi_env env, napi_callback_info info) {
     return capabilities_or_throw(env, status, capabilities);
 }
 
-/** Makes a BigInt mask the CPU's enabled set, clamped to detected and compiled and keeping the
- *  serial fallback, and returns the set that took effect; GPUs keep no such set. */
-napi_value capabilitiesEnableAPI(napi_env env, napi_callback_info info) {
-    uint32_t kind;
-    uint64_t wanted;
-    if (!read_device_arguments(env, info, 2, &kind, NULL, &wanted)) return NULL;
-    if (kind != device_cpu_k) return capabilities_or_throw(env, sz_missing_kernel_k, 0);
-    sz_capability_t available = sz_cap_serial_k;
-    if (!check_status(env, sz_cpu_capabilities_enabled(&available))) return NULL;
-    default_capabilities = ((sz_capability_t)wanted & available) | sz_cap_serial_k;
-    return capabilities_or_throw(env, sz_success_k, default_capabilities);
-}
-
 /** Builds the @c Capability object, mapping each capability's name to its BigInt bit, and the
- *  @c cpus, @c devices and @c any groups to theirs. */
+ *  @c cpus, @c gpus and @c any groups to theirs. */
 static napi_status create_capability_names(napi_env env, napi_value *names) {
     napi_value value;
     napi_status status = napi_create_object(env, names);
@@ -1287,7 +1265,7 @@ static napi_status create_capability_names(napi_env env, napi_value *names) {
     struct {
         char const *name;
         sz_capability_t mask;
-    } const groups[] = {{"cpus", sz_cap_cpus_k}, {"devices", sz_cap_devices_k}, {"any", sz_cap_any_k}};
+    } const groups[] = {{"cpus", sz_cap_cpus_k}, {"gpus", sz_cap_gpus_k}, {"any", sz_cap_any_k}};
     for (size_t group = 0; group != sizeof(groups) / sizeof(groups[0]); ++group)
         if ((status = napi_create_bigint_uint64(env, (uint64_t)groups[group].mask, &value)) != napi_ok ||
             (status = napi_set_named_property(env, *names, groups[group].name, value)) != napi_ok)
@@ -1296,9 +1274,6 @@ static napi_status create_capability_names(napi_env env, napi_value *names) {
 }
 
 napi_value Init(napi_env env, napi_value exports) {
-    sz_cpu_capabilities_enabled(&default_capabilities);
-    sz_cpu_configure_thread(default_capabilities);
-
     // Create Hasher class constructor
     napi_value hasherClass;
     napi_property_descriptor hasherProps[] = {
@@ -1385,8 +1360,6 @@ napi_value Init(napi_env env, napi_value exports) {
                                                          napi_default,           0};
     napi_property_descriptor capabilitiesEnabledDesc = {"capabilitiesEnabled", 0, capabilitiesEnabledAPI, 0, 0, 0,
                                                         napi_default,          0};
-    napi_property_descriptor capabilitiesEnableDesc = {"capabilitiesEnable", 0, capabilitiesEnableAPI, 0, 0, 0,
-                                                       napi_default,         0};
     napi_value capability_names;
     if (create_capability_names(env, &capability_names) != napi_ok) return NULL;
     napi_property_descriptor capabilityDesc = {"Capability", 0, 0, 0, 0, capability_names, napi_default, 0};
@@ -1421,7 +1394,6 @@ napi_value Init(napi_env env, napi_value exports) {
         capabilitiesDetectedDesc,
         capabilitiesCompiledDesc,
         capabilitiesEnabledDesc,
-        capabilitiesEnableDesc,
         capabilityDesc,
     };
 

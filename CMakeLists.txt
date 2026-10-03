@@ -147,14 +147,14 @@ set(sz_in_header_only_suite_
     "$<IN_LIST:$<TARGET_PROPERTY:NAME>,stringzilla_cpu_header_test;stringzilla_cpu_header_bench>"
 )
 if ("STRINGZILLA_TARGET_LOONGSONASX=1" IN_LIST sz_compile_definitions_)
-    set_source_files_properties(c/cpu/loongsonasx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_LOONGSONASX})
+    set_source_files_properties(c/target/loongsonasx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_LOONGSONASX})
     set_source_files_properties(
         test/cross_loongarch64.cpp bench/cross_loongarch64.cpp
         PROPERTIES COMPILE_OPTIONS "$<${sz_in_header_only_suite_}:${sz_kit_flags_LOONGSONASX}>"
     )
 endif ()
 if ("STRINGZILLA_TARGET_POWERVSX=1" IN_LIST sz_compile_definitions_)
-    set_source_files_properties(c/cpu/powervsx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_POWERVSX})
+    set_source_files_properties(c/target/powervsx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_POWERVSX})
     set_source_files_properties(
         test/cross_ppc64.cpp bench/cross_ppc64.cpp PROPERTIES COMPILE_OPTIONS
                                                               "$<${sz_in_header_only_suite_}:${sz_kit_flags_POWERVSX}>"
@@ -349,13 +349,15 @@ target_include_directories(
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
 
 # The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
-# `c/cpu/<capability>.c` defines that capability's kernels once, and each `c/dispatch/<family>.c` holds its family's
-# lists, dispatch points and finder. Globbed, so a new unit needs no entry.
+# `c/target/<capability>.c` defines that capability's kernels once, and each `c/dispatch/<family>.c` holds its family's
+# lists, dispatch points and finder. Globbed, so a new unit needs no entry; the Metal unit joins below, with its own
+# frameworks, beside the CUDA and ROCm ones.
 file(
     GLOB STRINGZILLA_LIBRARY_UNITS_ CONFIGURE_DEPENDS
     RELATIVE ${PROJECT_SOURCE_DIR}
-    ${PROJECT_SOURCE_DIR}/c/cpu/*.c ${PROJECT_SOURCE_DIR}/c/dispatch/*.c
+    ${PROJECT_SOURCE_DIR}/c/target/*.c ${PROJECT_SOURCE_DIR}/c/dispatch/*.c
 )
+list(REMOVE_ITEM STRINGZILLA_LIBRARY_UNITS_ c/target/metal.c)
 set(STRINGZILLA_SHIM_SOURCES c/stringzilla.c ${STRINGZILLA_LIBRARY_UNITS_})
 
 # Defines `stringzilla_shared` or `stringzilla_static` over the sources that follow.
@@ -442,7 +444,7 @@ endforeach ()
 # CPU tests of the dispatch points alone.
 string(REPLACE "=1" "=0" STRINGZILLA_SERIAL_DEFINITIONS_ "${sz_compile_definitions_}")
 
-# Adds one GPU vendor's unit, like `c/nvidia/cuda.cu`, to the archive and the shared library: compiled without the CPU
+# Adds one GPU vendor's unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled without the CPU
 # kits, and linked with the runtime libraries that follow. Both the unit and the libraries' host units see `definition`,
 # so the dispatch lists name the unit's kernels.
 function (sz_add_gpu_unit_ source definition)
@@ -474,13 +476,13 @@ function (sz_add_gpu_unit_ source definition)
 endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
-    sz_add_gpu_unit_(c/nvidia/cuda.cu "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
+    sz_add_gpu_unit_(c/target/cuda.cu "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
 endif ()
 if (STRINGZILLA_BUILD_ROCM)
-    sz_add_gpu_unit_(c/amd/rocm.hip "STRINGZILLA_ARCH_ROCM_=1" hip::host)
+    sz_add_gpu_unit_(c/target/rocm.hip "STRINGZILLA_ARCH_ROCM_=1" hip::host)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
-    sz_add_gpu_unit_(c/apple/metal.c "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
+    sz_add_gpu_unit_(c/target/metal.c "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
 endif ()
 
 # The `stringzilla` extension module, which scikit-build-core builds and packages from `pyproject.toml`, installed at the

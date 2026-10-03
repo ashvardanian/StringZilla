@@ -10,22 +10,20 @@ Author: Ash Vardanian
 Date: June 18, 2023
 """
 
-import contextlib
 import io
 import math
 import os
 import re
 import secrets
 import tempfile
-import threading
 import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from random import Random
 from string import ascii_lowercase
-from typing import TYPE_CHECKING, NewType
+from typing import NewType
 
 # NumPy is available on most platforms and is required for many tests. PyPy on some platforms raises
 # a weird error that is not an `ImportError`, so the naked `except` is a necessary evil.
@@ -43,9 +41,6 @@ try:
     pyarrow_available = True
 except:  # noqa: E722
     pyarrow_available = False
-
-if TYPE_CHECKING:
-    import stringzilla as sz
 
 
 def _write_cache_atomically(cache_path: str, payload: bytes) -> None:
@@ -1448,10 +1443,10 @@ non-negative."""
 
 # region Backend differential sweep
 #
-# Every call dispatches on the CPU's `capabilities_enabled()`, which `capabilities_enable(...)`
-# narrows, so running the same input under `SERIAL` and under `SERIAL | NEON` exercises different
-# kernel code through one binding, and any divergence is a kernel bug, not a binding bug. The
-# helpers below drive that comparison over inputs engineered to stress the SIMD tail/boundary logic.
+# A call passing `capabilities=` dispatches within that mask, so running the same input under
+# `SERIAL` and under `SERIAL | NEON` exercises different kernel code through one binding, and any
+# divergence is a kernel bug, not a binding bug. The helpers below drive that comparison over inputs
+# engineered to stress the SIMD tail/boundary logic.
 
 
 def capability_sweep():
@@ -1459,17 +1454,17 @@ def capability_sweep():
     API, derived from the live hardware so no test hardcodes which backend its kernel uses.
 
     Returns: the serial baseline, then each enabled SIMD capability on its own (atop serial), then all of
-    them together. Built from the CPU's ``capabilities_enabled()``, so it adapts to the host (NEON / NEON-AES /
+    them together. Built from ``cpu_capabilities_enabled()``, so it adapts to the host (NEON / NEON-AES /
     NEON-SHA on Arm; Westmere/Haswell/Skylake/Ice Lake on x86) and collapses to just ``SERIAL`` on a
-    machine with no SIMD capability. Each config is one ``sz.Capability`` mask, suitable for both
-    ``forced_capabilities(config)`` and a ``capabilities=config`` argument. Sweeping every config across
+    machine with no SIMD capability. Each config is one ``sz.Capability`` mask, passed to a call as its
+    ``capabilities=config`` argument. Sweeping every config across
     every API means an API whose kernel ignores a given capability simply re-runs the serial path under
     that config, harmless redundancy, while the config that does enable its SIMD path exercises it. Any
     divergence across the sweep is a kernel bug.
     """
     import stringzilla as sz
 
-    enabled = sz.Device.cpu().capabilities_enabled()
+    enabled = sz.cpu_capabilities_enabled()
     simd = [capability for capability in sz.Capability if capability in enabled and capability != sz.Capability.SERIAL]
     sweep = [sz.Capability.SERIAL] + [sz.Capability.SERIAL | capability for capability in simd]
     if len(simd) > 1:
@@ -1477,35 +1472,9 @@ def capability_sweep():
     return sweep
 
 
-_CAPABILITIES_LOCK = threading.RLock()
-"""Held while a block narrows the process-wide mask, so `--parallel-threads` can't interleave a save and a restore."""
-
-
-@contextlib.contextmanager
-def forced_capabilities(capabilities: "sz.Capability") -> "Iterator[sz.Capability]":
-    """Temporarily make `capabilities` what StringZilla dispatches with, restoring the previous mask on exit.
-
-    Yields the mask active inside the block, which may be smaller than requested, since
-    `capabilities_enable` drops capabilities the hardware lacks. The `finally` restores the mask found on
-    entry, so a failing assertion cannot leak a reduced mask into later tests.
-    """
-    import stringzilla as sz
-
-    with _CAPABILITIES_LOCK:
-        previous = sz.Device.cpu().capabilities_enabled()
-        try:
-            yield sz.Device.cpu().capabilities_enable(capabilities)
-        finally:
-            sz.Device.cpu().capabilities_enable(previous)
-
-
 def run_across_backends(operation) -> dict[object, object]:
-    """Run ``operation()`` under every :func:`capability_sweep` config, returning ``{config: result}``."""
-    results = {}
-    for config in capability_sweep():
-        with forced_capabilities(config):
-            results[config] = operation()
-    return results
+    """Run ``operation(config)`` for every :func:`capability_sweep` config, returning ``{config: result}``."""
+    return {config: operation(config) for config in capability_sweep()}
 
 
 def assert_backends_agree(results, *, oracle=None, format_inputs=None):

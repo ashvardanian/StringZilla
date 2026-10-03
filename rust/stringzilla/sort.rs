@@ -122,7 +122,7 @@ where
             reverse,
             core::ptr::null(),
             order.as_mut_ptr(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     })

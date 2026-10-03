@@ -102,7 +102,7 @@ impl Aes256CtrKey {
             sz_aes256_key_init_best(
                 &mut key as *mut _ as *mut c_void,
                 secret.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -132,7 +132,7 @@ impl Aes256CtrKey {
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -152,7 +152,7 @@ impl Aes256CtrKey {
                 pointer as *const c_void,
                 length,
                 pointer,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -194,7 +194,7 @@ impl Aes256GcmKey {
             sz_aes256_gcm_key_init_best(
                 &mut key as *mut _ as *mut c_void,
                 secret.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -227,7 +227,7 @@ impl Aes256GcmKey {
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
                 tag.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -255,7 +255,7 @@ impl Aes256GcmKey {
                 length,
                 pointer,
                 tag.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -291,7 +291,7 @@ impl Aes256GcmKey {
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
                 tag.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -320,7 +320,7 @@ impl Aes256GcmKey {
                 length,
                 pointer,
                 tag.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -404,7 +404,7 @@ impl Aes256GcmEncryptor {
                 &mut encryptor as *mut _ as *mut c_void,
                 key as *const _ as *const c_void,
                 nonce.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -420,7 +420,7 @@ impl Aes256GcmEncryptor {
                 self as *mut _ as *mut c_void,
                 associated.as_ptr() as *const c_void,
                 associated.len(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -442,7 +442,7 @@ impl Aes256GcmEncryptor {
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -460,7 +460,7 @@ impl Aes256GcmEncryptor {
                 pointer as *const c_void,
                 length,
                 pointer,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -475,7 +475,7 @@ impl Aes256GcmEncryptor {
             sz_aes256_gcm_encryptor_digest_best(
                 self as *const _ as *const c_void,
                 tag.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -496,7 +496,7 @@ impl Aes256GcmDecryptor {
                 &mut decryptor as *mut _ as *mut c_void,
                 key as *const _ as *const c_void,
                 nonce.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -512,7 +512,7 @@ impl Aes256GcmDecryptor {
                 self as *mut _ as *mut c_void,
                 associated.as_ptr() as *const c_void,
                 associated.len(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -540,7 +540,7 @@ impl Aes256GcmDecryptor {
                 text.as_ptr() as *const c_void,
                 text.len(),
                 output.as_mut_ptr() as *mut c_void,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -562,7 +562,7 @@ impl Aes256GcmDecryptor {
                 pointer as *const c_void,
                 length,
                 pointer,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -578,7 +578,7 @@ impl Aes256GcmDecryptor {
             sz_aes256_gcm_decryptor_verify_best(
                 self as *const _ as *const c_void,
                 tag.as_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }

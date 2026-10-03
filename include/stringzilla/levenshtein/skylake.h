@@ -356,9 +356,9 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_skylake(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
-                                                               sz_levenshtein_symbol_t symbol, sz_size_t ordinal,
+                                                               sz_levenshtein_symbol_t symbol,
                                                                sz_memory_allocator_t *allocator, void *stream) {
-    return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_skylake_k, ordinal, allocator, stream);
+    return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_skylake_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,

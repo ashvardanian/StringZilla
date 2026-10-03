@@ -28,15 +28,13 @@ Every call runs on the CPU and dispatches to the best kernel of its enabled capa
 const cpu = sz.Device.cpu();
 console.log(cpu.capabilitiesEnabled()); // what dispatch uses
 console.log((cpu.capabilitiesEnabled() & sz.Capability.haswell) !== 0n);
-cpu.capabilitiesEnable(cpu.capabilitiesEnabled() & ~sz.Capability.skylake); // stop dispatching to AVX-512
 ```
 
 `capabilitiesEnabled()` is the one you usually want, and derives from two independent axes:
 
 - `capabilitiesDetected()`: what this device can execute.
 - `capabilitiesCompiled()`: what this build contains for devices of its kind, from the ISA probes at build time.
-- `capabilitiesEnabled()`: what dispatch uses, both axes at once unless narrowed.
-- `capabilitiesEnable(wanted)`: makes `wanted` the CPU's enabled set, clamped to both axes, and returns what took effect.
+- `capabilitiesEnabled()`: what dispatch uses, both axes at once.
 
 `capabilitiesDetected()` describes the machine and says nothing about whether a kernel was compiled in, so a build whose ISA probes failed still reports your CPU's full feature set while containing no SIMD kernels at all.
 The enabled set always keeps the `serial` fallback.
@@ -52,7 +50,6 @@ gpu.capabilitiesEnabled();         // what that GPU runs, like `Capability.cuda`
 - `Device.cpu()` is the host CPU, which every build has.
 - `Device.count(kind)` counts the devices of `"cpu"`, `"cuda"`, `"rocm"` or `"metal"`, and throws without a GPU of that kind.
 - `new Device(kind, ordinal)` throws a `RangeError` past the last device.
-- `capabilitiesEnable` throws on a GPU, which keeps no enabled set of its own; this binding only reports GPU masks.
 
 `Capability` maps each lowercase capability name, like `haswell`, `neon` or `cuda`, to its bit, and the `cpus`, `devices` and `any` groups to theirs.
 It is built at load from the C library's own names.

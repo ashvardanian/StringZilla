@@ -16,7 +16,7 @@ uv.lock
 .swiftpm/
 .build/
 tmp/
-target/
+/target/
 __pycache__
 .pytest_cache
 .conda

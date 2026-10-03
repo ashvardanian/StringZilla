@@ -80,22 +80,10 @@ class Device {
         return compiled.capabilitiesCompiled(deviceKindIndex(this.kind));
     }
 
-    /** The capabilities this device's calls pass: detected and compiled at once, as a bitmask.
-     *  On the CPU it is what every call passes, narrowed by {@link Device.capabilitiesEnable},
-     *  and always includes `Capability.serial`. */
+    /** The capabilities this device's calls run: detected and compiled at once, as a bitmask.
+     *  On the CPU it always includes `Capability.serial`. */
     capabilitiesEnabled() {
         return compiled.capabilitiesEnabled(deviceKindIndex(this.kind), this.ordinal);
-    }
-
-    /**
-     *  Makes `wanted` the CPU's enabled set, clamped to what it detects and this build compiled,
-     *  and keeping the serial fallback.
-     *  @param wanted - Bitmask of `Capability` bits
-     *  @returns The enabled set that took effect
-     *  @throws On a GPU, which keeps no such set
-     */
-    capabilitiesEnable(wanted) {
-        return compiled.capabilitiesEnable(deviceKindIndex(this.kind), wanted);
     }
 }
 
@@ -219,7 +207,7 @@ export default {
     Device,
 
     /** Lowercase capability names, like `haswell`, `neon` or `cuda`, mapped to their `BigInt` bits,
-     *  and the `cpus`, `devices` and `any` groups to theirs. */
+     *  and the `cpus`, `gpus` and `any` groups to theirs. */
     Capability: Object.freeze(compiled.Capability),
 
     /**

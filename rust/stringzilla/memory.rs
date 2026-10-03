@@ -30,7 +30,7 @@ where
             target_slice.as_mut_ptr() as *mut c_void,
             source_slice.as_ptr() as *const c_void,
             source_slice.len(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -51,7 +51,7 @@ where
             target_slice.as_mut_ptr() as *mut c_void,
             target_slice.len(),
             value,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -79,7 +79,7 @@ where
             target_slice.as_mut_ptr() as *mut c_void,
             source_slice.as_ptr() as *const c_void,
             source_slice.len(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -130,7 +130,7 @@ where
             source_slice.as_ptr() as *const c_void,
             source_slice.len(),
             table.as_ptr(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -169,7 +169,7 @@ where
             buffer_slice.as_ptr() as *const c_void,
             buffer_slice.len(),
             table.as_ptr(),
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -206,7 +206,7 @@ where
             buffer_slice.as_mut_ptr() as *mut c_void,
             buffer_slice.len(),
             nonce,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }
@@ -256,7 +256,7 @@ where
                         buffer.as_mut_ptr().add(write) as *mut c_void,
                         buffer.as_ptr().add(read) as *const c_void,
                         chunk,
-                        enabled_cpu_capabilities_mask(),
+                        Capabilities::CPUS.bits(),
                         core::ptr::null_mut(),
                     )
                 }
@@ -276,7 +276,7 @@ where
                     buffer.as_mut_ptr().add(write) as *mut c_void,
                     buffer.as_ptr().add(read) as *const c_void,
                     chunk,
-                    enabled_cpu_capabilities_mask(),
+                    Capabilities::CPUS.bits(),
                     core::ptr::null_mut(),
                 )
             }
@@ -327,7 +327,7 @@ where
                     buffer.as_mut_ptr().add(write_end - tail_len) as *mut c_void,
                     buffer.as_ptr().add(match_end) as *const c_void,
                     tail_len,
-                    enabled_cpu_capabilities_mask(),
+                    Capabilities::CPUS.bits(),
                     core::ptr::null_mut(),
                 )
             }

@@ -107,7 +107,7 @@ impl<'a> Utf8UncasedNeedle<'a> {
                 needle.as_ptr() as *const c_void,
                 needle.len(),
                 prepared.as_mut_ptr(),
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
             .infallible();
@@ -161,7 +161,7 @@ impl Utf8UncasedNeedleArg for &Utf8UncasedNeedle<'_> {
                 self,
                 &mut result,
                 &mut match_length,
-                enabled_cpu_capabilities_mask(),
+                Capabilities::CPUS.bits(),
                 core::ptr::null_mut(),
             )
         }
@@ -216,7 +216,7 @@ where
             second_ref.as_ptr() as *const c_void,
             second_ref.len(),
             &mut result,
-            enabled_cpu_capabilities_mask(),
+            Capabilities::CPUS.bits(),
             core::ptr::null_mut(),
         )
     }

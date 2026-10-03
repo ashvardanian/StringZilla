@@ -261,7 +261,10 @@
     "Zillable"
   ],
   "files.associations": {
+    "*.cu": "cuda-cpp",
+    "*.cuh": "cuda-cpp",
     "*.gyp": "json",
+    "*.hip": "cuda-cpp",
     "*.metal": "cpp",
     "*.tcc": "cpp",
     "__availability": "cpp",

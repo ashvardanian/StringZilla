@@ -419,7 +419,9 @@ WORDBREAK_REALISTIC_TEXTS = [
 def test_utf8_wordbreaks_backend_differential(text):
     """utf8_wordbreaks must segment identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
-    results = run_across_backends(lambda: [bytes(segment) for segment in sz.utf8_wordbreaks(text)])
+    results = run_across_backends(
+        lambda capabilities: [bytes(segment) for segment in sz.utf8_wordbreaks(text, capabilities=capabilities)]
+    )
     assert_backends_agree(results, format_inputs=lambda: f"text={text!r}")
 
 

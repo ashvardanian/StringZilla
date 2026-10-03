@@ -78,13 +78,6 @@
 #include <windows.h>
 #endif
 
-/* Each GPU vendor's runtime answers only where the unit is compiled for that vendor; the library's
- * host units, which know the vendors it holds, include neither, as the two clash. */
-#if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
-#include <hip/hip_runtime.h> // `hipGetDeviceCount`, `hipDeviceGetAttribute`
-#elif STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__)
-#include <cuda_runtime.h> // `cudaGetDeviceCount`, `cudaDeviceGetAttribute`
-#endif
 #if STRINGZILLA_WITH_METAL
 #include "stringzilla/metal.h" // `sz_metal_list_devices_`, `sz_metal_device_`
 #endif
@@ -133,7 +126,7 @@ typedef sz_u64_t sz_capability_t;
 #define sz_cap_metal_k ((sz_capability_t)1 << 60)
 
 /** Every GPU capability above, which the CPU queries never detect, compile or enable. */
-#define sz_cap_devices_k (sz_cap_cuda_k | sz_cap_rocm_k | sz_cap_metal_k)
+#define sz_cap_gpus_k (sz_cap_cuda_k | sz_cap_rocm_k | sz_cap_metal_k)
 
 /** Every CPU capability, the bits below the first GPU vendor's. */
 #define sz_cap_cpus_k (sz_cap_cuda_k - 1)
@@ -722,7 +715,7 @@ typedef sz_status_t (*sz_kernel_sequence_intersect_t)(struct sz_sequence_t const
 /** Signature of every @c sz_levenshtein_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein_engine_t *,
                                                            struct sz_sequence_t const *, sz_levenshtein_symbol_t,
-                                                           sz_size_t, sz_memory_allocator_t *, void *);
+                                                           sz_memory_allocator_t *, void *);
 
 /** Signature of every @c sz_levenshtein_distances kernel, at either alphabet. */
 typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
@@ -734,8 +727,8 @@ typedef sz_status_t (*sz_kernel_levenshtein_distance_tiled_t)(sz_cptr_t, sz_size
 
 /** Signature of every @c sz_overlap_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
-                                                       sz_size_t const *, sz_size_t, sz_size_t, sz_size_t,
-                                                       sz_memory_allocator_t *, void *);
+                                                       sz_size_t const *, sz_size_t, sz_size_t, sz_memory_allocator_t *,
+                                                       void *);
 
 /** Signature of every @c sz_overlap_scores kernel. */
 typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
@@ -745,7 +738,7 @@ typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, 
 typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
                                                           sz_substrings_case_sensitivity_t,
                                                           sz_substrings_overlap_policy_t, sz_size_t, sz_size_t,
-                                                          sz_size_t, sz_size_t, sz_memory_allocator_t *, void *);
+                                                          sz_size_t, sz_memory_allocator_t *, void *);
 
 /** Signature of every @c sz_substrings_counts kernel. */
 typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
@@ -1139,7 +1132,8 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_(void) {
  *  The two axes are independent, and conflating them is a silent performance cliff rather than a
  *  build error: a binary whose ISA probes failed still reports this machine's full @b detected
  *  mask while containing no SIMD kernels at all. Ask for @b enabled() unless you specifically mean
- *  one of the raw axes. */
+ *  one of the raw axes. The library's lookups clamp every CPU mask to @b enabled() themselves, so
+ *  @c sz_cap_cpus_k dispatches to the same kernels. */
 
 STRINGZILLA_API sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities);
 STRINGZILLA_API sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities);
@@ -1214,54 +1208,8 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
 
 #endif // STRINGZILLA_HEADER_ONLY
 
-/*  Each vendor's helpers answer from its runtime where the translation unit is compiled for that
- *  vendor, and report no devices elsewhere. */
-
-/** How many CUDA devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_count_devices_(void) {
-#if STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__)
-    int count = 0;
-    return cudaGetDeviceCount(&count) == cudaSuccess ? (sz_size_t)count : 0;
-#else
-    return 0;
-#endif
-}
-
-/** The capabilities CUDA device @p device runs, by the runtime's own ordinal. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_capabilities_detected_(sz_size_t device, sz_capability_t *capabilities) {
-    *capabilities = 0;
-    if (device >= sz_cuda_count_devices_()) return sz_missing_gpu_k;
-#if STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__)
-    int multiprocessors = 0;
-    if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, (int)device) != cudaSuccess)
-        return sz_device_code_mismatch_k;
-    if (multiprocessors > 0) *capabilities = sz_cap_cuda_k;
-#endif
-    return sz_success_k;
-}
-
-/** How many ROCm devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_rocm_count_devices_(void) {
-#if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
-    int count = 0;
-    return hipGetDeviceCount(&count) == hipSuccess ? (sz_size_t)count : 0;
-#else
-    return 0;
-#endif
-}
-
-/** The capabilities ROCm device @p device runs, by the runtime's own ordinal. */
-STRINGZILLA_INLINE sz_status_t sz_rocm_capabilities_detected_(sz_size_t device, sz_capability_t *capabilities) {
-    *capabilities = 0;
-    if (device >= sz_rocm_count_devices_()) return sz_missing_gpu_k;
-#if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
-    int multiprocessors = 0;
-    if (hipDeviceGetAttribute(&multiprocessors, hipDeviceAttributeMultiprocessorCount, (int)device) != hipSuccess)
-        return sz_device_code_mismatch_k;
-    if (multiprocessors > 0) *capabilities = sz_cap_rocm_k;
-#endif
-    return sz_success_k;
-}
+/*  The CUDA and ROCm producers answer from their runtimes in `cuda.cuh` and `rocm.cuh`, which only
+ *  their own compilers reach; Metal's answer from here, behind the switch the build stamps. */
 
 /** How many Metal devices the system lists, or zero. */
 STRINGZILLA_INLINE sz_size_t sz_metal_count_devices_(void) {
@@ -1272,13 +1220,13 @@ STRINGZILLA_INLINE sz_size_t sz_metal_count_devices_(void) {
 #endif
 }
 
-/** The capabilities Metal device @p device runs, in the order the system lists them. The baseline
+/** The capabilities Metal device @p ordinal runs, in the order the system lists them. The baseline
  *  needs Apple7, whose threadgroup atomics and simdgroup scans the kernels use. */
-STRINGZILLA_INLINE sz_status_t sz_metal_capabilities_detected_(sz_size_t device, sz_capability_t *capabilities) {
+STRINGZILLA_INLINE sz_status_t sz_metal_capabilities_detected_(sz_size_t ordinal, sz_capability_t *capabilities) {
     *capabilities = 0;
-    if (device >= sz_metal_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_metal_count_devices_()) return sz_missing_gpu_k;
 #if STRINGZILLA_WITH_METAL
-    void *const metal_device = sz_metal_device_(device);
+    void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
     SEL const supports = sel_registerName("supportsFamily:");
     sz_size_t const apple7 = 1007; // `MTLGPUFamilyApple7`
@@ -1287,6 +1235,33 @@ STRINGZILLA_INLINE sz_status_t sz_metal_capabilities_detected_(sz_size_t device,
     sz_metal_do_(metal_device, "release");
 #endif
     return sz_success_k;
+}
+
+/** Opens a command queue on Metal device @p ordinal, in the order the system lists them. */
+STRINGZILLA_INLINE sz_status_t sz_metal_stream_init_(sz_size_t ordinal, void **stream) {
+    *stream = STRINGZILLA_NULL;
+    if (ordinal >= sz_metal_count_devices_()) return sz_missing_gpu_k;
+#if STRINGZILLA_WITH_METAL
+    void *const metal_device = sz_metal_device_(ordinal);
+    if (!metal_device) return sz_device_code_mismatch_k;
+    *stream = sz_metal_get_(metal_device, "newCommandQueue");
+    sz_metal_do_(metal_device, "release");
+    if (!*stream) return sz_bad_alloc_k;
+#endif
+    return sz_success_k;
+}
+
+/** Waits for @p stream, so its command buffers and the frees deferred behind it drain, then
+ *  releases it; a null stream is the default one, which is only waited for. */
+STRINGZILLA_INLINE sz_status_t sz_metal_stream_free_(void *stream) {
+#if STRINGZILLA_WITH_METAL
+    sz_status_t const status = sz_stream_synchronize_metal(stream);
+    sz_metal_do_(stream, "release");
+    return status;
+#else
+    sz_unused_(stream);
+    return sz_missing_gpu_k;
+#endif
 }
 
 /** The CUDA capabilities this binary holds kernels for. */
@@ -1314,7 +1289,10 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_metal_capabilities_compiled_(void) {
  *  - @b sz_cuda_capabilities_enabled() — both at once: the mask to dispatch on that device with.
  *
  *  ROCm and Metal have the same four. Nothing is cached, as the runtimes answer from their own
- *  state: ask once per device and keep the mask. */
+ *  state: ask once per device and keep the mask. Each vendor also makes a stream on one device
+ *  with @b sz_cuda_stream_init() and frees it with @b sz_cuda_stream_free(), for a caller without
+ *  the vendor's runtime at hand. These are the only functions an ordinal reaches: everything
+ *  consuming a mask takes a stream instead, which names its device. */
 
 /**
  *  @brief Counts the CUDA devices the process sees.
@@ -1323,75 +1301,120 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_metal_capabilities_compiled_(void) {
 STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count);
 
 /**
- *  @brief Reports the capabilities CUDA device @p device runs.
- *  @param[in] device The CUDA runtime's ordinal, like @c cudaSetDevice takes.
+ *  @brief Reports the capabilities CUDA device @p ordinal runs.
+ *  @param[in] ordinal The CUDA runtime's device index, like @c cudaSetDevice takes.
  *  @param[out] capabilities The CUDA baseline and what the device runs, zero on failure.
  *  @return @c sz_success_k, @c sz_missing_gpu_k past the last device, or
  *      @c sz_device_code_mismatch_k when the runtime fails to answer.
  */
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Reports the CUDA capabilities this binary holds kernels for. */
 STRINGZILLA_API sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities);
 
 /** @copydoc sz_cuda_capabilities_detected, narrowed to what this binary holds kernels for. */
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+
+/** Creates a stream on CUDA device @p ordinal with @c cudaStreamCreate. */
+STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream);
+
+/** Destroys a stream of @ref sz_cuda_stream_init with @c cudaStreamDestroy, once its work ends. */
+STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream);
 
 /** @copydoc sz_cuda_count_devices, for ROCm. */
 STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count);
 
 /** @copydoc sz_cuda_capabilities_detected, for ROCm, whose ordinal @c hipSetDevice takes. */
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** @copydoc sz_cuda_capabilities_compiled, for ROCm. */
 STRINGZILLA_API sz_status_t sz_rocm_capabilities_compiled(sz_capability_t *capabilities);
 
 /** @copydoc sz_cuda_capabilities_enabled, for ROCm. */
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+
+/** Creates a stream on ROCm device @p ordinal with @c hipStreamCreate. */
+STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream);
+
+/** Destroys a stream of @ref sz_rocm_stream_init with @c hipStreamDestroy, once its work ends. */
+STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream);
 
 /** @copydoc sz_cuda_count_devices, for Metal. */
 STRINGZILLA_API sz_status_t sz_metal_count_devices(sz_size_t *count);
 
 /** @copydoc sz_cuda_capabilities_detected, for Metal, whose devices count in system order. */
-STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** @copydoc sz_cuda_capabilities_compiled, for Metal. */
 STRINGZILLA_API sz_status_t sz_metal_capabilities_compiled(sz_capability_t *capabilities);
 
 /** @copydoc sz_cuda_capabilities_enabled, for Metal. */
-STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+
+/** Opens an @c id<MTLCommandQueue> stream on Metal device @p ordinal with @c newCommandQueue. */
+STRINGZILLA_API sz_status_t sz_metal_stream_init(sz_size_t ordinal, void **stream);
+
+/** Waits for a queue of @ref sz_metal_stream_init, then releases it. */
+STRINGZILLA_API sz_status_t sz_metal_stream_free(void *stream);
 
 #if STRINGZILLA_HEADER_ONLY
 
+/*  Compiled for CUDA or ROCm, the producers come from `cuda.cuh` or `rocm.cuh`, included below. */
+#if !STRINGZILLA_TARGET_CUDA
 STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count) {
-    *count = sz_cuda_count_devices_();
-    return *count ? sz_success_k : sz_missing_gpu_k;
+    *count = 0;
+    return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t device, sz_capability_t *capabilities) {
-    return sz_cuda_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_gpu_k;
 }
+STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream) {
+    sz_unused_(ordinal);
+    *stream = STRINGZILLA_NULL;
+    return sz_missing_gpu_k;
+}
+STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream) {
+    sz_unused_(stream);
+    return sz_missing_gpu_k;
+}
+#endif // !STRINGZILLA_TARGET_CUDA
 STRINGZILLA_API sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities) {
     *capabilities = sz_cuda_capabilities_compiled_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_cuda_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_cuda_capabilities_detected(ordinal, capabilities);
     *capabilities &= sz_cuda_capabilities_compiled_();
     return status;
 }
+#if !STRINGZILLA_TARGET_ROCM
 STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count) {
-    *count = sz_rocm_count_devices_();
-    return *count ? sz_success_k : sz_missing_gpu_k;
+    *count = 0;
+    return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t device, sz_capability_t *capabilities) {
-    return sz_rocm_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_unused_(ordinal);
+    *capabilities = 0;
+    return sz_missing_gpu_k;
 }
+STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream) {
+    sz_unused_(ordinal);
+    *stream = STRINGZILLA_NULL;
+    return sz_missing_gpu_k;
+}
+STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream) {
+    sz_unused_(stream);
+    return sz_missing_gpu_k;
+}
+#endif // !STRINGZILLA_TARGET_ROCM
 STRINGZILLA_API sz_status_t sz_rocm_capabilities_compiled(sz_capability_t *capabilities) {
     *capabilities = sz_rocm_capabilities_compiled_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_rocm_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_rocm_capabilities_detected(ordinal, capabilities);
     *capabilities &= sz_rocm_capabilities_compiled_();
     return status;
 }
@@ -1399,23 +1422,33 @@ STRINGZILLA_API sz_status_t sz_metal_count_devices(sz_size_t *count) {
     *count = sz_metal_count_devices_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t device, sz_capability_t *capabilities) {
-    return sz_metal_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
+    return sz_metal_capabilities_detected_(ordinal, capabilities);
 }
 STRINGZILLA_API sz_status_t sz_metal_capabilities_compiled(sz_capability_t *capabilities) {
     *capabilities = sz_metal_capabilities_compiled_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t device, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_metal_capabilities_detected_(device, capabilities);
+STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_metal_capabilities_detected_(ordinal, capabilities);
     *capabilities &= sz_metal_capabilities_compiled_();
     return status;
 }
+STRINGZILLA_API sz_status_t sz_metal_stream_init(sz_size_t ordinal, void **stream) {
+    return sz_metal_stream_init_(ordinal, stream);
+}
+STRINGZILLA_API sz_status_t sz_metal_stream_free(void *stream) { return sz_metal_stream_free_(stream); }
 
 #endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 } // extern "C"
+#endif
+
+/*  After the declarations they define, outside `extern "C"`, as the runtimes declare templates. */
+#if STRINGZILLA_HEADER_ONLY
+#include "stringzilla/cuda.cuh"
+#include "stringzilla/rocm.cuh"
 #endif
 
 #endif // STRINGZILLA_CAPABILITIES_H_

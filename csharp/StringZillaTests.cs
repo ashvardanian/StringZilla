@@ -105,19 +105,11 @@ public class StringZillaTests {
     }
 
     [Fact]
-    public void Capabilities_EnableClampsAndKeepsSerial() {
+    public void Capabilities_EnabledIsDetectedAndCompiledWithSerial() {
         Device cpu = Device.Cpu;
         ulong enabled = cpu.CapabilitiesEnabled;
-        try {
-            Assert.Equal(1UL, enabled & 1);
-            Assert.Equal(0UL, enabled & ~(cpu.CapabilitiesDetected & cpu.CapabilitiesCompiled));
-            Assert.Equal(1UL, cpu.CapabilitiesEnable(0));
-            Assert.Equal(1UL, cpu.CapabilitiesEnabled);
-            Assert.Equal(6L, Sz.IndexOf(B("hello world"), B("world")));
-        }
-        finally {
-            Assert.Equal(enabled, cpu.CapabilitiesEnable(enabled));
-        }
+        Assert.Equal(1UL, enabled & 1);
+        Assert.Equal(enabled, cpu.CapabilitiesDetected & cpu.CapabilitiesCompiled);
     }
 
     [Fact]
@@ -132,7 +124,6 @@ public class StringZillaTests {
             Assert.Throws<StatusException>(() => new Device(kind, count));
             Device gpu = new(kind, 0);
             Assert.Equal(0UL, gpu.CapabilitiesCompiled & ((1UL << 48) - 1));
-            Assert.Throws<StatusException>(() => gpu.CapabilitiesEnable(ulong.MaxValue));
             Assert.Throws<StatusException>(() => gpu.ConfigureThread(ulong.MaxValue));
         }
     }

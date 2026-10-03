@@ -847,14 +847,14 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
     // included in those P-long words, so in reality every iteration of the recursive algorithm
     // takes (P-1) bytes from each string.
     sz_size_t memory_usage = sequence->count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!pgrams) return sz_bad_alloc_k;
 
     // Recursively sort the whole sequence.
     sz_sequence_argsort_sort_byte_windows_serial_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
 
     // Free temporary storage.
-    allocator->free(pgrams, memory_usage, allocator->handle);
+    allocator->free(pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
@@ -876,12 +876,12 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(            //
 
     // Just a pgram buffer: the sort is stateless across windows, re-folding each prefix on demand.
     sz_size_t const memory_usage = count * sizeof(sz_pgram_t);
-    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
+    sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!pgrams) return sz_bad_alloc_k;
 
     sz_sequence_argsort_sort_casefold_windows_serial_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
 
-    allocator->free(pgrams, memory_usage, allocator->handle);
+    allocator->free(pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 

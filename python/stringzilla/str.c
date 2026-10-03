@@ -316,7 +316,7 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
 
     // An embedded NUL would silently truncate the path at `fopen`; reject it like CPython's open()
     sz_cptr_t null_byte = NULL;
-    sz_status_t status = sz_find_byte_best(path.start, path.length, "\0", &null_byte, sz_py_enabled_capabilities, NULL);
+    sz_status_t status = sz_find_byte_best(path.start, path.length, "\0", &null_byte, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         sz_py_raise_status(status, "write_to()");
         return NULL;
@@ -338,7 +338,7 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
         return NULL;
     }
-    status = sz_copy_best(path_buffer, path.start, path.length, sz_py_enabled_capabilities, NULL);
+    status = sz_copy_best(path_buffer, path.start, path.length, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         free(path_buffer);
         sz_py_raise_status(status, "write_to()");
@@ -450,10 +450,9 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
 
     // Perform the string concatenation
     sz_ptr_t const target = (sz_ptr_t)result_str->memory.start;
-    sz_status_t status = sz_copy_best(target, self_str.start, self_str.length, sz_py_enabled_capabilities, NULL);
+    sz_status_t status = sz_copy_best(target, self_str.start, self_str.length, sz_cap_cpus_k, NULL);
     if (status == sz_success_k)
-        status = sz_copy_best(target + self_str.length, other_str.start, other_str.length, sz_py_enabled_capabilities,
-                              NULL);
+        status = sz_copy_best(target + self_str.length, other_str.start, other_str.length, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
         Py_DECREF(result_str);
         sz_py_raise_status(status, "Str concatenation");

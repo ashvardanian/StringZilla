@@ -38,7 +38,7 @@ func Utf8CaseFold(str string, validate bool) (string, error) {
 	dst := make([]byte, len(str)*3)
 	var outLen C.sz_size_t
 	if err := statusError(C.sz_utf8_uncased_fold_best(srcPtr, srcLen, (*C.char)(unsafe.Pointer(&dst[0])), &outLen,
-		capabilities(), nil)); err != nil {
+		C.sz_cap_cpus_k, nil)); err != nil {
 		return "", err
 	}
 	return string(dst[:outLen]), nil
@@ -54,7 +54,7 @@ func Utf8Count(str string) int {
 	}
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	var count C.sz_size_t
-	check(C.sz_utf8_count_best(strPtr, C.sz_size_t(len(str)), &count, capabilities(), nil))
+	check(C.sz_utf8_count_best(strPtr, C.sz_size_t(len(str)), &count, C.sz_cap_cpus_k, nil))
 	return int(count)
 }
 
@@ -83,7 +83,7 @@ func Utf8Normalize(str string, form NormalForm) string {
 	dst := make([]byte, len(str)*18)
 	var outLen C.sz_size_t
 	check(C.sz_utf8_norm_best(srcPtr, C.sz_size_t(len(str)), C.sz_normal_form_t(form),
-		(*C.char)(unsafe.Pointer(&dst[0])), &outLen, capabilities(), nil))
+		(*C.char)(unsafe.Pointer(&dst[0])), &outLen, C.sz_cap_cpus_k, nil))
 	return string(dst[:outLen])
 }
 
@@ -102,7 +102,7 @@ func Utf8CaseInsensitiveFind(haystack, needle string, validate bool) (index int6
 	pinner.Pin(unsafe.StringData(needle))
 	var prepared C.sz_utf8_uncased_needle_t
 	if err := statusError(C.sz_utf8_uncased_needle_init_best((*C.char)(unsafe.Pointer(unsafe.StringData(needle))),
-		C.sz_size_t(len(needle)), &prepared, capabilities(), nil)); err != nil {
+		C.sz_size_t(len(needle)), &prepared, C.sz_cap_cpus_k, nil)); err != nil {
 		return -1, 0, err
 	}
 	return utf8UncasedSearch(haystack, &prepared)
@@ -124,7 +124,7 @@ func NewUtf8CaseInsensitiveNeedle(needle string, validate bool) (*Utf8CaseInsens
 	bytes := C.CString(needle)
 	n := &Utf8CaseInsensitiveNeedle{}
 	if err := statusError(C.sz_utf8_uncased_needle_init_best(bytes, C.sz_size_t(len(needle)), &n.prepared,
-		capabilities(), nil)); err != nil {
+		C.sz_cap_cpus_k, nil)); err != nil {
 		C.free(unsafe.Pointer(bytes))
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func utf8UncasedSearch(haystack string, needle *C.sz_utf8_uncased_needle_t) (ind
 	var matchPtr C.sz_cptr_t
 	var matchedLen C.sz_size_t
 	if err := statusError(C.sz_utf8_uncased_search_best(hPtr, C.sz_size_t(len(haystack)), needle, &matchPtr,
-		&matchedLen, capabilities(), nil)); err != nil {
+		&matchedLen, C.sz_cap_cpus_k, nil)); err != nil {
 		return -1, 0, err
 	}
 	if matchPtr == nil {

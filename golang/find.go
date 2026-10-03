@@ -17,7 +17,7 @@ func Contains(str string, substr string) bool {
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	substrLen := len(substr)
 	var matchPtr C.sz_cptr_t
-	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
+	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, C.sz_cap_cpus_k, nil))
 	return matchPtr != nil
 }
 
@@ -33,7 +33,7 @@ func Index(str string, substr string) int64 {
 	strLen := len(str)
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	var matchPtr C.sz_cptr_t
-	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
+	check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -52,7 +52,7 @@ func LastIndex(str string, substr string) int64 {
 	strPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(str)))
 	substrPtr := (*C.char)(unsafe.Pointer(unsafe.StringData(substr)))
 	var matchPtr C.sz_cptr_t
-	check(C.sz_rfind_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, capabilities(), nil))
+	check(C.sz_rfind_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr, C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -67,7 +67,7 @@ func IndexByte(str string, c byte) int64 {
 	strLen := len(str)
 	cPtr := (*C.char)(unsafe.Pointer(&c))
 	var matchPtr C.sz_cptr_t
-	check(C.sz_find_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, capabilities(), nil))
+	check(C.sz_find_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -82,7 +82,7 @@ func LastIndexByte(str string, c byte) int64 {
 	strLen := len(str)
 	cPtr := (*C.char)(unsafe.Pointer(&c))
 	var matchPtr C.sz_cptr_t
-	check(C.sz_rfind_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, capabilities(), nil))
+	check(C.sz_rfind_byte_best(strPtr, C.sz_size_t(strLen), cPtr, &matchPtr, C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -107,7 +107,7 @@ func IndexAny(str string, substr string) int64 {
 	set := byteset(substr)
 	var matchPtr C.sz_cptr_t
 	check(C.sz_find_byteset_best(strPtr, C.sz_size_t(strLen), (*C.sz_byteset_t)(unsafe.Pointer(&set)), &matchPtr,
-		capabilities(), nil))
+		C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -124,7 +124,7 @@ func LastIndexAny(str string, substr string) int64 {
 	set := byteset(substr)
 	var matchPtr C.sz_cptr_t
 	check(C.sz_rfind_byteset_best(strPtr, C.sz_size_t(strLen), (*C.sz_byteset_t)(unsafe.Pointer(&set)), &matchPtr,
-		capabilities(), nil))
+		C.sz_cap_cpus_k, nil))
 	if matchPtr == nil {
 		return -1
 	}
@@ -155,7 +155,7 @@ func Count(str string, substr string, overlap bool) int64 {
 	for strLen > 0 {
 		var matchPtr C.sz_cptr_t
 		check(C.sz_find_best(strPtr, C.sz_size_t(strLen), substrPtr, C.sz_size_t(substrLen), &matchPtr,
-			capabilities(), nil))
+			C.sz_cap_cpus_k, nil))
 		if matchPtr == nil {
 			break
 		}

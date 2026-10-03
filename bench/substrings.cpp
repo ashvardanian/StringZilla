@@ -55,10 +55,10 @@ struct substrings_build_from_sz {
         sz_memory_allocator_init_default(&allocator);
         if (sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity,
                                       sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                      sz::default_capabilities(), 0, &allocator, nullptr) != sz_success_k)
+                                      sz::default_capabilities(), &allocator, nullptr) != sz_success_k)
             throw std::runtime_error("The vocabulary would not compile.");
         check_value_t const mixed = (check_value_t)engine.state_count * 31u + engine.max_outputs_per_state;
-        sz_substrings_engine_free(&engine);
+        sz_substrings_engine_free(&engine, nullptr);
         call_result_t result(dictionary.needle_bytes, mixed, dictionary.needle_bytes);
         return result;
     }

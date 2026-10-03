@@ -154,7 +154,7 @@ jobs:
           import stringzilla as sz
           print("platform:", platform.platform())
           print("machine:", platform.machine(), "processor:", platform.processor())
-          print("capabilities:", repr(sz.Device.cpu().capabilities_enabled()))
+          print("capabilities:", repr(sz.cpu_capabilities_enabled()))
           PY
       - name: Test Python
         run: python -X faulthandler -m pytest -x
@@ -168,9 +168,9 @@ jobs:
       - name: Build and test JavaScript
         run: npm install --ignore-scripts --omit=optional && npm run prebuild && npm test
 
-      # Rust
+      # Rust, on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Test Rust no_std
@@ -266,14 +266,14 @@ jobs:
           import stringzilla as sz
           print("platform:", platform.platform())
           print("machine:", platform.machine(), "processor:", platform.processor())
-          print("capabilities:", repr(sz.Device.cpu().capabilities_enabled()))
+          print("capabilities:", repr(sz.cpu_capabilities_enabled()))
           PY
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
-        # Rust
+        # Rust, on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Test Rust no_std
@@ -423,7 +423,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Link Rust tests with CUDA
         run: cargo test --features cuda --no-run
 
@@ -437,7 +437,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Link Rust tests with ROCm
         run: cargo test --features rocm --no-run
 
@@ -756,7 +756,7 @@ jobs:
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           targets: wasm32-wasip1
 
@@ -834,9 +834,9 @@ jobs:
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
-        # Rust
+        # Rust, on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Test Rust no_std
@@ -1012,9 +1012,9 @@ jobs:
       - name: Test Python
         run: python -X faulthandler -m pytest -x
 
-        # Rust
+        # Rust, on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Build Rust no_std
@@ -1064,9 +1064,9 @@ jobs:
       - name: Test Python
         run: python3 -X faulthandler -m pytest -x
 
-        # Rust
+        # Rust, on nightly until 1.100 reaches stable, as `rust-version` rejects any older compiler
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Test Rust no_std
@@ -1247,5 +1247,6 @@ jobs:
         env:
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-          # STRINGZILLA_IN_QEMU disables tricky SIMD; STRINGZILLA_SCALE matches `test_cross_qemu`.
-          CIBW_ENVIRONMENT_LINUX: STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05
+          # QEMU_CPU drops the SVE kits, whose emulation is flaky; STRINGZILLA_SCALE matches `test_cross_qemu`.
+          CIBW_ENVIRONMENT_LINUX: >-
+            STRINGZILLA_IN_QEMU=1 STRINGZILLA_SCALE=0.05${{ matrix.arch == 'aarch64' && ' QEMU_CPU=max,sve=off' || '' }}
