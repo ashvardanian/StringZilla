@@ -786,6 +786,11 @@ if (STRINGZILLA_BUILD_TEST)
     define_launcher(stringzilla_test_cpp17 17 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
     define_launcher(stringzilla_test_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" ${STRINGZILLA_TEST_SOURCES})
 
+    # The STL-free build has its own translation unit: the suites above exercise the `std::string` interop that
+    # `SZ_AVOID_STL=1` removes, so they cannot double as its coverage. C++11 pins the floor, C++20 the ceiling.
+    define_launcher(stringzilla_test_avoid_stl_cpp11 11 "${STRINGZILLA_TARGET_ARCH}" test/avoid_stl.cpp)
+    define_launcher(stringzilla_test_avoid_stl_cpp20 20 "${STRINGZILLA_TARGET_ARCH}" test/avoid_stl.cpp)
+
     # Test parallel algorithms separately; link the static archive when the libraries are built. StringZillas requires
     # C++20 as the minimum language standard for concepts, designated initializers, and templated lambdas. We also test
     # C++23 to validate forward compatibility, but only where the toolchain actually advertises support for it — older

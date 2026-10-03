@@ -828,6 +828,10 @@ typedef enum sz_status_t {
     sz_device_memory_mismatch_k = -18,
     /** An authenticated decryption saw a tag that does not match the ciphertext it accompanies. */
     sz_authentication_failed_k = -19,
+    /** A position argument addressed past the end of its container. */
+    sz_out_of_range_k = -20,
+    /** A requested length exceeds what the container can represent. */
+    sz_length_error_k = -21,
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;

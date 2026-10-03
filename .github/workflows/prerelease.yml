@@ -123,7 +123,9 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: |
+          build_artifacts/stringzilla_test_cpp20
+          build_artifacts/stringzilla_test_avoid_stl_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
@@ -264,7 +266,9 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: |
+          build_artifacts/stringzilla_test_cpp20
+          build_artifacts/stringzilla_test_avoid_stl_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
       - name: Build shared library for Go binding
@@ -386,7 +390,9 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: |
+          build_artifacts/stringzilla_test_cpp20
+          build_artifacts/stringzilla_test_avoid_stl_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 
@@ -482,7 +488,9 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: build_artifacts/stringzilla_test_cpp20
+        run: |
+          build_artifacts/stringzilla_test_cpp20
+          build_artifacts/stringzilla_test_avoid_stl_cpp20
       - name: Check stringzilla_bare is built correctly
         run: test -z "$(ldd build_artifacts/libstringzilla_bare.so | grep '.so')"
 

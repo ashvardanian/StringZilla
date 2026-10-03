@@ -35,9 +35,10 @@
 #define sz_lifetime_bound_
 #endif
 
+#include <cstddef> // `std::size_t`
+#include <cstdint> // `std::int8_t`
+
 #if !SZ_AVOID_STL
-#include <cstddef>   // `std::size_t`
-#include <cstdint>   // `std::int8_t`
 #include <iosfwd>    // `std::basic_ostream`
 #include <stdexcept> // `std::out_of_range`
 #include <array>     // `std::array`
@@ -675,7 +676,9 @@ class find_matches_view {
         string_view_type remaining_;
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using difference_type = std::ptrdiff_t;
         using value_type = string_view_type;
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
@@ -712,7 +715,7 @@ class find_matches_view {
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
     iterator end() const noexcept { return {string_view_type(haystack_.data() + haystack_.size(), 0ull), matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
-    difference_type ssize() const noexcept { return std::distance(begin(), end()); }
+    difference_type ssize() const noexcept { return static_cast<difference_type>(range_length(begin(), end())); }
     bool empty() const noexcept { return begin() == end_sentinel_type {}; }
     bool include_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
 
@@ -767,7 +770,9 @@ class rfind_matches_view {
         string_view_type remaining_;
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using difference_type = std::ptrdiff_t;
         using value_type = string_view_type;
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
@@ -817,7 +822,7 @@ class rfind_matches_view {
     iterator begin() const noexcept { return {string_view_type(haystack_), matcher_}; }
     iterator end() const noexcept { return {string_view_type(haystack_.data(), 0ull), matcher_}; }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
-    difference_type ssize() const noexcept { return std::distance(begin(), end()); }
+    difference_type ssize() const noexcept { return static_cast<difference_type>(range_length(begin(), end())); }
     bool empty() const noexcept { return begin() == end_sentinel_type {}; }
     bool include_overlaps() const noexcept { return matcher_.skip_length() < matcher_.needle_length(); }
 
@@ -904,7 +909,9 @@ class find_splits_view {
         }
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using difference_type = std::ptrdiff_t;
         using value_type = string_view_type;
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
@@ -953,7 +960,7 @@ class find_splits_view {
         return {string_view_type(haystack_.end(), 0), matcher_, end_sentinel_type {}};
     }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
-    difference_type ssize() const noexcept { return std::distance(begin(), end()); }
+    difference_type ssize() const noexcept { return static_cast<difference_type>(range_length(begin(), end())); }
     constexpr bool empty() const noexcept { return false; }
 
     /** @brief Copies the matches into a container. */
@@ -1041,7 +1048,9 @@ class rfind_splits_view {
         }
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using difference_type = std::ptrdiff_t;
         using value_type = string_view_type;
         using pointer = string_view_type;   // Needed for compatibility with STL container constructors.
@@ -1090,7 +1099,7 @@ class rfind_splits_view {
         return {string_view_type(haystack_.data(), 0ull), matcher_, end_sentinel_type {}};
     }
     size_type size() const noexcept { return static_cast<size_type>(ssize()); }
-    difference_type ssize() const noexcept { return std::distance(begin(), end()); }
+    difference_type ssize() const noexcept { return static_cast<difference_type>(range_length(begin(), end())); }
     constexpr bool empty() const noexcept { return false; }
 
     /** @brief Copies the matches into a container. */
@@ -1174,7 +1183,9 @@ class utf8_runes_view {
         }
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using value_type = sz_rune_t;
         using difference_type = std::ptrdiff_t;
         using pointer = sz_rune_t const *;
@@ -1397,7 +1408,9 @@ class utf8_split_view {
         }
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using value_type = string_view_type;
         using difference_type = std::ptrdiff_t;
         using pointer = string_view_type;
@@ -1523,7 +1536,9 @@ class utf8_segments_view {
         }
 
       public:
+#if !SZ_AVOID_STL
         using iterator_category = std::forward_iterator_tag;
+#endif
         using value_type = string_view_type;
         using difference_type = std::ptrdiff_t;
         using pointer = string_view_type;
@@ -1897,34 +1912,61 @@ rsplit_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)), {needle_storage(n)}};
 }
 
-/**  @brief Helper function using `std::advance` iterator and return it back. */
+/**  @brief Advances @p it by @p n and returns it - analog to `std::advance`, without `<iterator>`. */
 template <typename iterator_type, typename distance_type>
 iterator_type advanced(iterator_type &&it, distance_type n) {
-    std::advance(it, n);
+    while (n-- > 0) ++it;
     return it;
 }
 
-/**  @brief Helper function using `range_length` to compute the unsigned distance. */
+/**  @brief Unsigned distance from @p first to @p last - analog to `std::distance`, without `<iterator>`.
+ *   @note The `int` overload outranks the `long` one, so subtractable iterators skip the walk. */
+template <typename iterator_type>
+auto range_length_(iterator_type first, iterator_type last, int) -> decltype(std::size_t(last - first)) {
+    return static_cast<std::size_t>(last - first);
+}
+
+template <typename iterator_type>
+std::size_t range_length_(iterator_type first, iterator_type last, long) {
+    std::size_t count = 0;
+    for (; first != last; ++first) ++count;
+    return count;
+}
+
 template <typename iterator_type>
 std::size_t range_length(iterator_type first, iterator_type last) {
-    return static_cast<std::size_t>(std::distance(first, last));
+    return range_length_(first, last, 0);
 }
 
 #pragma endregion
 
 #pragma region Helper Types
 
-#if !SZ_AVOID_STL
-inline void raise(status_t status) noexcept(false) {
+/**
+ *  @brief Reports a failed operation - throws the matching STL exception, or trips `sz_assert_` when
+ *      the STL is unavailable. Every failure path in this header funnels through here, so the
+ *      exception dependency lives in this one body. @p site names the reporting function.
+ *  @note `sz_assert_` keys off `SZ_DEBUG`, so a release build without the STL continues past the failure.
+ *  @note `std::bad_alloc` carries no message, so @p site reaches `what()` only for the other statuses.
+ */
+inline void raise(status_t status, char const *site = "") noexcept(false) {
     switch (status) {
+    case status_t::success_k: return;
+#if !SZ_AVOID_STL
+    case status_t::out_of_range_k: throw std::out_of_range(site);
+    case status_t::length_error_k: throw std::length_error(site);
     case status_t::bad_alloc_k: throw std::bad_alloc();
     case status_t::invalid_utf8_k: throw std::invalid_argument("Invalid UTF-8 string");
     case status_t::contains_duplicates_k: throw std::invalid_argument("Array contains identical strings");
     default: break;
+#else
+    default:
+        sz_unused_(site);
+        sz_assert_(false && "Operation failed");
+        break;
+#endif
     }
 }
-
-#endif
 
 #pragma endregion
 
@@ -1986,7 +2028,9 @@ struct string_partition_result {
 template <typename value_type_>
 class reversed_iterator_for {
   public:
+#if !SZ_AVOID_STL
     using iterator_category = std::random_access_iterator_tag;
+#endif
     using value_type = value_type_;
     using difference_type = std::ptrdiff_t;
     using pointer = value_type_ *;
@@ -2086,8 +2130,8 @@ struct concatenation {
     }
 
     size_type copy(pointer destination, size_type length) const noexcept {
-        auto first_length = std::min(first.length(), length);
-        auto second_length = std::min(second.length(), length - first_length);
+        auto first_length = min_of_two(first.length(), length);
+        auto second_length = min_of_two(second.length(), length - first_length);
         first.copy(destination, first_length);
         second.copy(destination + first_length, second_length);
         return first_length + second_length;
@@ -2201,7 +2245,9 @@ class basic_string_slice {
 
   public:
     // STL compatibility
+#if !SZ_AVOID_STL
     using traits_type = std::char_traits<mutable_char_type>;
+#endif
     using value_type = mutable_char_type;
     using pointer = char_type *;
     using const_pointer = immutable_char_type *;
@@ -2407,8 +2453,6 @@ class basic_string_slice {
         length_ -= n;
     }
 
-#if !SZ_AVOID_STL
-
     /**  @brief Added for STL compatibility. */
     string_slice substr() const noexcept { return *this; }
 
@@ -2418,7 +2462,7 @@ class basic_string_slice {
      *  @sa `sub` for a cleaner exception-less alternative.
      */
     string_slice substr(size_type n) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice::substr");
+        if (n > size()) raise(status_t::out_of_range_k, __func__);
         return string_slice(start_ + n, length_ - n);
     }
 
@@ -2428,7 +2472,7 @@ class basic_string_slice {
      *  @sa `sub` for a cleaner exception-less alternative.
      */
     string_slice substr(size_type n, size_type count) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice::substr");
+        if (n > size()) raise(status_t::out_of_range_k, __func__);
         return string_slice(start_ + n, sz_min_of_two(count, length_ - n));
     }
 
@@ -2438,13 +2482,11 @@ class basic_string_slice {
      *  @sa `sub` for a cleaner exception-less alternative.
      */
     size_type copy(value_type *destination, size_type count, size_type n = 0) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice::copy");
+        if (n > size()) raise(status_t::out_of_range_k, __func__);
         count = sz_min_of_two(count, length_ - n);
         sz_copy((sz_ptr_t)destination, start_ + n, count);
         return count;
     }
-
-#endif // !SZ_AVOID_STL
 
 #pragma endregion
 
@@ -3241,7 +3283,7 @@ class basic_string_slice {
  *  is out of bounds. Same as with STL, the bound checks are often asymmetric, so pay attention to docs.
  *  If exceptions are disabled, on failure, `std::terminate` is called.
  */
-template <typename char_type_, typename allocator_type_ = std::allocator<char_type_>>
+template <typename char_type_, typename allocator_type_ = default_alloc<char_type_>>
 class basic_string {
 
     static_assert(sizeof(char_type_) == 1, "Characters must be a single byte long");
@@ -3300,7 +3342,9 @@ class basic_string {
 
   public:
     // STL compatibility
+#if !SZ_AVOID_STL
     using traits_type = std::char_traits<char_type>;
+#endif
     using value_type = char_type;
     using pointer = char_type *;
     using const_pointer = char_type const *;
@@ -3460,7 +3504,7 @@ class basic_string {
 
     template <typename first_type_, typename second_type_>
     basic_string &operator=(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
-        if (!try_assign(expression)) throw std::bad_alloc();
+        if (!try_assign(expression)) raise(status_t::bad_alloc_k, __func__);
         return *this;
     }
 
@@ -3500,18 +3544,14 @@ class basic_string {
     pointer c_str() noexcept sz_lifetime_bound_ { return string_.internal.start; }
     const_pointer c_str() const noexcept sz_lifetime_bound_ { return string_.internal.start; }
 
-#if !SZ_AVOID_STL
-
     reference at(size_type pos) noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
+        if (pos >= size()) raise(status_t::out_of_range_k, __func__);
         return string_.internal.start[pos];
     }
     const_reference at(size_type pos) const noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
+        if (pos >= size()) raise(status_t::out_of_range_k, __func__);
         return string_.internal.start[pos];
     }
-
-#endif // !SZ_AVOID_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
     size_type size() const noexcept { return sz_string_length(&string_); }
@@ -4184,16 +4224,14 @@ class basic_string {
      */
     iterator erase(const_iterator pos) noexcept sz_lifetime_bound_ { return erase(pos, pos + 1); }
 
-#if !SZ_AVOID_STL
-
     /**
      *  @brief Resizes the string to match @p count, filling the new space with the given @p character.
      *  @throw `std::length_error` if the string is too long.
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     void resize(size_type count, value_type character = '\0') noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::basic_string::resize");
-        if (!try_resize(count, character)) throw std::bad_alloc();
+        if (count > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_resize(count, character)) raise(status_t::bad_alloc_k, __func__);
     }
 
     /**
@@ -4208,8 +4246,8 @@ class basic_string {
      */
     template <typename operation_type_>
     void resize_and_overwrite(size_type count, operation_type_ operation) noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::basic_string::resize_and_overwrite");
-        if (!try_resize_and_overwrite(count, operation)) throw std::bad_alloc();
+        if (count > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_resize_and_overwrite(count, operation)) raise(status_t::bad_alloc_k, __func__);
     }
 
     /**
@@ -4217,7 +4255,7 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     void shrink_to_fit() noexcept(false) {
-        if (!try_shrink_to_fit()) throw std::bad_alloc();
+        if (!try_shrink_to_fit()) raise(status_t::bad_alloc_k, __func__);
     }
 
     /**
@@ -4225,8 +4263,8 @@ class basic_string {
      *  @throw `std::length_error` if the string is too long.
      */
     void reserve(size_type capacity) noexcept(false) {
-        if (capacity > max_size()) throw std::length_error("sz::basic_string::reserve");
-        if (!try_reserve(capacity)) throw std::bad_alloc();
+        if (capacity > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_reserve(capacity)) raise(status_t::bad_alloc_k, __func__);
     }
 
     /**
@@ -4236,8 +4274,8 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
+        if (offset > size()) raise(status_t::out_of_range_k, __func__);
+        if (size() + repeats > max_size()) raise(status_t::length_error_k, __func__);
         raise(_with_alloc([&](sz_alloc_type &alloc) {
             return sz_string_expand(&string_, offset, repeats, &alloc) ? sz_success_k : sz_bad_alloc_k;
         }));
@@ -4252,8 +4290,8 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     basic_string &insert(size_type offset, string_view other) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
+        if (offset > size()) raise(status_t::out_of_range_k, __func__);
+        if (size() + other.size() > max_size()) raise(status_t::length_error_k, __func__);
         raise(_with_alloc([&](sz_alloc_type &alloc) {
             return sz_string_expand(&string_, offset, other.size(), &alloc) ? sz_success_k : sz_bad_alloc_k;
         }));
@@ -4316,10 +4354,10 @@ class basic_string {
     iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound_ {
 
         auto pos = range_length(cbegin(), it);
-        if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
+        if (pos > size()) raise(status_t::out_of_range_k, __func__);
 
         auto added_length = range_length(first, last);
-        if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
+        if (size() + added_length > max_size()) raise(status_t::length_error_k, __func__);
 
         raise(_with_alloc([&](sz_alloc_type &alloc) {
             return sz_string_expand(&string_, pos, added_length, &alloc) ? sz_success_k : sz_bad_alloc_k;
@@ -4347,7 +4385,7 @@ class basic_string {
      */
     basic_string &erase(size_type pos = 0, size_type count = npos) noexcept(false) {
         if (!count || empty()) return *this;
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::erase");
+        if (pos >= size()) raise(status_t::out_of_range_k, __func__);
         sz_string_erase(&string_, pos, count);
         return *this;
     }
@@ -4359,9 +4397,9 @@ class basic_string {
      *  @sa `try_replace` for a cleaner exception-less alternative.
      */
     basic_string &replace(size_type pos, size_type count, string_view const &str) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + str.size() > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, str.size())) throw std::bad_alloc();
+        if (pos > size()) raise(status_t::out_of_range_k, __func__);
+        if (size() - count + str.size() > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_preparing_replacement(pos, count, str.size())) raise(status_t::bad_alloc_k, __func__);
         sz_copy(data() + pos, str.data(), str.size());
         return *this;
     }
@@ -4435,9 +4473,9 @@ class basic_string {
      *  @sa `try_replace` for a cleaner exception-less alternative.
      */
     basic_string &replace(size_type pos, size_type count, size_type count2, char_type character) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, count2)) throw std::bad_alloc();
+        if (pos > size()) raise(status_t::out_of_range_k, __func__);
+        if (size() - count + count2 > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_preparing_replacement(pos, count, count2)) raise(status_t::bad_alloc_k, __func__);
         sz_fill(data() + pos, count2, character);
         return *this;
     }
@@ -4465,9 +4503,9 @@ class basic_string {
         auto pos = range_length(cbegin(), first);
         auto count = range_length(first, last);
         auto count2 = range_length(first2, last2);
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
-        if (!try_preparing_replacement(pos, count, count2)) throw std::bad_alloc();
+        if (pos > size()) raise(status_t::out_of_range_k, __func__);
+        if (size() - count + count2 > max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_preparing_replacement(pos, count, count2)) raise(status_t::bad_alloc_k, __func__);
         for (iterator output = begin() + pos; first2 != last2; ++first2, ++output) *output = *first2;
         return *this;
     }
@@ -4489,8 +4527,8 @@ class basic_string {
      *  @throw `std::bad_alloc` if the allocation fails.
      */
     void push_back(char_type ch) noexcept(false) {
-        if (size() == max_size()) throw std::length_error("string::push_back");
-        if (!try_push_back(ch)) throw std::bad_alloc();
+        if (size() == max_size()) raise(status_t::length_error_k, __func__);
+        if (!try_push_back(ch)) raise(status_t::bad_alloc_k, __func__);
     }
 
     /**
@@ -4506,7 +4544,7 @@ class basic_string {
      *  @sa `try_assign` for a cleaner exception-less alternative.
      */
     basic_string &assign(string_view other) noexcept(false) {
-        if (!try_assign(other)) throw std::bad_alloc();
+        if (!try_assign(other)) raise(status_t::bad_alloc_k, __func__);
         return *this;
     }
 
@@ -4570,7 +4608,7 @@ class basic_string {
      *  @sa `try_append` for a cleaner exception-less alternative.
      */
     basic_string &append(string_view str) noexcept(false) {
-        if (!try_append(str)) throw std::bad_alloc();
+        if (!try_append(str)) raise(status_t::bad_alloc_k, __func__);
         return *this;
     }
 
@@ -4647,7 +4685,6 @@ class basic_string {
         return basic_string {concatenation<string_view, string_view> {view(), string_view(other)}};
     }
 
-#endif
 #pragma endregion
 #pragma endregion
 
@@ -4710,7 +4747,7 @@ class basic_string {
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
     basic_string &replace_all(string_view pattern, string_view replacement) noexcept(false) {
-        if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
+        if (!try_replace_all(pattern, replacement)) raise(status_t::bad_alloc_k, __func__);
         return *this;
     }
 
@@ -4723,7 +4760,7 @@ class basic_string {
      *  The algorithm is suboptimal when this string is made exclusively of the pattern.
      */
     basic_string &replace_all(byteset pattern, string_view replacement) noexcept(false) {
-        if (!try_replace_all(pattern, replacement)) throw std::bad_alloc();
+        if (!try_replace_all(pattern, replacement)) raise(status_t::bad_alloc_k, __func__);
         return *this;
     }
 
@@ -4917,7 +4954,7 @@ class basic_string {
     bool try_preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
 };
 
-using string = basic_string<char, std::allocator<char>>;
+using string = basic_string<char, default_alloc<char>>;
 
 static_assert(sizeof(string) == 4 * sizeof(void *), "String size must be 4 pointers.");
 
@@ -5355,7 +5392,7 @@ status_t try_argsort(container_type_ const &container, string_extractor_ const &
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+    return _with_alloc<default_alloc<sz_u8_t>>([&](sz_alloc_type &alloc) {
         return sz_sequence_argsort(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
                                    static_cast<sz_bool_t>(reverse));
     });
@@ -5379,7 +5416,7 @@ status_t try_argsort_utf8_uncased(container_type_ const &container, string_extra
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
     using sz_alloc_type = sz_memory_allocator_t;
-    return _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+    return _with_alloc<default_alloc<sz_u8_t>>([&](sz_alloc_type &alloc) {
         return sz_sequence_argsort_uncased(&sequence, &alloc, order.data(), static_cast<sz_size_t>(top_count),
                                            static_cast<sz_bool_t>(reverse));
     });
@@ -5422,7 +5459,7 @@ expected<std::size_t, status_t> try_intersect(                                  
 
     std::size_t intersection_size = 0;
     using sz_alloc_type = sz_memory_allocator_t;
-    status_t status = _with_alloc<std::allocator<sz_u8_t>>([&](sz_alloc_type &alloc) {
+    status_t status = _with_alloc<default_alloc<sz_u8_t>>([&](sz_alloc_type &alloc) {
         static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");
         return sz_sequence_intersect(&first_sequence, &second_sequence, &alloc, static_cast<sz_u64_t>(seed),
                                      reinterpret_cast<sz_size_t *>(&intersection_size), first_positions.data(),
@@ -5538,7 +5575,7 @@ intersect_result_t intersect(first_type_ const &first, second_type_ const &secon
                              first_extractor_ const &first_extractor, second_extractor_ const &second_extractor,
                              std::uint64_t seed = 0) noexcept(false) {
 
-    std::size_t const max_count = (std::min)(first.size(), second.size());
+    std::size_t const max_count = min_of_two(first.size(), second.size());
     std::vector<sorted_idx_t> first_positions(max_count);
     std::vector<sorted_idx_t> second_positions(max_count);
     expected<std::size_t, status_t> result = try_intersect( //
@@ -5579,6 +5616,8 @@ intersect_result_t intersect(first_type_ const &first, second_type_ const &secon
 
 #pragma region STL Specializations
 
+#if !SZ_AVOID_STL
+
 namespace std {
 
 template <>
@@ -5592,6 +5631,8 @@ struct hash<ashvardanian::stringzilla::string> {
 };
 
 } // namespace std
+
+#endif // !SZ_AVOID_STL
 
 #pragma endregion
 
