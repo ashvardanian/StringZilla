@@ -81,7 +81,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_rvv_(sz_cptr_t haystack, sz_size_t ha
  *  @param[in] vector_length Vector length for this strip.
  *  @return Predicate mask where lane @c i is set if `haystack_u8m8[i]` is in the set.
  */
-STRINGZILLA_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
+STRINGZILLA_INLINE vbool1_t sz_find_byteset_mask_m8_rvv_(vuint8m8_t haystack_u8m8, sz_u8_t const *set_u8s,
                                                          sz_size_t vector_length) {
     vuint8m8_t byte_index_u8m8 = __riscv_vsrl_vx_u8m8(haystack_u8m8, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m8_t bit_position_u8m8 = __riscv_vand_vx_u8m8(haystack_u8m8, 7, vector_length); // c & 7
@@ -92,8 +92,8 @@ STRINGZILLA_INLINE vbool1_t sz_find_byteset_rvv_mask_m8_(vuint8m8_t haystack_u8m
     return __riscv_vmsne_vx_u8m8_b1(anded_u8m8, 0, vector_length);
 }
 
-/** The @c m4 sibling of @ref sz_find_byteset_rvv_mask_m8_, used on the reversed backward strip. */
-STRINGZILLA_INLINE vbool2_t sz_find_byteset_rvv_mask_m4_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
+/** The @c m4 sibling of @ref sz_find_byteset_mask_m8_rvv_, used on the reversed backward strip. */
+STRINGZILLA_INLINE vbool2_t sz_find_byteset_mask_m4_rvv_(vuint8m4_t haystack_u8m4, sz_u8_t const *set_u8s,
                                                          sz_size_t vector_length) {
     vuint8m4_t byte_index_u8m4 = __riscv_vsrl_vx_u8m4(haystack_u8m4, 3, vector_length);   // c >> 3, in [0, 31]
     vuint8m4_t bit_position_u8m4 = __riscv_vand_vx_u8m4(haystack_u8m4, 7, vector_length); // c & 7
@@ -110,7 +110,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_rvv_(sz_cptr_t haystack, sz_size_t 
     while (haystack_length) {
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
         vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vector_length);
-        vbool1_t match_mask_b1 = sz_find_byteset_rvv_mask_m8_(haystack_u8m8, &set->_u8s[0], vector_length);
+        vbool1_t match_mask_b1 = sz_find_byteset_mask_m8_rvv_(haystack_u8m8, &set->_u8s[0], vector_length);
         long match_index = __riscv_vfirst_m_b1(match_mask_b1, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(haystack_u8 + match_index);
         haystack_u8 += vector_length, haystack_length -= vector_length;
@@ -125,7 +125,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_rvv_(sz_cptr_t haystack, sz_size_t
         sz_size_t vector_length = __riscv_vsetvl_e8m4(haystack_length);
         sz_u8_t const *strip = haystack_u8 + haystack_length - vector_length;
         vuint8m4_t reversed_u8m4 = sz_reverse_strip_rvv_(__riscv_vle8_v_u8m4(strip, vector_length), vector_length);
-        vbool2_t match_mask_b2 = sz_find_byteset_rvv_mask_m4_(reversed_u8m4, &set->_u8s[0], vector_length);
+        vbool2_t match_mask_b2 = sz_find_byteset_mask_m4_rvv_(reversed_u8m4, &set->_u8s[0], vector_length);
         long match_index = __riscv_vfirst_m_b2(match_mask_b2, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(strip + (vector_length - 1 - match_index));
         haystack_length -= vector_length;

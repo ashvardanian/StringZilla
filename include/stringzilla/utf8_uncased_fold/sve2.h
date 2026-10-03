@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
-STRINGZILLA_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
+STRINGZILLA_INLINE svuint8_t sz_utf8_fold_ascii_sve2_(svuint8_t source_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svbool_t const is_upper_b8x = svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 'A'), 26);
     return svadd_n_u8_m(is_upper_b8x, source_u8x, 0x20);
@@ -41,10 +41,10 @@ STRINGZILLA_INLINE svuint8_t sz_utf8_fold_sve2_ascii_(svuint8_t source_u8x) {
 
 /**
  *  @brief Per-lead well-formedness mirror of @c sz_rune_decode - the SVE2 twin of
- *      @ref sz_utf8_fold_neon_malformed_lead_ over one (chunk, peek) pair.
+ *      @ref sz_utf8_fold_malformed_lead_neon_ over one (chunk, peek) pair.
  *  @return Predicate set on every lead byte that does not begin a well-formed rune.
  */
-STRINGZILLA_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u8x, svuint8_t peek_u8x) {
+STRINGZILLA_INLINE svbool_t sz_utf8_fold_malformed_lead_sve2_(svuint8_t source_u8x, svuint8_t peek_u8x) {
     svbool_t const all_b8x = svptrue_b8();
     svuint8_t const next1_u8x = svext_u8(source_u8x, peek_u8x, 1);
     svuint8_t const next2_u8x = svext_u8(source_u8x, peek_u8x, 2);
@@ -86,15 +86,15 @@ STRINGZILLA_INLINE svbool_t sz_utf8_fold_sve2_malformed_lead_(svuint8_t source_u
 
 /**
  *  @brief Folds a 64-byte superchunk containing only caseless multi-byte scripts mixed with ASCII -
- *      the SVE2 twin of @ref sz_utf8_uncased_fold_neon_caseless_chunk_.
+ *      the SVE2 twin of @ref sz_utf8_uncased_fold_caseless_chunk_neon_.
  *  @return Bytes consumed; always 62..64, never zero.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_caseless_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     for (sz_size_t chunk_base = 0; chunk_base < 64; chunk_base += chunk_bytes) {
         svbool_t const loaded_b8x = svwhilelt_b8_u64((sz_u64_t)chunk_base, 64);
         svuint8_t const source_u8x = svld1_u8(loaded_b8x, (sz_u8_t const *)source + chunk_base);
-        svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_sve2_ascii_(source_u8x));
+        svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_ascii_sve2_(source_u8x));
     }
     // A 2-byte lead is incomplete only in the last byte; a 3-byte lead in the last two.
     sz_u8_t const second_to_last_byte = (sz_u8_t)source[62], last_byte = (sz_u8_t)source[63];
@@ -105,11 +105,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_caseless_chunk_(sz_cptr_t
 
 /**
  *  @brief Folds a 64-byte superchunk of Latin text in place - the SVE2 twin of
- *      @ref sz_utf8_uncased_fold_neon_latin_chunk_, with the same C4/C5/C6 delta tables read
+ *      @ref sz_utf8_uncased_fold_latin_chunk_neon_, with the same C4/C5/C6 delta tables read
  *      through chunked @c svtbl walks and the same stop policy.
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_latin_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -197,7 +197,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t so
         svbool_t const irregular_extended_b8x = svcmpne_n_u8(all_b8x, svand_n_u8_x(all_b8x, extended_deltas_u8x, 0x80),
                                                              0);
 
-        svbool_t const malformed_lead_b8x = sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x);
+        svbool_t const malformed_lead_b8x = sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x);
         svbool_t const stop_b8x = svorr_b_z(
             loaded_b8x, svorr_b_z(loaded_b8x, irregular_extended_b8x, foreign_e1_second_b8x),
             svorr_b_z(loaded_b8x, svorr_b_z(loaded_b8x, irregular_additional_b8x, is_foreign_lead_b8x),
@@ -205,7 +205,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t so
         stop_lanes |= sz_utf8_rune_pred_to_u64_sve2_(svand_b_z(loaded_b8x, stop_b8x, loaded_b8x)) << chunk_base;
 
         // 1. ASCII A-Z; 2. Latin-1 Supplement 'À'-'Þ' (C3 80-9E minus '×' 0x97) +0x20.
-        svuint8_t folded_u8x = sz_utf8_fold_sve2_ascii_(source_u8x);
+        svuint8_t folded_u8x = sz_utf8_fold_ascii_sve2_(source_u8x);
         svbool_t is_latin1_upper_b8x = svand_b_z(all_b8x, after_c3_b8x,
                                                  svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 0x80), 0x1F));
         is_latin1_upper_b8x = svbic_b_z(all_b8x, is_latin1_upper_b8x, svcmpeq_n_u8(all_b8x, source_u8x, 0x97));
@@ -249,10 +249,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_latin_chunk_(sz_cptr_t so
 
 /**
  *  @brief Folds a 64-byte superchunk of basic Cyrillic mixed with ASCII - the SVE2 twin of
- *      @ref sz_utf8_uncased_fold_neon_cyrillic_chunk_.
+ *      @ref sz_utf8_uncased_fold_cyrillic_chunk_neon_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_cyrillic_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
@@ -280,7 +280,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t
 
         // Cyrillic Extended-A (D1 A0+) folds by parity and stays on the serial path.
         svbool_t const is_extended_b8x = svand_b_z(loaded_b8x, is_d1_b8x, svcmpge_n_u8(all_b8x, next_byte_u8x, 0xA0));
-        svbool_t const malformed_lead_b8x = sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x);
+        svbool_t const malformed_lead_b8x = sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x);
         svbool_t const stop_b8x = svorr_b_z(loaded_b8x, svorr_b_z(loaded_b8x, is_foreign_lead_b8x, is_extended_b8x),
                                             malformed_lead_b8x);
         stop_lanes |= sz_utf8_rune_pred_to_u64_sve2_(svand_b_z(loaded_b8x, stop_b8x, loaded_b8x)) << chunk_base;
@@ -292,7 +292,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t
         svuint8_t const offsets_u8x = svand_u8_z(after_d0_b8x,
                                                  svtbl_u8(offsets_lut_u8x, svlsr_n_u8_x(all_b8x, source_u8x, 4)),
                                                  svtbl_u8(offsets_lut_u8x, svlsr_n_u8_x(all_b8x, source_u8x, 4)));
-        svuint8_t folded_u8x = svadd_u8_x(all_b8x, sz_utf8_fold_sve2_ascii_(source_u8x), offsets_u8x);
+        svuint8_t folded_u8x = svadd_u8_x(all_b8x, sz_utf8_fold_ascii_sve2_(source_u8x), offsets_u8x);
 
         // Lead rewrite D0 -> D1 (+1) where the lowercase lives in the next block: seconds 80-8F and A0-AF.
         svbool_t const needs_d1_b8x = svand_b_z(
@@ -312,10 +312,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_cyrillic_chunk_(sz_cptr_t
 
 /**
  *  @brief Folds a 64-byte superchunk of basic Greek mixed with ASCII - the SVE2 twin of
- *      @ref sz_utf8_uncased_fold_neon_greek_chunk_.
+ *      @ref sz_utf8_uncased_fold_greek_chunk_neon_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_greek_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -345,7 +345,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t so
             loaded_b8x, is_ce_b8x,
             svorr_b_z(all_b8x, svcmplt_n_u8(all_b8x, next_byte_u8x, 0x91), svcmpeq_n_u8(all_b8x, next_byte_u8x, 0xB0)));
         svbool_t const cf_excluded_b8x = svand_b_z(loaded_b8x, is_cf_b8x, svcmpge_n_u8(all_b8x, next_byte_u8x, 0x8F));
-        svbool_t const malformed_lead_b8x = sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x);
+        svbool_t const malformed_lead_b8x = sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x);
         svbool_t const stop_b8x = svorr_b_z(
             loaded_b8x,
             svorr_b_z(loaded_b8x, is_foreign_lead_b8x, svorr_b_z(loaded_b8x, ce_excluded_b8x, cf_excluded_b8x)),
@@ -369,7 +369,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t so
                       svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 0xA3), 0x09)));
         svbool_t const is_final_sigma_b8x = svand_b_z(all_b8x, after_cf_b8x, svcmpeq_n_u8(all_b8x, source_u8x, 0x82));
 
-        svuint8_t folded_u8x = sz_utf8_fold_sve2_ascii_(source_u8x);
+        svuint8_t folded_u8x = sz_utf8_fold_ascii_sve2_(source_u8x);
         folded_u8x = svadd_n_u8_m(is_basic_upper_b8x, folded_u8x, 0x20);
         folded_u8x = svadd_n_u8_m(is_promoting_upper_b8x, folded_u8x, 0xE0);
         folded_u8x = svadd_n_u8_m(is_final_sigma_b8x, folded_u8x, 0x01);
@@ -391,10 +391,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_greek_chunk_(sz_cptr_t so
 
 /**
  *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII - the SVE2 twin of
- *      @ref sz_utf8_uncased_fold_neon_armenian_chunk_.
+ *      @ref sz_utf8_uncased_fold_armenian_chunk_neon_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_armenian_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -424,7 +424,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t
         svbool_t const is_d4_stop_b8x = svand_b_z(loaded_b8x, is_d4_b8x, svcmplt_n_u8(all_b8x, next_byte_u8x, 0xB1));
         svbool_t const is_ligature_stop_b8x = svand_b_z(loaded_b8x, is_d6_b8x,
                                                         svcmpeq_n_u8(all_b8x, next_byte_u8x, 0x87));
-        svbool_t const malformed_lead_b8x = sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x);
+        svbool_t const malformed_lead_b8x = sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x);
         svbool_t const stop_b8x = svorr_b_z(
             loaded_b8x,
             svorr_b_z(loaded_b8x, is_foreign_lead_b8x, svorr_b_z(loaded_b8x, is_d4_stop_b8x, is_ligature_stop_b8x)),
@@ -445,7 +445,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t
         svbool_t const is_d5_minus10_b8x = svand_b_z(
             all_b8x, after_d5_b8x, svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, source_u8x, 0x90), 0x07));
 
-        svuint8_t folded_u8x = sz_utf8_fold_sve2_ascii_(source_u8x);
+        svuint8_t folded_u8x = sz_utf8_fold_ascii_sve2_(source_u8x);
         folded_u8x = svadd_n_u8_m(svorr_b_z(all_b8x, is_d4_second_b8x, is_d5_minus10_b8x), folded_u8x, 0xF0);
         folded_u8x = svadd_n_u8_m(is_d5_plus30_b8x, folded_u8x, 0x30);
 
@@ -466,10 +466,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_armenian_chunk_(sz_cptr_t
 
 /**
  *  @brief Folds a 64-byte superchunk of Georgian (E1 82/83 content) mixed with ASCII - the SVE2
- *      twin of @ref sz_utf8_uncased_fold_neon_georgian_chunk_.
+ *      twin of @ref sz_utf8_uncased_fold_georgian_chunk_neon_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_georgian_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     svuint8_t const lane_iota_u8x = svindex_u8(0, 1);
@@ -497,7 +497,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t
         svbool_t const is_83_lead_b8x = svand_b_z(loaded_b8x, is_e1_b8x, svcmpeq_n_u8(all_b8x, next_byte_u8x, 0x83));
         svbool_t const is_foreign_e1_b8x = svbic_b_z(loaded_b8x, is_e1_b8x,
                                                      svorr_b_z(loaded_b8x, is_82_lead_b8x, is_83_lead_b8x));
-        svbool_t const malformed_lead_b8x = sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x);
+        svbool_t const malformed_lead_b8x = sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x);
         svbool_t const stop_b8x = svorr_b_z(loaded_b8x, svorr_b_z(loaded_b8x, is_foreign_lead_b8x, is_foreign_e1_b8x),
                                             malformed_lead_b8x);
         stop_lanes |= sz_utf8_rune_pred_to_u64_sve2_(svand_b_z(loaded_b8x, stop_b8x, loaded_b8x)) << chunk_base;
@@ -527,7 +527,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t
                                                        svcmpne_n_u8(all_b8x, is_83_upper_second_u8x, 0));
 
         // Rewrites: lead E1 -> E2, second 82/83 -> B4, third -0x20 (82, +0xE0 wrap) or +0x20 (83).
-        svuint8_t folded_u8x = sz_utf8_fold_sve2_ascii_(source_u8x);
+        svuint8_t folded_u8x = sz_utf8_fold_ascii_sve2_(source_u8x);
         folded_u8x = svsel_u8(is_upper_lead_b8x, svdup_n_u8(0xE2), folded_u8x);
         folded_u8x = svsel_u8(is_upper_second_b8x, svdup_n_u8(0xB4), folded_u8x);
         folded_u8x = svadd_n_u8_m(svcmpne_n_u8(all_b8x, is_82_upper_third_u8x, 0), folded_u8x, 0xE0);
@@ -549,10 +549,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_georgian_chunk_(sz_cptr_t
 
 /**
  *  @brief Folds a 64-byte superchunk of caseless scripts mixed with safe guarded punctuation - the
- *      SVE2 twin of @ref sz_utf8_uncased_fold_neon_guarded_chunk_.
+ *      SVE2 twin of @ref sz_utf8_uncased_fold_guarded_chunk_neon_.
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t source, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_guarded_chunk_sve2_(sz_cptr_t source, sz_ptr_t target) {
     svbool_t const all_b8x = svptrue_b8();
     sz_size_t const chunk_bytes = svcntb() < 64 ? svcntb() : 64;
     sz_u64_t stop_lanes = 0;
@@ -588,10 +588,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_guarded_chunk_(sz_cptr_t 
             svand_b_z(loaded_b8x, is_ea_b8x,
                       svorr_b_z(all_b8x, svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, next_byte_u8x, 0x99), 0x07),
                                 svcmplt_n_u8(all_b8x, svsub_n_u8_x(all_b8x, next_byte_u8x, 0xAD), 0x02))));
-        stop_b8x = svorr_b_z(loaded_b8x, stop_b8x, sz_utf8_fold_sve2_malformed_lead_(source_u8x, peek_u8x));
+        stop_b8x = svorr_b_z(loaded_b8x, stop_b8x, sz_utf8_fold_malformed_lead_sve2_(source_u8x, peek_u8x));
         stop_lanes |= sz_utf8_rune_pred_to_u64_sve2_(svand_b_z(loaded_b8x, stop_b8x, loaded_b8x)) << chunk_base;
 
-        svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_sve2_ascii_(source_u8x));
+        svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_ascii_sve2_(source_u8x));
     }
 
     if (stop_lanes) return sz_utf8_fold_stop_boundary_serial_(stop_lanes, source);
@@ -627,7 +627,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_siz
             for (sz_size_t chunk_base = 0; chunk_base < 64; chunk_base += chunk_bytes) {
                 svbool_t const loaded_b8x = svwhilelt_b8_u64((sz_u64_t)chunk_base, 64);
                 svuint8_t const source_u8x = svld1_u8(loaded_b8x, (sz_u8_t const *)source + chunk_base);
-                svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_sve2_ascii_(source_u8x));
+                svst1_u8(loaded_b8x, (sz_u8_t *)target + chunk_base, sz_utf8_fold_ascii_sve2_(source_u8x));
             }
             target += 64, source += 64, source_length -= 64;
             continue;
@@ -649,48 +649,48 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_siz
         }
 
         if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_k)) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_caseless_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_caseless_chunk_sve2_(source, target);
             target += handled, source += handled, source_length -= handled;
             continue;
         }
         if (lead_families &
             (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k | sz_utf8_fold_lead_e1_flag_k)) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_latin_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_latin_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_e1_flag_k) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_georgian_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_georgian_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_cyrillic_flag_k) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_cyrillic_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_cyrillic_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_greek_flag_k) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_greek_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_greek_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_guarded_flag_k) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_guarded_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_guarded_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_complex_flag_k) {
-            sz_size_t const handled = sz_utf8_uncased_fold_sve2_armenian_chunk_(source, target);
+            sz_size_t const handled = sz_utf8_uncased_fold_armenian_chunk_sve2_(source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;

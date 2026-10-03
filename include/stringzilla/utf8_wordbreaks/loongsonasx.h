@@ -67,19 +67,19 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_loongsonasx_(__m256i 
     __m256i const nibble_4_u8x32 = __lasx_xvand_v(plane_offset_u8x32, low_nibble_mask_u8x32);
     __m256i const nibble_3_u8x32 = sz_utf8_high_nibble_loongsonasx_(high_byte_u8x32);
     __m256i const stage1_index_u8x32 = __lasx_xvor_v(__lasx_xvslli_h(nibble_4_u8x32, 4), nibble_3_u8x32);
-    __m256i const page_u8x32 = sz_utf8_rune_lut256_scalar_loongsonasx_(sz_utf8_word_break_haswell_astral_stage1_,
+    __m256i const page_u8x32 = sz_utf8_rune_lut256_scalar_loongsonasx_(sz_utf8_word_break_astral_stage1_,
                                                                        stage1_index_u8x32);
     __m256i const nibble_2_u8x32 = __lasx_xvand_v(high_byte_u8x32, low_nibble_mask_u8x32);
     __m256i const stage2_leaf_u8x32 = sz_utf8_rune_cascade_stage_loongsonasx_(
-        sz_utf8_word_break_haswell_astral_stage2_lo_, sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
-        page_u8x32, nibble_2_u8x32);
+        sz_utf8_word_break_astral_stage2_low_, sz_utf8_word_break_astral_stage2_low_count_k / 16, page_u8x32,
+        nibble_2_u8x32);
     __m256i const nibble_1_u8x32 = sz_utf8_high_nibble_loongsonasx_(low_byte_u8x32);
     __m256i const stage3_low_leaf_u8x32 = sz_utf8_rune_cascade_stage_loongsonasx_(
-        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16,
-        stage2_leaf_u8x32, nibble_1_u8x32);
+        sz_utf8_word_break_astral_stage3_low_, sz_utf8_word_break_astral_stage3_low_count_k / 16, stage2_leaf_u8x32,
+        nibble_1_u8x32);
     __m256i const stage3_high_leaf_u8x32 = sz_utf8_rune_cascade_stage_loongsonasx_(
-        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16,
-        stage2_leaf_u8x32, nibble_1_u8x32);
+        sz_utf8_word_break_astral_stage3_high_, sz_utf8_word_break_astral_stage3_high_count_k / 16, stage2_leaf_u8x32,
+        nibble_1_u8x32);
     __m256i const nibble_0_u8x32 = __lasx_xvand_v(low_byte_u8x32, low_nibble_mask_u8x32);
     __m256i const leaf_group_u8x32 = __lasx_xvor_v(
         __lasx_xvand_v(sz_utf8_high_nibble_loongsonasx_(stage3_low_leaf_u8x32), low_nibble_mask_u8x32),
@@ -96,8 +96,8 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_loongsonasx_(__m256i 
     for (int lane = 0; lane < 32; ++lane) {
         sz_u32_t const group = leaf_group_vec.u8s[lane];
         result_vec.u8s[lane] =
-            group < (sz_u32_t)sz_utf8_word_break_haswell_astral_leaf_groups_k
-                ? sz_utf8_word_break_haswell_astral_stage4_groups_[(sz_size_t)group * 256 + stage4_index_vec.u8s[lane]]
+            group < (sz_u32_t)sz_utf8_word_break_astral_leaf_groups_k
+                ? sz_utf8_word_break_astral_stage4_groups_[(sz_size_t)group * 256 + stage4_index_vec.u8s[lane]]
                 : 0;
     }
     return result_vec.lasx;

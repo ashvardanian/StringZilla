@@ -89,27 +89,27 @@ STRINGZILLA_INLINE v128_t sz_utf8_word_break_astral_class_v128_(v128_t plane_off
     v128_t const nibble4_u8x16 = wasm_v128_and(plane_off_u8x16, low_nibble_mask_u8x16);
     v128_t const nibble3_u8x16 = wasm_v128_and(wasm_u8x16_shr(high_u8x16, 4), low_nibble_mask_u8x16);
     v128_t const stage1_index_u8x16 = wasm_v128_or(wasm_i8x16_shl(nibble4_u8x16, 4), nibble3_u8x16);
-    v128_t const page_u8x16 = sz_utf8_rune_lut256_v128_(sz_utf8_word_break_haswell_astral_stage1_, stage1_index_u8x16);
+    v128_t const page_u8x16 = sz_utf8_rune_lut256_v128_(sz_utf8_word_break_astral_stage1_, stage1_index_u8x16);
     v128_t const nibble2_u8x16 = wasm_v128_and(high_u8x16, low_nibble_mask_u8x16);
-    v128_t const leaf2_u8x16 = sz_utf8_rune_cascade_stage_v128_(
-        sz_utf8_word_break_haswell_astral_stage2_lo_, sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
-        page_u8x16, nibble2_u8x16);
+    v128_t const leaf2_u8x16 = sz_utf8_rune_cascade_stage_v128_(sz_utf8_word_break_astral_stage2_low_,
+                                                                sz_utf8_word_break_astral_stage2_low_count_k / 16,
+                                                                page_u8x16, nibble2_u8x16);
     v128_t const nibble1_u8x16 = wasm_v128_and(wasm_u8x16_shr(low_u8x16, 4), low_nibble_mask_u8x16);
-    v128_t const leaf_lo_u8x16 = sz_utf8_rune_cascade_stage_v128_(
-        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16,
-        leaf2_u8x16, nibble1_u8x16);
-    v128_t const leaf_hi_u8x16 = sz_utf8_rune_cascade_stage_v128_(
-        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16,
-        leaf2_u8x16, nibble1_u8x16);
+    v128_t const leaf_lo_u8x16 = sz_utf8_rune_cascade_stage_v128_(sz_utf8_word_break_astral_stage3_low_,
+                                                                  sz_utf8_word_break_astral_stage3_low_count_k / 16,
+                                                                  leaf2_u8x16, nibble1_u8x16);
+    v128_t const leaf_hi_u8x16 = sz_utf8_rune_cascade_stage_v128_(sz_utf8_word_break_astral_stage3_high_,
+                                                                  sz_utf8_word_break_astral_stage3_high_count_k / 16,
+                                                                  leaf2_u8x16, nibble1_u8x16);
     v128_t const nibble0_u8x16 = wasm_v128_and(low_u8x16, low_nibble_mask_u8x16);
     v128_t const leaf_group_u8x16 = wasm_v128_or(wasm_v128_and(wasm_u8x16_shr(leaf_lo_u8x16, 4), low_nibble_mask_u8x16),
                                                  wasm_i8x16_shl(leaf_hi_u8x16, 4));
     v128_t const leaf_low_nibble_u8x16 = wasm_v128_and(leaf_lo_u8x16, low_nibble_mask_u8x16);
     v128_t const stage4_lut_index_u8x16 = wasm_v128_or(wasm_i8x16_shl(leaf_low_nibble_u8x16, 4), nibble0_u8x16);
     v128_t result_u8x16 = wasm_i8x16_splat(0);
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_astral_leaf_groups_k; ++group) {
-        v128_t const value_u8x16 = sz_utf8_rune_lut256_v128_(
-            sz_utf8_word_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
+    for (int group = 0; group < (int)sz_utf8_word_break_astral_leaf_groups_k; ++group) {
+        v128_t const value_u8x16 = sz_utf8_rune_lut256_v128_(sz_utf8_word_break_astral_stage4_groups_ + group * 256,
+                                                             stage4_lut_index_u8x16);
         v128_t const here_u8x16 = wasm_i8x16_eq(leaf_group_u8x16, wasm_i8x16_splat((sz_i8_t)group));
         result_u8x16 = wasm_v128_bitselect(value_u8x16, result_u8x16, here_u8x16);
     }

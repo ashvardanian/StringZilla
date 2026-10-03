@@ -73,20 +73,19 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     vuint8m4_t const n4_u8m4 = __riscv_vand_vx_u8m4(plane_off_u8m4, 0x0F, 64);
     vuint8m4_t const n3_u8m4 = __riscv_vsrl_vx_u8m4(high_u8m4, 4, 64);
     vuint8m4_t const stage1_index_u8m4 = __riscv_vor_vv_u8m4(__riscv_vsll_vx_u8m4(n4_u8m4, 4, 64), n3_u8m4, 64);
-    vuint8m4_t const page_u8m4 = __riscv_vluxei8_v_u8m4(&sz_utf8_word_break_haswell_astral_stage1_[0],
-                                                        stage1_index_u8m4, 64);
+    vuint8m4_t const page_u8m4 = __riscv_vluxei8_v_u8m4(&sz_utf8_word_break_astral_stage1_[0], stage1_index_u8m4, 64);
 
     vuint8m4_t const n2_u8m4 = __riscv_vand_vx_u8m4(high_u8m4, 0x0F, 64);
     vuint8m4_t const stage2_index_u8m4 = __riscv_vor_vv_u8m4(__riscv_vsll_vx_u8m4(page_u8m4, 4, 64), n2_u8m4, 64);
-    vuint8m4_t const leaf2_u8m4 = __riscv_vluxei8_v_u8m4(&sz_utf8_word_break_haswell_astral_stage2_lo_[0],
-                                                         stage2_index_u8m4, 64);
+    vuint8m4_t const leaf2_u8m4 = __riscv_vluxei8_v_u8m4(&sz_utf8_word_break_astral_stage2_low_[0], stage2_index_u8m4,
+                                                         64);
 
     vuint8m4_t const n1_u8m4 = __riscv_vand_vx_u8m4(__riscv_vsrl_vx_u8m4(low_u8m4, 4, 64), 0x0F, 64);
     vuint16m8_t const stage3_index_u16m8 = __riscv_vwaddu_wv_u16m8(
         __riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(leaf2_u8m4, 64), 4, 64), n1_u8m4, 64);
-    vuint8m4_t const leaf_lo_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_haswell_astral_stage3_lo_[0],
+    vuint8m4_t const leaf_lo_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_astral_stage3_low_[0],
                                                             stage3_index_u16m8, 64);
-    vuint8m4_t const leaf_hi_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_haswell_astral_stage3_hi_[0],
+    vuint8m4_t const leaf_hi_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_astral_stage3_high_[0],
                                                             stage3_index_u16m8, 64);
 
     vuint8m4_t const n0_u8m4 = __riscv_vand_vx_u8m4(low_u8m4, 0x0F, 64);
@@ -96,14 +95,14 @@ STRINGZILLA_INLINE vuint8m4_t sz_utf8_word_break_astral_class_rvv_( //
     vuint8m4_t const stage4_lut_index_u8m4 = __riscv_vor_vv_u8m4(
         __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(leaf_lo_u8m4, 0x0F, 64), 4, 64), n0_u8m4, 64);
     vbool2_t const group_bad_b2 = __riscv_vmsgtu_vx_u8m4_b2(leaf_group_u8m4,
-                                                            sz_utf8_word_break_haswell_astral_leaf_groups_k - 1, 64);
+                                                            sz_utf8_word_break_astral_leaf_groups_k - 1, 64);
     vuint16m8_t const stage4_index_u16m8 = __riscv_vwaddu_wv_u16m8(
         __riscv_vsll_vx_u16m8(
             __riscv_vzext_vf2_u16m8(
-                __riscv_vminu_vx_u8m4(leaf_group_u8m4, sz_utf8_word_break_haswell_astral_leaf_groups_k - 1, 64), 64),
+                __riscv_vminu_vx_u8m4(leaf_group_u8m4, sz_utf8_word_break_astral_leaf_groups_k - 1, 64), 64),
             8, 64),
         stage4_lut_index_u8m4, 64);
-    vuint8m4_t const gathered_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_haswell_astral_stage4_groups_[0],
+    vuint8m4_t const gathered_u8m4 = __riscv_vluxei16_v_u8m4(&sz_utf8_word_break_astral_stage4_groups_[0],
                                                              stage4_index_u16m8, 64);
     return __riscv_vmerge_vxm_u8m4(gathered_u8m4, 0, group_bad_b2, 64);
 }

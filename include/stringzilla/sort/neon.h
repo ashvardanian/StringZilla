@@ -36,7 +36,7 @@ extern "C" {
 #endif
 
 /** Collapses two @c uint64x2_t compare results (lanes are 0 or ~0) into a 4-bit lane mask. */
-STRINGZILLA_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
+STRINGZILLA_INLINE sz_u32_t sz_sort_lane_mask4_neon_(uint64x2_t lower_u64x2, uint64x2_t upper_u64x2) {
     static sz_u16_t const lane_weights[4] = {1, 2, 4, 8};
     uint16x4_t flags_u16x4 = vmovn_u32(vcombine_u32(vmovn_u64(lower_u64x2), vmovn_u64(upper_u64x2)));
     return (sz_u32_t)vaddv_u16(vand_u16(flags_u16x4, vld1_u16(lane_weights)));
@@ -48,7 +48,7 @@ STRINGZILLA_INLINE sz_u32_t sz_sort_neon_lane_mask4_(uint64x2_t lower_u64x2, uin
  *  by the surviving count, so the unwritten tail is overwritten by the next call or lands in the
  *  region slack): on a wide out-of-order core the branchless full-vector stores beat data-dependent
  *  "store only what survives" branches, whose misprediction cost dwarfs the few wasted stores. */
-STRINGZILLA_INLINE sz_size_t sz_sort_neon_compact4_(                   //
+STRINGZILLA_INLINE sz_size_t sz_sort_compact4_neon_(                   //
     uint8x16x2_t const keys_u8x16x2, uint8x16x2_t const order_u8x16x2, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
@@ -101,7 +101,7 @@ STRINGZILLA_INLINE sz_size_t sz_sort_neon_compact4_(                   //
  *  spill; the three regions are then copied back contiguously. A single block-major pass left-packs
  *  all three comparison kinds together, so each block is loaded once and the equal mask is free.
  */
-STRINGZILLA_INLINE void sz_sequence_argsort_neon_3way_partition_(                   //
+STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_neon_(                   //
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
     sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
@@ -163,32 +163,32 @@ STRINGZILLA_INLINE void sz_sequence_argsort_neon_3way_partition_(               
              vreinterpretq_u8_u64(vld1q_u64((sz_u64_t const *)(initial_order + i + 6)))}};
 
         // Eight compares per block; the equal mask is the complement of (smaller | greater), so no third set.
-        sz_u32_t smaller_lower = sz_sort_neon_lane_mask4_(vcltq_u64(keys0_u64x2, pivot_u64x2),
+        sz_u32_t smaller_lower = sz_sort_lane_mask4_neon_(vcltq_u64(keys0_u64x2, pivot_u64x2),
                                                           vcltq_u64(keys1_u64x2, pivot_u64x2));
-        sz_u32_t smaller_upper = sz_sort_neon_lane_mask4_(vcltq_u64(keys2_u64x2, pivot_u64x2),
+        sz_u32_t smaller_upper = sz_sort_lane_mask4_neon_(vcltq_u64(keys2_u64x2, pivot_u64x2),
                                                           vcltq_u64(keys3_u64x2, pivot_u64x2));
-        sz_u32_t greater_lower = sz_sort_neon_lane_mask4_(vcgtq_u64(keys0_u64x2, pivot_u64x2),
+        sz_u32_t greater_lower = sz_sort_lane_mask4_neon_(vcgtq_u64(keys0_u64x2, pivot_u64x2),
                                                           vcgtq_u64(keys1_u64x2, pivot_u64x2));
-        sz_u32_t greater_upper = sz_sort_neon_lane_mask4_(vcgtq_u64(keys2_u64x2, pivot_u64x2),
+        sz_u32_t greater_upper = sz_sort_lane_mask4_neon_(vcgtq_u64(keys2_u64x2, pivot_u64x2),
                                                           vcgtq_u64(keys3_u64x2, pivot_u64x2));
         sz_u32_t equal_lower = (~(smaller_lower | greater_lower)) & 0xF;
         sz_u32_t equal_upper = (~(smaller_upper | greater_upper)) & 0xF;
 
         sz_size_t taken;
-        taken = sz_sort_neon_compact4_(keys_lower_u8x16x2, order_lower_u8x16x2, smaller_lower, smaller_pgrams,
+        taken = sz_sort_compact4_neon_(keys_lower_u8x16x2, order_lower_u8x16x2, smaller_lower, smaller_pgrams,
                                        smaller_order);
         smaller_pgrams += taken, smaller_order += taken;
-        taken = sz_sort_neon_compact4_(keys_upper_u8x16x2, order_upper_u8x16x2, smaller_upper, smaller_pgrams,
+        taken = sz_sort_compact4_neon_(keys_upper_u8x16x2, order_upper_u8x16x2, smaller_upper, smaller_pgrams,
                                        smaller_order);
         smaller_pgrams += taken, smaller_order += taken;
-        taken = sz_sort_neon_compact4_(keys_lower_u8x16x2, order_lower_u8x16x2, equal_lower, equal_pgrams, equal_order);
+        taken = sz_sort_compact4_neon_(keys_lower_u8x16x2, order_lower_u8x16x2, equal_lower, equal_pgrams, equal_order);
         equal_pgrams += taken, equal_order += taken;
-        taken = sz_sort_neon_compact4_(keys_upper_u8x16x2, order_upper_u8x16x2, equal_upper, equal_pgrams, equal_order);
+        taken = sz_sort_compact4_neon_(keys_upper_u8x16x2, order_upper_u8x16x2, equal_upper, equal_pgrams, equal_order);
         equal_pgrams += taken, equal_order += taken;
-        taken = sz_sort_neon_compact4_(keys_lower_u8x16x2, order_lower_u8x16x2, greater_lower, greater_pgrams,
+        taken = sz_sort_compact4_neon_(keys_lower_u8x16x2, order_lower_u8x16x2, greater_lower, greater_pgrams,
                                        greater_order);
         greater_pgrams += taken, greater_order += taken;
-        taken = sz_sort_neon_compact4_(keys_upper_u8x16x2, order_upper_u8x16x2, greater_upper, greater_pgrams,
+        taken = sz_sort_compact4_neon_(keys_upper_u8x16x2, order_upper_u8x16x2, greater_upper, greater_pgrams,
                                        greater_order);
         greater_pgrams += taken, greater_order += taken;
     }
@@ -223,7 +223,7 @@ STRINGZILLA_INLINE void sz_sequence_argsort_neon_3way_partition_(               
     *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
 }
 
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_quicksort_pgrams_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_quicksort_pgrams_neon_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
     sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t const top_count) {
@@ -234,14 +234,14 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_quicksort_pgrams_(
     }
 
     sz_size_t first_pivot_index, last_pivot_index;
-    sz_sequence_argsort_neon_3way_partition_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_3way_partition_neon_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                              start_in_sequence, end_in_sequence, &first_pivot_index, &last_pivot_index);
 
     if (start_in_sequence + 1 < first_pivot_index)
-        sz_sequence_argsort_neon_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+        sz_sequence_argsort_quicksort_pgrams_neon_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                                    start_in_sequence, first_pivot_index, top_count);
     if (last_pivot_index + 2 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_neon_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+        sz_sequence_argsort_quicksort_pgrams_neon_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                                    last_pivot_index + 1, end_in_sequence, top_count);
 }
 
@@ -261,22 +261,22 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_neon_(sz_pgram_t *pgrams, sz_size_
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_neon_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
+    sz_sequence_argsort_quicksort_pgrams_neon_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     allocator->free(temporary_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
 
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_byte_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_byte_windows_neon_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
-    sz_sequence_argsort_serial_export_byte_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_byte_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character, reverse);
 
-    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_quicksort_pgrams_neon_(global_pgrams, global_order, temporary_pgrams, temporary_order,
                                                start_in_sequence, end_in_sequence, top_count);
 
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
@@ -298,7 +298,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_byte_windows_(
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+            sz_sequence_argsort_sort_byte_windows_neon_(sequence, global_pgrams, global_order, temporary_pgrams,
                                                         temporary_order, nested_start, nested_end,
                                                         start_character + pgram_capacity, top_count, reverse);
         else if (has_multiple_strings)
@@ -332,25 +332,25 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_neon_(sz_sequence_t const *se
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
     if (!global_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
+    sz_sequence_argsort_sort_byte_windows_neon_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                 count, 0, top_count, reverse);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
 }
 
-/** Uncased twin of @c sz_sequence_argsort_neon_sort_byte_windows_: the folded code-point export
+/** Uncased twin of @c sz_sequence_argsort_sort_byte_windows_neon_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the NEON partition - which is where NEON beats the fully-serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_casefold_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_neon_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
-    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_casefold_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                        end_in_sequence, folded_skip_count, reverse);
-    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_quicksort_pgrams_neon_(global_pgrams, global_order, temporary_pgrams, temporary_order,
                                                start_in_sequence, end_in_sequence, top_count);
 
     // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
@@ -369,7 +369,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_neon_sort_casefold_windows_(
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+            sz_sequence_argsort_sort_casefold_windows_neon_(sequence, global_pgrams, global_order, temporary_pgrams,
                                                             temporary_order, nested_start, nested_end,
                                                             folded_skip_count + fields_per_pgram, top_count, reverse);
         else if (has_multiple_strings)
@@ -402,7 +402,7 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_uncased_neon_(    //
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
 
-    sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_sort_casefold_windows_neon_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
                                                     0, count, 0, top_count, reverse);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle);

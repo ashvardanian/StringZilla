@@ -44,7 +44,7 @@ typedef struct sz_levenshtein_u64x4_vertical_haswell_t {
 } sz_levenshtein_u64x4_vertical_haswell_t;
 
 /** The AVX2 lowering of the shared Myers @c Ph and @c Pv' shape: first | ~(second | third). */
-STRINGZILLA_INLINE __m256i sz_levenshtein_haswell_or_nor_(__m256i first_u64x4, __m256i second_u64x4,
+STRINGZILLA_INLINE __m256i sz_levenshtein_or_nor_haswell_(__m256i first_u64x4, __m256i second_u64x4,
                                                           __m256i third_u64x4) {
     return _mm256_or_si256(first_u64x4,
                            _mm256_andnot_si256(_mm256_or_si256(second_u64x4, third_u64x4), _mm256_set1_epi64x(-1)));
@@ -110,7 +110,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_step_haswell_(sz_levenshtein_u64x4_
         sum_vec.ymm = _mm256_add_epi64(_mm256_and_si256(matched_vec.ymm, vertical->positive_vec.ymm),
                                        vertical->positive_vec.ymm);
         diagonal_vec.ymm = _mm256_or_si256(_mm256_xor_si256(sum_vec.ymm, vertical->positive_vec.ymm), matched_vec.ymm);
-        horizontal_positive_vec.ymm = sz_levenshtein_haswell_or_nor_(vertical->negative_vec.ymm, diagonal_vec.ymm,
+        horizontal_positive_vec.ymm = sz_levenshtein_or_nor_haswell_(vertical->negative_vec.ymm, diagonal_vec.ymm,
                                                                      vertical->positive_vec.ymm);
         horizontal_negative_vec.ymm = _mm256_and_si256(vertical->positive_vec.ymm, diagonal_vec.ymm);
         if (word + 1 == words) {
@@ -130,7 +130,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_step_haswell_(sz_levenshtein_u64x4_
         horizontal_negative_vec.ymm = _mm256_or_si256(_mm256_slli_epi64(horizontal_negative_vec.ymm, 1),
                                                       negative_carry_vec.ymm);
         positive_carry_vec = next_positive_vec, negative_carry_vec = next_negative_vec;
-        vertical->positive_vec.ymm = sz_levenshtein_haswell_or_nor_(horizontal_negative_vec.ymm, vertical_carry_vec.ymm,
+        vertical->positive_vec.ymm = sz_levenshtein_or_nor_haswell_(horizontal_negative_vec.ymm, vertical_carry_vec.ymm,
                                                                     horizontal_positive_vec.ymm);
         vertical->negative_vec.ymm = _mm256_and_si256(horizontal_positive_vec.ymm, vertical_carry_vec.ymm);
     }
@@ -231,14 +231,14 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x4_transpose_haswell(sz_levenshtei
 /** One YMM register per position: a second measured no faster on one-word queries and
  *  slower on two. */
 enum {
-    sz_levenshtein_haswell_u64x4_candidates_per_step_k = 4,
-    sz_levenshtein_haswell_u64x4_registers_per_position_k = 1
+    sz_levenshtein_u64x4_candidates_per_step_haswell_k = 4,
+    sz_levenshtein_u64x4_registers_per_position_haswell_k = 1
 };
 
 /** Sweeps four candidates through every transpose; @p words is a constant, keeping short queries'
  *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
  *  as byte counts, refined by the transpose. */
-STRINGZILLA_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query_t const *shared_query,
+STRINGZILLA_INLINE void sz_levenshtein_u64x4_sweep_haswell_(sz_levenshtein_query_t const *shared_query,
                                                             sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                             sz_u64_t *symbol_counts, sz_size_t sweep_count,
                                                             sz_levenshtein_transpose_t_ transpose,
@@ -293,7 +293,7 @@ STRINGZILLA_INLINE void sz_levenshtein_haswell_u64x4_sweep_(sz_levenshtein_query
 
 /** Streams every candidate through a prepared @p query, four at a time, with @p transpose emitting
  *  their classes at @p width; @p verticals holds enough for a runtime word count. */
-STRINGZILLA_INLINE void sz_levenshtein_haswell_u64x4_distances_(
+STRINGZILLA_INLINE void sz_levenshtein_u64x4_distances_haswell_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t_ transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x4_vertical_haswell_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 4 };
@@ -310,13 +310,13 @@ STRINGZILLA_INLINE void sz_levenshtein_haswell_u64x4_distances_(
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
-            sz_levenshtein_haswell_u64x4_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x4_sweep_haswell_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 1, distances + sweep_first);
         else if (words == 2)
-            sz_levenshtein_haswell_u64x4_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x4_sweep_haswell_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 2, distances + sweep_first);
         else
-            sz_levenshtein_haswell_u64x4_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x4_sweep_haswell_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 verticals, words, distances + sweep_first);
     }
 }
@@ -336,7 +336,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    enum { registers_k = sz_levenshtein_haswell_u64x4_registers_per_position_k };
+    enum { registers_k = sz_levenshtein_u64x4_registers_per_position_haswell_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;
     sz_levenshtein_transpose_t_ const transpose = over_bytes ? sz_levenshtein_u8x4_transpose_haswell_
@@ -357,7 +357,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
             continue;
         }
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        sz_levenshtein_haswell_u64x4_distances_(&query, candidates, transpose, width, verticals, row);
+        sz_levenshtein_u64x4_distances_haswell_(&query, candidates, transpose, width, verticals, row);
     }
     return sz_success_k;
 }

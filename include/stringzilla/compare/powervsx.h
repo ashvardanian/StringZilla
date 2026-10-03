@@ -24,7 +24,7 @@ extern "C" {
 #pragma GCC target("power9-vector")
 #endif
 
-STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_vec16_(__vector unsigned char a_u8x16, __vector unsigned char b_u8x16) {
+STRINGZILLA_INLINE sz_bool_t sz_equal_vec16_powervsx_(__vector unsigned char a_u8x16, __vector unsigned char b_u8x16) {
     // On Power10 `vec_first_mismatch_index` reports the first differing lane (16 if none) in a
     // single instruction, replacing the `vec_all_eq` compare + branch reduction. The Power9
     // fallback keeps the byte-for-byte identical `vec_all_eq` semantics.
@@ -80,12 +80,12 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_powervsx_(sz_cptr_t a, sz_cptr_t b, sz_siz
         for (; offset + 16 <= length; offset += 16) {
             __vector unsigned char a_u8x16 = vec_xl(0, (unsigned char const *)(a + offset));
             __vector unsigned char b_u8x16 = vec_xl(0, (unsigned char const *)(b + offset));
-            if (!sz_equal_powervsx_vec16_(a_u8x16, b_u8x16)) return sz_false_k;
+            if (!sz_equal_vec16_powervsx_(a_u8x16, b_u8x16)) return sz_false_k;
         }
         // Final check - load the last register-long window from the end.
         __vector unsigned char a_tail_u8x16 = vec_xl(0, (unsigned char const *)(a + length - 16));
         __vector unsigned char b_tail_u8x16 = vec_xl(0, (unsigned char const *)(b + length - 16));
-        return sz_equal_powervsx_vec16_(a_tail_u8x16, b_tail_u8x16);
+        return sz_equal_vec16_powervsx_(a_tail_u8x16, b_tail_u8x16);
     }
 }
 

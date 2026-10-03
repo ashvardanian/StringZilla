@@ -818,12 +818,12 @@ sz_align_(64) static const sz_u8_t sz_utf8_word_break_bmp_page_lut_[256] = {
     31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 48, 1,  49, 50, 51,
 };
 enum {
-    sz_utf8_word_break_haswell_astral_stage2_lo_count_k = 224,
-    sz_utf8_word_break_haswell_astral_stage3_lo_count_k = 1184,
-    sz_utf8_word_break_haswell_astral_stage3_hi_count_k = 1184,
-    sz_utf8_word_break_haswell_astral_leaf_groups_k = 13,
+    sz_utf8_word_break_astral_stage2_low_count_k = 224,
+    sz_utf8_word_break_astral_stage3_low_count_k = 1184,
+    sz_utf8_word_break_astral_stage3_high_count_k = 1184,
+    sz_utf8_word_break_astral_leaf_groups_k = 13,
 };
-static const sz_u8_t sz_utf8_word_break_haswell_astral_stage1_[256] = {
+static const sz_u8_t sz_utf8_word_break_astral_stage1_[256] = {
     0, 1, 2, 3, 4, 5, 6, 5, 5, 5, 7, 8, 9, 10, 11, 12, 5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -832,7 +832,7 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage1_[256] = {
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 13, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
 };
-static const sz_u8_t sz_utf8_word_break_haswell_astral_stage2_lo_[224] = {
+static const sz_u8_t sz_utf8_word_break_astral_stage2_low_[224] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
     28, 29, 30, 31, 6,  6,  6,  32, 33, 34, 35, 35, 35, 35, 35, 35, 35, 35, 35, 36, 6,  6,  6,  6,  37, 6,  6,  6,
     6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  38, 6,  6,  39, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
@@ -842,7 +842,7 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage2_lo_[224] = {
     35, 35, 58, 35, 35, 35, 35, 59, 60, 61, 62, 35, 63, 64, 65, 66, 67, 68, 35, 35, 35, 35, 69, 35, 35, 70, 35, 71,
     35, 35, 35, 35, 35, 35, 35, 50, 35, 35, 35, 35, 72, 73, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
 };
-static const sz_u8_t sz_utf8_word_break_haswell_astral_stage3_lo_[1184] = {
+static const sz_u8_t sz_utf8_word_break_astral_stage3_low_[1184] = {
     0,   1,   2,   3,   4,   4,   5,   5,   1,   1,   1,   1,   1,   1,   1,   6,   5,   5,   5,   5,   1,   1,   1,
     7,   5,   5,   5,   5,   5,   5,   5,   8,   5,   5,   5,   5,   5,   5,   5,   5,   1,   9,   1,   1,   1,   10,
     11,  5,   1,   1,   12,  1,   6,   1,   1,   13,  1,   4,   1,   1,   14,  15,  5,   5,   1,   1,   1,   1,   1,
@@ -896,7 +896,7 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage3_lo_[1184] = {
     5,   170, 194, 5,   88,  88,  88,  88,  88,  88,  5,   5,   5,   5,   5,   5,   5,   5,   88,  88,  88,  88,  88,
     88,  88,  88,  88,  88,  88,  88,  88,  88,  88,  5,
 };
-static const sz_u8_t sz_utf8_word_break_haswell_astral_stage3_hi_[1184] = {
+static const sz_u8_t sz_utf8_word_break_astral_stage3_high_[1184] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -929,7 +929,7 @@ static const sz_u8_t sz_utf8_word_break_haswell_astral_stage3_hi_[1184] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
-static const sz_u8_t sz_utf8_word_break_haswell_astral_stage4_groups_[3328] = {
+static const sz_u8_t sz_utf8_word_break_astral_stage4_groups_[3328] = {
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  0,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  0,  0,  0,  0,  0,  0,  0,  0,

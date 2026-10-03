@@ -84,9 +84,9 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_rune_is_wsegspace(sz_rune_t rune) {
  *  of equality comparisons in the hot WB4 skip loops. */
 enum {
     sz_utf8_word_break_ignorable_set_k = (1u << sz_utf8_word_break_extend_k) | (1u << sz_utf8_word_break_zwj_k) |
-        (1u << sz_utf8_word_break_format_k),
+                                         (1u << sz_utf8_word_break_format_k),
     sz_utf8_word_break_aletter_or_hebrew_set_k = (1u << sz_utf8_word_break_aletter_k) |
-        (1u << sz_utf8_word_break_hebrew_letter_k),
+                                                 (1u << sz_utf8_word_break_hebrew_letter_k),
     sz_utf8_word_break_mid_quotes_set_k = (1u << sz_utf8_word_break_mid_quotes_k),
 };
 
@@ -248,7 +248,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_word_regional_run_before_(sz_cptr_t text, sz_
  *
  *  Nothing in the library calls this: the segmenters run a streaming state machine instead, which
  *  carries that context forward. It is the independent second opinion the tests measure that
- *  machine against, which is what turns @c sz_word_serial_boundary_'s byte-identity claim into
+ *  machine against, which is what turns @c sz_word_boundary_serial_'s byte-identity claim into
  *  something checked rather than asserted.
  */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, sz_size_t length, sz_size_t position) {
@@ -359,7 +359,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_word_boundary_serial(sz_cptr_t text, 
  *  Regional_Indicator runs); here they are tracked forward. The forward WB6/WB7b/WB12 lookahead
  *  keeps reusing @c sz_word_next_element_ (the same bounded forward fold the oracle uses), so only
  *  the backward rescans are removed. Fields mirror @c sz_utf8_word_break_carry_t. */
-typedef struct sz_word_serial_state_t {
+typedef struct sz_word_state_serial_t {
 
     /** Word_Break class of the WB4 effective-previous element's base codepoint. */
     sz_u8_t previous_property;
@@ -388,12 +388,12 @@ typedef struct sz_word_serial_state_t {
 
     /** A codepoint has been processed (clears the WB1 start-of-text state). */
     sz_bool_t has_previous;
-} sz_word_serial_state_t;
+} sz_word_state_serial_t;
 
 /** Advance @p state by one codepoint: fold it into the previous element (WB4) or open a new
  *  element base, maintaining the two-back base chain, the Regional_Indicator parity, and
  *  the raw-previous fields. */
-STRINGZILLA_CONSTEXPR void sz_word_serial_advance_(sz_word_serial_state_t *state, sz_u8_t property,
+STRINGZILLA_CONSTEXPR void sz_word_advance_serial_(sz_word_state_serial_t *state, sz_u8_t property,
                                                    sz_rune_t codepoint) {
     sz_bool_t const after_newline = (sz_bool_t)(state->has_previous &&
                                                 sz_word_is_newline_(state->previous_raw_property));
@@ -419,7 +419,7 @@ STRINGZILLA_CONSTEXPR void sz_word_serial_advance_(sz_word_serial_state_t *state
  *  The only right-context rules (WB6 / WB7b / WB12) reuse the bounded @c sz_word_next_element_
  *  forward fold; all left context comes from @p state. Byte-identical to
  *  @c sz_utf8_is_word_boundary_serial. */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_word_serial_boundary_(sz_word_serial_state_t const *state, sz_u8_t next_property,
+STRINGZILLA_CONSTEXPR sz_bool_t sz_word_boundary_serial_(sz_word_state_serial_t const *state, sz_u8_t next_property,
                                                          sz_rune_t next_codepoint, sz_cptr_t text, sz_size_t length,
                                                          sz_size_t position) {
     sz_u8_t const immediate_property = state->previous_raw_property;
@@ -507,7 +507,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
     sz_size_t words = 0;
     if (length == 0 || words_capacity == 0) return 0;
 
-    sz_word_serial_state_t state;
+    sz_word_state_serial_t state;
     state.previous_property = (sz_u8_t)sz_utf8_word_break_other_k;
     state.previous_codepoint = 0;
     state.before_property = (sz_u8_t)sz_utf8_word_break_other_k;
@@ -524,19 +524,19 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_serial_( //
     sz_size_t word_start = 0;
     sz_size_t position = 0;
     sz_rune_t const first_codepoint = sz_utf8_next_rune_(text, length, &position);
-    sz_word_serial_advance_(&state, sz_rune_word_break_property(first_codepoint), first_codepoint);
+    sz_word_advance_serial_(&state, sz_rune_word_break_property(first_codepoint), first_codepoint);
 
     while (position < length) {
         sz_size_t next_position = position;
         sz_rune_t const next_codepoint = sz_utf8_next_rune_(text, length, &next_position);
         sz_u8_t const next_property = sz_rune_word_break_property(next_codepoint);
-        if (sz_word_serial_boundary_(&state, next_property, next_codepoint, text, length, position)) {
+        if (sz_word_boundary_serial_(&state, next_property, next_codepoint, text, length, position)) {
             if (words == words_capacity) return words;
             word_lengths[words] = position - word_start;
             ++words;
             word_start = position;
         }
-        sz_word_serial_advance_(&state, next_property, next_codepoint);
+        sz_word_advance_serial_(&state, next_property, next_codepoint);
         position = next_position;
     }
 

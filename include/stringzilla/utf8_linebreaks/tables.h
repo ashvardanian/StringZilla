@@ -1004,12 +1004,12 @@ sz_align_(64) static const sz_u8_t sz_utf8_line_break_bmp_page_lut_[256] = {
 /** The bit-exact Haswell @c vpshufb nibble cascade mapping an astral codepoint →
  *  UAX-14 palette index. */
 enum {
-    sz_utf8_line_break_haswell_astral_stage2_lo_count_k = 288,
-    sz_utf8_line_break_haswell_astral_stage3_lo_count_k = 1280,
-    sz_utf8_line_break_haswell_astral_stage3_hi_count_k = 1280,
-    sz_utf8_line_break_haswell_astral_leaf_groups_k = 16,
+    sz_utf8_line_break_astral_stage2_low_count_k = 288,
+    sz_utf8_line_break_astral_stage3_low_count_k = 1280,
+    sz_utf8_line_break_astral_stage3_high_count_k = 1280,
+    sz_utf8_line_break_astral_leaf_groups_k = 16,
 };
-static const sz_u8_t sz_utf8_line_break_haswell_astral_stage1_[256] = {
+static const sz_u8_t sz_utf8_line_break_astral_stage1_[256] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 5, 9, 10, 11, 12, 13, 14, 7,  7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 15,
     7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,  7,  7,  7,  15, 5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -1018,7 +1018,7 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage1_[256] = {
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  16, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
     5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5};
-static const sz_u8_t sz_utf8_line_break_haswell_astral_stage2_lo_[288] = {
+static const sz_u8_t sz_utf8_line_break_astral_stage2_low_[288] = {
     0,  1,  2,  3,  4,  0,  0,  0,  5,  6,  7,  8,  0,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
     25, 26, 27, 0,  0,  0,  0,  28, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  29, 30, 31, 0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  32, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -1029,7 +1029,7 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage2_lo_[288] = {
     0,  0,  0,  0,  0,  54, 55, 56, 0,  57, 58, 59, 0,  60, 61, 0,  0,  62, 0,  0,  0,  63, 64, 65, 66, 67, 68, 69, 70,
     71, 72, 73, 47, 74, 74, 74, 75, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 39, 76, 77, 78, 0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0};
-static const sz_u8_t sz_utf8_line_break_haswell_astral_stage3_lo_[1280] = {
+static const sz_u8_t sz_utf8_line_break_astral_stage3_low_[1280] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   0,   0,   0,   0,   0,   0,
     0,   0,   0,   0,   0,   0,   0,   0,   2,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
     3,   0,   0,   0,   0,   0,   0,   0,   0,   4,   0,   5,   0,   0,   0,   6,   0,   0,   0,   0,   0,   0,   0,
@@ -1086,7 +1086,7 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage3_lo_[1280] = {
     128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 244, 40,  0,   61,  61,  61,  61,  61,  61,  0,   0,
     0,   0,   0,   0,   0,   0,   61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  61,  0,   0,
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0};
-static const sz_u8_t sz_utf8_line_break_haswell_astral_stage3_hi_[1280] = {
+static const sz_u8_t sz_utf8_line_break_astral_stage3_high_[1280] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1120,7 +1120,7 @@ static const sz_u8_t sz_utf8_line_break_haswell_astral_stage3_hi_[1280] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-static const sz_u8_t sz_utf8_line_break_haswell_astral_stage4_groups_[4096] = {
+static const sz_u8_t sz_utf8_line_break_astral_stage4_groups_[4096] = {
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  1,  1,  1,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  8,  8,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,
     8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  0,  0,  0,  0,  0,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,  8,

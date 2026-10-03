@@ -106,7 +106,7 @@ STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t len
  *  @see OpenSSL vpaes-x86_64.pl, the constant-time S-box-equivalent reference: https://github.com/openssl/openssl/blob/master/crypto/aes/asm/vpaes-x86_64.pl */
 
 /** Pre-computed vpaes-style nibble tables for the LASX AES round (see derivation above). */
-STRINGZILLA_INLINE sz_u8_t const *sz_aes_loongsonasx_tables_(void) {
+STRINGZILLA_INLINE sz_u8_t const *sz_aes_tables_loongsonasx_(void) {
     // Layout: [iptlo, ipthi, sbolo, sbohi, glog, gexp, ginv, shiftrows] x16 bytes each.
     static sz_align_(64) sz_u8_t const tables[8 * 16] = {
         // k_iptlo
@@ -336,7 +336,7 @@ STRINGZILLA_INLINE __m128i sz_emulate_aes_mixcolumns_loongsonasx_(__m128i sbox_o
  *          @c sz_emulate_aesenc_si128_serial_.
  */
 STRINGZILLA_INLINE __m128i sz_emulate_aesenc_loongsonasx_(__m128i state_u8x16, __m128i round_key_u8x16) {
-    sz_u8_t const *tables = sz_aes_loongsonasx_tables_();
+    sz_u8_t const *tables = sz_aes_tables_loongsonasx_();
     __m128i zero_u8x16 = __lsx_vreplgr2vr_b(0);
     __m128i low_nibble_mask_u8x16 = __lsx_vreplgr2vr_b(0x0F);
     __m128i input_transform_low_u8x16 = __lsx_vld(tables + 0, 0),

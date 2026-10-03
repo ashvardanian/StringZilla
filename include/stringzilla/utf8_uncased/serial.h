@@ -2025,7 +2025,8 @@ STRINGZILLA_CONSTEXPR sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune
         // Latin Extended-B (C6 lead byte) - for vietnamese (supports ơ/ư)
         if (lead == 0xC6) { safety |= (1 << sz_utf8_uncased_rune_safe_vietnamese_k); }
 
-        // Cyrillic - check exact ranges handled by sz_utf8_uncased_search_icelake_cyrillic_fold_zmm_
+        // Cyrillic - check the exact ranges that
+        // sz_utf8_uncased_search_cyrillic_fold_naively_zmm_icelake_ handles
         // D0 80-BF: U+0400-U+043F (includes uppercase and lowercase)
         // D1 80-9F: U+0440-U+045F (lowercase continuation)
         // Note: D2/D3 Extended Cyrillic BANNED from SIMD kernel - needles with D2/D3 use serial fallback
@@ -2034,7 +2035,8 @@ STRINGZILLA_CONSTEXPR sz_utf8_uncased_rune_safety_profile_t sz_utf8_uncased_rune
             safety |= (1 << sz_utf8_uncased_rune_safe_cyrillic_k);
         }
 
-        // Greek - check exact ranges handled by sz_utf8_uncased_search_icelake_greek_fold_zmm_
+        // Greek - check the exact ranges that
+        // sz_utf8_uncased_search_greek_fold_naively_zmm_icelake_ handles
         // CE 86-8F: accented uppercase Ά-Ώ (with gaps at 87, 8B, 8D)
         //   - exclude CE 90: 'ΐ' (U+0390) expands to 3 codepoints.
         // CE 91-A9: basic uppercase Α-Ω

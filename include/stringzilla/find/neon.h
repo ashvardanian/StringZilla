@@ -86,7 +86,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_neon_(sz_cptr_t haystack, sz_size_t h
  *  @param[in] set_bottom_vec_u8x16 Bottom half of the 32-byte byteset (bytes 16..31).
  *  @return 64-bit mask with 4-bit-spaced bits set for matching positions.
  */
-STRINGZILLA_INLINE sz_u64_t sz_find_byteset_neon_register_( //
+STRINGZILLA_INLINE sz_u64_t sz_find_byteset_register_neon_( //
     sz_u128_vec_t haystack_vec, uint8x16_t set_top_vec_u8x16, uint8x16_t set_bottom_vec_u8x16) {
 
     // Once we've read the characters in the haystack, we want to
@@ -243,7 +243,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_neon_(sz_cptr_t haystack, sz_size_t
 
     for (; haystack_length >= 16; haystack += 16, haystack_length -= 16) {
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)(haystack));
-        matches = sz_find_byteset_neon_register_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
+        matches = sz_find_byteset_register_neon_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return haystack + sz_u64_ctz_neon_(matches) / 4;
     }
 
@@ -260,7 +260,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_neon_(sz_cptr_t haystack, sz_size_
     // Check `sz_find_byteset_neon` for explanations.
     for (; haystack_length >= 16; haystack_length -= 16) {
         haystack_vec.u8x16 = vld1q_u8((sz_u8_t const *)(haystack) + haystack_length - 16);
-        matches = sz_find_byteset_neon_register_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
+        matches = sz_find_byteset_register_neon_(haystack_vec, set_top_vec_u8x16, set_bottom_vec_u8x16);
         if (matches) return haystack + haystack_length - 1 - sz_u64_clz_neon_(matches) / 4;
     }
 

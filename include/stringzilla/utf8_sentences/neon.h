@@ -151,18 +151,17 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16
     uint8x16_t const n4_u8x16 = vandq_u8(plane_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const n3_u8x16 = vandq_u8(vshrq_n_u8(high_u8x16, 4), low_nibble_mask_u8x16);
     uint8x16_t const stage1_index_u8x16 = vorrq_u8(vshlq_n_u8(n4_u8x16, 4), n3_u8x16);
-    uint8x16_t const page_u8x16 = sz_utf8_rune_lut256_neon_(sz_utf8_sentence_break_haswell_astral_stage1_,
-                                                            stage1_index_u8x16);
+    uint8x16_t const page_u8x16 = sz_utf8_rune_lut256_neon_(sz_utf8_sentence_break_astral_stage1_, stage1_index_u8x16);
     uint8x16_t const n2_u8x16 = vandq_u8(high_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const leaf2_lo_u8x16 = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_sentence_break_haswell_astral_stage2_lo_, sz_utf8_sentence_break_haswell_astral_stage2_lo_count_k / 16,
-        page_u8x16, n2_u8x16);
+        sz_utf8_sentence_break_astral_stage2_low_, sz_utf8_sentence_break_astral_stage2_low_count_k / 16, page_u8x16,
+        n2_u8x16);
     uint8x16_t const n1_u8x16 = vandq_u8(vshrq_n_u8(low_u8x16, 4), low_nibble_mask_u8x16);
     uint8x16_t const leaf_lo_u8x16 = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_sentence_break_haswell_astral_stage3_lo_, sz_utf8_sentence_break_haswell_astral_stage3_lo_count_k / 16,
+        sz_utf8_sentence_break_astral_stage3_low_, sz_utf8_sentence_break_astral_stage3_low_count_k / 16,
         leaf2_lo_u8x16, n1_u8x16);
     uint8x16_t const leaf_hi_u8x16 = sz_utf8_rune_cascade_stage_neon_(
-        sz_utf8_sentence_break_haswell_astral_stage3_hi_, sz_utf8_sentence_break_haswell_astral_stage3_hi_count_k / 16,
+        sz_utf8_sentence_break_astral_stage3_high_, sz_utf8_sentence_break_astral_stage3_high_count_k / 16,
         leaf2_lo_u8x16, n1_u8x16);
     uint8x16_t const n0_u8x16 = vandq_u8(low_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const leaf_group_u8x16 = vorrq_u8(vandq_u8(vshrq_n_u8(leaf_lo_u8x16, 4), low_nibble_mask_u8x16),
@@ -170,9 +169,9 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_sentence_break_astral_class_neon_(uint8x16
     uint8x16_t const leaf_low_nibble_u8x16 = vandq_u8(leaf_lo_u8x16, low_nibble_mask_u8x16);
     uint8x16_t const stage4_lut_index_u8x16 = vorrq_u8(vshlq_n_u8(leaf_low_nibble_u8x16, 4), n0_u8x16);
     uint8x16_t result_u8x16 = vdupq_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_sentence_break_haswell_astral_leaf_groups_k; ++group) {
+    for (int group = 0; group < (int)sz_utf8_sentence_break_astral_leaf_groups_k; ++group) {
         uint8x16_t const value_u8x16 = sz_utf8_rune_lut256_neon_(
-            sz_utf8_sentence_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
+            sz_utf8_sentence_break_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
         uint8x16_t const here_u8x16 = vceqq_u8(leaf_group_u8x16, vdupq_n_u8((sz_u8_t)group));
         result_u8x16 = vbslq_u8(here_u8x16, value_u8x16, result_u8x16);
     }

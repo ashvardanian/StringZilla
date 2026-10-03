@@ -70,13 +70,13 @@ typedef struct sz_levenshtein_u8x64_query_icelake_t {
 
 /** One ZMM per position, sixty-four candidates in it, and the vertical never leaves a register. */
 enum {
-    sz_levenshtein_icelake_u8x64_candidates_per_step_k = 64,
-    sz_levenshtein_icelake_u8x64_registers_per_position_k = 1
+    sz_levenshtein_u8x64_candidates_per_step_icelake_k = 64,
+    sz_levenshtein_u8x64_registers_per_position_icelake_k = 1
 };
 
 /** Positions the byte-lane deltas span before a signed byte could wrap: a score moves by at most
  *  one per step. */
-enum { sz_levenshtein_icelake_u8x64_positions_per_flush_k = 64 };
+enum { sz_levenshtein_u8x64_positions_per_flush_icelake_k = 64 };
 
 STRINGZILLA_INLINE void sz_levenshtein_u8x64_pack_icelake_(sz_levenshtein_query_t const *query,
                                                            sz_levenshtein_u8x64_query_icelake_t *packed) {
@@ -159,7 +159,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u8x64_step_icelake(sz_levenshtein_u8x64_s
 
 STRINGZILLA_INLINE void sz_levenshtein_u8x64_flush_icelake_(sz_levenshtein_u8x64_state_icelake_t *state,
                                                             sz_size_t *scores) {
-    enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
+    enum { lanes_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k };
     sz_u512_vec_t const deltas_vec = state->deltas_vec;
     for (sz_size_t candidate = 0; candidate != lanes_k; ++candidate)
         scores[candidate] = (sz_size_t)((sz_ssize_t)scores[candidate] + deltas_vec.i8s[candidate]);
@@ -179,7 +179,7 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x64_transpose_icelake_(sz_levensht
                                                                      sz_size_t *cursors, sz_u64_t *symbol_counts,
                                                                      sz_size_t transpose_start, sz_size_t positions,
                                                                      void *transpose_classes) {
-    enum { lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
+    enum { lanes_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k };
     sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
     sz_u8_t const *const byte_to_class = query->byte_to_class;
     sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
@@ -227,13 +227,13 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x64_transpose_icelake(sz_levenshte
 /** Sweeps sixty-four candidates of a query of at most eight symbols through every transpose.
  *  Between a retirement and a flush the step loop carries no scalar work, so a run of positions
  *  costs only its permutes and logic. */
-STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query_t const *shared_query,
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_sweep_icelake_(sz_levenshtein_query_t const *shared_query,
                                                             sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                             sz_size_t sweep_count, sz_size_t *distances) {
     enum {
-        candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k,
+        candidates_per_position_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k,
         positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k,
-        positions_per_flush_k = sz_levenshtein_icelake_u8x64_positions_per_flush_k
+        positions_per_flush_k = sz_levenshtein_u8x64_positions_per_flush_icelake_k
     };
     // A local copy: nothing stored through the transpose can alias it, so the step keeps the packed query in registers.
     sz_levenshtein_query_t const local_query = *shared_query;
@@ -286,9 +286,9 @@ STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_sweep_(sz_levenshtein_query
 
 /** Streams every candidate through a prepared byte @p query of at most eight symbols, sixty-four
  *  at a time. */
-STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_query_t const *query,
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_distances_icelake_(sz_levenshtein_query_t const *query,
                                                                 sz_sequence_t const *candidates, sz_size_t *distances) {
-    enum { candidates_per_position_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k };
+    enum { candidates_per_position_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k };
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
         sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
                                                     candidates->count - sweep_first);
@@ -298,7 +298,7 @@ STRINGZILLA_INLINE void sz_levenshtein_icelake_u8x64_distances_(sz_levenshtein_q
             texts[candidate] = candidates->get_start(candidates->handle, sweep_first + candidate);
             byte_counts[candidate] = candidates->get_length(candidates->handle, sweep_first + candidate);
         }
-        sz_levenshtein_icelake_u8x64_sweep_(query, texts, byte_counts, sweep_count, distances + sweep_first);
+        sz_levenshtein_u8x64_sweep_icelake_(query, texts, byte_counts, sweep_count, distances + sweep_first);
     }
 }
 
@@ -334,7 +334,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
+    enum { registers_k = sz_levenshtein_u64x8_registers_per_position_skylake_k };
     // The byte lanes read one word of one class row, so a rune batch is Skylake's whole and not one query at a time.
     if (engine->symbol != sz_levenshtein_bytes_k)
         return sz_levenshtein_distances_skylake_(engine, candidates, distances, distances_stride);
@@ -355,9 +355,9 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
         }
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
         if (sz_levenshtein_lanes_icelake(query.length) == sz_levenshtein_lanes_u8x64_k)
-            sz_levenshtein_icelake_u8x64_distances_(&query, candidates, row);
+            sz_levenshtein_u8x64_distances_icelake_(&query, candidates, row);
         else
-            sz_levenshtein_skylake_u64x8_distances_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake_,
+            sz_levenshtein_u64x8_distances_skylake_(&query, candidates, sz_levenshtein_u8x8_transpose_skylake_,
                                                     sz_levenshtein_classes_u8_k, verticals, row);
     }
     return sz_success_k;

@@ -389,11 +389,11 @@ STRINGZILLA_INLINE void sz_overlap_engine_close_(sz_overlap_engine_t *engine) {
 #pragma region Serial
 
 /** Positions one serial step advances the chain by. */
-enum { sz_overlap_serial_f64x1_positions_per_step_k = 1 };
+enum { sz_overlap_f64x1_positions_per_step_serial_k = 1 };
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product fits one @c u64, and the remainder by a constant becomes a multiply-high and a shift. */
-STRINGZILLA_CONSTEXPR sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multiplier, sz_f64_t multiplicand,
+STRINGZILLA_CONSTEXPR sz_f64_t sz_overlap_multiply_add_serial_(sz_f64_t multiplier, sz_f64_t multiplicand,
                                                                sz_f64_t addend) {
     sz_u64_t const product = (sz_u64_t)multiplier * (sz_u64_t)multiplicand + (sz_u64_t)addend;
     return (sz_f64_t)(product % (sz_u64_t)sz_overlap_modulus_k);
@@ -401,7 +401,7 @@ STRINGZILLA_CONSTEXPR sz_f64_t sz_overlap_serial_multiply_add_(sz_f64_t multipli
 
 STRINGZILLA_INLINE sz_f64_t sz_overlap_f64x1_prefix_hash_step_serial_(sz_f64_t prior, sz_cptr_t text,
                                                                       sz_f64_t *prefix_hashes) {
-    sz_f64_t const next = sz_overlap_serial_multiply_add_(prior, sz_overlap_powers_of_256_k[1],
+    sz_f64_t const next = sz_overlap_multiply_add_serial_(prior, sz_overlap_powers_of_256_k[1],
                                                           (sz_f64_t)(sz_u8_t)text[0]);
     prefix_hashes[0] = next;
     return next;
@@ -427,7 +427,7 @@ STRINGZILLA_INLINE sz_f64_t sz_overlap_f64x1_prefix_hash_step_tail_serial(sz_f64
 STRINGZILLA_CONSTEXPR void sz_overlap_f64x1_window_hash_step_serial(sz_f64_t const *prefix_hashes_at_start,
                                                                     sz_f64_t const *prefix_hashes_at_end,
                                                                     sz_f64_t window_power, sz_u32_t *window_hashes) {
-    sz_f64_t const shifted = sz_overlap_serial_multiply_add_(prefix_hashes_at_start[0], window_power, 0.0);
+    sz_f64_t const shifted = sz_overlap_multiply_add_serial_(prefix_hashes_at_start[0], window_power, 0.0);
     sz_f64_t residue = prefix_hashes_at_end[0] - shifted;
     if (residue < 0.0) residue += (sz_f64_t)sz_overlap_modulus_k;
     window_hashes[0] = (sz_u32_t)residue;
@@ -444,7 +444,7 @@ STRINGZILLA_INLINE void sz_overlap_f64x1_window_hash_step_tail_serial(sz_f64_t c
 }
 
 /** Branchless compare-exchange: @p lower keeps the smaller key, unsigned. */
-STRINGZILLA_INLINE void sz_overlap_serial_exchange_(sz_u32_t *lower, sz_u32_t *upper) {
+STRINGZILLA_INLINE void sz_overlap_exchange_serial_(sz_u32_t *lower, sz_u32_t *upper) {
     sz_u32_t const first = *lower, second = *upper;
     *lower = first < second ? first : second;
     *upper = first < second ? second : first;
@@ -458,11 +458,11 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x1_btree_sort_serial_(sz_u32_t *keys,
     for (sz_size_t phase = 2; phase <= capacity; phase *= 2) {
         for (sz_size_t start = 0; start != capacity; start += phase)
             for (sz_size_t offset = 0; offset != phase / 2; ++offset)
-                sz_overlap_serial_exchange_(keys + start + offset, keys + start + phase - 1 - offset);
+                sz_overlap_exchange_serial_(keys + start + offset, keys + start + phase - 1 - offset);
         for (sz_size_t distance = phase / 4; distance != 0; distance /= 2)
             for (sz_size_t start = 0; start != capacity; start += 2 * distance)
                 for (sz_size_t offset = 0; offset != distance; ++offset)
-                    sz_overlap_serial_exchange_(keys + start + offset, keys + start + distance + offset);
+                    sz_overlap_exchange_serial_(keys + start + offset, keys + start + distance + offset);
     }
     return sz_overlap_btree_unique_(keys, count);
 }
@@ -475,7 +475,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x1_btree_sort_serial(sz_u32_t *keys, 
 
 /** One branch level: the child ordinal a flipped @p key descends into, the count of
  *  separators below it. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *node, sz_u32_t key) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_branch_step_serial_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t child = 0;
     for (sz_size_t separator = 0; separator != sz_overlap_keys_per_node_k; ++separator)
         child += (sz_i32_t)node[separator] < (sz_i32_t)key;
@@ -483,7 +483,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_serial_branch_step_(sz_u32_t const *n
 }
 
 /** The leaf compare: one when the flipped @p key sits in this node, zero otherwise. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_serial_leaf_step_(sz_u32_t const *node, sz_u32_t key) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_leaf_step_serial_(sz_u32_t const *node, sz_u32_t key) {
     sz_size_t found = 0;
     for (sz_size_t position = 0; position != sz_overlap_keys_per_node_k; ++position) found |= node[position] == key;
     return found;
@@ -498,9 +498,9 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x1_btree_probe_serial_(sz_overlap_btr
         sz_size_t node = 0;
         for (sz_size_t level = 0; level + 1 != btree->levels; ++level)
             node = node * branches_per_node +
-                   sz_overlap_serial_branch_step_(btree->nodes + (btree->level_bases[level] + node) * keys_per_node,
+                   sz_overlap_branch_step_serial_(btree->nodes + (btree->level_bases[level] + node) * keys_per_node,
                                                   key);
-        matches += sz_overlap_serial_leaf_step_(
+        matches += sz_overlap_leaf_step_serial_(
             btree->nodes + (btree->level_bases[btree->levels - 1] + node) * keys_per_node, key);
     }
     return matches;

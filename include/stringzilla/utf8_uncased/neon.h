@@ -23,7 +23,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/find/neon.h" // `sz_find_neon_`
 #include "stringzilla/utf8_uncased/serial.h"
-#include "stringzilla/utf8_uncased_fold/neon.h" // `sz_utf8_fold_neon_ascii_`
+#include "stringzilla/utf8_uncased_fold/neon.h" // `sz_utf8_fold_ascii_neon_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,7 +49,7 @@ extern "C" {
  *  exactly one bit per byte, so the probe filter's scalar shifts by runtime probe offsets port from
  *  the AVX2 driver unchanged.
  */
-STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t low_cmp_u8x16,
+STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_movemask_u8x16x2_neon_(uint8x16_t low_cmp_u8x16,
                                                                    uint8x16_t high_cmp_u8x16) {
     // MSVC's ARM64 `uint8x16_t` is a `__n128` struct that rejects scalar brace-init, so load from `.rodata`.
     static sz_u8_t const bit_weights[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
@@ -66,7 +66,7 @@ STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_neon_movemask_u8x16x2_(uint8x16_t lo
 /** Detects bytes in the unsigned range from @p range_start up to, but excluding, @p range_start +
  *  @p range_length. NEON has unsigned byte compares, so `(x − start) < length` is one wrap-around
  *  subtraction plus one @c VCLT: bytes below the start wrap above the length and drop out. */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_neon_in_byte_range_u8x16_(uint8x16_t values_u8x16, sz_u8_t range_start,
+STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_in_byte_range_u8x16_neon_(uint8x16_t values_u8x16, sz_u8_t range_start,
                                                                         sz_u8_t range_length) {
     return vcltq_u8(vsubq_u8(values_u8x16, vdupq_n_u8(range_start)), vdupq_n_u8(range_length));
 }
@@ -82,7 +82,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_neon_in_byte_range_u8x16_(uint8x16
  *  lead byte's fold never needs its predecessor; the candidate-window re-fold uses the same
  *  zero-predecessor convention, so both agree at every real match position.
  */
-STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_previous_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
+STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_previous_bytes_u8x16x2_neon_(uint8x16x2_t source_u8x16x2) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16x2_t result_u8x16x2;
     result_u8x16x2.val[0] = vextq_u8(zero_u8x16, source_u8x16x2.val[0], 15);
@@ -93,7 +93,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_previous_bytes_u8x16x2_(uin
 /** Shifts the 32 chunk bytes left by one lane, so lane @c i holds byte i + 1. Lane 15 of the high
  *  register receives zero; lane 15 of the low register receives the high register's lane 0.
  *  Vector-domain equivalent of Ice Lake's `k-mask >> 1`. */
-STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_next_bytes_u8x16x2_(uint8x16x2_t source_u8x16x2) {
+STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_next_bytes_u8x16x2_neon_(uint8x16x2_t source_u8x16x2) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16x2_t result_u8x16x2;
     result_u8x16x2.val[0] = vextq_u8(source_u8x16x2.val[0], source_u8x16x2.val[1], 1);
@@ -102,7 +102,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_next_bytes_u8x16x2_(uint8x1
 }
 
 /** First N bits set, defined for `n == 32` (where `(1u << n) − 1` is undefined). */
-STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_neon_mask_until_(sz_size_t n) {
+STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_mask_until_neon_(sz_size_t n) {
     return n >= 32 ? 0xFFFFFFFFu : ((sz_u32_t)1 << n) - 1;
 }
 
@@ -110,7 +110,7 @@ STRINGZILLA_INLINE sz_u32_t sz_utf8_uncased_neon_mask_until_(sz_size_t n) {
  *  @p length. The zero padding mirrors Ice Lake's @c maskz loads: zero bytes match no probe inside
  *  a valid window and trip no alarm, so tail chunks reuse the main-loop logic unchanged instead of
  *  branching into a separate epilogue. */
-STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_load_padded_u8x16x2_(sz_cptr_t source, sz_size_t length) {
+STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_load_padded_u8x16x2_neon_(sz_cptr_t source, sz_size_t length) {
     sz_u8_t buffer[32] = {0};
     for (sz_size_t byte_index = 0; byte_index < length; ++byte_index) buffer[byte_index] = (sz_u8_t)source[byte_index];
     return vld1q_u8_x2(buffer);
@@ -119,7 +119,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_neon_load_padded_u8x16x2_(sz_cpt
 /** Loads up to 16 bytes for candidate-window verification without over-reading the haystack: the
  *  fast full load is taken whenever 16 bytes remain, and only the last few candidates near the
  *  haystack end pay for the zero-padded stack copy. */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_neon_load_window_u8x16_(sz_cptr_t source, sz_size_t available) {
+STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_load_window_u8x16_neon_(sz_cptr_t source, sz_size_t available) {
     if (available >= 16) return vld1q_u8((sz_u8_t const *)source);
     sz_u8_t buffer[16] = {0};
     for (sz_size_t byte_index = 0; byte_index < available; ++byte_index)
@@ -135,11 +135,11 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_uncased_neon_load_window_u8x16_(sz_cptr_t 
  *  @brief Fold a 32-byte chunk using ASCII case folding rules.
  *  @sa sz_utf8_uncased_rune_ascii_invariant_k
  */
-STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
+STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
     uint8x16x2_t result_u8x16x2;
     // Only fold bytes in range A-Z; the masked add stays branch-free across both registers
-    result_u8x16x2.val[0] = sz_utf8_fold_neon_ascii_(text_u8x16x2.val[0]);
-    result_u8x16x2.val[1] = sz_utf8_fold_neon_ascii_(text_u8x16x2.val[1]);
+    result_u8x16x2.val[0] = sz_utf8_fold_ascii_neon_(text_u8x16x2.val[0]);
+    result_u8x16x2.val[1] = sz_utf8_fold_ascii_neon_(text_u8x16x2.val[1]);
     return result_u8x16x2;
 }
 
@@ -152,7 +152,7 @@ STRINGZILLA_INLINE uint8x16x2_t sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(
  *  32-bit movemask integers: with windows ≤ 16 bytes every chunk still exposes ≥ 17 valid start
  *  positions per iteration.
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_ascii_3probe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_3probe_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                      //
     sz_cptr_t needle, sz_size_t needle_length,                          //
     sz_utf8_uncased_needle_t const *needle_metadata,                    //
@@ -179,18 +179,18 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_ascii_3probe_( //
 
         uint8x16x2_t text_u8x16x2 = available >= 32
                                         ? vld1q_u8_x2((sz_u8_t const *)haystack_ptr)
-                                        : sz_utf8_uncased_neon_load_padded_u8x16x2_(haystack_ptr, chunk_size);
-        uint8x16x2_t folded_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
+                                        : sz_utf8_uncased_load_padded_u8x16x2_neon_(haystack_ptr, chunk_size);
+        uint8x16x2_t folded_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
 
-        sz_u32_t matches = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_first_u8x16),
+        sz_u32_t matches = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_first_u8x16),
                                                                   vceqq_u8(folded_u8x16x2.val[1], probe_first_u8x16));
-        matches &= sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_second_u8x16),
+        matches &= sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_second_u8x16),
                                                           vceqq_u8(folded_u8x16x2.val[1], probe_second_u8x16)) >>
                    offset_second;
-        matches &= sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_last_u8x16),
+        matches &= sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_last_u8x16),
                                                           vceqq_u8(folded_u8x16x2.val[1], probe_last_u8x16)) >>
                    offset_last;
-        matches &= sz_utf8_uncased_neon_mask_until_(valid_starts);
+        matches &= sz_utf8_uncased_mask_until_neon_(valid_starts);
 
         for (; matches; matches &= matches - 1) {
             sz_size_t const candidate_offset = (sz_size_t)sz_u32_ctz_neon_(matches);
@@ -248,7 +248,7 @@ typedef sz_u32_t (*sz_utf8_uncased_alarm_u8x16x2_t_)(uint8x16x2_t text_u8x16x2, 
  *  @param[in] alarm Script-specific danger detection callback, or @c NULL if the script has no
  *      danger characters: the danger branch disappears and the full step is used.
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_neon_( //
     sz_utf8_uncased_fold_u8x16x2_t_ fold,                           //
     sz_utf8_uncased_alarm_u8x16x2_t_ alarm,                         //
     sz_cptr_t haystack, sz_size_t haystack_length,                  //
@@ -266,7 +266,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
     // Pre-load folded window into one register; the byte-mask `window_keep` replicates Ice Lake's
     // `maskz` window load: bytes past the window are zeroed before folding, so a lead byte at the
     // window edge never borrows fold context from haystack bytes outside the window
-    sz_u32_t const folded_window_mask = sz_utf8_uncased_neon_mask_until_(folded_window_length);
+    sz_u32_t const folded_window_mask = sz_utf8_uncased_mask_until_neon_(folded_window_length);
     uint8x16_t const needle_window_u8x16 = vld1q_u8((sz_u8_t const *)needle_metadata->folded_slice);
     static sz_u8_t const lane_indices[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
     uint8x16_t const lane_indices_u8x16 = vld1q_u8(lane_indices);
@@ -298,12 +298,12 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
         // For tail chunks (valid_starts <= 2), step = 1 ensures progress.
         // Scripts without danger characters advance by the full window count.
         sz_size_t const step = !alarm ? valid_starts : valid_starts > 2 ? valid_starts - 2 : 1;
-        sz_u32_t const load_mask = sz_utf8_uncased_neon_mask_until_(chunk_size);
-        sz_u32_t const valid_mask = sz_utf8_uncased_neon_mask_until_(valid_starts);
+        sz_u32_t const load_mask = sz_utf8_uncased_mask_until_neon_(chunk_size);
+        sz_u32_t const valid_mask = sz_utf8_uncased_mask_until_neon_(valid_starts);
 
         uint8x16x2_t text_u8x16x2 = available >= 32
                                         ? vld1q_u8_x2((sz_u8_t const *)haystack_ptr)
-                                        : sz_utf8_uncased_neon_load_padded_u8x16x2_(haystack_ptr, chunk_size);
+                                        : sz_utf8_uncased_load_padded_u8x16x2_neon_(haystack_ptr, chunk_size);
 
         // Check for anomalies (characters that fold to different byte widths)
         if (alarm) {
@@ -329,15 +329,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
         // Fold once, then filter candidates with 4 probe positions: scalar shifts over the
         // 32-bit movemasks substitute Ice Lake's k-mask shifts bit-for-bit
         uint8x16x2_t folded_u8x16x2 = fold(text_u8x16x2);
-        sz_u32_t matches = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_first_u8x16),
+        sz_u32_t matches = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_first_u8x16),
                                                                   vceqq_u8(folded_u8x16x2.val[1], probe_first_u8x16));
-        matches &= sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_second_u8x16),
+        matches &= sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_second_u8x16),
                                                           vceqq_u8(folded_u8x16x2.val[1], probe_second_u8x16)) >>
                    offset_second;
-        matches &= sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_third_u8x16),
+        matches &= sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_third_u8x16),
                                                           vceqq_u8(folded_u8x16x2.val[1], probe_third_u8x16)) >>
                    offset_third;
-        matches &= sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(folded_u8x16x2.val[0], probe_last_u8x16),
+        matches &= sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(folded_u8x16x2.val[0], probe_last_u8x16),
                                                           vceqq_u8(folded_u8x16x2.val[1], probe_last_u8x16)) >>
                    offset_last;
         matches &= valid_mask;
@@ -350,14 +350,14 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
             // Re-fold the candidate window: loading the ≤16-byte view into the low register with a
             // zeroed high register keeps the script fold's per-register semantics identical to the
             // main chunk fold (zero predecessor for byte 0, zero successor past the window)
-            uint8x16_t window_u8x16 = sz_utf8_uncased_neon_load_window_u8x16_(
+            uint8x16_t window_u8x16 = sz_utf8_uncased_load_window_u8x16_neon_(
                 haystack_candidate_ptr, (sz_size_t)(haystack_end - haystack_candidate_ptr));
             window_u8x16 = vandq_u8(window_u8x16, window_keep_u8x16);
             uint8x16x2_t window_chunk_u8x16x2;
             window_chunk_u8x16x2.val[0] = window_u8x16;
             window_chunk_u8x16x2.val[1] = vdupq_n_u8(0x00);
             uint8x16x2_t folded_window_u8x16x2 = fold(window_chunk_u8x16x2);
-            sz_u32_t window_equal_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
+            sz_u32_t window_equal_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
                 vceqq_u8(folded_window_u8x16x2.val[0], needle_window_u8x16), vdupq_n_u8(0x00));
             if ((window_equal_mask & folded_window_mask) != folded_window_mask) continue;
 
@@ -394,13 +394,13 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_scripted_( //
 /** 4-probe ASCII uncased search: the shared scripted driver with the ASCII fold and no alarm -
  *  ASCII never changes byte width when folded, so the danger machinery compiles away entirely and
  *  the step covers every valid start position. */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_4probe_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                      //
     sz_cptr_t needle, sz_size_t needle_length,                          //
     sz_utf8_uncased_needle_t const *needle_metadata,                    //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_,
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_,
         (sz_utf8_uncased_alarm_u8x16x2_t_)STRINGZILLA_NULL, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
@@ -417,9 +417,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_ascii_4probe_( //
  *  excluding the caseless '×' C3 97), and 'ß' (U+00DF, C3 9F) → "ss" where both bytes of the
  *  pair become 's' so the folded image matches the needle's "ss".
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_western_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
@@ -436,7 +436,7 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fo
         is_eszett_second_u8x16x2.val[register_index] = is_eszett_second_u8x16;
         is_eszett_second_u8x16x2.val[register_index ^ 1] = vdupq_n_u8(0x00);
         uint8x16_t next_eszett_second_u8x16 =
-            sz_utf8_uncased_neon_next_bytes_u8x16x2_(is_eszett_second_u8x16x2).val[register_index];
+            sz_utf8_uncased_next_bytes_u8x16x2_neon_(is_eszett_second_u8x16x2).val[register_index];
         uint8x16_t is_eszett_u8x16 = vorrq_u8(is_eszett_second_u8x16, next_eszett_second_u8x16);
         result_u8x16 = vbslq_u8(is_eszett_u8x16, vdupq_n_u8('s'), result_u8x16);
 
@@ -444,7 +444,7 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fo
         //    excluding '×' (C3 97, no case variant) and 'ß' (C3 9F, already handled above)
         uint8x16_t is_97_u8x16 = vceqq_u8(text_u8x16, vdupq_n_u8(0x97));
         uint8x16_t is_latin1_upper_u8x16 = vandq_u8(
-            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x80, 0x1F),
+            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x80, 0x1F),
                                         vorrq_u8(is_eszett_second_u8x16, is_97_u8x16)));
         result_u8x16 = vaddq_u8(result_u8x16, vandq_u8(is_latin1_upper_u8x16, vdupq_n_u8(0x20)));
         result_u8x16x2.val[register_index] = result_u8x16;
@@ -472,7 +472,7 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_western_europe_fo
  *  Lake's k-masks, including the boundary behavior where a lead at lane 31 defers to the next
  *  chunk, which overlaps this one.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_western_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                          sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
@@ -481,8 +481,8 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_
     // `previous` view and the third byte from the `next` view. AVX2's `movemask <</>> 1` predecessor
     // algebra becomes plain `vceqq` against those shifted views, and a single `vmaxvq_u8` over the
     // accumulated danger lanes replaces the dozen per-value horizontal reductions.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -493,7 +493,7 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_
 
         uint8x16_t danger_u8x16 = vandq_u8( // Capital Sharp S & co (E1 BA 96-9E)
             vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xBA)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE1))),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(next_u8x16, 0x96, 0x09));
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(next_u8x16, 0x96, 0x09));
         danger_u8x16 = vorrq_u8( // Kelvin/Angstrom (E2 84 AA/AB)
             danger_u8x16,
             vandq_u8(vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x84)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))),
@@ -515,14 +515,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_western_europe_alarm_
  *  @brief Western European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_western_europe_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_western_europe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_western_europe_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_utf8_uncased_needle_t const *needle_metadata,                      //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_western_europe_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_western_europe_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_western_europe_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_western_europe_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -546,9 +546,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_western_europe_( //
  *  In the C4 B9-BD sub-range, 'ĸ' (C4 B8) is caseless and 'Ŀ' (C4 BF) folds across leads to 'ŀ' (C5
  *  80), so it is routed through the alarm instead.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_central_europe_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_central_c4_deltas_lut_);
     uint8x16x4_t const c5_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_central_c5_deltas_lut_);
 
@@ -563,7 +563,7 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fo
 
         // 1. Latin-1 Supplement: C3 80-9E → +0x20, except '×' (C3 97)
         uint8x16_t is_latin1_upper_u8x16 = vandq_u8(
-            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x80, 0x1F),
+            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x80, 0x1F),
                                         vceqq_u8(text_u8x16, vdupq_n_u8(0x97))));
         result_u8x16 = vaddq_u8(result_u8x16, vandq_u8(is_latin1_upper_u8x16, vdupq_n_u8(0x20)));
 
@@ -593,14 +593,14 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_central_europe_fo
  *  - C5 B8: 'Ÿ' (U+0178) → 'ÿ' (C3 BF), crosses lead bytes
  *  - EF AC 80-86: Latin ligatures 'ﬀ'-'ﬆ' → ASCII pairs/triples
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_central_europe_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                          sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Byte-mask danger detection anchored at the second byte; the lead comes from the `previous`
     // view. All pairs are two-byte, so no `next` lookup is needed, and one `vmaxvq_u8` gates the
     // driver's danger branch in place of seven per-value movemasks.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -632,14 +632,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_central_europe_alarm_
  *  @brief Central European uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_central_europe_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_central_europe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_central_europe_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                        //
     sz_cptr_t needle, sz_size_t needle_length,                            //
     sz_utf8_uncased_needle_t const *needle_metadata,                      //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_central_europe_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_central_europe_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_central_europe_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_central_europe_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -662,10 +662,10 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_central_europe_( //
  *  Extended Cyrillic (D2/D3) needles are banned at classification time, so only the D0
  *  continuations need any folding.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t next_bytes_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_cyrillic_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t next_bytes_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
 
     // Second-byte offsets keyed by the high nibble: 8 → +0x10, 9 → +0x20, A → −0x20 (0xE0)
     static sz_u8_t const cyrillic_offset_lut[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
@@ -686,8 +686,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x
         // block, so their D0 lead takes a masked +1; 'А'-'П' (seconds 90-9F) stay under D0
         uint8x16_t is_d0_u8x16 = vceqq_u8(text_u8x16, vdupq_n_u8(0xD0));
         uint8x16_t needs_d1_u8x16 = vandq_u8(
-            is_d0_u8x16, vorrq_u8(sz_utf8_uncased_neon_in_byte_range_u8x16_(next_bytes_u8x16, 0x80, 0x10),
-                                  sz_utf8_uncased_neon_in_byte_range_u8x16_(next_bytes_u8x16, 0xA0, 0x10)));
+            is_d0_u8x16, vorrq_u8(sz_utf8_uncased_in_byte_range_u8x16_neon_(next_bytes_u8x16, 0x80, 0x10),
+                                  sz_utf8_uncased_in_byte_range_u8x16_neon_(next_bytes_u8x16, 0xA0, 0x10)));
         result_u8x16 = vaddq_u8(result_u8x16, vandq_u8(needs_d1_u8x16, vdupq_n_u8(0x01)));
         result_u8x16x2.val[register_index] = result_u8x16;
     }
@@ -704,21 +704,21 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_cyrillic_fold_u8x
  *  through the serial danger-zone scanner. As the E1 B2 pair is absent from virtually all real
  *  Cyrillic text, the third-byte refinement hides behind a branch and the hot path is two compares.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_cyrillic_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                    sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // E1 B2 is dangerous only when the third (next) byte folds, i.e. lands in 80-88. Anchored at the
     // B2 second byte: lead from `previous`, third from `next`, gated by one `vmaxvq_u8`.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t danger_u8x16 = vandq_u8(
             vandq_u8(vceqq_u8(text_u8x16x2.val[register_index], vdupq_n_u8(0xB2)),
                      vceqq_u8(previous_u8x16x2.val[register_index], vdupq_n_u8(0xE1))),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(next_u8x16x2.val[register_index], 0x80, 0x09));
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(next_u8x16x2.val[register_index], 0x80, 0x09));
         any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
     }
     return vmaxvq_u8(any_danger_u8x16);
@@ -728,14 +728,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x
  *  @brief Cyrillic uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_cyrillic_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_cyrillic_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_cyrillic_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                  //
     sz_cptr_t needle, sz_size_t needle_length,                      //
     sz_utf8_uncased_needle_t const *needle_metadata,                //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_cyrillic_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_cyrillic_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_cyrillic_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_cyrillic_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -758,9 +758,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_cyrillic_( //
  *  disjoint byte positions. The D4 range checks only the lower bound, mirroring the reference:
  *  valid continuation bytes never exceed BF.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_armenian_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     // The lead +1 bump comes from the second byte's class shifted one lane forward, which must
     // cross the internal boundary - so the two per-register `is_minus_10` masks are assembled
@@ -775,16 +775,16 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x
 
         // Second-byte classes; the [B1, FF] range realizes the unbounded `≥ B1` check
         uint8x16_t is_d4_upper_u8x16 = vandq_u8(is_after_d4_u8x16, //
-                                                sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0xB1, 0x4F));
+                                                sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0xB1, 0x4F));
         uint8x16_t is_d5_low_u8x16 = vandq_u8(is_after_d5_u8x16, //
-                                              sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x80, 0x10));
+                                              sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x80, 0x10));
         uint8x16_t is_d5_high_u8x16 = vandq_u8(is_after_d5_u8x16, //
-                                               sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x90, 0x07));
+                                               sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x90, 0x07));
         is_minus_10_u8x16x2.val[register_index] = vorrq_u8(is_d4_upper_u8x16, is_d5_high_u8x16);
         is_d5_low_u8x16x2.val[register_index] = is_d5_low_u8x16;
     }
 
-    uint8x16x2_t lead_plus_one_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(is_minus_10_u8x16x2);
+    uint8x16x2_t lead_plus_one_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(is_minus_10_u8x16x2);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         // Disjoint positions merge into one offset vector and a single add
         uint8x16_t offsets_u8x16 = vandq_u8(is_minus_10_u8x16x2.val[register_index], vdupq_n_u8(0xF0));
@@ -806,12 +806,12 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_armenian_fold_u8x
  *  EF AC neighbors are the Latin/Hebrew presentation forms, which never appear inside Armenian
  *  haystacks, so the coarser test costs nothing in practice.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_armenian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                    sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Two two-byte pairs anchored at their second byte; lead from `previous`, gated by `vmaxvq_u8`.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -830,14 +830,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_armenian_alarm_u8x16x
  *  @brief Armenian uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_armenian_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_armenian_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_armenian_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                  //
     sz_cptr_t needle, sz_size_t needle_length,                      //
     sz_utf8_uncased_needle_t const *needle_metadata,                //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_armenian_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_armenian_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_armenian_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -868,9 +868,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_armenian_( //
  *  class masks are assembled per register first, then a single 32-byte @c next_bytes carries the
  *  high register's lane 0 to the low register's lane 15.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_greek_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16x4_t const ce_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_greek_ce_deltas_lut_);
     uint8x16x4_t const ce_promotes_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_uncased_greek_ce_promotes_lut_);
@@ -908,8 +908,8 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x
     }
 
     // Propagate the lead rewrites back from the second-byte flags across the internal boundary
-    uint8x16x2_t promote_lead_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(promote_seconds_u8x16x2);
-    uint8x16x2_t micro_lead_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(micro_seconds_u8x16x2);
+    uint8x16x2_t promote_lead_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(promote_seconds_u8x16x2);
+    uint8x16x2_t micro_lead_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(micro_seconds_u8x16x2);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t offsets_u8x16 = partial_offsets_u8x16x2.val[register_index];
         offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(promote_lead_u8x16x2.val[register_index], vdupq_n_u8(0x01)));
@@ -934,13 +934,13 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_greek_fold_u8x16x
  *  never fire - but when they do, the driver's step−2 retreat keeps a 3-byte danger
  *  sequence straddling the chunk edge fully visible in the next chunk.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_greek_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                 sz_u32_t load_mask) {
     sz_unused_(load_mask); // Present for the shared `sz_utf8_uncased_alarm_u8x16x2_t_` signature
 
     // Pair danger anchored at the second byte (lead from `previous`); the polytonic & archaic leads
     // E1/CD are blanket hazards flagged at their own lane. One `vmaxvq_u8` gates the danger branch.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -978,14 +978,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_(
  *  @brief Greek uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_greek_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_greek_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_greek_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,               //
     sz_cptr_t needle, sz_size_t needle_length,                   //
     sz_utf8_uncased_needle_t const *needle_metadata,             //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_greek_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_greek_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_greek_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_greek_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -1012,10 +1012,10 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_greek_( //
  *  The third-byte rule needs the byte two lanes back, so a second @c previous_bytes pass
  *  materializes it; all rule masks flag disjoint positions and merge into one offset add.
  */
-STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_(uint8x16x2_t text_u8x16x2) {
-    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t previous2_bytes_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(previous_bytes_u8x16x2);
+STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_vietnamese_fold_u8x16x2_neon_(uint8x16x2_t text_u8x16x2) {
+    uint8x16x2_t result_u8x16x2 = sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t previous2_bytes_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(previous_bytes_u8x16x2);
 
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
         uint8x16_t text_u8x16 = text_u8x16x2.val[register_index];
@@ -1029,15 +1029,15 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u
 
         // 1. Latin-1 Supplement: C3 80-9E → +0x20, except '×' (C3 97)
         uint8x16_t is_c3_target_u8x16 = vandq_u8(
-            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x80, 0x1F),
+            is_after_c3_u8x16, vbicq_u8(sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x80, 0x1F),
                                         vceqq_u8(text_u8x16, vdupq_n_u8(0x97))));
 
         // 2. Latin Extended-A: +1 on even seconds, except the inverted sub-ranges C4 B9-BE and
         //    C5 00-88 (the unsigned `≤ 88` bound mirrors the reference) which fold odd
         uint8x16_t is_odd_u8x16 = vceqq_u8(vandq_u8(text_u8x16, vdupq_n_u8(0x01)), vdupq_n_u8(0x01));
         uint8x16_t is_inverted_u8x16 = vorrq_u8(
-            vandq_u8(is_after_c4_u8x16, sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0xB9, 0x06)),
-            vandq_u8(is_after_c5_u8x16, sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x00, 0x89)));
+            vandq_u8(is_after_c4_u8x16, sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0xB9, 0x06)),
+            vandq_u8(is_after_c5_u8x16, sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x00, 0x89)));
         uint8x16_t is_extended_even_u8x16 = vbicq_u8(
             vbicq_u8(vorrq_u8(is_after_c4_u8x16, is_after_c5_u8x16), is_inverted_u8x16), is_odd_u8x16);
         uint8x16_t fold_extended_u8x16 = vorrq_u8(is_extended_even_u8x16, vandq_u8(is_inverted_u8x16, is_odd_u8x16));
@@ -1050,10 +1050,10 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u
         //    except the expanding E1 BA 96-9F block
         uint8x16_t is_after_e1_pair_u8x16 = vandq_u8(
             vceqq_u8(previous2_bytes_u8x16, vdupq_n_u8(0xE1)),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(previous_bytes_u8x16, 0xB8, 0x04));
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(previous_bytes_u8x16, 0xB8, 0x04));
         uint8x16_t is_excluded_third_u8x16 = vandq_u8(
             vceqq_u8(previous_bytes_u8x16, vdupq_n_u8(0xBA)),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(text_u8x16, 0x96, 0x0A));
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(text_u8x16, 0x96, 0x0A));
         uint8x16_t fold_e1_u8x16 = vbicq_u8(vbicq_u8(is_after_e1_pair_u8x16, is_excluded_third_u8x16), is_odd_u8x16);
 
         // Disjoint positions merge into one offset vector and a single add
@@ -1085,15 +1085,15 @@ STRINGZILLA_OUTLINED_ uint8x16x2_t sz_utf8_uncased_search_neon_vietnamese_fold_u
  *  compare is exactly as safe-negative on tail chunks. Unlike the other alarms, the result is
  *  shifted back to the sequence-start positions, mirroring the reference bit-for-bit.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_vietnamese_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                      sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // All hazards anchored at their second byte: lead from `previous`, the E1 BA expanding third
     // byte from `next`. The dense-E1 early exit is unnecessary now that the per-value movemasks are
     // gone - the whole alarm is a handful of `vceqq`/`vand` ops gated by one `vmaxvq_u8`.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -1103,7 +1103,7 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x1
 
         uint8x16_t danger_u8x16 = vandq_u8( // E1 BA 96-9F (expanding third byte)
             vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xBA)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE1))),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(next_u8x16, 0x96, 0x0A));
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(next_u8x16, 0x96, 0x0A));
         danger_u8x16 = vorrq_u8( // Sharp S (C3 9F)
             danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x9F)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xC3))));
         danger_u8x16 = vorrq_u8( // Long S (C5 BF)
@@ -1121,14 +1121,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_vietnamese_alarm_u8x1
  *  @brief Vietnamese uncased search for needles with safe slices up to 16 bytes.
  *  @sa sz_utf8_uncased_rune_safe_vietnamese_k
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_vietnamese_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_vietnamese_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                    //
     sz_cptr_t needle, sz_size_t needle_length,                        //
     sz_utf8_uncased_needle_t const *needle_metadata,                  //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_vietnamese_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_vietnamese_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_vietnamese_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_vietnamese_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -1152,14 +1152,14 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_vietnamese_( //
  *  safe-negative. Like the reference, bit-for-bit, the result is shifted back to the sequence-start
  *  positions of each flagged sequence.
  */
-STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x2_(uint8x16x2_t text_u8x16x2,
+STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_georgian_alarm_u8x16x2_neon_(uint8x16x2_t text_u8x16x2,
                                                                                    sz_u32_t load_mask) {
     sz_unused_(load_mask); // Padded loads zero absent bytes, so range compares are safe-negative
 
     // E1 B2 = Mtavruli; E1 82 refines on the A0-E5 third (next) byte for Asomtavruli; E2 B4 =
     // Nuskhuri. Anchored at the second byte (lead from `previous`), gated by one `vmaxvq_u8`.
-    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_neon_previous_bytes_u8x16x2_(text_u8x16x2);
-    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_neon_next_bytes_u8x16x2_(text_u8x16x2);
+    uint8x16x2_t previous_u8x16x2 = sz_utf8_uncased_previous_bytes_u8x16x2_neon_(text_u8x16x2);
+    uint8x16x2_t next_u8x16x2 = sz_utf8_uncased_next_bytes_u8x16x2_neon_(text_u8x16x2);
 
     uint8x16_t any_danger_u8x16 = vdupq_n_u8(0);
     for (sz_size_t register_index = 0; register_index != 2; ++register_index) {
@@ -1172,7 +1172,7 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x
             vceqq_u8(text_u8x16, vdupq_n_u8(0xB2)), is_after_e1_u8x16);
         danger_u8x16 = vorrq_u8( // Asomtavruli (E1 82 A0-E5)
             danger_u8x16, vandq_u8(vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0x82)), is_after_e1_u8x16),
-                                   sz_utf8_uncased_neon_in_byte_range_u8x16_(next_u8x16, 0xA0, 0x46)));
+                                   sz_utf8_uncased_in_byte_range_u8x16_neon_(next_u8x16, 0xA0, 0x46)));
         danger_u8x16 = vorrq_u8( // Nuskhuri (E2 B4)
             danger_u8x16, vandq_u8(vceqq_u8(text_u8x16, vdupq_n_u8(0xB4)), vceqq_u8(previous_u8x16, vdupq_n_u8(0xE2))));
         any_danger_u8x16 = vorrq_u8(any_danger_u8x16, danger_u8x16);
@@ -1187,14 +1187,14 @@ STRINGZILLA_OUTLINED_ sz_u32_t sz_utf8_uncased_search_neon_georgian_alarm_u8x16x
  *  The fastest non-ASCII kernel: Mkhedruli is caseless, so the fold callback is just the
  *  ASCII fold for mixed Latin text and the alarm only watches for the historical scripts.
  */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_georgian_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_georgian_neon_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                  //
     sz_cptr_t needle, sz_size_t needle_length,                      //
     sz_utf8_uncased_needle_t const *needle_metadata,                //
     sz_size_t *match_length) {
-    return sz_utf8_uncased_search_neon_scripted_( //
-        sz_utf8_uncased_search_neon_ascii_fold_u8x16x2_,
-        sz_utf8_uncased_search_neon_georgian_alarm_u8x16x2_, //
+    return sz_utf8_uncased_search_scripted_neon_( //
+        sz_utf8_uncased_search_ascii_fold_u8x16x2_neon_,
+        sz_utf8_uncased_search_georgian_alarm_u8x16x2_neon_, //
         haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
@@ -1207,37 +1207,37 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_neon_(sz_cptr_t str, sz_size_t l
     // the 3-byte slack keeps every checked lead's continuation bytes inside the same 32-byte load
     while (length) {
         sz_size_t block_length = sz_min_of_two(length, 29);
-        sz_u32_t lead_mask = sz_utf8_uncased_neon_mask_until_(block_length);
+        sz_u32_t lead_mask = sz_utf8_uncased_mask_until_neon_(block_length);
         uint8x16x2_t text_u8x16x2 = length >= 32 ? vld1q_u8_x2((sz_u8_t const *)text_cursor)
-                                                 : sz_utf8_uncased_neon_load_padded_u8x16x2_(text_cursor, length);
+                                                 : sz_utf8_uncased_load_padded_u8x16x2_neon_(text_cursor, length);
         uint8x16_t low_u8x16 = text_u8x16x2.val[0], high_u8x16 = text_u8x16x2.val[1];
 
         // 1. ASCII letter check (zeros beyond the string are fine - not letters)
-        sz_u32_t is_upper_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 'A', 26),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 'A', 26));
-        sz_u32_t is_lower_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 'a', 26),
-            sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 'a', 26));
+        sz_u32_t is_upper_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 'A', 26),
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 'A', 26));
+        sz_u32_t is_lower_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 'a', 26),
+            sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 'a', 26));
         if (is_upper_mask | is_lower_mask) return sz_utf8_find_cased_serial_(text_cursor, length);
 
         // 2. Check for non-ASCII in lead positions
-        sz_u32_t is_non_ascii_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vcgeq_u8(low_u8x16, vdupq_n_u8(0x80)),
+        sz_u32_t is_non_ascii_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vcgeq_u8(low_u8x16, vdupq_n_u8(0x80)),
                                                                             vcgeq_u8(high_u8x16, vdupq_n_u8(0x80))) &
                                      lead_mask;
         if (is_non_ascii_mask) {
             // 3. Identify UTF-8 lead bytes
             uint8x16_t const xe0_u8x16 = vdupq_n_u8(0xE0);
             uint8x16_t const xf0_u8x16 = vdupq_n_u8(0xF0);
-            sz_u32_t is_two_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
+            sz_u32_t is_two_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
                                        vceqq_u8(vandq_u8(low_u8x16, xe0_u8x16), vdupq_n_u8(0xC0)),
                                        vceqq_u8(vandq_u8(high_u8x16, xe0_u8x16), vdupq_n_u8(0xC0))) &
                                    lead_mask;
-            sz_u32_t is_three_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
+            sz_u32_t is_three_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
                                          vceqq_u8(vandq_u8(low_u8x16, xf0_u8x16), xe0_u8x16),
                                          vceqq_u8(vandq_u8(high_u8x16, xf0_u8x16), xe0_u8x16)) &
                                      lead_mask;
-            sz_u32_t is_four_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
+            sz_u32_t is_four_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
                                         vceqq_u8(vandq_u8(low_u8x16, vdupq_n_u8(0xF8)), xf0_u8x16),
                                         vceqq_u8(vandq_u8(high_u8x16, vdupq_n_u8(0xF8)), xf0_u8x16)) &
                                     lead_mask;
@@ -1245,15 +1245,15 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_neon_(sz_cptr_t str, sz_size_t l
             // 4. Check 4-byte bicameral scripts (SMP): F0 with second byte 90/91/96/9D/9E
             if (is_four_mask) {
                 sz_u32_t after_f0_mask = is_four_mask << 1;
-                sz_u32_t is_90_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x90)),
+                sz_u32_t is_90_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0x90)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x90)));
-                sz_u32_t is_91_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x91)),
+                sz_u32_t is_91_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0x91)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x91)));
-                sz_u32_t is_96_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x96)),
+                sz_u32_t is_96_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0x96)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x96)));
-                sz_u32_t is_9d_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9D)),
+                sz_u32_t is_9d_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9D)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x9D)));
-                sz_u32_t is_9e_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9E)),
+                sz_u32_t is_9e_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0x9E)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0x9E)));
                 if (after_f0_mask & (is_90_mask | is_91_mask | is_96_mask | is_9d_mask | is_9e_mask))
                     return sz_utf8_find_cased_serial_(text_cursor, length);
@@ -1263,16 +1263,16 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_neon_(sz_cptr_t str, sz_size_t l
             // C3-CF: Latin Extended (umlauts, accents, Eszett)
             // D0-D1: Cyrillic, D4-D6: Armenian (D6 needed for small letters U+0580+)
             if (is_two_mask) {
-                sz_u32_t is_bicameral_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-                    sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 0xC3, 0x14),
-                    sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 0xC3, 0x14));
+                sz_u32_t is_bicameral_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+                    sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 0xC3, 0x14),
+                    sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 0xC3, 0x14));
 
                 // Special case: C2 B5 = U+00B5 MICRO SIGN folds to Greek mu (U+03BC)
-                sz_u32_t is_c2_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC2)),
+                sz_u32_t is_c2_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0xC2)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0xC2))) &
                                       is_two_mask;
                 if (is_c2_mask) {
-                    sz_u32_t is_b5_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
+                    sz_u32_t is_b5_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
                         vceqq_u8(low_u8x16, vdupq_n_u8(0xB5)), vceqq_u8(high_u8x16, vdupq_n_u8(0xB5)));
                     if ((is_c2_mask << 1) & is_b5_mask) return sz_utf8_find_cased_serial_(text_cursor, length);
                 }
@@ -1287,38 +1287,38 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_cased_neon_(sz_cptr_t str, sz_size_t l
             // 6. Check 3-byte bicameral sequences
             if (is_three_mask) {
                 // E1: Georgian, Greek Extended, Latin Extended Additional
-                sz_u32_t is_e1_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
+                sz_u32_t is_e1_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE1)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0xE1)));
                 if (is_e1_mask & is_three_mask) return sz_utf8_find_cased_serial_(text_cursor, length);
 
                 // EF: Fullwidth Latin
-                sz_u32_t is_ef_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
+                sz_u32_t is_ef_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEF)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0xEF)));
                 if (is_ef_mask & is_three_mask) return sz_utf8_find_cased_serial_(text_cursor, length);
 
                 // E2: Safe only for second byte 80-83
-                sz_u32_t is_e2_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
+                sz_u32_t is_e2_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0xE2)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0xE2))) &
                                       is_three_mask;
                 if (is_e2_mask) {
-                    sz_u32_t e2_second_safe_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 0x80, 0x04),
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 0x80, 0x04));
+                    sz_u32_t e2_second_safe_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 0x80, 0x04),
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 0x80, 0x04));
                     if ((is_e2_mask << 1) & ~e2_second_safe_mask)
                         return sz_utf8_find_cased_serial_(text_cursor, length);
                 }
 
                 // EA: Bicameral second bytes 99-9F, AC-AE
-                sz_u32_t is_ea_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEA)),
+                sz_u32_t is_ea_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(vceqq_u8(low_u8x16, vdupq_n_u8(0xEA)),
                                                                              vceqq_u8(high_u8x16, vdupq_n_u8(0xEA))) &
                                       is_three_mask;
                 if (is_ea_mask) {
-                    sz_u32_t is_99_range_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 0x99, 0x07),
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 0x99, 0x07));
-                    sz_u32_t is_ac_range_mask = sz_utf8_uncased_neon_movemask_u8x16x2_(
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(low_u8x16, 0xAC, 0x03),
-                        sz_utf8_uncased_neon_in_byte_range_u8x16_(high_u8x16, 0xAC, 0x03));
+                    sz_u32_t is_99_range_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 0x99, 0x07),
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 0x99, 0x07));
+                    sz_u32_t is_ac_range_mask = sz_utf8_uncased_movemask_u8x16x2_neon_(
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(low_u8x16, 0xAC, 0x03),
+                        sz_utf8_uncased_in_byte_range_u8x16_neon_(high_u8x16, 0xAC, 0x03));
                     if ((is_ea_mask << 1) & (is_99_range_mask | is_ac_range_mask))
                         return sz_utf8_find_cased_serial_(text_cursor, length);
                 }
@@ -1353,39 +1353,39 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_neon_( //
     // Dispatch to appropriate kernel
     if (needle_metadata->script == sz_utf8_uncased_rune_ascii_invariant_k) {
         if (needle_metadata->folded_slice_length <= 3)
-            return sz_utf8_uncased_search_neon_ascii_3probe_( //
+            return sz_utf8_uncased_search_ascii_3probe_neon_( //
                 haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
         else
-            return sz_utf8_uncased_search_neon_ascii_4probe_( //
+            return sz_utf8_uncased_search_ascii_4probe_neon_( //
                 haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     }
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_western_europe_k)
-        return sz_utf8_uncased_search_neon_western_europe_( //
+        return sz_utf8_uncased_search_western_europe_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_central_europe_k)
-        return sz_utf8_uncased_search_neon_central_europe_( //
+        return sz_utf8_uncased_search_central_europe_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_cyrillic_k)
-        return sz_utf8_uncased_search_neon_cyrillic_( //
+        return sz_utf8_uncased_search_cyrillic_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_greek_k)
-        return sz_utf8_uncased_search_neon_greek_( //
+        return sz_utf8_uncased_search_greek_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_armenian_k)
-        return sz_utf8_uncased_search_neon_armenian_( //
+        return sz_utf8_uncased_search_armenian_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_vietnamese_k)
-        return sz_utf8_uncased_search_neon_vietnamese_( //
+        return sz_utf8_uncased_search_vietnamese_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     if (needle_metadata->script == sz_utf8_uncased_rune_safe_georgian_k)
-        return sz_utf8_uncased_search_neon_georgian_( //
+        return sz_utf8_uncased_search_georgian_neon_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
 
     // No suitable SIMD path found (needle has complex Unicode), fall back to serial

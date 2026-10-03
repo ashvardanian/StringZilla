@@ -1356,8 +1356,8 @@ void bench_unordered_map_kernels(environment_t &env, std::string_view hash_kit, 
 #pragma region Levenshtein
 
 /** Candidates a step arm advances at once, so all tiers answer the same eight scores in order. */
-inline constexpr std::size_t levenshtein_step_lanes_k = (std::size_t)sz_levenshtein_serial_u64x1_candidates_per_step_k *
-                                                        sz_levenshtein_serial_u64x1_registers_per_position_k;
+inline constexpr std::size_t levenshtein_step_lanes_k = (std::size_t)sz_levenshtein_u64x1_candidates_per_step_serial_k *
+                                                        sz_levenshtein_u64x1_registers_per_position_serial_k;
 
 /** Positions one step arm walks per call, the transpose width the sweeps feed it from. */
 inline constexpr std::size_t levenshtein_step_positions_k = sz_levenshtein_positions_per_transpose_k;
@@ -1679,10 +1679,10 @@ struct overlap_query_t {
             text.append(token);
         }
         std::vector<sz_f64_t> prefix_hashes(text.size() + 1);
-        overlap_prefix_hashes_<sz_overlap_serial_f64x1_positions_per_step_k, sz_overlap_f64x1_prefix_hash_step_serial,
+        overlap_prefix_hashes_<sz_overlap_f64x1_positions_per_step_serial_k, sz_overlap_f64x1_prefix_hash_step_serial,
                                sz_overlap_f64x1_prefix_hash_step_tail_serial>(text, prefix_hashes.data());
         window_hashes.resize(text.size());
-        window_hashes.resize(overlap_window_hashes_<sz_overlap_serial_f64x1_positions_per_step_k,
+        window_hashes.resize(overlap_window_hashes_<sz_overlap_f64x1_positions_per_step_serial_k,
                                                     sz_overlap_f64x1_window_hash_step_serial,
                                                     sz_overlap_f64x1_window_hash_step_tail_serial>(
             prefix_hashes.data(), text.size(), width, window_hashes.data()));
@@ -1849,7 +1849,7 @@ void bench_overlap_step_kernels(environment_t &env, std::string_view kit) {
     auto const name = [&](char const *arm, std::string_view of) {
         return fmt::format("sz_overlap_{}_{}{}", arm, of, suffix);
     };
-    constexpr sz_size_t serial_positions_k = sz_overlap_serial_f64x1_positions_per_step_k;
+    constexpr sz_size_t serial_positions_k = sz_overlap_f64x1_positions_per_step_serial_k;
     bench_kernel_unary(env, corpus, name("prefix_hashes", kit), name("prefix_hashes", "serial"),
                        prefix_hashes_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
                                              sz_overlap_f64x1_prefix_hash_step_tail_serial> {corpus},

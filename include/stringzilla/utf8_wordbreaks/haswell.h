@@ -68,19 +68,17 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plan
     __m256i const n4_u8x32 = _mm256_and_si256(plane_off_u8x32, low_nibble_mask_u8x32);
     __m256i const n3_u8x32 = _mm256_and_si256(_mm256_srli_epi16(high_u8x32, 4), low_nibble_mask_u8x32);
     __m256i const stage1_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(n4_u8x32, 4), n3_u8x32);
-    __m256i const page_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_haswell_astral_stage1_,
-                                                            stage1_index_u8x32);
+    __m256i const page_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_astral_stage1_, stage1_index_u8x32);
     __m256i const n2_u8x32 = _mm256_and_si256(high_u8x32, low_nibble_mask_u8x32);
     __m256i const leaf2_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_astral_stage2_lo_, sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
-        page_u8x32, n2_u8x32);
+        sz_utf8_word_break_astral_stage2_low_, sz_utf8_word_break_astral_stage2_low_count_k / 16, page_u8x32, n2_u8x32);
     __m256i const n1_u8x32 = _mm256_and_si256(_mm256_srli_epi16(low_u8x32, 4), low_nibble_mask_u8x32);
-    __m256i const leaf_lo_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16,
-        leaf2_u8x32, n1_u8x32);
+    __m256i const leaf_lo_u8x32 = sz_utf8_rune_cascade_stage_haswell_(sz_utf8_word_break_astral_stage3_low_,
+                                                                      sz_utf8_word_break_astral_stage3_low_count_k / 16,
+                                                                      leaf2_u8x32, n1_u8x32);
     __m256i const leaf_hi_u8x32 = sz_utf8_rune_cascade_stage_haswell_(
-        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16,
-        leaf2_u8x32, n1_u8x32);
+        sz_utf8_word_break_astral_stage3_high_, sz_utf8_word_break_astral_stage3_high_count_k / 16, leaf2_u8x32,
+        n1_u8x32);
     __m256i const n0_u8x32 = _mm256_and_si256(low_u8x32, low_nibble_mask_u8x32);
     __m256i const leaf_group_u8x32 = _mm256_or_si256(
         _mm256_and_si256(_mm256_srli_epi16(leaf_lo_u8x32, 4), low_nibble_mask_u8x32),
@@ -88,9 +86,9 @@ STRINGZILLA_INLINE __m256i sz_utf8_word_break_astral_class_haswell_(__m256i plan
     __m256i const leaf_low_nibble_u8x32 = _mm256_and_si256(leaf_lo_u8x32, low_nibble_mask_u8x32);
     __m256i const stage4_lut_index_u8x32 = _mm256_or_si256(_mm256_slli_epi16(leaf_low_nibble_u8x32, 4), n0_u8x32);
     __m256i result_u8x32 = _mm256_setzero_si256();
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_astral_leaf_groups_k; ++group) {
-        __m256i const value_u8x32 = sz_utf8_rune_lut256_haswell_(
-            sz_utf8_word_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x32);
+    for (int group = 0; group < (int)sz_utf8_word_break_astral_leaf_groups_k; ++group) {
+        __m256i const value_u8x32 = sz_utf8_rune_lut256_haswell_(sz_utf8_word_break_astral_stage4_groups_ + group * 256,
+                                                                 stage4_lut_index_u8x32);
         __m256i const here_u8x32 = _mm256_cmpeq_epi8(leaf_group_u8x32, _mm256_set1_epi8((char)group));
         result_u8x32 = _mm256_blendv_epi8(result_u8x32, value_u8x32, here_u8x32);
     }

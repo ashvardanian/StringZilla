@@ -80,7 +80,7 @@ std::size_t test_cross_serial(environment_t const &env) {
 
     constexpr overlap_step_backend_t overlap_steps_serial {
         .name = "serial",
-        .positions_per_step = sz_overlap_serial_f64x1_positions_per_step_k,
+        .positions_per_step = sz_overlap_f64x1_positions_per_step_serial_k,
         .prefix_hash_step = sz_overlap_f64x1_prefix_hash_step_serial,
         .prefix_hash_step_tail = sz_overlap_f64x1_prefix_hash_step_tail_serial,
         .window_hash_step = sz_overlap_f64x1_window_hash_step_serial,

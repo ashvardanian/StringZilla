@@ -153,7 +153,7 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -161,13 +161,13 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
@@ -176,14 +176,14 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -193,15 +193,15 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data2_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -212,11 +212,11 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_skylake_(sz_
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data2_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data3_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     // Skylake has no VAES, so its four-lane AES-NI absorb has no throughput edge over Westmere; in 512-bit form it
     // is in fact slower (per-lane `vextracti128` contends on the shuffle port). Skylake's win is the masked-load

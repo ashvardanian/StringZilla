@@ -60,7 +60,7 @@ void bench_cross_serial(environment_t &env) {
         env, "serial", sz_levenshtein_runes_k);
     bench_levenshtein_query_prepare(env);
     bench_levenshtein_step_kernels<levenshtein_step_from_serial>(env, "sz_levenshtein_u64x1_step_serial");
-    bench_overlap_step_kernels<sz_overlap_serial_f64x1_positions_per_step_k, sz_overlap_f64x1_prefix_hash_step_serial,
+    bench_overlap_step_kernels<sz_overlap_f64x1_positions_per_step_serial_k, sz_overlap_f64x1_prefix_hash_step_serial,
                                sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
                                sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
                                sz_overlap_u32x1_btree_probe_serial>(env, "serial");

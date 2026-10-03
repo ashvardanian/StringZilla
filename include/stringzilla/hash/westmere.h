@@ -30,7 +30,7 @@ extern "C" {
  *  @param[out] state Pointer to the aligned minimal hash state to initialize.
  *  @param[in] seed 64-bit seed value XOR-ed with Pi constants to form the initial state.
  */
-STRINGZILLA_INLINE void sz_hash_state_short_init_westmere_aligned_(sz_hash_state_aligned_for_short_t *state,
+STRINGZILLA_INLINE void sz_hash_state_short_init_aligned_westmere_(sz_hash_state_aligned_for_short_t *state,
                                                                    sz_u64_t seed) {
 
     // The key is made from the seed and half of it will be mixed with the length in the end
@@ -56,7 +56,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_init_westmere_aligned_(sz_hash_state
  *  @param[in] order_u8x16 Shuffle permutation for the additive accumulator lane (loaded
  *      from @c sz_hash_u8x16x4_shuffle_).
  */
-STRINGZILLA_INLINE void sz_hash_state_short_update_westmere_aligned_(sz_hash_state_aligned_for_short_t *state_ptr,
+STRINGZILLA_INLINE void sz_hash_state_short_update_aligned_westmere_(sz_hash_state_aligned_for_short_t *state_ptr,
                                                                      __m128i block_u8x16, __m128i order_u8x16) {
     state_ptr->aes.xmm = _mm_aesenc_si128(state_ptr->aes.xmm, block_u8x16);
     state_ptr->sum.xmm = _mm_add_epi64(_mm_shuffle_epi8(state_ptr->sum.xmm, order_u8x16), block_u8x16);
@@ -68,7 +68,7 @@ STRINGZILLA_INLINE void sz_hash_state_short_update_westmere_aligned_(sz_hash_sta
  *  @param[in] length Total number of bytes hashed, mixed into the key for length sensitivity.
  *  @return 64-bit hash value.
  */
-STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_westmere_aligned_(
+STRINGZILLA_INLINE sz_u64_t sz_hash_state_short_finalize_aligned_westmere_(
     sz_hash_state_aligned_for_short_t const *state, sz_size_t length) {
     // Mix the length into the key
     __m128i key_with_length_u64x2 = _mm_add_epi64(state->key.xmm, _mm_set_epi64x(0, length));
@@ -199,7 +199,7 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
     if (length <= 16) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data and update the state
         sz_u128_vec_t data_vec;
@@ -208,13 +208,13 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 32) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec;
@@ -224,14 +224,14 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 48) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
@@ -242,15 +242,15 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data2_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else if (length <= 64) {
         // Initialize the AES block with a given seed
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seed);
+        sz_hash_state_short_init_aligned_westmere_(&state, seed);
 
         // Load the data, shifting the data within the register to de-interleave the bytes
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
@@ -262,11 +262,11 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_westmere_(sz
 
         // Shuffle with the same mask
         __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
-        sz_hash_state_short_update_westmere_aligned_(&state, data0_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data1_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data2_vec.xmm, order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&state, data3_vec.xmm, order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+        sz_hash_state_short_update_aligned_westmere_(&state, data0_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data1_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data2_vec.xmm, order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&state, data3_vec.xmm, order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     else {
         sz_align_(64) sz_hash_state_aligned_t state;
@@ -342,26 +342,26 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_westmere_(sz_hash_state_t const
     // The logic is different depending on the length of the input
     __m128i const order_u8x16 = _mm_load_si128((__m128i const *)sz_hash_u8x16x4_shuffle_());
     if (length <= 16) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&minimal_state, length);
     }
     else if (length <= 32) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[1], order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&minimal_state, length);
     }
     else if (length <= 48) {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[1], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[2], order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&minimal_state, length);
     }
     else {
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[0], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[1], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[2], order_u8x16);
-        sz_hash_state_short_update_westmere_aligned_(&minimal_state, state.ins.xmms[3], order_u8x16);
-        return sz_hash_state_short_finalize_westmere_aligned_(&minimal_state, length);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[0], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[1], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[2], order_u8x16);
+        sz_hash_state_short_update_aligned_westmere_(&minimal_state, state.ins.xmms[3], order_u8x16);
+        return sz_hash_state_short_finalize_aligned_westmere_(&minimal_state, length);
     }
 }
 
@@ -504,21 +504,21 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t
     sz_size_t seed_index = 0;
     for (; seed_index + 2 <= seeds_count; seed_index += 2) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state0, state1;
-        sz_hash_state_short_init_westmere_aligned_(&state0, seeds[seed_index + 0]);
-        sz_hash_state_short_init_westmere_aligned_(&state1, seeds[seed_index + 1]);
+        sz_hash_state_short_init_aligned_westmere_(&state0, seeds[seed_index + 0]);
+        sz_hash_state_short_init_aligned_westmere_(&state1, seeds[seed_index + 1]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index) {
-            sz_hash_state_short_update_westmere_aligned_(&state0, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
-            sz_hash_state_short_update_westmere_aligned_(&state1, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
+            sz_hash_state_short_update_aligned_westmere_(&state0, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
+            sz_hash_state_short_update_aligned_westmere_(&state1, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
         }
-        hashes[seed_index + 0] = sz_hash_state_short_finalize_westmere_aligned_(&state0, length);
-        hashes[seed_index + 1] = sz_hash_state_short_finalize_westmere_aligned_(&state1, length);
+        hashes[seed_index + 0] = sz_hash_state_short_finalize_aligned_westmere_(&state0, length);
+        hashes[seed_index + 1] = sz_hash_state_short_finalize_aligned_westmere_(&state1, length);
     }
     if (seed_index < seeds_count) {
         sz_align_(16) sz_hash_state_aligned_for_short_t state;
-        sz_hash_state_short_init_westmere_aligned_(&state, seeds[seed_index]);
+        sz_hash_state_short_init_aligned_westmere_(&state, seeds[seed_index]);
         for (sz_size_t lane_index = 0; lane_index < text_lanes_count; ++lane_index)
-            sz_hash_state_short_update_westmere_aligned_(&state, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
-        hashes[seed_index] = sz_hash_state_short_finalize_westmere_aligned_(&state, length);
+            sz_hash_state_short_update_aligned_westmere_(&state, text_lanes_vec.u128s[lane_index].xmm, order_u8x16);
+        hashes[seed_index] = sz_hash_state_short_finalize_aligned_westmere_(&state, length);
     }
     return sz_success_k;
 }

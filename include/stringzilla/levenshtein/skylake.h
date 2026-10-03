@@ -231,14 +231,14 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_skylake(sz_levenshtei
 
 /** One ZMM register per position; unmeasured, the Haswell reading carried over. */
 enum {
-    sz_levenshtein_skylake_u64x8_candidates_per_step_k = 8,
-    sz_levenshtein_skylake_u64x8_registers_per_position_k = 1
+    sz_levenshtein_u64x8_candidates_per_step_skylake_k = 8,
+    sz_levenshtein_u64x8_registers_per_position_skylake_k = 1
 };
 
 /** Sweeps eight candidates through every transpose; @p words is a constant, keeping short queries'
  *  verticals in registers. A candidate's score is read where its text ends; @p symbol_counts seeds
  *  as byte counts, refined by the transpose. */
-STRINGZILLA_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query_t const *shared_query,
+STRINGZILLA_INLINE void sz_levenshtein_u64x8_sweep_skylake_(sz_levenshtein_query_t const *shared_query,
                                                             sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                             sz_u64_t *symbol_counts, sz_size_t sweep_count,
                                                             sz_levenshtein_transpose_t_ transpose,
@@ -293,7 +293,7 @@ STRINGZILLA_INLINE void sz_levenshtein_skylake_u64x8_sweep_(sz_levenshtein_query
 
 /** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting
  *  their classes at @p width; @p verticals holds enough for a runtime word count. */
-STRINGZILLA_INLINE void sz_levenshtein_skylake_u64x8_distances_(
+STRINGZILLA_INLINE void sz_levenshtein_u64x8_distances_skylake_(
     sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t_ transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x8_vertical_skylake_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 8 };
@@ -310,13 +310,13 @@ STRINGZILLA_INLINE void sz_levenshtein_skylake_u64x8_distances_(
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x8_sweep_skylake_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 1, distances + sweep_first);
         else if (words == 2)
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x8_sweep_skylake_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 resident_verticals, 2, distances + sweep_first);
         else
-            sz_levenshtein_skylake_u64x8_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
+            sz_levenshtein_u64x8_sweep_skylake_(query, texts, byte_counts, symbol_counts, sweep_count, transpose, width,
                                                 verticals, words, distances + sweep_first);
     }
 }
@@ -326,7 +326,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
                                                                  sz_size_t distances_stride) {
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    enum { registers_k = sz_levenshtein_skylake_u64x8_registers_per_position_k };
+    enum { registers_k = sz_levenshtein_u64x8_registers_per_position_skylake_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_bool_t const over_bytes = engine->symbol == sz_levenshtein_bytes_k ? sz_true_k : sz_false_k;
     sz_levenshtein_transpose_t_ const transpose = over_bytes ? sz_levenshtein_u8x8_transpose_skylake_
@@ -347,7 +347,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
             continue;
         }
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        sz_levenshtein_skylake_u64x8_distances_(&query, candidates, transpose, width, verticals, row);
+        sz_levenshtein_u64x8_distances_skylake_(&query, candidates, transpose, width, verticals, row);
     }
     return sz_success_k;
 }

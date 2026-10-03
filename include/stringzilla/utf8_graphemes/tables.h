@@ -682,7 +682,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
  *  #         desc=astral_stage4_groups[leaf>>4][(leaf&0xF)*16+n0]
  *  @endcode
  */
-static const sz_u8_t sz_utf8_grapheme_break_haswell_ascii_desc_[256] = {
+static const sz_u8_t sz_utf8_grapheme_break_ascii_desc_lut_[256] = {
     3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -703,12 +703,12 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_bmp_page_lut_[256] = {
     1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  51, 1,  1,  52, 53,
 };
 enum {
-    sz_utf8_grapheme_break_haswell_astral_stage2_lo_count_k = 192,
-    sz_utf8_grapheme_break_haswell_astral_stage3_lo_count_k = 928,
-    sz_utf8_grapheme_break_haswell_astral_stage3_hi_count_k = 928,
-    sz_utf8_grapheme_break_haswell_astral_leaf_groups_k = 11,
+    sz_utf8_grapheme_break_astral_stage2_low_count_k = 192,
+    sz_utf8_grapheme_break_astral_stage3_low_count_k = 928,
+    sz_utf8_grapheme_break_astral_stage3_high_count_k = 928,
+    sz_utf8_grapheme_break_astral_leaf_groups_k = 11,
 };
-static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage1_[256] = {
+static const sz_u8_t sz_utf8_grapheme_break_astral_stage1_[256] = {
     0, 1, 2, 3, 2, 2, 4, 2, 2, 2, 2, 5, 6, 7, 8, 9, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -717,7 +717,7 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage1_[256] = {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
 };
-static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage2_lo_[192] = {
+static const sz_u8_t sz_utf8_grapheme_break_astral_stage2_low_[192] = {
     0,  1,  2,  3,  0,  0,  0,  0,  0,  0,  4,  0,  0,  5,  6,  7, 8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     20, 21, 22, 23, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,  24, 0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  25, 0,  0,  0,  0,  0,  0, 0,  0,  26, 27, 0,  28, 0,  29, 0,  0,  0,  0,
@@ -726,7 +726,7 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage2_lo_[192] = {
     0,  0,  0,  0,  42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 0, 53, 53, 53, 54, 55, 56, 57, 57, 57, 57, 57, 57,
     57, 57, 57, 57, 57, 57, 57, 57, 0,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,
 };
-static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage3_lo_[928] = {
+static const sz_u8_t sz_utf8_grapheme_break_astral_stage3_low_[928] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
     0,   0,   0,   0,   0,   0,   0,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
     2,   0,   0,   0,   0,   0,   0,   0,   0,   3,   0,   0,   0,   0,   0,   0,   0,   0,   4,   5,   6,   7,   0,
@@ -769,7 +769,7 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage3_lo_[928] = {
     100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 86,  86,  86,  86,  86,  86,  86,  86,  86,
     86,  86,  86,  86,  86,  86,  86,  86,
 };
-static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage3_hi_[928] = {
+static const sz_u8_t sz_utf8_grapheme_break_astral_stage3_high_[928] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -795,7 +795,7 @@ static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage3_hi_[928] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 };
-static const sz_u8_t sz_utf8_grapheme_break_haswell_astral_stage4_groups_[2816] = {
+static const sz_u8_t sz_utf8_grapheme_break_astral_stage4_groups_[2816] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     36, 0,  0,  36, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  36, 36, 36, 36,
     36, 0,  0,  0,  0,  0,  16, 36, 36, 36, 0,  36, 36, 0,  0,  0,  0,  0,  36, 36, 36, 36, 16, 16, 16, 16, 0,  16, 16,

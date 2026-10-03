@@ -30,13 +30,13 @@ extern "C" {
 #pragma region Haswell
 
 /** Positions one YMM step advances the chain by: the four prefix hashes ending inside one word. */
-enum { sz_overlap_haswell_f64x4_positions_per_step_k = 4 };
+enum { sz_overlap_f64x4_positions_per_step_haswell_k = 4 };
 
 /** Keys one YMM register holds, and keys the eight-register sorting network orders at once. */
-enum { sz_overlap_haswell_keys_per_register_k = 8, sz_overlap_haswell_keys_per_run_k = 64 };
+enum { sz_overlap_keys_per_register_haswell_k = 8, sz_overlap_keys_per_run_haswell_k = 64 };
 
 /** Exact @c u32 → @c f64, since AVX2 offers only the signed conversion. */
-STRINGZILLA_INLINE __m256d sz_overlap_haswell_u32x4_to_f64x4_(__m128i values_vec) {
+STRINGZILLA_INLINE __m256d sz_overlap_u32x4_to_f64x4_haswell_(__m128i values_vec) {
     sz_u256_vec_t signed_vec, wrapped_vec;
     signed_vec.ymm_pd = _mm256_cvtepi32_pd(values_vec);
     wrapped_vec.ymm_pd = _mm256_cmp_pd(signed_vec.ymm_pd, _mm256_setzero_pd(), _CMP_LT_OQ);
@@ -44,14 +44,14 @@ STRINGZILLA_INLINE __m256d sz_overlap_haswell_u32x4_to_f64x4_(__m128i values_vec
 }
 
 /** Exact @c f64 → @c u32 for values below 2^32, biasing around the signed conversion's ceiling. */
-STRINGZILLA_INLINE __m128i sz_overlap_haswell_f64x4_to_u32x4_(__m256d values_vec) {
+STRINGZILLA_INLINE __m128i sz_overlap_f64x4_to_u32x4_haswell_(__m256d values_vec) {
     __m128i const biased_vec = _mm256_cvttpd_epi32(_mm256_sub_pd(values_vec, _mm256_set1_pd(2147483648.0)));
     return _mm_xor_si128(biased_vec, _mm_set1_epi32((int)0x80000000u));
 }
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product's rounded head and exact tail reduce together, so the 53-bit mantissa never binds. */
-STRINGZILLA_INLINE __m256d sz_overlap_haswell_multiply_add_(__m256d multiplier_vec, __m256d multiplicand_vec,
+STRINGZILLA_INLINE __m256d sz_overlap_multiply_add_haswell_(__m256d multiplier_vec, __m256d multiplicand_vec,
                                                             __m256d addend_vec) {
     sz_u256_vec_t modulus_vec, reciprocal_vec, high_vec, low_vec, quotient_vec, folded_vec;
     sz_u256_vec_t second_vec, residue_vec, negative_vec;
@@ -76,9 +76,9 @@ STRINGZILLA_INLINE sz_f64_t sz_overlap_f64x4_prefix_hash_step_haswell_(sz_f64_t 
     sz_u32_t const word = sz_u32_bytes_reverse(sz_u32_load(text).u32);
     __m128i const shifted_vec = _mm_srlv_epi32(_mm_set1_epi32((int)word), _mm_setr_epi32(24, 16, 8, 0));
     sz_u256_vec_t chunks_vec, powers_vec, values_vec;
-    chunks_vec.ymm_pd = sz_overlap_haswell_u32x4_to_f64x4_(shifted_vec);
+    chunks_vec.ymm_pd = sz_overlap_u32x4_to_f64x4_haswell_(shifted_vec);
     powers_vec.ymm_pd = _mm256_loadu_pd(sz_overlap_powers_of_256_k + 1);
-    values_vec.ymm_pd = sz_overlap_haswell_multiply_add_(_mm256_set1_pd(prior), powers_vec.ymm_pd, chunks_vec.ymm_pd);
+    values_vec.ymm_pd = sz_overlap_multiply_add_haswell_(_mm256_set1_pd(prior), powers_vec.ymm_pd, chunks_vec.ymm_pd);
     _mm256_storeu_pd(prefix_hashes, values_vec.ymm_pd);
     return prefix_hashes[3];
 }
@@ -108,13 +108,13 @@ STRINGZILLA_INLINE void sz_overlap_f64x4_window_hash_step_haswell_(sz_f64_t cons
     sz_u256_vec_t start_vec, end_vec, shifted_vec, difference_vec, negative_vec, residues_vec;
     start_vec.ymm_pd = _mm256_loadu_pd(prefix_hashes_at_start);
     end_vec.ymm_pd = _mm256_loadu_pd(prefix_hashes_at_end);
-    shifted_vec.ymm_pd = sz_overlap_haswell_multiply_add_(start_vec.ymm_pd, _mm256_set1_pd(window_power),
+    shifted_vec.ymm_pd = sz_overlap_multiply_add_haswell_(start_vec.ymm_pd, _mm256_set1_pd(window_power),
                                                           _mm256_setzero_pd());
     difference_vec.ymm_pd = _mm256_sub_pd(end_vec.ymm_pd, shifted_vec.ymm_pd);
     negative_vec.ymm_pd = _mm256_cmp_pd(difference_vec.ymm_pd, _mm256_setzero_pd(), _CMP_LT_OQ);
     residues_vec.ymm_pd = _mm256_add_pd(
         difference_vec.ymm_pd, _mm256_and_pd(negative_vec.ymm_pd, _mm256_set1_pd((sz_f64_t)sz_overlap_modulus_k)));
-    _mm_storeu_si128((__m128i *)window_hashes, sz_overlap_haswell_f64x4_to_u32x4_(residues_vec.ymm_pd));
+    _mm_storeu_si128((__m128i *)window_hashes, sz_overlap_f64x4_to_u32x4_haswell_(residues_vec.ymm_pd));
 }
 
 /** Four positions' window hashes: H(i, w) = P(i + w) − P(i) · bʷ, a full-width hash
@@ -145,47 +145,47 @@ STRINGZILLA_INLINE void sz_overlap_f64x4_window_hash_step_tail_haswell(sz_f64_t 
 }
 
 /** The eight keys of a register in reverse order. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_reverse_(__m256i keys_u32x8) {
+STRINGZILLA_INLINE __m256i sz_overlap_reverse_haswell_(__m256i keys_u32x8) {
     return _mm256_permutevar8x32_epi32(keys_u32x8, _mm256_setr_epi32(7, 6, 5, 4, 3, 2, 1, 0));
 }
 
 /** Compare-exchange at distance one inside a register: the odd positions take the larger key. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_exchange_at_1_(__m256i keys_u32x8) {
+STRINGZILLA_INLINE __m256i sz_overlap_exchange_at_1_haswell_(__m256i keys_u32x8) {
     __m256i const partners_u32x8 = _mm256_shuffle_epi32(keys_u32x8, 0xB1);
     return _mm256_blend_epi32(_mm256_min_epu32(keys_u32x8, partners_u32x8),
                               _mm256_max_epu32(keys_u32x8, partners_u32x8), 0xAA);
 }
 
 /** Compare-exchange at distance two inside a register. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_exchange_at_2_(__m256i keys_u32x8) {
+STRINGZILLA_INLINE __m256i sz_overlap_exchange_at_2_haswell_(__m256i keys_u32x8) {
     __m256i const partners_u32x8 = _mm256_shuffle_epi32(keys_u32x8, 0x4E);
     return _mm256_blend_epi32(_mm256_min_epu32(keys_u32x8, partners_u32x8),
                               _mm256_max_epu32(keys_u32x8, partners_u32x8), 0xCC);
 }
 
 /** Compare-exchange at distance four inside a register. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_exchange_at_4_(__m256i keys_u32x8) {
+STRINGZILLA_INLINE __m256i sz_overlap_exchange_at_4_haswell_(__m256i keys_u32x8) {
     __m256i const partners_u32x8 = _mm256_permute2x128_si256(keys_u32x8, keys_u32x8, 0x01);
     return _mm256_blend_epi32(_mm256_min_epu32(keys_u32x8, partners_u32x8),
                               _mm256_max_epu32(keys_u32x8, partners_u32x8), 0xF0);
 }
 
 /** The mirrored stage opening a merge of two-key runs into four: key @c i against key @c 3-i. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_mirror_over_4_(__m256i keys_u32x8) {
+STRINGZILLA_INLINE __m256i sz_overlap_mirror_over_4_haswell_(__m256i keys_u32x8) {
     __m256i const partners_u32x8 = _mm256_shuffle_epi32(keys_u32x8, 0x1B);
     return _mm256_blend_epi32(_mm256_min_epu32(keys_u32x8, partners_u32x8),
                               _mm256_max_epu32(keys_u32x8, partners_u32x8), 0xCC);
 }
 
 /** The mirrored stage opening a merge of four-key runs into eight: key @c i against key @c 7-i. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_mirror_over_8_(__m256i keys_u32x8) {
-    __m256i const partners_u32x8 = sz_overlap_haswell_reverse_(keys_u32x8);
+STRINGZILLA_INLINE __m256i sz_overlap_mirror_over_8_haswell_(__m256i keys_u32x8) {
+    __m256i const partners_u32x8 = sz_overlap_reverse_haswell_(keys_u32x8);
     return _mm256_blend_epi32(_mm256_min_epu32(keys_u32x8, partners_u32x8),
                               _mm256_max_epu32(keys_u32x8, partners_u32x8), 0xF0);
 }
 
 /** Two registers a fixed distance apart: @p lower keeps the minima, @p upper the maxima. */
-STRINGZILLA_INLINE void sz_overlap_haswell_exchange_(__m256i *lower_u32x8, __m256i *upper_u32x8) {
+STRINGZILLA_INLINE void sz_overlap_exchange_haswell_(__m256i *lower_u32x8, __m256i *upper_u32x8) {
     __m256i const smaller_u32x8 = _mm256_min_epu32(*lower_u32x8, *upper_u32x8);
     __m256i const larger_u32x8 = _mm256_max_epu32(*lower_u32x8, *upper_u32x8);
     *lower_u32x8 = smaller_u32x8, *upper_u32x8 = larger_u32x8;
@@ -193,34 +193,34 @@ STRINGZILLA_INLINE void sz_overlap_haswell_exchange_(__m256i *lower_u32x8, __m25
 
 /** The mirrored stage opening a merge of two ascending runs: @p upper is read
  *  and written reversed. */
-STRINGZILLA_INLINE void sz_overlap_haswell_exchange_mirrored_(__m256i *lower_u32x8, __m256i *upper_u32x8) {
-    __m256i const reversed_u32x8 = sz_overlap_haswell_reverse_(*upper_u32x8);
+STRINGZILLA_INLINE void sz_overlap_exchange_mirrored_haswell_(__m256i *lower_u32x8, __m256i *upper_u32x8) {
+    __m256i const reversed_u32x8 = sz_overlap_reverse_haswell_(*upper_u32x8);
     __m256i const smaller_u32x8 = _mm256_min_epu32(*lower_u32x8, reversed_u32x8);
     __m256i const larger_u32x8 = _mm256_max_epu32(*lower_u32x8, reversed_u32x8);
-    *lower_u32x8 = smaller_u32x8, *upper_u32x8 = sz_overlap_haswell_reverse_(larger_u32x8);
+    *lower_u32x8 = smaller_u32x8, *upper_u32x8 = sz_overlap_reverse_haswell_(larger_u32x8);
 }
 
 /** Sorts the eight keys of one register ascending: the merges of two, four and eight keys,
  *  all inside it. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_sort_within_(__m256i keys_u32x8) {
-    keys_u32x8 = sz_overlap_haswell_exchange_at_1_(keys_u32x8);
-    keys_u32x8 = sz_overlap_haswell_mirror_over_4_(keys_u32x8);
-    keys_u32x8 = sz_overlap_haswell_exchange_at_1_(keys_u32x8);
-    keys_u32x8 = sz_overlap_haswell_mirror_over_8_(keys_u32x8);
-    keys_u32x8 = sz_overlap_haswell_exchange_at_2_(keys_u32x8);
-    return sz_overlap_haswell_exchange_at_1_(keys_u32x8);
+STRINGZILLA_INLINE __m256i sz_overlap_sort_within_haswell_(__m256i keys_u32x8) {
+    keys_u32x8 = sz_overlap_exchange_at_1_haswell_(keys_u32x8);
+    keys_u32x8 = sz_overlap_mirror_over_4_haswell_(keys_u32x8);
+    keys_u32x8 = sz_overlap_exchange_at_1_haswell_(keys_u32x8);
+    keys_u32x8 = sz_overlap_mirror_over_8_haswell_(keys_u32x8);
+    keys_u32x8 = sz_overlap_exchange_at_2_haswell_(keys_u32x8);
+    return sz_overlap_exchange_at_1_haswell_(keys_u32x8);
 }
 
 /** The ascending half-cleaners at distances four, two and one, closing a merge
  *  inside the register. */
-STRINGZILLA_INLINE __m256i sz_overlap_haswell_merge_within_(__m256i keys_u32x8) {
-    keys_u32x8 = sz_overlap_haswell_exchange_at_4_(keys_u32x8);
-    keys_u32x8 = sz_overlap_haswell_exchange_at_2_(keys_u32x8);
-    return sz_overlap_haswell_exchange_at_1_(keys_u32x8);
+STRINGZILLA_INLINE __m256i sz_overlap_merge_within_haswell_(__m256i keys_u32x8) {
+    keys_u32x8 = sz_overlap_exchange_at_4_haswell_(keys_u32x8);
+    keys_u32x8 = sz_overlap_exchange_at_2_haswell_(keys_u32x8);
+    return sz_overlap_exchange_at_1_haswell_(keys_u32x8);
 }
 
 /** Loads the eight registers of one 64-key run. */
-STRINGZILLA_INLINE void sz_overlap_haswell_load_run_(sz_u32_t const *keys, __m256i *registers_u32x8) {
+STRINGZILLA_INLINE void sz_overlap_load_run_haswell_(sz_u32_t const *keys, __m256i *registers_u32x8) {
     registers_u32x8[0] = _mm256_loadu_si256((__m256i const *)(keys + 0));
     registers_u32x8[1] = _mm256_loadu_si256((__m256i const *)(keys + 8));
     registers_u32x8[2] = _mm256_loadu_si256((__m256i const *)(keys + 16));
@@ -232,7 +232,7 @@ STRINGZILLA_INLINE void sz_overlap_haswell_load_run_(sz_u32_t const *keys, __m25
 }
 
 /** Stores the eight registers of one 64-key run. */
-STRINGZILLA_INLINE void sz_overlap_haswell_store_run_(__m256i const *registers_u32x8, sz_u32_t *keys) {
+STRINGZILLA_INLINE void sz_overlap_store_run_haswell_(__m256i const *registers_u32x8, sz_u32_t *keys) {
     _mm256_storeu_si256((__m256i *)(keys + 0), registers_u32x8[0]);
     _mm256_storeu_si256((__m256i *)(keys + 8), registers_u32x8[1]);
     _mm256_storeu_si256((__m256i *)(keys + 16), registers_u32x8[2]);
@@ -244,91 +244,91 @@ STRINGZILLA_INLINE void sz_overlap_haswell_store_run_(__m256i const *registers_u
 }
 
 /** Closes a merge inside every register of a run. */
-STRINGZILLA_INLINE void sz_overlap_haswell_merge_within_run_(__m256i *registers_u32x8) {
-    registers_u32x8[0] = sz_overlap_haswell_merge_within_(registers_u32x8[0]);
-    registers_u32x8[1] = sz_overlap_haswell_merge_within_(registers_u32x8[1]);
-    registers_u32x8[2] = sz_overlap_haswell_merge_within_(registers_u32x8[2]);
-    registers_u32x8[3] = sz_overlap_haswell_merge_within_(registers_u32x8[3]);
-    registers_u32x8[4] = sz_overlap_haswell_merge_within_(registers_u32x8[4]);
-    registers_u32x8[5] = sz_overlap_haswell_merge_within_(registers_u32x8[5]);
-    registers_u32x8[6] = sz_overlap_haswell_merge_within_(registers_u32x8[6]);
-    registers_u32x8[7] = sz_overlap_haswell_merge_within_(registers_u32x8[7]);
+STRINGZILLA_INLINE void sz_overlap_merge_within_run_haswell_(__m256i *registers_u32x8) {
+    registers_u32x8[0] = sz_overlap_merge_within_haswell_(registers_u32x8[0]);
+    registers_u32x8[1] = sz_overlap_merge_within_haswell_(registers_u32x8[1]);
+    registers_u32x8[2] = sz_overlap_merge_within_haswell_(registers_u32x8[2]);
+    registers_u32x8[3] = sz_overlap_merge_within_haswell_(registers_u32x8[3]);
+    registers_u32x8[4] = sz_overlap_merge_within_haswell_(registers_u32x8[4]);
+    registers_u32x8[5] = sz_overlap_merge_within_haswell_(registers_u32x8[5]);
+    registers_u32x8[6] = sz_overlap_merge_within_haswell_(registers_u32x8[6]);
+    registers_u32x8[7] = sz_overlap_merge_within_haswell_(registers_u32x8[7]);
 }
 
 /** Sorts one 64-key run ascending in eight registers: every stage is a fixed register pair or
  *  an immediate blend. */
-STRINGZILLA_INLINE void sz_overlap_haswell_sort_run_(sz_u32_t *keys) {
+STRINGZILLA_INLINE void sz_overlap_sort_run_haswell_(sz_u32_t *keys) {
     __m256i registers_u32x8[8];
-    sz_overlap_haswell_load_run_(keys, registers_u32x8);
-    registers_u32x8[0] = sz_overlap_haswell_sort_within_(registers_u32x8[0]);
-    registers_u32x8[1] = sz_overlap_haswell_sort_within_(registers_u32x8[1]);
-    registers_u32x8[2] = sz_overlap_haswell_sort_within_(registers_u32x8[2]);
-    registers_u32x8[3] = sz_overlap_haswell_sort_within_(registers_u32x8[3]);
-    registers_u32x8[4] = sz_overlap_haswell_sort_within_(registers_u32x8[4]);
-    registers_u32x8[5] = sz_overlap_haswell_sort_within_(registers_u32x8[5]);
-    registers_u32x8[6] = sz_overlap_haswell_sort_within_(registers_u32x8[6]);
-    registers_u32x8[7] = sz_overlap_haswell_sort_within_(registers_u32x8[7]);
+    sz_overlap_load_run_haswell_(keys, registers_u32x8);
+    registers_u32x8[0] = sz_overlap_sort_within_haswell_(registers_u32x8[0]);
+    registers_u32x8[1] = sz_overlap_sort_within_haswell_(registers_u32x8[1]);
+    registers_u32x8[2] = sz_overlap_sort_within_haswell_(registers_u32x8[2]);
+    registers_u32x8[3] = sz_overlap_sort_within_haswell_(registers_u32x8[3]);
+    registers_u32x8[4] = sz_overlap_sort_within_haswell_(registers_u32x8[4]);
+    registers_u32x8[5] = sz_overlap_sort_within_haswell_(registers_u32x8[5]);
+    registers_u32x8[6] = sz_overlap_sort_within_haswell_(registers_u32x8[6]);
+    registers_u32x8[7] = sz_overlap_sort_within_haswell_(registers_u32x8[7]);
     // Sixteen keys: register pairs mirrored, then within.
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[0], &registers_u32x8[1]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[2], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[4], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[6], &registers_u32x8[7]);
-    sz_overlap_haswell_merge_within_run_(registers_u32x8);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[0], &registers_u32x8[1]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[2], &registers_u32x8[3]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[4], &registers_u32x8[5]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[6], &registers_u32x8[7]);
+    sz_overlap_merge_within_run_haswell_(registers_u32x8);
     // Thirty-two keys: quads mirrored, one stage of pairs, then within.
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[0], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[1], &registers_u32x8[2]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[4], &registers_u32x8[7]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[5], &registers_u32x8[6]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[1]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[2], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[4], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[6], &registers_u32x8[7]);
-    sz_overlap_haswell_merge_within_run_(registers_u32x8);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[0], &registers_u32x8[3]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[1], &registers_u32x8[2]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[4], &registers_u32x8[7]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[5], &registers_u32x8[6]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[1]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[2], &registers_u32x8[3]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[4], &registers_u32x8[5]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[6], &registers_u32x8[7]);
+    sz_overlap_merge_within_run_haswell_(registers_u32x8);
     // Sixty-four keys: the whole run mirrored, the stages at distance sixteen and eight, then within.
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[0], &registers_u32x8[7]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[1], &registers_u32x8[6]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[2], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_mirrored_(&registers_u32x8[3], &registers_u32x8[4]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[2]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[1], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[4], &registers_u32x8[6]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[5], &registers_u32x8[7]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[1]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[2], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[4], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[6], &registers_u32x8[7]);
-    sz_overlap_haswell_merge_within_run_(registers_u32x8);
-    sz_overlap_haswell_store_run_(registers_u32x8, keys);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[0], &registers_u32x8[7]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[1], &registers_u32x8[6]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[2], &registers_u32x8[5]);
+    sz_overlap_exchange_mirrored_haswell_(&registers_u32x8[3], &registers_u32x8[4]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[2]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[1], &registers_u32x8[3]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[4], &registers_u32x8[6]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[5], &registers_u32x8[7]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[1]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[2], &registers_u32x8[3]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[4], &registers_u32x8[5]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[6], &registers_u32x8[7]);
+    sz_overlap_merge_within_run_haswell_(registers_u32x8);
+    sz_overlap_store_run_haswell_(registers_u32x8, keys);
 }
 
 /** Closes a merge inside one 64-key run: the ascending stages at distances thirty-two
  *  down to one. */
-STRINGZILLA_INLINE void sz_overlap_haswell_merge_run_(sz_u32_t *keys) {
+STRINGZILLA_INLINE void sz_overlap_merge_run_haswell_(sz_u32_t *keys) {
     __m256i registers_u32x8[8];
-    sz_overlap_haswell_load_run_(keys, registers_u32x8);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[4]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[1], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[2], &registers_u32x8[6]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[3], &registers_u32x8[7]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[2]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[1], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[4], &registers_u32x8[6]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[5], &registers_u32x8[7]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[0], &registers_u32x8[1]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[2], &registers_u32x8[3]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[4], &registers_u32x8[5]);
-    sz_overlap_haswell_exchange_(&registers_u32x8[6], &registers_u32x8[7]);
-    sz_overlap_haswell_merge_within_run_(registers_u32x8);
-    sz_overlap_haswell_store_run_(registers_u32x8, keys);
+    sz_overlap_load_run_haswell_(keys, registers_u32x8);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[4]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[1], &registers_u32x8[5]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[2], &registers_u32x8[6]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[3], &registers_u32x8[7]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[2]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[1], &registers_u32x8[3]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[4], &registers_u32x8[6]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[5], &registers_u32x8[7]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[0], &registers_u32x8[1]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[2], &registers_u32x8[3]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[4], &registers_u32x8[5]);
+    sz_overlap_exchange_haswell_(&registers_u32x8[6], &registers_u32x8[7]);
+    sz_overlap_merge_within_run_haswell_(registers_u32x8);
+    sz_overlap_store_run_haswell_(registers_u32x8, keys);
 }
 
 STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_sort_haswell_(sz_u32_t *keys, sz_size_t count) {
-    sz_size_t const keys_per_register = sz_overlap_haswell_keys_per_register_k;
-    sz_size_t const keys_per_run = sz_overlap_haswell_keys_per_run_k;
+    sz_size_t const keys_per_register = sz_overlap_keys_per_register_haswell_k;
+    sz_size_t const keys_per_run = sz_overlap_keys_per_run_haswell_k;
     sz_size_t const capacity = sz_overlap_btree_sorted_capacity_(count);
     for (sz_size_t position = count; position != capacity; ++position) keys[position] = sz_overlap_padding_key_k;
     for (sz_size_t run = 0; run != capacity / keys_per_run; ++run)
-        sz_overlap_haswell_sort_run_(keys + run * keys_per_run);
+        sz_overlap_sort_run_haswell_(keys + run * keys_per_run);
 
     // Every merge opens mirrored over memory, so no run is ever descending; the stages that reach past a run
     // exchange whole registers in memory, and the rest close inside one run's registers.
@@ -338,7 +338,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_sort_haswell_(sz_u32_t *keys
                 __m256i lower_u32x8 = _mm256_loadu_si256((__m256i const *)(keys + start + offset));
                 __m256i upper_u32x8 = _mm256_loadu_si256(
                     (__m256i const *)(keys + start + phase - keys_per_register - offset));
-                sz_overlap_haswell_exchange_mirrored_(&lower_u32x8, &upper_u32x8);
+                sz_overlap_exchange_mirrored_haswell_(&lower_u32x8, &upper_u32x8);
                 _mm256_storeu_si256((__m256i *)(keys + start + offset), lower_u32x8);
                 _mm256_storeu_si256((__m256i *)(keys + start + phase - keys_per_register - offset), upper_u32x8);
             }
@@ -347,12 +347,12 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_sort_haswell_(sz_u32_t *keys
                 for (sz_size_t offset = 0; offset != distance; offset += keys_per_register) {
                     __m256i lower_u32x8 = _mm256_loadu_si256((__m256i const *)(keys + start + offset));
                     __m256i upper_u32x8 = _mm256_loadu_si256((__m256i const *)(keys + start + distance + offset));
-                    sz_overlap_haswell_exchange_(&lower_u32x8, &upper_u32x8);
+                    sz_overlap_exchange_haswell_(&lower_u32x8, &upper_u32x8);
                     _mm256_storeu_si256((__m256i *)(keys + start + offset), lower_u32x8);
                     _mm256_storeu_si256((__m256i *)(keys + start + distance + offset), upper_u32x8);
                 }
         for (sz_size_t run = 0; run != capacity / keys_per_run; ++run)
-            sz_overlap_haswell_merge_run_(keys + run * keys_per_run);
+            sz_overlap_merge_run_haswell_(keys + run * keys_per_run);
     }
     return sz_overlap_btree_unique_(keys, count);
 }
@@ -365,7 +365,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_sort_haswell(sz_u32_t *keys,
 
 /** One branch level: the child ordinal a flipped @p key_u32x8 descends into, the count of
  *  separators below it. */
-STRINGZILLA_INLINE sz_size_t sz_overlap_haswell_branch_step_(sz_u32_t const *node, __m256i key_u32x8) {
+STRINGZILLA_INLINE sz_size_t sz_overlap_branch_step_haswell_(sz_u32_t const *node, __m256i key_u32x8) {
     __m256i const first_below_u32x8 = _mm256_cmpgt_epi32(key_u32x8, _mm256_loadu_si256((__m256i const *)node));
     __m256i const second_below_u32x8 = _mm256_cmpgt_epi32(key_u32x8, _mm256_loadu_si256((__m256i const *)(node + 8)));
     unsigned const below_mask = (unsigned)_mm256_movemask_epi8(
@@ -374,29 +374,29 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_haswell_branch_step_(sz_u32_t const *nod
 }
 
 /** The leaf compare: one when the flipped @p key_u32x8 sits in this node, zero otherwise. */
-STRINGZILLA_INLINE sz_size_t sz_overlap_haswell_leaf_step_(sz_u32_t const *node, __m256i key_u32x8) {
+STRINGZILLA_INLINE sz_size_t sz_overlap_leaf_step_haswell_(sz_u32_t const *node, __m256i key_u32x8) {
     __m256i const first_equal_u32x8 = _mm256_cmpeq_epi32(key_u32x8, _mm256_loadu_si256((__m256i const *)node));
     __m256i const second_equal_u32x8 = _mm256_cmpeq_epi32(key_u32x8, _mm256_loadu_si256((__m256i const *)(node + 8)));
     return _mm256_movemask_epi8(_mm256_or_si256(first_equal_u32x8, second_equal_u32x8)) != 0;
 }
 
 /** Walks the whole tree for one flipped key, the root included. */
-STRINGZILLA_INLINE sz_size_t sz_overlap_haswell_probe_key_(sz_overlap_btree_t const *btree, sz_u32_t flipped_key) {
+STRINGZILLA_INLINE sz_size_t sz_overlap_probe_key_haswell_(sz_overlap_btree_t const *btree, sz_u32_t flipped_key) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
     __m256i const key_u32x8 = _mm256_set1_epi32((int)flipped_key);
     sz_size_t node = 0;
     for (sz_size_t level = 0; level + 1 != btree->levels; ++level)
         node = node * branches_per_node +
-               sz_overlap_haswell_branch_step_(btree->nodes + (btree->level_bases[level] + node) * keys_per_node,
+               sz_overlap_branch_step_haswell_(btree->nodes + (btree->level_bases[level] + node) * keys_per_node,
                                                key_u32x8);
-    return sz_overlap_haswell_leaf_step_(btree->nodes + (btree->level_bases[btree->levels - 1] + node) * keys_per_node,
+    return sz_overlap_leaf_step_haswell_(btree->nodes + (btree->level_bases[btree->levels - 1] + node) * keys_per_node,
                                          key_u32x8);
 }
 
 STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_probe_haswell_(sz_overlap_btree_t const *btree,
                                                                    sz_u32_t const *keys, sz_size_t count) {
     sz_size_t const keys_per_node = sz_overlap_keys_per_node_k, branches_per_node = sz_overlap_branches_per_node_k;
-    sz_size_t const keys_per_register = sz_overlap_haswell_keys_per_register_k;
+    sz_size_t const keys_per_register = sz_overlap_keys_per_register_haswell_k;
     sz_u32_t const *const root = btree->nodes + btree->level_bases[0] * keys_per_node;
     sz_u32_t const *const leaves = btree->nodes + btree->level_bases[btree->levels - 1] * keys_per_node;
     __m256i const flip_u32x8 = _mm256_set1_epi32((int)sz_overlap_sign_flip_k);
@@ -426,16 +426,16 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x8_btree_probe_haswell_(sz_overlap_bt
                 sz_u32_t const *const level_nodes = btree->nodes + btree->level_bases[level] * keys_per_node;
                 for (sz_size_t walk = 0; walk != keys_per_register; ++walk)
                     walks[walk] = (sz_u32_t)(walks[walk] * branches_per_node +
-                                             sz_overlap_haswell_branch_step_(
+                                             sz_overlap_branch_step_haswell_(
                                                  level_nodes + walks[walk] * keys_per_node,
                                                  _mm256_set1_epi32((int)flipped_keys[walk])));
             }
             for (sz_size_t walk = 0; walk != keys_per_register; ++walk)
-                matches += sz_overlap_haswell_leaf_step_(leaves + walks[walk] * keys_per_node,
+                matches += sz_overlap_leaf_step_haswell_(leaves + walks[walk] * keys_per_node,
                                                          _mm256_set1_epi32((int)flipped_keys[walk]));
         }
     for (; index != count; ++index)
-        matches += sz_overlap_haswell_probe_key_(btree, keys[index] ^ sz_overlap_sign_flip_k);
+        matches += sz_overlap_probe_key_haswell_(btree, keys[index] ^ sz_overlap_sign_flip_k);
     return matches;
 }
 
@@ -462,7 +462,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_haswell(sz_overlap_engine_t *
                                                            void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL && ordinal == 0);
     sz_unused_(candidates_budget);
-    sz_size_t const step = sz_overlap_haswell_f64x4_positions_per_step_k;
+    sz_size_t const step = sz_overlap_f64x4_positions_per_step_haswell_k;
     sz_memory_allocator_t host;
     if (allocator) host = *allocator;
     else sz_memory_allocator_init_default(&host);
@@ -531,7 +531,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engin
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
     if (!candidates->count || !engine->count) return sz_success_k;
-    sz_size_t const step = sz_overlap_haswell_f64x4_positions_per_step_k;
+    sz_size_t const step = sz_overlap_f64x4_positions_per_step_haswell_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
 
     sz_size_t longest_candidate = 0;

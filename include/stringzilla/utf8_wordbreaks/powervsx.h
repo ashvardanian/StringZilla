@@ -89,19 +89,18 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powerv
     __vector unsigned char const n4_u8x16 = vec_and(plane_off_u8x16, low_nibble_mask_u8x16);
     __vector unsigned char const n3_u8x16 = vec_and(vec_sr(high_u8x16, shift_four_u8x16), low_nibble_mask_u8x16);
     __vector unsigned char const stage1_index_u8x16 = vec_or(vec_sl(n4_u8x16, shift_four_u8x16), n3_u8x16);
-    __vector unsigned char const page_u8x16 = sz_utf8_rune_lut256_powervsx_(sz_utf8_word_break_haswell_astral_stage1_,
+    __vector unsigned char const page_u8x16 = sz_utf8_rune_lut256_powervsx_(sz_utf8_word_break_astral_stage1_,
                                                                             stage1_index_u8x16);
     __vector unsigned char const n2_u8x16 = vec_and(high_u8x16, low_nibble_mask_u8x16);
     __vector unsigned char const leaf2_u8x16 = sz_utf8_rune_cascade_stage_powervsx_(
-        sz_utf8_word_break_haswell_astral_stage2_lo_, sz_utf8_word_break_haswell_astral_stage2_lo_count_k / 16,
-        page_u8x16, n2_u8x16);
+        sz_utf8_word_break_astral_stage2_low_, sz_utf8_word_break_astral_stage2_low_count_k / 16, page_u8x16, n2_u8x16);
     __vector unsigned char const n1_u8x16 = vec_and(vec_sr(low_u8x16, shift_four_u8x16), low_nibble_mask_u8x16);
     __vector unsigned char const leaf_lo_u8x16 = sz_utf8_rune_cascade_stage_powervsx_(
-        sz_utf8_word_break_haswell_astral_stage3_lo_, sz_utf8_word_break_haswell_astral_stage3_lo_count_k / 16,
-        leaf2_u8x16, n1_u8x16);
+        sz_utf8_word_break_astral_stage3_low_, sz_utf8_word_break_astral_stage3_low_count_k / 16, leaf2_u8x16,
+        n1_u8x16);
     __vector unsigned char const leaf_hi_u8x16 = sz_utf8_rune_cascade_stage_powervsx_(
-        sz_utf8_word_break_haswell_astral_stage3_hi_, sz_utf8_word_break_haswell_astral_stage3_hi_count_k / 16,
-        leaf2_u8x16, n1_u8x16);
+        sz_utf8_word_break_astral_stage3_high_, sz_utf8_word_break_astral_stage3_high_count_k / 16, leaf2_u8x16,
+        n1_u8x16);
     __vector unsigned char const n0_u8x16 = vec_and(low_u8x16, low_nibble_mask_u8x16);
     __vector unsigned char const leaf_group_u8x16 = vec_or(
         vec_and(vec_sr(leaf_lo_u8x16, shift_four_u8x16), low_nibble_mask_u8x16),
@@ -110,9 +109,9 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powerv
     __vector unsigned char const stage4_lut_index_u8x16 = vec_or(vec_sl(leaf_low_nibble_u8x16, shift_four_u8x16),
                                                                  n0_u8x16);
     __vector unsigned char result_u8x16 = vec_splats((unsigned char)0);
-    for (int group = 0; group < (int)sz_utf8_word_break_haswell_astral_leaf_groups_k; ++group) {
+    for (int group = 0; group < (int)sz_utf8_word_break_astral_leaf_groups_k; ++group) {
         __vector unsigned char const value_u8x16 = sz_utf8_rune_lut256_powervsx_(
-            sz_utf8_word_break_haswell_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
+            sz_utf8_word_break_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
         __vector bool char const here_u8x16 = vec_cmpeq(leaf_group_u8x16, vec_splats((unsigned char)group));
         result_u8x16 = vec_sel(result_u8x16, value_u8x16, here_u8x16);
     }

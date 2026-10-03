@@ -140,7 +140,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
 #if STRINGZILLA_HEADER_ONLY // The step verbs are inline helpers, compiled only with the capability headers
     constexpr overlap_step_backend_t overlap_steps_haswell {
         .name = "haswell",
-        .positions_per_step = sz_overlap_haswell_f64x4_positions_per_step_k,
+        .positions_per_step = sz_overlap_f64x4_positions_per_step_haswell_k,
         .prefix_hash_step = sz_overlap_f64x4_prefix_hash_step_haswell,
         .prefix_hash_step_tail = sz_overlap_f64x4_prefix_hash_step_tail_haswell,
         .window_hash_step = sz_overlap_f64x4_window_hash_step_haswell,
@@ -294,7 +294,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
 #if STRINGZILLA_HEADER_ONLY // The step verbs are inline helpers, compiled only with the capability headers
     constexpr overlap_step_backend_t overlap_steps_skylake {
         .name = "skylake",
-        .positions_per_step = sz_overlap_skylake_f64x8_positions_per_step_k,
+        .positions_per_step = sz_overlap_f64x8_positions_per_step_skylake_k,
         .prefix_hash_step = sz_overlap_f64x8_prefix_hash_step_skylake,
         .prefix_hash_step_tail = sz_overlap_f64x8_prefix_hash_step_tail_skylake,
         .window_hash_step = sz_overlap_f64x8_window_hash_step_skylake,

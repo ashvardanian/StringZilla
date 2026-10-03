@@ -528,10 +528,10 @@ static const sz_u8_t sz_utf8_sentence_break_astral_cls_[550] = {
  *  @endcode
  */
 enum {
-    sz_utf8_sentence_break_haswell_astral_stage2_lo_count_k = 368,
-    sz_utf8_sentence_break_haswell_astral_stage3_lo_count_k = 1344,
-    sz_utf8_sentence_break_haswell_astral_stage3_hi_count_k = 1344,
-    sz_utf8_sentence_break_haswell_astral_leaf_groups_k = 15,
+    sz_utf8_sentence_break_astral_stage2_low_count_k = 368,
+    sz_utf8_sentence_break_astral_stage3_low_count_k = 1344,
+    sz_utf8_sentence_break_astral_stage3_high_count_k = 1344,
+    sz_utf8_sentence_break_astral_leaf_groups_k = 15,
 };
 sz_align_(64) static const sz_u8_t sz_utf8_sentence_break_bmp_page_lut_[256] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 17, 21, 22, 23, 24, 25, 26, 27,
@@ -543,7 +543,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_sentence_break_bmp_page_lut_[256] = {
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
     17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 51, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33,
     33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 33, 17, 52, 53, 17, 54, 55, 56};
-static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage1_[256] = {
+static const sz_u8_t sz_utf8_sentence_break_astral_stage1_[256] = {
     0, 1,  2, 3,  4, 5, 6, 7, 8, 5, 9, 10, 11, 12, 13, 14, 7,  7, 7, 7, 7, 7, 7, 7, 7, 7, 15, 16, 17, 7, 18, 19,
     7, 20, 7, 21, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5,  5,
     5, 5,  5, 5,  5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5,  5,
@@ -552,7 +552,7 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage1_[256] = {
     5, 5,  5, 5,  5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5,  5,
     5, 5,  5, 5,  5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  22, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5,  5,
     5, 5,  5, 5,  5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5,  5,  5,  5, 5, 5, 5, 5, 5, 5, 5, 5, 5,  5,  5,  5, 5,  5};
-static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage2_lo_[368] = {
+static const sz_u8_t sz_utf8_sentence_break_astral_stage2_low_[368] = {
     0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 31, 6,  6,  6,  32, 33, 34, 35, 35, 35, 35, 35, 35, 35, 35, 35, 36, 6,  6,  6,  6,  37, 6,  6,  6,  6,  6,
     6,  6,  6,  6,  6,  6,  6,  6,  6,  38, 6,  6,  39, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35,
@@ -566,7 +566,7 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage2_lo_[368] = {
     6,  6,  6,  6,  6,  6,  6,  6,  6,  77, 6,  6,  78, 35, 35, 35, 35, 35, 35, 35, 35, 35, 6,  6,  79, 35, 35, 35, 35,
     35, 6,  6,  6,  80, 6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  81, 35, 35, 35, 35, 35, 35, 35,
     35, 35, 35, 35, 82, 83, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35, 35};
-static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage3_lo_[1344] = {
+static const sz_u8_t sz_utf8_sentence_break_astral_stage3_low_[1344] = {
     0,   1,   2,   3,   4,   4,   5,   5,   1,   1,   1,   1,   1,   1,   1,   6,   5,   5,   5,   5,   1,   1,   1,
     7,   5,   5,   5,   5,   5,   5,   5,   8,   5,   5,   5,   5,   5,   5,   5,   5,   1,   9,   1,   1,   1,   10,
     11,  5,   1,   1,   12,  1,   6,   1,   1,   13,  1,   4,   1,   1,   14,  15,  5,   5,   16,  16,  17,  18,  18,
@@ -626,7 +626,7 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage3_lo_[1344] = {
     1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   1,   36,  5,   5,   5,   5,   5,   5,   5,
     5,   236, 5,   99,  99,  99,  99,  99,  99,  5,   5,   5,   5,   5,   5,   5,   5,   99,  99,  99,  99,  99,  99,
     99,  99,  99,  99,  99,  99,  99,  99,  99,  5};
-static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage3_hi_[1344] = {
+static const sz_u8_t sz_utf8_sentence_break_astral_stage3_high_[1344] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -662,7 +662,7 @@ static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage3_hi_[1344] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-static const sz_u8_t sz_utf8_sentence_break_haswell_astral_stage4_groups_[3840] = {
+static const sz_u8_t sz_utf8_sentence_break_astral_stage4_groups_[3840] = {
     9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  0,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,
     9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  0,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,
     9,  0,  9,  9,  0,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  9,  0,  0,  0,  0,  0,  0,  0,  0,  0,

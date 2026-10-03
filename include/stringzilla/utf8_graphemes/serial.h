@@ -222,7 +222,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_is_grapheme_boundary_serial(sz_cptr_t te
 /** Forward run-state carried across codepoints by the bulk segmenter, so the GB9c, GB11, and
  *  GB12-13 unbounded runs resolve in O(1) per codepoint instead of a backward re-walk: the
  *  scalar twin of the Ice Lake register carry. */
-typedef struct sz_grapheme_serial_state_t {
+typedef struct sz_grapheme_state_serial_t {
 
     /** Packed descriptor of the previous codepoint. */
     sz_u8_t previous_descriptor;
@@ -241,11 +241,11 @@ typedef struct sz_grapheme_serial_state_t {
 
     /** A Linker has appeared in that open InCB run. */
     sz_bool_t indic_conjunct_seen_linker;
-} sz_grapheme_serial_state_t;
+} sz_grapheme_state_serial_t;
 
 /** Boundary decision between @p state's previous codepoint and the @p after codepoint,
  *  GB3..GB13 in O(1). */
-STRINGZILLA_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_state_t const *state, sz_u8_t after) {
+STRINGZILLA_INLINE sz_bool_t sz_grapheme_boundary_serial_(sz_grapheme_state_serial_t const *state, sz_u8_t after) {
     sz_u8_t const before_class = sz_grapheme_break_descriptor_gcb_(state->previous_descriptor);
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     if (before_class == sz_grapheme_break_cr_k && after_class == sz_grapheme_break_lf_k) return sz_false_k; // GB3
@@ -283,7 +283,7 @@ STRINGZILLA_INLINE sz_bool_t sz_grapheme_serial_boundary_(sz_grapheme_serial_sta
 
 /** Advances @p state by the @p after codepoint, toggling or closing the RI, ExtPict-ZWJ,
  *  and InCB runs. */
-STRINGZILLA_INLINE void sz_grapheme_serial_advance_(sz_grapheme_serial_state_t *state, sz_u8_t after) {
+STRINGZILLA_INLINE void sz_grapheme_advance_serial_(sz_grapheme_state_serial_t *state, sz_u8_t after) {
     sz_u8_t const after_class = sz_grapheme_break_descriptor_gcb_(after);
     state->regional_indicator_run_odd = (after_class == sz_grapheme_break_regional_indicator_k)
                                             ? (sz_bool_t)(!state->regional_indicator_run_odd)
@@ -333,13 +333,13 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_( //
     if (length == 0 || clusters_capacity == 0) return 0;
 
     sz_size_t cluster_start = 0;
-    sz_grapheme_serial_state_t state;
+    sz_grapheme_state_serial_t state;
     state.regional_indicator_run_odd = sz_false_k;
     state.extended_pictographic_run = sz_false_k;
     state.zero_width_joiner_connector = sz_false_k;
     state.indic_conjunct_open = sz_false_k;
     state.indic_conjunct_seen_linker = sz_false_k;
-    sz_grapheme_serial_advance_(&state, sz_grapheme_break_property_at_(text, length, 0)); // seed from codepoint 0
+    sz_grapheme_advance_serial_(&state, sz_grapheme_break_property_at_(text, length, 0)); // seed from codepoint 0
 
     sz_size_t position = sz_grapheme_break_next_start_(text, length, 0);
     while (position < length) {
@@ -349,14 +349,14 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_serial_( //
         sz_size_t const before_start = sz_utf8_previous_rune_start_(text, position);
         sz_bool_t const boundary = (((sz_u8_t)text[before_start] & 0xC0u) == 0x80u)
                                        ? sz_true_k
-                                       : sz_grapheme_serial_boundary_(&state, after_descriptor);
+                                       : sz_grapheme_boundary_serial_(&state, after_descriptor);
         if (boundary) {
             if (clusters == clusters_capacity) return clusters;
             cluster_lengths[clusters] = position - cluster_start;
             ++clusters;
             cluster_start = position;
         }
-        sz_grapheme_serial_advance_(&state, after_descriptor);
+        sz_grapheme_advance_serial_(&state, after_descriptor);
         position = sz_grapheme_break_next_start_(text, length, position);
     }
 

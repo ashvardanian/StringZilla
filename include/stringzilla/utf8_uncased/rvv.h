@@ -764,7 +764,7 @@ STRINGZILLA_INLINE sz_u8_t const *sz_utf8_uncased_load_padded_rvv_(sz_cptr_t sou
  *  serial danger-zone handler; clean strips are folded and probe-filtered, with each survivor
  *  re-folded, byte-compared against the needle window, and verified by
  *  @ref sz_utf8_uncased_verify_match_. */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_scripted_rvv_( //
     sz_utf8_uncased_fold_strip_rvv_t_ fold,                        //
     sz_utf8_uncased_alarm_strip_rvv_t_ alarm,                      //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
@@ -912,75 +912,75 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_scripted_( //
 
 #pragma region Per Script Kernels
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_ascii_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_ascii_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_ascii_strip_rvv_,
                                                 (sz_utf8_uncased_alarm_strip_rvv_t_)STRINGZILLA_NULL, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_western_europe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_western_europe_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_western_europe_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_western_europe_strip_rvv_,
                                                 sz_utf8_uncased_alarm_western_europe_strip_rvv_, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_central_europe_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_central_europe_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                       //
     sz_cptr_t needle, sz_size_t needle_length,                           //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_central_europe_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_central_europe_strip_rvv_,
                                                 sz_utf8_uncased_alarm_central_europe_strip_rvv_, haystack,
                                                 haystack_length, needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_cyrillic_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_cyrillic_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_cyrillic_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_cyrillic_strip_rvv_,
                                                 sz_utf8_uncased_alarm_cyrillic_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_greek_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_greek_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,              //
     sz_cptr_t needle, sz_size_t needle_length,                  //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_greek_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_greek_strip_rvv_,
                                                 sz_utf8_uncased_alarm_greek_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_armenian_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_armenian_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_armenian_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_armenian_strip_rvv_,
                                                 sz_utf8_uncased_alarm_armenian_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_vietnamese_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_vietnamese_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                   //
     sz_cptr_t needle, sz_size_t needle_length,                       //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_vietnamese_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_vietnamese_strip_rvv_,
                                                 sz_utf8_uncased_alarm_vietnamese_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_georgian_( //
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_georgian_rvv_( //
     sz_cptr_t haystack, sz_size_t haystack_length,                 //
     sz_cptr_t needle, sz_size_t needle_length,                     //
     sz_utf8_uncased_needle_t const *needle_metadata, sz_size_t *match_length) {
     // Mkhedruli is caseless, so the fold is the bare ASCII fold; the alarm watches the historical scripts.
-    return sz_utf8_uncased_search_rvv_scripted_(sz_utf8_uncased_fold_ascii_strip_rvv_,
+    return sz_utf8_uncased_search_scripted_rvv_(sz_utf8_uncased_fold_ascii_strip_rvv_,
                                                 sz_utf8_uncased_alarm_georgian_strip_rvv_, haystack, haystack_length,
                                                 needle, needle_length, needle_metadata, match_length);
 }
@@ -1007,28 +1007,28 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_rvv_( //
 
     switch (needle_metadata->script) {
     case sz_utf8_uncased_rune_ascii_invariant_k:
-        return sz_utf8_uncased_search_rvv_ascii_( //
+        return sz_utf8_uncased_search_ascii_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_western_europe_k:
-        return sz_utf8_uncased_search_rvv_western_europe_( //
+        return sz_utf8_uncased_search_western_europe_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_central_europe_k:
-        return sz_utf8_uncased_search_rvv_central_europe_( //
+        return sz_utf8_uncased_search_central_europe_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_cyrillic_k:
-        return sz_utf8_uncased_search_rvv_cyrillic_( //
+        return sz_utf8_uncased_search_cyrillic_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_greek_k:
-        return sz_utf8_uncased_search_rvv_greek_( //
+        return sz_utf8_uncased_search_greek_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_armenian_k:
-        return sz_utf8_uncased_search_rvv_armenian_( //
+        return sz_utf8_uncased_search_armenian_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_vietnamese_k:
-        return sz_utf8_uncased_search_rvv_vietnamese_( //
+        return sz_utf8_uncased_search_vietnamese_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     case sz_utf8_uncased_rune_safe_georgian_k:
-        return sz_utf8_uncased_search_rvv_georgian_( //
+        return sz_utf8_uncased_search_georgian_rvv_( //
             haystack, haystack_length, needle, needle_length, needle_metadata, match_length);
     default: break;
     }

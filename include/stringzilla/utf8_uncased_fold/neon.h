@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 /** Folds ASCII A-Z down to a-z in one register, leaving every other byte unchanged. */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) {
+STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_ascii_neon_(uint8x16_t source_u8x16) {
     // Unsigned wrap-around turns the two-sided 'A' ≤ x ≤ 'Z' test into one compare: bytes below
     // 'A' wrap past 0xE5 and bytes above 'Z' land at 26+, so only A-Z stay under 26.
     uint8x16_t is_ascii_upper_u8x16 = vcltq_u8(vsubq_u8(source_u8x16, vdupq_n_u8('A')), vdupq_n_u8(26));
@@ -42,13 +42,13 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_ascii_(uint8x16_t source_u8x16) 
  *
  *  @see Porting x86 vector bitmask optimizations to Arm NEON: https://community.arm.com/arm-community-blogs/b/infrastructure-solutions-blog/posts/porting-x86-vector-bitmask-optimizations-to-arm-neon
  */
-STRINGZILLA_INLINE sz_u64_t sz_utf8_fold_neon_nibble_mask_(uint8x16_t mask_u8x16) {
+STRINGZILLA_INLINE sz_u64_t sz_utf8_fold_nibble_mask_neon_(uint8x16_t mask_u8x16) {
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(mask_u8x16), 4)), 0) &
            0x8888888888888888ull;
 }
 
 /** OR-reduces all 16 byte lanes of one register into a single byte of accumulated flags. */
-STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x16) {
+STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_reduce_or_u8_neon_(uint8x16_t flags_u8x16) {
     uint8x8_t flags_u8x8 = vorr_u8(vget_low_u8(flags_u8x16), vget_high_u8(flags_u8x16));
     sz_u64_t flags_u64 = vget_lane_u64(vreinterpret_u64_u8(flags_u8x8), 0);
     flags_u64 |= flags_u64 >> 32, flags_u64 |= flags_u64 >> 16, flags_u64 |= flags_u64 >> 8;
@@ -57,7 +57,7 @@ STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_neon_reduce_or_u8_(uint8x16_t flags_u8x1
 
 /** Maps every lead byte in one register onto its folding-family flag; non-leads map to zero. One
  *  @c vqtbl4q_u8 covers the full 64-entry table - the NEON twin of Ice Lake's single VPERMB. */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x16,
+STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_classify_neon_(uint8x16_t source_u8x16,
                                                           uint8x16x4_t lead_families_lut_u8x16x4) {
     uint8x16_t is_non_ascii_u8x16 = vcgeq_u8(source_u8x16, vdupq_n_u8(0x80));
     // Continuations are 10xxxxxx, i.e. exactly the [0x80, 0xBF] range - one wrap-around compare
@@ -85,7 +85,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_classify_(uint8x16_t source_u8x1
  *
  *  @return Per-byte mask (0xFF) set on every lead byte that does not begin a well-formed rune.
  */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t source_u8x16,
+STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_malformed_lead_neon_(uint8x16_t source_u8x16,
                                                                 uint8x16_t next_register_u8x16) {
     uint8x16_t const continuation_low_u8x16 = vdupq_n_u8(0x80);
     uint8x16_t const continuation_span_u8x16 = vdupq_n_u8(0x40);
@@ -140,7 +140,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t sourc
  *
  *  Folds ASCII A-Z in place and copies everything else, trimming an incomplete trailing sequence.
  *
- *  Mirrors @c sz_utf8_uncased_fold_icelake_caseless_chunk_ at a fixed 64-byte chunk size: an
+ *  Mirrors @c sz_utf8_uncased_fold_caseless_chunk_icelake_ at a fixed 64-byte chunk size: an
  *  incomplete sequence can only be a 2-byte lead in the last byte or a 3-byte lead in the last two
  *  bytes (4-byte leads carry the complex flag and never reach this handler), so only the last
  *  register's lead masks matter and one nibble-mask extraction covers both checks.
@@ -148,7 +148,7 @@ STRINGZILLA_INLINE uint8x16_t sz_utf8_fold_neon_malformed_lead_(uint8x16_t sourc
  *  @return Bytes consumed; always 62..64, never zero - 62 bytes of any valid UTF-8 cover at least
  *      one complete sequence, so the superchunk cannot start with an incomplete one.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_caseless_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_ptr_t target) {
 
     uint8x16_t last_u8x16 = source_u8x16x4.val[3];
     uint8x16_t is_two_byte_lead_u8x16 = vcltq_u8(vsubq_u8(last_u8x16, vdupq_n_u8(0xC0)), vdupq_n_u8(0x20));
@@ -159,7 +159,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x
     uint8x16_t last_two_lanes_u8x16 = vsetq_lane_u8(0xFF, last_lane_u8x16, 14);
     uint8x16_t is_incomplete_u8x16 = vorrq_u8(vandq_u8(is_two_byte_lead_u8x16, last_lane_u8x16),
                                               vandq_u8(is_three_byte_lead_u8x16, last_two_lanes_u8x16));
-    sz_u64_t incomplete_nibbles = sz_utf8_fold_neon_nibble_mask_(is_incomplete_u8x16);
+    sz_u64_t incomplete_nibbles = sz_utf8_fold_nibble_mask_neon_(is_incomplete_u8x16);
 
     // Nibble positions are byte positions × 4; lanes 14-15 of the last register are bytes 62-63
     sz_size_t copy_length = incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz_neon_(incomplete_nibbles) / 4) : 64;
@@ -167,10 +167,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x
     // Caseless folding is length-preserving, so full-register stores are exact for the consumed
     // prefix; the 0-2 trailing bytes written past `copy_length` sit inside the caller-guaranteed
     // output headroom and are rewritten by the next iteration.
-    vst1q_u8((sz_u8_t *)target + 0, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[0]));
-    vst1q_u8((sz_u8_t *)target + 16, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[1]));
-    vst1q_u8((sz_u8_t *)target + 32, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[2]));
-    vst1q_u8((sz_u8_t *)target + 48, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[3]));
+    vst1q_u8((sz_u8_t *)target + 0, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[0]));
+    vst1q_u8((sz_u8_t *)target + 16, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[1]));
+    vst1q_u8((sz_u8_t *)target + 32, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[2]));
+    vst1q_u8((sz_u8_t *)target + 48, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[3]));
     return copy_length;
 }
 
@@ -179,7 +179,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x
  *      Latin Extended-A/B (C4-C6), and Latin Extended Additional (E1 B8-BB) - the working set
  *      of German, Czech, Vietnamese, and most other Latin-script languages.
  *
- *  Mirrors @c sz_utf8_uncased_fold_icelake_latin_chunk_ at a fixed 64-byte chunk size. Latin
+ *  Mirrors @c sz_utf8_uncased_fold_latin_chunk_icelake_ at a fixed 64-byte chunk size. Latin
  *  Extended folding is parity-based: uppercase codepoints are even and fold to the next odd
  *  codepoint, and the codepoint's low bit lives in the last byte of its UTF-8 sequence, so the
  *  fold is an in-place masked +1. Per-codepoint deltas come from @c vqtbl4q_u8 tables indexed by
@@ -194,7 +194,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_caseless_chunk_(uint8x16x
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_latin_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                     sz_ptr_t target) {
 
     uint8x16x4_t const c4_deltas_lut_u8x16x4 = vld1q_u8_x4(sz_utf8_fold_c4_deltas_lut_);
@@ -276,7 +276,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t
         // to this handler: treating them as stops truncates the fold before them so the per-rune
         // fallback copies one byte and resyncs. For valid text the malformed mask is empty, so the
         // handler behaves exactly as before.
-        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(
             vorrq_u8(irregular_extended_u8x16, foreign_e1_second_u8x16),
             vorrq_u8(vorrq_u8(irregular_additional_u8x16, is_foreign_lead_u8x16), malformed_lead_u8x16));
@@ -284,7 +284,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
         // 1. ASCII A-Z
-        uint8x16_t folded_u8x16 = sz_utf8_fold_neon_ascii_(source_u8x16);
+        uint8x16_t folded_u8x16 = sz_utf8_fold_ascii_neon_(source_u8x16);
 
         // 2. Latin-1 Supplement: 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20
         uint8x16_t is_latin1_upper_u8x16 = vandq_u8(
@@ -332,7 +332,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -352,7 +352,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t
     uint8x16_t last_two_lanes_u8x16 = vsetq_lane_u8(0xFF, last_lane_u8x16, 14);
     uint8x16_t is_incomplete_u8x16 = vorrq_u8(vandq_u8(is_two_byte_lead_u8x16, last_lane_u8x16),
                                               vandq_u8(is_e1_lead_u8x16, last_two_lanes_u8x16));
-    sz_u64_t incomplete_nibbles = sz_utf8_fold_neon_nibble_mask_(is_incomplete_u8x16);
+    sz_u64_t incomplete_nibbles = sz_utf8_fold_nibble_mask_neon_(is_incomplete_u8x16);
     return incomplete_nibbles ? 48 + (sz_size_t)(sz_u64_ctz_neon_(incomplete_nibbles) / 4) : 64;
 }
 
@@ -367,7 +367,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_latin_chunk_(uint8x16x4_t
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_cyrillic_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                        sz_ptr_t target) {
     static sz_u8_t const second_byte_offsets_lut_[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x10, 0x20, 0xE0, 0, 0, 0, 0, 0};
     uint8x16_t const offsets_lut_u8x16 = vld1q_u8(second_byte_offsets_lut_);
@@ -391,7 +391,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x
         // Cyrillic Extended-A ('Ѡ'+, D1 A0+) folds by parity and stays on the serial path
         uint8x16_t is_extended_u8x16 = vandq_u8(is_d1_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0xA0)));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
-        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, is_extended_u8x16), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
@@ -400,7 +400,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x
         // 'Р'-'Я' (A0-AF) → −0x20; lowercase B0+ maps to zero through the table.
         uint8x16_t after_d0_u8x16 = vextq_u8(previous_is_d0_u8x16, is_d0_u8x16, 15);
         uint8x16_t offsets_u8x16 = vandq_u8(vqtbl1q_u8(offsets_lut_u8x16, vshrq_n_u8(source_u8x16, 4)), after_d0_u8x16);
-        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_neon_ascii_(source_u8x16), offsets_u8x16);
+        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_ascii_neon_(source_u8x16), offsets_u8x16);
 
         // Lead rewrite D0 → D1 (+1) where the lowercase lives in the next block:
         // seconds 80-8F ('Ѐ'-'Џ' → 'ѐ'-'џ') and A0-AF ('Р'-'Я' → 'р'-'я')
@@ -416,7 +416,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -444,7 +444,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_cyrillic_chunk_(uint8x16x
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_greek_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                     sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_ce_u8x16 = zero_u8x16, previous_is_cf_u8x16 = zero_u8x16;
@@ -467,7 +467,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t
                                                                       vceqq_u8(next_byte_u8x16, vdupq_n_u8(0xB0))));
         uint8x16_t cf_excluded_u8x16 = vandq_u8(is_cf_u8x16, vcgeq_u8(next_byte_u8x16, vdupq_n_u8(0x8F)));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
-        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(
             vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(ce_excluded_u8x16, cf_excluded_u8x16)), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
@@ -486,7 +486,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t
         // Final sigma 'ς' → 'σ': +1
         uint8x16_t is_final_sigma_u8x16 = vandq_u8(after_cf_u8x16, vceqq_u8(source_u8x16, vdupq_n_u8(0x82)));
 
-        uint8x16_t folded_u8x16 = sz_utf8_fold_neon_ascii_(source_u8x16);
+        uint8x16_t folded_u8x16 = sz_utf8_fold_ascii_neon_(source_u8x16);
         folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_basic_upper_u8x16, vdupq_n_u8(0x20)));
         folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_promoting_upper_u8x16, vdupq_n_u8(0xE0)));
         folded_u8x16 = vaddq_u8(folded_u8x16, vandq_u8(is_final_sigma_u8x16, vdupq_n_u8(0x01)));
@@ -504,7 +504,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -522,7 +522,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t
  *  @brief Folds a 64-byte superchunk of Armenian (D4-D6 leads) mixed with ASCII.
  *
  *  Armenian uppercase spans two lead bytes and folds into three target blocks, reusing the exact
- *  math verified in the NEON finder's @c sz_utf8_uncased_search_neon_armenian_fold_u8x16x2_:
+ *  math verified in the NEON finder's @c sz_utf8_uncased_search_armenian_fold_u8x16x2_neon_:
  *  - D4 B1-BF: 'Ա'-'Ձ' → D5 A1-AF 'ա'-'ձ' (second −0x10, lead D4 → D5)
  *  - D5 80-8F: 'Ղ'-'Տ' → D5 B0-BF 'ղ'-'տ' (second +0x30, lead unchanged)
  *  - D5 90-96: 'Ր'-'Ֆ' → D6 80-86 'ր'-'ֆ' (second −0x10, lead D5 → D6)
@@ -541,7 +541,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_greek_chunk_(uint8x16x4_t
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_armenian_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                        sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_d4_u8x16 = zero_u8x16, previous_is_d5_u8x16 = zero_u8x16;
@@ -566,7 +566,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x
         uint8x16_t is_d4_stop_u8x16 = vandq_u8(is_d4_u8x16, vcltq_u8(next_byte_u8x16, vdupq_n_u8(0xB1)));
         uint8x16_t is_ligature_stop_u8x16 = vandq_u8(is_d6_u8x16, vceqq_u8(next_byte_u8x16, vdupq_n_u8(0x87)));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
-        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(
             vorrq_u8(is_foreign_lead_u8x16, vorrq_u8(is_d4_stop_u8x16, is_ligature_stop_u8x16)), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
@@ -586,7 +586,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x
         uint8x16_t offsets_u8x16 = vandq_u8(vorrq_u8(is_d4_armenian_second_u8x16, is_d5_minus10_second_u8x16),
                                             vdupq_n_u8(0xF0));
         offsets_u8x16 = vorrq_u8(offsets_u8x16, vandq_u8(is_d5_plus30_second_u8x16, vdupq_n_u8(0x30)));
-        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_neon_ascii_(source_u8x16), offsets_u8x16);
+        uint8x16_t folded_u8x16 = vaddq_u8(sz_utf8_fold_ascii_neon_(source_u8x16), offsets_u8x16);
 
         // Lead +1 rewrites decided from the lead's own next byte: D4 → D5 where next is B1-BF,
         // D5 → D6 where next is 90-96. D5 80-8F keeps its lead.
@@ -603,7 +603,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -644,7 +644,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_armenian_chunk_(uint8x16x
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_georgian_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                        sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t previous_is_82_upper_lead_u8x16 = zero_u8x16, previous_is_83_upper_lead_u8x16 = zero_u8x16;
@@ -672,7 +672,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x
         uint8x16_t is_georgian_lead_u8x16 = vorrq_u8(is_82_lead_u8x16, is_83_lead_u8x16);
         uint8x16_t is_foreign_e1_u8x16 = vbicq_u8(is_e1_u8x16, is_georgian_lead_u8x16);
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
-        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16);
+        uint8x16_t malformed_lead_u8x16 = sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16);
         uint8x16_t stop_u8x16 = vorrq_u8(vorrq_u8(is_foreign_lead_u8x16, is_foreign_e1_u8x16), malformed_lead_u8x16);
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
@@ -697,7 +697,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x
         uint8x16_t is_upper_second_u8x16 = vorrq_u8(is_82_upper_second_u8x16, is_83_upper_second_u8x16);
 
         // Rewrites: lead E1 → E2, second 82/83 → B4, third −0x20 (E1 82, added as +0xE0) or +0x20 (E1 83)
-        uint8x16_t folded_u8x16 = sz_utf8_fold_neon_ascii_(source_u8x16);
+        uint8x16_t folded_u8x16 = sz_utf8_fold_ascii_neon_(source_u8x16);
         folded_u8x16 = vbslq_u8(is_upper_lead_u8x16, vdupq_n_u8(0xE2), folded_u8x16);
         folded_u8x16 = vbslq_u8(is_upper_second_u8x16, vdupq_n_u8(0xB4), folded_u8x16);
         uint8x16_t third_offsets_u8x16 = vorrq_u8(vandq_u8(is_82_upper_third_u8x16, vdupq_n_u8(0xE0)),
@@ -714,7 +714,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -741,7 +741,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_georgian_chunk_(uint8x16x
  *
  *  @return Bytes consumed and written, or zero if the first character needs another path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_guarded_chunk_neon_(uint8x16x4_t source_u8x16x4, sz_cptr_t source,
                                                                       sz_ptr_t target) {
     uint8x16_t const zero_u8x16 = vdupq_n_u8(0x00);
     uint8x16_t stop_masks_u8x16[4];
@@ -771,17 +771,17 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_guarded_chunk_(uint8x16x4
             vandq_u8(is_ea_u8x16, vorrq_u8(vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0x99)), vdupq_n_u8(0x07)),
                                            vcltq_u8(vsubq_u8(next_byte_u8x16, vdupq_n_u8(0xAD)), vdupq_n_u8(0x02)))));
         // Malformed leads are foreign to this handler - see the Latin handler for the rationale
-        stop_u8x16 = vorrq_u8(stop_u8x16, sz_utf8_fold_neon_malformed_lead_(source_u8x16, next_register_u8x16));
+        stop_u8x16 = vorrq_u8(stop_u8x16, sz_utf8_fold_malformed_lead_neon_(source_u8x16, next_register_u8x16));
         stop_masks_u8x16[register_index] = stop_u8x16;
         any_stop_u8x16 = vorrq_u8(any_stop_u8x16, stop_u8x16);
 
-        vst1q_u8((sz_u8_t *)target + register_index * 16, sz_utf8_fold_neon_ascii_(source_u8x16));
+        vst1q_u8((sz_u8_t *)target + register_index * 16, sz_utf8_fold_ascii_neon_(source_u8x16));
     }
 
     if (vmaxvq_u8(any_stop_u8x16)) {
         sz_size_t first_flagged_position = 64;
         for (sz_size_t register_index = 0; register_index != 4; ++register_index) {
-            sz_u64_t stop_nibbles = sz_utf8_fold_neon_nibble_mask_(stop_masks_u8x16[register_index]);
+            sz_u64_t stop_nibbles = sz_utf8_fold_nibble_mask_neon_(stop_masks_u8x16[register_index]);
             if (!stop_nibbles) continue;
             first_flagged_position = register_index * 16 + (sz_size_t)(sz_u64_ctz_neon_(stop_nibbles) / 4);
             break;
@@ -821,10 +821,10 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
         uint8x16_t any_byte_u8x16 = vorrq_u8(vorrq_u8(source_u8x16x4.val[0], source_u8x16x4.val[1]),
                                              vorrq_u8(source_u8x16x4.val[2], source_u8x16x4.val[3]));
         if (vmaxvq_u8(any_byte_u8x16) < 0x80) {
-            vst1q_u8((sz_u8_t *)target + 0, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[0]));
-            vst1q_u8((sz_u8_t *)target + 16, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[1]));
-            vst1q_u8((sz_u8_t *)target + 32, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[2]));
-            vst1q_u8((sz_u8_t *)target + 48, sz_utf8_fold_neon_ascii_(source_u8x16x4.val[3]));
+            vst1q_u8((sz_u8_t *)target + 0, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[0]));
+            vst1q_u8((sz_u8_t *)target + 16, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[1]));
+            vst1q_u8((sz_u8_t *)target + 32, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[2]));
+            vst1q_u8((sz_u8_t *)target + 48, sz_utf8_fold_ascii_neon_(source_u8x16x4.val[3]));
             target += 64, source += 64, source_length -= 64;
             continue;
         }
@@ -834,14 +834,14 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
         // routes uniform chunks straight to their handler instead of probing per-script fast
         // paths sequentially, which degrades on mixed-script text.
         uint8x16_t lead_families_u8x16 = vorrq_u8(
-            vorrq_u8(sz_utf8_fold_neon_classify_(source_u8x16x4.val[0], lead_families_lut_u8x16x4),
-                     sz_utf8_fold_neon_classify_(source_u8x16x4.val[1], lead_families_lut_u8x16x4)),
-            vorrq_u8(sz_utf8_fold_neon_classify_(source_u8x16x4.val[2], lead_families_lut_u8x16x4),
-                     sz_utf8_fold_neon_classify_(source_u8x16x4.val[3], lead_families_lut_u8x16x4)));
-        sz_u8_t lead_families = sz_utf8_fold_neon_reduce_or_u8_(lead_families_u8x16);
+            vorrq_u8(sz_utf8_fold_classify_neon_(source_u8x16x4.val[0], lead_families_lut_u8x16x4),
+                     sz_utf8_fold_classify_neon_(source_u8x16x4.val[1], lead_families_lut_u8x16x4)),
+            vorrq_u8(sz_utf8_fold_classify_neon_(source_u8x16x4.val[2], lead_families_lut_u8x16x4),
+                     sz_utf8_fold_classify_neon_(source_u8x16x4.val[3], lead_families_lut_u8x16x4)));
+        sz_u8_t lead_families = sz_utf8_fold_reduce_or_u8_neon_(lead_families_u8x16);
 
         if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_k)) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_caseless_chunk_(source_u8x16x4, target);
+            sz_size_t handled = sz_utf8_uncased_fold_caseless_chunk_neon_(source_u8x16x4, target);
             target += handled, source += handled, source_length -= handled;
             continue;
         }
@@ -852,7 +852,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
         // and the chunk falls through to the next family - or to the serial rune below.
         if (lead_families &
             (sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k | sz_utf8_fold_lead_e1_flag_k)) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_latin_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_latin_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -861,28 +861,28 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
         // Georgian shares the E1 lead with Latin Extended Additional, so it runs second: the Latin
         // handler folds E1 B8-BB and returns zero on a leading E1 82/83, and this picks those up.
         if (lead_families & sz_utf8_fold_lead_e1_flag_k) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_georgian_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_georgian_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_cyrillic_flag_k) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_cyrillic_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_cyrillic_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_greek_flag_k) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_greek_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_greek_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
             }
         }
         if (lead_families & sz_utf8_fold_lead_guarded_flag_k) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_guarded_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_guarded_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -891,7 +891,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
         // Armenian (D4-D6) plus the Cyrillic Supplement that shares the D4 lead both fall in the
         // complex family; this handler folds them and truncates at any non-Armenian complex lead.
         if (lead_families & sz_utf8_fold_lead_complex_flag_k) {
-            sz_size_t handled = sz_utf8_uncased_fold_neon_armenian_chunk_(source_u8x16x4, source, target);
+            sz_size_t handled = sz_utf8_uncased_fold_armenian_chunk_neon_(source_u8x16x4, source, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
                 continue;
@@ -926,7 +926,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_neon_(sz_cptr_t source, sz_siz
     while (source_length >= 16) {
         uint8x16_t source_u8x16 = vld1q_u8((sz_u8_t const *)source);
         if (vmaxvq_u8(source_u8x16) >= 0x80) break;
-        vst1q_u8((sz_u8_t *)target, sz_utf8_fold_neon_ascii_(source_u8x16));
+        vst1q_u8((sz_u8_t *)target, sz_utf8_fold_ascii_neon_(source_u8x16));
         target += 16, source += 16, source_length -= 16;
     }
 

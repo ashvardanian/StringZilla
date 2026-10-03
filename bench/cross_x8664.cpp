@@ -24,7 +24,7 @@ namespace ashvardanian::stringzilla::bench {
 /** The serial step's eight lanes, four per YMM, so the two arms answer the same scores. */
 struct levenshtein_step_from_haswell {
     static constexpr std::size_t groups_k = levenshtein_step_lanes_k /
-                                            sz_levenshtein_haswell_u64x4_candidates_per_step_k;
+                                            sz_levenshtein_u64x4_candidates_per_step_haswell_k;
 
     /** Query words every step walks. */
     std::size_t words = 0;
@@ -66,10 +66,10 @@ struct levenshtein_step_from_haswell {
                 sz_levenshtein_u64x4_step_haswell(&states[group], verticals.data() + group * words, words, &query,
                                                   sz_levenshtein_u64x4_classes_u8_haswell(
                                                       classes.data() + position * levenshtein_step_lanes_k +
-                                                      group * sz_levenshtein_haswell_u64x4_candidates_per_step_k));
+                                                      group * sz_levenshtein_u64x4_candidates_per_step_haswell_k));
         check_value_t mixed = 0;
         for (std::size_t group = 0; group != groups_k; ++group)
-            for (std::size_t lane = 0; lane != sz_levenshtein_haswell_u64x4_candidates_per_step_k; ++lane)
+            for (std::size_t lane = 0; lane != sz_levenshtein_u64x4_candidates_per_step_haswell_k; ++lane)
                 mixed = mixed * 31u + sz_levenshtein_u64x4_score_haswell(&states[group], lane);
         call_result_t result(levenshtein_step_positions_k * levenshtein_step_lanes_k, mixed,
                              levenshtein_step_positions_k * levenshtein_step_lanes_k * words);
@@ -236,8 +236,8 @@ sz_status_t pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_size_t count, sz_memory_
  *  than on a per-position branch.
  */
 struct levenshtein_step_from_icelake_narrow {
-    static constexpr std::size_t lanes_k = sz_levenshtein_icelake_u8x64_candidates_per_step_k;
-    static constexpr std::size_t positions_per_flush_k = sz_levenshtein_icelake_u8x64_positions_per_flush_k;
+    static constexpr std::size_t lanes_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k;
+    static constexpr std::size_t positions_per_flush_k = sz_levenshtein_u8x64_positions_per_flush_icelake_k;
 
     /** Match masks the query points at. */
     std::vector<sz_u64_t> masks;
@@ -371,7 +371,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
 #else
         bench_pgrams_sort_kernels<pgrams_sort_haswell_>(env, "haswell");
         bench_levenshtein_step_kernels<levenshtein_step_from_haswell>(env, "sz_levenshtein_u64x4_step_haswell");
-        bench_overlap_step_kernels<sz_overlap_haswell_f64x4_positions_per_step_k, overlap_prefix_hash_step_haswell_,
+        bench_overlap_step_kernels<sz_overlap_f64x4_positions_per_step_haswell_k, overlap_prefix_hash_step_haswell_,
                                    overlap_prefix_hash_step_tail_haswell_, overlap_window_hash_step_haswell_,
                                    overlap_window_hash_step_tail_haswell_, overlap_btree_sort_haswell_,
                                    overlap_btree_probe_haswell_>(env, "haswell");
@@ -408,7 +408,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_HEADER_ONLY
         bench_pgrams_sort_kernels<pgrams_sort_skylake_>(env, "skylake");
         bench_levenshtein_step_kernels<levenshtein_step_from_skylake>(env, "sz_levenshtein_u64x8_step_skylake");
-        bench_overlap_step_kernels<sz_overlap_skylake_f64x8_positions_per_step_k, overlap_prefix_hash_step_skylake_,
+        bench_overlap_step_kernels<sz_overlap_f64x8_positions_per_step_skylake_k, overlap_prefix_hash_step_skylake_,
                                    overlap_prefix_hash_step_tail_skylake_, overlap_window_hash_step_skylake_,
                                    overlap_window_hash_step_tail_skylake_, overlap_btree_sort_skylake_,
                                    overlap_btree_probe_skylake_>(env, "skylake");

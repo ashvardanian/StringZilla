@@ -860,22 +860,22 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_u64x1_score_serial(sz_levenshtein
 /** Scalar candidates advanced per position: one word's recurrence is a dependency chain, and only
  *  independent candidates fill the pipeline behind it. */
 enum {
-    sz_levenshtein_serial_u64x1_candidates_per_step_k = 1,
-    sz_levenshtein_serial_u64x1_registers_per_position_k = 8
+    sz_levenshtein_u64x1_candidates_per_step_serial_k = 1,
+    sz_levenshtein_u64x1_registers_per_position_serial_k = 8
 };
 
 /** Sweeps up to eight candidates through every transpose with @p words verticals each - a constant
  *  keeps a one- or two-word query's verticals register-resident. Every score is read at the
  *  position where its text ends. */
-STRINGZILLA_INLINE void sz_levenshtein_serial_u64x1_sweep_(sz_levenshtein_query_t const *shared_query,
+STRINGZILLA_INLINE void sz_levenshtein_u64x1_sweep_serial_(sz_levenshtein_query_t const *shared_query,
                                                            sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                            sz_u64_t *symbol_counts, sz_size_t sweep_count,
                                                            sz_levenshtein_transpose_t_ transpose,
                                                            sz_levenshtein_u64x1_vertical_serial_t *verticals,
                                                            sz_size_t words, sz_size_t *distances) {
     enum {
-        candidates_per_position_k = sz_levenshtein_serial_u64x1_candidates_per_step_k *
-                                    sz_levenshtein_serial_u64x1_registers_per_position_k,
+        candidates_per_position_k = sz_levenshtein_u64x1_candidates_per_step_serial_k *
+                                    sz_levenshtein_u64x1_registers_per_position_serial_k,
         positions_per_transpose_k = sz_levenshtein_positions_per_transpose_k,
     };
     // A local copy: nothing stored through the verticals can alias it, so the step keeps its fields in registers.
@@ -914,14 +914,14 @@ STRINGZILLA_INLINE void sz_levenshtein_serial_u64x1_sweep_(sz_levenshtein_query_
 
 /** Streams every candidate through a prepared @p query, @c candidates_per_position_k at a time,
  *  with @p transpose emitting their classes; @p verticals holds enough for a runtime word count. */
-STRINGZILLA_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_query_t const *query,
+STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_query_t const *query,
                                                                sz_sequence_t const *candidates,
                                                                sz_levenshtein_transpose_t_ transpose,
                                                                sz_levenshtein_u64x1_vertical_serial_t *verticals,
                                                                sz_size_t *distances) {
     enum {
-        candidates_per_position_k = sz_levenshtein_serial_u64x1_candidates_per_step_k *
-                                    sz_levenshtein_serial_u64x1_registers_per_position_k
+        candidates_per_position_k = sz_levenshtein_u64x1_candidates_per_step_serial_k *
+                                    sz_levenshtein_u64x1_registers_per_position_serial_k
     };
     sz_size_t const words = sz_levenshtein_query_words(query->length);
     sz_levenshtein_u64x1_vertical_serial_t resident_verticals[candidates_per_position_k * 2];
@@ -936,13 +936,13 @@ STRINGZILLA_INLINE void sz_levenshtein_serial_u64x1_distances_(sz_levenshtein_qu
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
+            sz_levenshtein_u64x1_sweep_serial_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
                                                resident_verticals, 1, distances + sweep_first);
         else if (words == 2)
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
+            sz_levenshtein_u64x1_sweep_serial_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
                                                resident_verticals, 2, distances + sweep_first);
         else
-            sz_levenshtein_serial_u64x1_sweep_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
+            sz_levenshtein_u64x1_sweep_serial_(query, texts, byte_counts, symbol_counts, sweep_count, transpose,
                                                verticals, words, distances + sweep_first);
     }
 }
@@ -962,7 +962,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engin
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    enum { registers_k = sz_levenshtein_serial_u64x1_registers_per_position_k };
+    enum { registers_k = sz_levenshtein_u64x1_registers_per_position_serial_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_levenshtein_transpose_t_ const transpose = engine->symbol == sz_levenshtein_bytes_k
                                                       ? sz_levenshtein_transpose_
@@ -981,7 +981,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engin
             continue;
         }
         sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        sz_levenshtein_serial_u64x1_distances_(&query, candidates, transpose, verticals, row);
+        sz_levenshtein_u64x1_distances_serial_(&query, candidates, transpose, verticals, row);
     }
     return sz_success_k;
 }

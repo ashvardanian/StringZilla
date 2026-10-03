@@ -293,7 +293,7 @@ STRINGZILLA_CONSTEXPR void sz_order_indices_ascending_(sz_sorted_idx_t *order, s
  *      ascending integer sort of the complemented keys yields a descending lexicographic order
  *      of the strings.
  */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_export_byte_window_(      //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_export_byte_window_serial_(      //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -418,7 +418,7 @@ STRINGZILLA_CONSTEXPR sz_pgram_t const *sz_sequence_partitioning_pivot_(sz_pgram
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  *  @see https://en.wikipedia.org/wiki/Dutch_national_flag_problem
  */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_3way_partition_(    //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_3way_partition_serial_(    //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t *first_pivot_offset, sz_size_t *last_pivot_offset) {
@@ -468,7 +468,7 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_3way_partition_(    //
 
 /**
  *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_best and
- *      @c sz_pgrams_sort_serial_, and using the @c sz_sequence_argsort_serial_3way_partition_
+ *      @c sz_pgrams_sort_serial_, and using the @c sz_sequence_argsort_3way_partition_serial_
  *      under the hood.
  *
  *  @param[inout] global_pgrams Pgram array to sort in place.
@@ -481,33 +481,33 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_3way_partition_(    //
  *  With the complement trick the wanted elements, the smallest or the largest under reverse, always
  *  fall in `[0, top_count)`, so one cut-off serves both directions.
  */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_quicksort_pgrams_(  //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_quicksort_pgrams_serial_(  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
 
     // Partition the collection around some pivot or 2 pivots in a 3-way partitioning
     sz_size_t first_pivot_index, last_pivot_index;
-    sz_sequence_argsort_serial_3way_partition_( //
+    sz_sequence_argsort_3way_partition_serial_( //
         global_pgrams, global_order,            //
         start_in_sequence, end_in_sequence,     //
         &first_pivot_index, &last_pivot_index);
 
     // Recursively sort the left partition
     if (start_in_sequence < first_pivot_index)
-        sz_sequence_argsort_serial_quicksort_pgrams_(global_pgrams, global_order, start_in_sequence, first_pivot_index,
+        sz_sequence_argsort_quicksort_pgrams_serial_(global_pgrams, global_order, start_in_sequence, first_pivot_index,
                                                      top_count);
 
     // Recursively sort the right partition, unless it lies entirely past the `top_count` cut-off.
     if (last_pivot_index + 1 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_serial_quicksort_pgrams_(global_pgrams, global_order, last_pivot_index + 1, end_in_sequence,
+        sz_sequence_argsort_quicksort_pgrams_serial_(global_pgrams, global_order, last_pivot_index + 1, end_in_sequence,
                                                      top_count);
 }
 
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  Combines @c sz_sequence_argsort_serial_export_byte_window_ with
- *  @c sz_sequence_argsort_serial_quicksort_pgrams_, then recurses into every group of equal pgrams.
+ *  Combines @c sz_sequence_argsort_export_byte_window_serial_ with
+ *  @c sz_sequence_argsort_quicksort_pgrams_serial_, then recurses into every group of equal pgrams.
  *
  *  @param[in] sequence The collection of strings to sort.
  *  @param[inout] global_pgrams Working pgram array, length at least `sequence->count`.
@@ -518,18 +518,18 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_quicksort_pgrams_(  //
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_byte_windows_( //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_sort_byte_windows_serial_( //
     sz_sequence_t const *const sequence,                                  //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,   //
     sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
 
     // Prepare the new range of pgrams
-    sz_sequence_argsort_serial_export_byte_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_byte_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character, reverse);
 
     // Sort current pgrams with a quicksort
-    sz_sequence_argsort_serial_quicksort_pgrams_(global_pgrams, global_order, start_in_sequence, end_in_sequence,
+    sz_sequence_argsort_quicksort_pgrams_serial_(global_pgrams, global_order, start_in_sequence, end_in_sequence,
                                                  top_count);
 
     // Depending on the architecture, we will export a different number of bytes.
@@ -559,7 +559,7 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_byte_windows_( //
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each) {
-            sz_sequence_argsort_serial_sort_byte_windows_(sequence, global_pgrams, global_order, nested_start,
+            sz_sequence_argsort_sort_byte_windows_serial_(sequence, global_pgrams, global_order, nested_start,
                                                           nested_end, start_character + pgram_capacity, top_count,
                                                           reverse);
         }
@@ -593,7 +593,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_siz
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
     // Reuse the string sorting algorithm for sorting the "pgrams" - a plain full ascending sort.
-    sz_sequence_argsort_serial_quicksort_pgrams_((sz_pgram_t *)pgrams, order, 0, count, 0);
+    sz_sequence_argsort_quicksort_pgrams_serial_((sz_pgram_t *)pgrams, order, 0, count, 0);
     return sz_success_k;
 }
 
@@ -607,7 +607,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_siz
 #define sz_argsort_casefold_fields_(pgram_type) ((sz_size_t)(sizeof(pgram_type) * 8) / sz_argsort_casefold_field_bits_)
 
 /**
- *  @brief Uncased counterpart of @c sz_sequence_argsort_serial_export_byte_window_.
+ *  @brief Uncased counterpart of @c sz_sequence_argsort_export_byte_window_serial_.
  *
  *  Packs the folded @b code-points of each string at recursion depth @p folded_skip_count into a
  *  pgram: three 21-bit fields on 64-bit targets, MSB-first, each holding `code-point + 1` so a zero
@@ -630,7 +630,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_siz
  *      times the fields per pgram.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_export_casefold_window_(  //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_export_casefold_window_serial_(  //
     sz_sequence_t const *const sequence,                                        //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t const *const global_order, //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
@@ -697,19 +697,19 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_export_casefold_window_(  
     }
 }
 
-/** Uncased counterpart of @c sz_sequence_argsort_serial_sort_byte_windows_: sorts a range by
+/** Uncased counterpart of @c sz_sequence_argsort_sort_byte_windows_serial_: sorts a range by
  *  its folded pgram window at depth @p folded_skip_count, then recurses into fold-equal groups
  *  one window deeper. Stateless - only the shared @p folded_skip_count is threaded, exactly
  *  like @c start_character. */
-STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_casefold_windows_( //
+STRINGZILLA_CONSTEXPR void sz_sequence_argsort_sort_casefold_windows_serial_( //
     sz_sequence_t const *const sequence,                                      //
     sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,     //
     sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,       //
     sz_size_t const folded_skip_count, sz_size_t const top_count, sz_bool_t const reverse) {
 
-    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_casefold_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                        end_in_sequence, folded_skip_count, reverse);
-    sz_sequence_argsort_serial_quicksort_pgrams_(global_pgrams, global_order, start_in_sequence, end_in_sequence,
+    sz_sequence_argsort_quicksort_pgrams_serial_(global_pgrams, global_order, start_in_sequence, end_in_sequence,
                                                  top_count);
 
     // The lowest 21-bit field is non-zero only when the window was filled to capacity, i.e. the strings may
@@ -728,7 +728,7 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_serial_sort_casefold_windows_( //
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
         if (has_multiple_strings && has_more_characters_in_each) {
-            sz_sequence_argsort_serial_sort_casefold_windows_(sequence, global_pgrams, global_order, nested_start,
+            sz_sequence_argsort_sort_casefold_windows_serial_(sequence, global_pgrams, global_order, nested_start,
                                                               nested_end, folded_skip_count + fields_per_pgram,
                                                               top_count, reverse);
         }
@@ -851,7 +851,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
     if (!pgrams) return sz_bad_alloc_k;
 
     // Recursively sort the whole sequence.
-    sz_sequence_argsort_serial_sort_byte_windows_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
+    sz_sequence_argsort_sort_byte_windows_serial_(sequence, pgrams, order, 0, sequence->count, 0, top_count, reverse);
 
     // Free temporary storage.
     allocator->free(pgrams, memory_usage, allocator->handle);
@@ -879,7 +879,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(            //
     sz_pgram_t *pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle);
     if (!pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_serial_sort_casefold_windows_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
+    sz_sequence_argsort_sort_casefold_windows_serial_(sequence, pgrams, order, 0, count, 0, top_count, reverse);
 
     allocator->free(pgrams, memory_usage, allocator->handle);
     return sz_success_k;

@@ -35,7 +35,7 @@ STRINGZILLA_INLINE svuint8_t sz_emulate_aesenc_u8x16_sve2_(svuint8_t state_u8x, 
 }
 
 /** A variant of @c sz_hash_sve2aes for strings up to 16 bytes long - smallest SVE register size. */
-STRINGZILLA_INLINE sz_u64_t sz_hash_sve2_upto16_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
+STRINGZILLA_INLINE sz_u64_t sz_hash_upto16_sve2aes_(sz_cptr_t text, sz_size_t length, sz_u64_t seed) {
     svuint8_t state_aes_u8x, state_sum_u8x, state_key_u8x;
 
     // To load and store the seed, we don't even need a `svwhilelt_b64(0, 2)`.
@@ -107,7 +107,7 @@ STRINGZILLA_API sz_status_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *
 STRINGZILLA_API sz_status_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
                                             void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *hash = length <= 16 ? sz_hash_sve2_upto16_(text, length, seed) : sz_hash_neonaes_(text, length, seed);
+    *hash = length <= 16 ? sz_hash_upto16_sve2aes_(text, length, seed) : sz_hash_neonaes_(text, length, seed);
     return sz_success_k;
 }
 

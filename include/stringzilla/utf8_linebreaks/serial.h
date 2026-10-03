@@ -182,9 +182,9 @@ STRINGZILLA_INLINE sz_line_break_cluster_t sz_line_break_next_cluster_(sz_cptr_t
  *
  *  Holds the nearest non-space cluster for LB8/14-17, the "NU (SY|IS)*" numeric run for
  *  LB25, and the Regional_Indicator parity for LB30a. Advanced by @c right each step
- *  via @c sz_line_break_serial_advance_.
+ *  via @c sz_line_break_advance_serial_.
  */
-typedef struct sz_line_break_serial_state_t {
+typedef struct sz_line_break_state_serial_t {
 
     /** nearest non-SP class at or left of @c left (LB8/14-17) */
     sz_u8_t last_non_space_class;
@@ -212,12 +212,12 @@ typedef struct sz_line_break_serial_state_t {
 
     /** index of @c right; the LB8 @c had_space / left-context `≥ 2` guards */
     sz_size_t cluster_index;
-} sz_line_break_serial_state_t;
+} sz_line_break_state_serial_t;
 
 /** Advance @p state by the @c right cluster, the one about to become @c left: refresh the
  *  nearest non-space context, the numeric-run flags, the Regional_Indicator parity, and
  *  the cluster counter. */
-STRINGZILLA_CONSTEXPR void sz_line_break_serial_advance_(sz_line_break_serial_state_t *state,
+STRINGZILLA_CONSTEXPR void sz_line_break_advance_serial_(sz_line_break_state_serial_t *state,
                                                          sz_line_break_cluster_t const *right, sz_u8_t left_class) {
     sz_u8_t const right_class = right->line_break_class;
     if (right_class != sz_line_break_sp_k) {
@@ -258,7 +258,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
     if (length == 0 || lines_capacity == 0) return 0;
 
     sz_size_t position = 0;
-    sz_line_break_serial_state_t state;
+    sz_line_break_state_serial_t state;
     state.last_codepoint_was_zwj = sz_false_k; // seeds the decoder; the rest of `state` is seeded from `left` below
 
     // Five-cluster sliding context centred on the (left | right) boundary under test: `previous2` (two left, for
@@ -275,8 +275,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
     // The open line begins at `left` (the first cluster; LB2 has no break before start of text).
     sz_size_t open_line_start = left.byte_start; // = 0
 
-    // Seed the forward-carried run state from the first cluster; `sz_line_break_serial_advance_` advances it by `right`
-    // each step — the continuous analogue of the window engine's per-cluster advance, never re-seeded.
+    // Seed the forward-carried run state from the first cluster; `sz_line_break_advance_serial_`
+    // advances it by `right` each step — the continuous analogue of the window engine's per-cluster
+    // advance, never re-seeded.
     state.last_non_space_class = left.line_break_class;
     state.last_non_space_descriptor = left.descriptor;
     state.last_non_space_left_class = (sz_u8_t)sz_line_break_xx_k;
@@ -578,7 +579,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_serial_( //
 
         // Advance the forward-carried run state by `right`, then slide the five-cluster context forward by one and
         // decode the new look-ahead tail.
-        sz_line_break_serial_advance_(&state, &right, left_class);
+        sz_line_break_advance_serial_(&state, &right, left_class);
         previous2 = left;
         left = right;
         right = ahead1;

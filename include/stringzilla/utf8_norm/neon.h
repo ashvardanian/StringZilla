@@ -45,7 +45,7 @@ extern "C" {
  *
  *  @return The first such byte, or NULL.
  */
-STRINGZILLA_INLINE uint8x16_t sz_utf8_norm_classify_neon_lead_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
+STRINGZILLA_INLINE uint8x16_t sz_utf8_norm_classify_lead_neon_(uint8x16_t v_u8x16, uint8x16x4_t lut_u8x16x4,
                                                                uint8x16_t flag_vec_u8x16) {
     uint8x16_t non_ascii_u8x16 = vcgeq_u8(v_u8x16, vdupq_n_u8(0x80));
     uint8x16_t continuation_u8x16 = vcltq_u8(vsubq_u8(v_u8x16, vdupq_n_u8(0x80)), vdupq_n_u8(0x40));
@@ -88,10 +88,10 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_neon_(sz_cptr_t text, sz_s
             continue;
         } // all 64 bytes ASCII: inert
         uint8x16_t flagged_u8x16 = vorrq_u8(
-            vorrq_u8(sz_utf8_norm_classify_neon_lead_(v0_u8x16, lut_u8x16x4, flag_vec_u8x16),
-                     sz_utf8_norm_classify_neon_lead_(v1_u8x16, lut_u8x16x4, flag_vec_u8x16)),
-            vorrq_u8(sz_utf8_norm_classify_neon_lead_(v2_u8x16, lut_u8x16x4, flag_vec_u8x16),
-                     sz_utf8_norm_classify_neon_lead_(v3_u8x16, lut_u8x16x4, flag_vec_u8x16)));
+            vorrq_u8(sz_utf8_norm_classify_lead_neon_(v0_u8x16, lut_u8x16x4, flag_vec_u8x16),
+                     sz_utf8_norm_classify_lead_neon_(v1_u8x16, lut_u8x16x4, flag_vec_u8x16)),
+            vorrq_u8(sz_utf8_norm_classify_lead_neon_(v2_u8x16, lut_u8x16x4, flag_vec_u8x16),
+                     sz_utf8_norm_classify_lead_neon_(v3_u8x16, lut_u8x16x4, flag_vec_u8x16)));
         if (vmaxvq_u8(flagged_u8x16) == 0) { // 64 bytes inert for the form
             ptr += 64, previous_canonical_combining_class = 0;
             while (ptr < end && (*ptr & 0xC0) == 0x80) ++ptr;

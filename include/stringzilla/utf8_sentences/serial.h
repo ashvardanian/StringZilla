@@ -117,12 +117,12 @@ STRINGZILLA_INLINE sz_u8_t sz_sentence_break_property_at_(sz_cptr_t text, sz_siz
  *  @brief Forward run-state carried across codepoints by the bulk segmenter so the SB3..SB11 rules
  *      resolve in O(1) per codepoint.
  *
- *  The scalar twin of the Ice Lake register carry, mirroring @c sz_grapheme_serial_state_t.
+ *  The scalar twin of the Ice Lake register carry, mirroring @c sz_grapheme_state_serial_t.
  *  The trailing `SATerm Close* Sp*` context and the Extend- and Format-transparent
  *  significant chain are tracked forward here, so the bulk driver decodes each codepoint once
  *  with no backward re-scan.
  */
-typedef struct sz_sentence_serial_state_t {
+typedef struct sz_sentence_state_serial_t {
 
     /** Raw SB property of the immediately previous codepoint (SB3 CR x LF, SB4). */
     sz_u8_t previous_property;
@@ -144,12 +144,12 @@ typedef struct sz_sentence_serial_state_t {
 
     /** A codepoint has been processed. */
     sz_bool_t has_previous;
-} sz_sentence_serial_state_t;
+} sz_sentence_state_serial_t;
 
 /** Advances @p state by the @p current codepoint property, updating the significant chain
  *  and the `SATerm Close* Sp*` terminator context; Extend and Format are transparent and
  *  leave both unchanged. */
-STRINGZILLA_CONSTEXPR void sz_sentence_serial_advance_(sz_sentence_serial_state_t *state, sz_u8_t current) {
+STRINGZILLA_CONSTEXPR void sz_sentence_advance_serial_(sz_sentence_state_serial_t *state, sz_u8_t current) {
     if (!sz_sentence_break_is_transparent_(current)) {
         state->before_significant = state->previous_significant;
         state->previous_significant = current;
@@ -184,7 +184,7 @@ typedef enum sz_sentence_decision_t {
 /** Boundary decision, SB3..SB998, between @p state's previous codepoint and the @p after
  *  codepoint, in O(1) with no forward re-scan: SB8's Lower-lookahead is deferred as @c pending
  *  and resolved forward by the driver. */
-STRINGZILLA_CONSTEXPR sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sentence_serial_state_t const *state,
+STRINGZILLA_CONSTEXPR sz_sentence_decision_t sz_sentence_boundary_serial_(sz_sentence_state_serial_t const *state,
                                                                           sz_u8_t after) {
     sz_u8_t const before = state->previous_property;
     if (before == sz_sentence_break_cr_k && after == sz_sentence_break_lf_k)
@@ -222,7 +222,7 @@ STRINGZILLA_CONSTEXPR sz_sentence_decision_t sz_sentence_serial_boundary_(sz_sen
 /** Appends the length of the sentence ending at @p boundary to the output and re-anchors the
  *  running start. Returns @c sz_false_k when the capacity is exhausted: the caller stops and
  *  reports the emitted prefix. */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_sentence_serial_emit_(sz_size_t boundary, sz_size_t *sentence_lengths,
+STRINGZILLA_CONSTEXPR sz_bool_t sz_sentence_emit_serial_(sz_size_t boundary, sz_size_t *sentence_lengths,
                                                          sz_size_t sentences_capacity, sz_size_t *sentences,
                                                          sz_size_t *sentence_start) {
     if (*sentences == sentences_capacity) return sz_false_k;
@@ -242,7 +242,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_( //
     sz_size_t sentences = 0;
     if (length == 0 || sentences_capacity == 0) return 0;
 
-    sz_sentence_serial_state_t state;
+    sz_sentence_state_serial_t state;
     state.previous_property = (sz_u8_t)sz_sentence_break_other_k;
     state.previous_significant = (sz_u8_t)sz_sentence_break_other_k;
     state.before_significant = (sz_u8_t)sz_sentence_break_other_k;
@@ -250,7 +250,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_( //
     state.terminator_saw_close = sz_false_k;
     state.terminator_saw_space = sz_false_k;
     state.has_previous = sz_false_k;
-    sz_sentence_serial_advance_(&state, sz_sentence_break_property_at_(text, length, 0)); // seed from codepoint 0
+    sz_sentence_advance_serial_(&state, sz_sentence_break_property_at_(text, length, 0)); // seed from codepoint 0
 
     sz_size_t sentence_start = 0;
     sz_size_t position = sz_sentence_break_next_start_(text, length, 0);
@@ -261,35 +261,35 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_serial_( //
         if (boundary_pending) {
             if (after == sz_sentence_break_lower_k) { boundary_pending = sz_false_k; } // SB8: Lower → suppress
             else if (sz_sentence_break_sb8_stops_(after)) { // stop → confirm the deferred break
-                if (!sz_sentence_serial_emit_(boundary_pending_position, sentence_lengths, sentences_capacity,
+                if (!sz_sentence_emit_serial_(boundary_pending_position, sentence_lengths, sentences_capacity,
                                               &sentences, &sentence_start))
                     return sentences;
                 boundary_pending = sz_false_k;
             }
             else { // a neutral codepoint extends the SB8 run: keep the deferred verdict, no boundary here
-                sz_sentence_serial_advance_(&state, after);
+                sz_sentence_advance_serial_(&state, after);
                 position = sz_sentence_break_next_start_(text, length, position);
                 continue;
             }
         }
-        sz_sentence_decision_t const decision = sz_sentence_serial_boundary_(&state, after);
+        sz_sentence_decision_t const decision = sz_sentence_boundary_serial_(&state, after);
         if (decision == sz_sentence_decision_break_k) {
-            if (!sz_sentence_serial_emit_(position, sentence_lengths, sentences_capacity, &sentences, &sentence_start))
+            if (!sz_sentence_emit_serial_(position, sentence_lengths, sentences_capacity, &sentences, &sentence_start))
                 return sentences;
         }
         else if (decision == sz_sentence_decision_pending_k) {
             boundary_pending = sz_true_k;
             boundary_pending_position = position;
         }
-        sz_sentence_serial_advance_(&state, after);
+        sz_sentence_advance_serial_(&state, after);
         position = sz_sentence_break_next_start_(text, length, position);
     }
 
     // End of text: no Lower can follow, so any deferred SB8 verdict settles as a break before the final sentence.
-    if (boundary_pending && !sz_sentence_serial_emit_(boundary_pending_position, sentence_lengths, sentences_capacity,
+    if (boundary_pending && !sz_sentence_emit_serial_(boundary_pending_position, sentence_lengths, sentences_capacity,
                                                       &sentences, &sentence_start))
         return sentences;
-    sz_sentence_serial_emit_(length, sentence_lengths, sentences_capacity, &sentences, &sentence_start);
+    sz_sentence_emit_serial_(length, sentence_lengths, sentences_capacity, &sentences, &sentence_start);
     return sentences;
 }
 

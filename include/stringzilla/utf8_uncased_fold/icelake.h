@@ -33,21 +33,21 @@ extern "C" {
 #endif
 
 /** Detects ASCII uppercase A-Z, returning a mask of the bytes in range 0x41-0x5A. */
-#define sz_icelake_is_ascii_upper_(src_u8x64) \
+#define sz_is_ascii_upper_icelake_(src_u8x64) \
     _mm512_cmplt_epu8_mask(_mm512_sub_epi8((src_u8x64), a_upper_u8x64), subtract26_u8x64)
 
 /** Apply ASCII case folding (+0x20) to masked positions. */
-#define sz_icelake_fold_ascii_(src_u8x64, upper_mask, apply_mask) \
+#define sz_fold_ascii_icelake_(src_u8x64, upper_mask, apply_mask) \
     _mm512_mask_add_epi8((src_u8x64), (upper_mask) & (apply_mask), (src_u8x64), ascii_case_offset_u8x64)
 
 /** Fold ASCII A-Z in source vector within a prefix mask, returning folded result. */
-#define sz_icelake_fold_ascii_in_prefix_(src_u8x64, prefix_mask)                                          \
-    _mm512_mask_add_epi8((src_u8x64), sz_icelake_is_ascii_upper_(src_u8x64) & (prefix_mask), (src_u8x64), \
+#define sz_fold_ascii_in_prefix_icelake_(src_u8x64, prefix_mask)                                          \
+    _mm512_mask_add_epi8((src_u8x64), sz_is_ascii_upper_icelake_(src_u8x64) & (prefix_mask), (src_u8x64), \
                          ascii_case_offset_u8x64)
 
 /** Georgian uppercase transformation: E1 82/83 XX → E2 B4 YY. Sets E2 at lead byte positions and
  *  B4 at second byte positions, and adjusts third bytes (−0x20 for 82 sequences, +0x20 for 83). */
-#define sz_icelake_transform_georgian_(folded, georgian_leads, is_82_upper, is_83_upper, prefix_mask)                \
+#define sz_transform_georgian_icelake_(folded, georgian_leads, is_82_upper, is_83_upper, prefix_mask)                \
     do {                                                                                                             \
         (folded) = _mm512_mask_blend_epi8((georgian_leads), (folded), _mm512_set1_epi8((char)0xE2));                 \
         (folded) = _mm512_mask_blend_epi8((georgian_leads) << 1, (folded), _mm512_set1_epi8((char)0xB4));            \
@@ -68,13 +68,13 @@ extern "C" {
  *  @param[in] chunk_size Number of bytes in the current chunk, returned when all of them are valid.
  *  @return Index of the first invalid byte, or @p chunk_size if all loaded bytes are valid.
  */
-STRINGZILLA_INLINE sz_size_t sz_icelake_first_invalid_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
+STRINGZILLA_INLINE sz_size_t sz_first_invalid_icelake_(sz_u64_t is_valid, sz_u64_t load_mask, sz_size_t chunk_size) {
     sz_u64_t invalid_mask = ~is_valid | ~load_mask;
     return invalid_mask ? (sz_size_t)_tzcnt_u64(invalid_mask) : chunk_size;
 }
 
 /** OR-reduces all 64 byte lanes of a ZMM register into one byte of accumulated flags. */
-STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x64) {
+STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_reduce_or_u8_icelake_(__m512i flags_u8x64) {
     __m256i upper_u8x32 = _mm512_extracti64x4_epi64(flags_u8x64, 1);
     __m256i or256_u8x32 = _mm256_or_si256(_mm512_castsi512_si256(flags_u8x64), upper_u8x32);
     __m128i or128_u8x16 = _mm_or_si128(_mm256_castsi256_si128(or256_u8x32), _mm256_extracti128_si256(or256_u8x32, 1));
@@ -91,7 +91,7 @@ STRINGZILLA_INLINE sz_u8_t sz_utf8_fold_icelake_reduce_or_u8_(__m512i flags_u8x6
  *
  *  @return Bytes consumed and written, or zero if the chunk starts with an incomplete sequence.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_caseless_chunk_icelake_( //
     __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,        //
     __mmask64 is_two_byte_lead_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
@@ -109,7 +109,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
     if (copy_length == 0) return 0;
 
     __mmask64 prefix_m64 = sz_u64_mask_until_(copy_length);
-    _mm512_mask_storeu_epi8(target, prefix_m64, sz_icelake_fold_ascii_in_prefix_(source_u8x64, prefix_m64));
+    _mm512_mask_storeu_epi8(target, prefix_m64, sz_fold_ascii_in_prefix_icelake_(source_u8x64, prefix_m64));
     return copy_length;
 }
 
@@ -126,7 +126,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_caseless_chunk_( //
  *
  *  @return Bytes consumed and written, or zero if the first character needs the serial path.
  */
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
+STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_latin_chunk_icelake_( //
     __m512i source_u8x64, __mmask64 load_m64, sz_size_t chunk_size,     //
     __mmask64 is_continuation_m64, __mmask64 is_three_byte_lead_m64, __mmask64 malformed_lead_m64, sz_ptr_t target) {
 
@@ -215,7 +215,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_latin_chunk_( //
     __mmask64 prefix_m64 = sz_u64_mask_until_(fold_length);
 
     // 1. ASCII A-Z
-    __m512i folded_u8x64 = sz_icelake_fold_ascii_in_prefix_(source_u8x64, prefix_m64);
+    __m512i folded_u8x64 = sz_fold_ascii_in_prefix_icelake_(source_u8x64, prefix_m64);
 
     // 2. Latin-1 Supplement: 'À'-'Þ' (C3 80-9E, excluding '×' at 0x97) get +0x20
     __mmask64 after_c3_m64 = (is_c3_m64 << 1) & prefix_m64;
@@ -348,7 +348,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
         // This is the most common case for English and many other Latin-script texts.
         // Avoids computing 6+ masks that would be wasted on pure ASCII chunks.
         if (is_non_ascii_m64 == 0) {
-            _mm512_mask_storeu_epi8(target, load_m64, sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, load_m64));
+            _mm512_mask_storeu_epi8(target, load_m64, sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, load_m64));
             target += chunk_size, source += chunk_size, source_length -= chunk_size;
             continue;
         }
@@ -440,11 +440,11 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
             0x04, 0x02, 0x02, (char)0x80, (char)0x80);
         __m512i lead_families_u8x64 = _mm512_maskz_permutexvar_epi8(is_lead_m64, source_vec.zmm,
                                                                     lead_families_lut_u8x64);
-        sz_u8_t lead_families = sz_utf8_fold_icelake_reduce_or_u8_(lead_families_u8x64);
+        sz_u8_t lead_families = sz_utf8_fold_reduce_or_u8_icelake_(lead_families_u8x64);
 
         if (!(lead_families & ~sz_utf8_fold_lead_caseless_flag_k)) {
             __mmask64 is_two_byte_lead_m64 = is_lead_m64 & ~is_three_byte_lead_m64 & ~is_four_byte_lead_m64;
-            sz_size_t handled = sz_utf8_uncased_fold_icelake_caseless_chunk_(
+            sz_size_t handled = sz_utf8_uncased_fold_caseless_chunk_icelake_(
                 source_vec.zmm, load_m64, chunk_size, is_two_byte_lead_m64, is_three_byte_lead_m64, malformed_lead_m64,
                 target);
             if (handled) {
@@ -455,7 +455,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
         else if ((lead_families & (sz_utf8_fold_lead_latin_extended_flag_k | sz_utf8_fold_lead_e1_flag_k)) &&
                  !(lead_families & ~(sz_utf8_fold_lead_latin_flag_k | sz_utf8_fold_lead_latin_extended_flag_k |
                                      sz_utf8_fold_lead_e1_flag_k))) {
-            sz_size_t handled = sz_utf8_uncased_fold_icelake_latin_chunk_(
+            sz_size_t handled = sz_utf8_uncased_fold_latin_chunk_icelake_(
                 source_vec.zmm, load_m64, chunk_size, is_cont_m64, is_three_byte_lead_m64, malformed_lead_m64, target);
             if (handled) {
                 target += handled, source += handled, source_length -= handled;
@@ -518,8 +518,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                      _mm512_cmplt_epu8_mask(_mm512_sub_epi8(source_vec.zmm, _mm512_set1_epi8((char)0xAD)),
                                             _mm512_set1_epi8(0x02))); // 0xAD-0xAE
                 if (!(is_e1_m64 | is_e2_folding_m64 | is_ea_folding_m64 | is_ef_m64)) {
-                    // Safe 3-byte content (E0, E3-E9, EB-EE) - no 3-byte case folding needed
-                    // But ASCII mixed in still needs folding! Use sz_icelake_fold_ascii_in_prefix_.
+                    // Safe 3-byte content (E0, E3-E9, EB-EE) - no 3-byte case folding needed.
+                    // But ASCII mixed in still needs folding! Use sz_fold_ascii_in_prefix_icelake_.
                     // Just need to avoid splitting a 3-byte sequence at the end.
                     sz_size_t copy_length = chunk_size;
                     // Check if last 1-2 bytes are an incomplete sequence
@@ -531,7 +531,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                     if (copy_length > 0) {
                         __mmask64 copy_m64 = sz_u64_mask_until_(copy_length);
                         _mm512_mask_storeu_epi8(target, copy_m64,
-                                                sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, copy_m64));
+                                                sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, copy_m64));
                         target += copy_length, source += copy_length, source_length -= copy_length;
                         continue;
                     }
@@ -548,7 +548,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
         if (lead_families & sz_utf8_fold_lead_latin_flag_k) {
             __mmask64 is_valid_latin1_mix_m64 =
                 (~is_non_ascii_m64 | is_latin1_lead_m64 | latin1_second_byte_positions_m64) & ~malformed_lead_m64;
-            latin1_length = sz_icelake_first_invalid_(is_valid_latin1_mix_m64, load_m64, chunk_size);
+            latin1_length = sz_first_invalid_icelake_(is_valid_latin1_mix_m64, load_m64, chunk_size);
             latin1_length -= latin1_length && ((is_latin1_lead_m64 >> (latin1_length - 1)) & 1); // Don't split seq
         }
 
@@ -558,13 +558,13 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
 
             // ASCII A-Z (0x41-0x5A) and Latin-1 À-Þ (second byte 0x80-0x9E, excluding × at 0x97)
             // both get +0x20 added.
-            __mmask64 is_upper_ascii_m64 = sz_icelake_is_ascii_upper_(source_vec.zmm);
+            __mmask64 is_upper_ascii_m64 = sz_is_ascii_upper_icelake_(source_vec.zmm);
             __mmask64 is_latin1_upper_m64 = _mm512_mask_cmplt_epu8_mask(
                 latin1_second_bytes_m64, _mm512_sub_epi8(source_vec.zmm, utf8_cont_pattern_u8x64),
                 _mm512_set1_epi8(0x1F));
             is_latin1_upper_m64 ^= _mm512_mask_cmpeq_epi8_mask(is_latin1_upper_m64, source_vec.zmm,
                                                                _mm512_set1_epi8((char)0x97)); // Exclude ×
-            __m512i folded_u8x64 = sz_icelake_fold_ascii_(source_vec.zmm, is_upper_ascii_m64 | is_latin1_upper_m64,
+            __m512i folded_u8x64 = sz_fold_ascii_icelake_(source_vec.zmm, is_upper_ascii_m64 | is_latin1_upper_m64,
                                                           prefix_m64);
 
             // 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73): replace both bytes with 's'
@@ -622,7 +622,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
             __mmask64 is_valid_cyrillic_mix_m64 = ~is_non_ascii_m64 | is_cyrillic_lead_m64 |
                                                   cyrillic_second_byte_positions_m64;
             is_valid_cyrillic_mix_m64 &= ~is_d1_extended_m64 & ~malformed_lead_m64; // Stop at Cyrillic Extended
-            sz_size_t cyrillic_length = sz_icelake_first_invalid_(is_valid_cyrillic_mix_m64, load_m64, chunk_size);
+            sz_size_t cyrillic_length = sz_first_invalid_icelake_(is_valid_cyrillic_mix_m64, load_m64, chunk_size);
             cyrillic_length -= cyrillic_length && ((is_cyrillic_lead_m64 >> (cyrillic_length - 1)) & 1);
 
             if (cyrillic_length >= 2) {
@@ -630,7 +630,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                 __mmask64 is_after_d0_m64 = (is_d0_m64 << 1) & prefix_m64;
 
                 // Start with source, apply ASCII folding
-                __m512i folded_u8x64 = sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_m64);
+                __m512i folded_u8x64 = sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, prefix_m64);
 
                 // D0 second bytes: apply Cyrillic uppercase folding
                 // Range 0x80-0x8F (Ѐ-Џ): second byte += 0x10, lead becomes D1
@@ -704,7 +704,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
             // Check for pure basic Greek + ASCII mix (no problematic ranges)
             __mmask64 is_valid_greek_mix_m64 = ~is_non_ascii_m64 | is_greek_lead_m64 | greek_second_byte_positions_m64;
             is_valid_greek_mix_m64 &= ~(is_ce_problematic_m64 | is_cf_problematic_m64) & ~malformed_lead_m64;
-            sz_size_t greek_length = sz_icelake_first_invalid_(is_valid_greek_mix_m64, load_m64, chunk_size);
+            sz_size_t greek_length = sz_first_invalid_icelake_(is_valid_greek_mix_m64, load_m64, chunk_size);
             greek_length -= greek_length && ((is_greek_lead_m64 >> (greek_length - 1)) & 1);
 
             if (greek_length >= 2) {
@@ -713,7 +713,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                 __mmask64 is_after_cf_m64 = (is_cf_m64 << 1) & prefix_m64;
 
                 // Start with source, apply ASCII folding
-                __m512i folded_u8x64 = sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_m64);
+                __m512i folded_u8x64 = sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, prefix_m64);
 
                 // CE second bytes: Range 91-9F gets +0x20, Range A0-A1 and A3-AB gets -0x20 (lead changes)
                 // Note: A2 is unassigned (U+03A2) and must be excluded!
@@ -767,14 +767,14 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
             __mmask64 is_caseless_second_m64 = is_caseless_2byte_m64 << 1;
             __mmask64 is_valid_caseless_m64 = (~is_non_ascii_m64 | is_caseless_2byte_m64 | is_caseless_second_m64) &
                                               ~malformed_lead_m64;
-            sz_size_t caseless_length = sz_icelake_first_invalid_(is_valid_caseless_m64, load_m64, chunk_size);
+            sz_size_t caseless_length = sz_first_invalid_icelake_(is_valid_caseless_m64, load_m64, chunk_size);
             caseless_length -= caseless_length && ((is_caseless_2byte_m64 >> (caseless_length - 1)) & 1);
 
             if (caseless_length >= 2) {
                 __mmask64 prefix_m64 = sz_u64_mask_until_(caseless_length);
                 // Fold only ASCII A-Z, copy 2-byte unchanged
                 _mm512_mask_storeu_epi8(target, prefix_m64,
-                                        sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_m64));
+                                        sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, prefix_m64));
                 target += caseless_length, source += caseless_length, source_length -= caseless_length;
                 continue;
             }
@@ -803,7 +803,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
         // lead truncates the run, so the strict serial fallback copies it one byte at a time.
         __mmask64 is_valid_two_byte_mix_m64 =
             (~is_non_ascii_m64 | is_two_byte_lead_m64 | two_byte_second_positions_m64) & ~malformed_lead_m64;
-        sz_size_t two_byte_length = sz_icelake_first_invalid_(is_valid_two_byte_mix_m64, load_m64, chunk_size);
+        sz_size_t two_byte_length = sz_first_invalid_icelake_(is_valid_two_byte_mix_m64, load_m64, chunk_size);
         two_byte_length -= two_byte_length && ((is_two_byte_lead_m64 >> (two_byte_length - 1)) & 1);
 
         if (two_byte_length >= 2) {
@@ -1050,7 +1050,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                 // Accept: ASCII, safe 3-byte leads (E0, E3-E9, EB-EE), continuations - but not malformed leads
                 __mmask64 is_valid_m64 = (~is_non_ascii_m64 | is_three_byte_lead_m64 | is_cont_m64) &
                                          ~malformed_lead_m64;
-                sz_size_t valid_length = sz_icelake_first_invalid_(is_valid_m64, load_m64, chunk_size);
+                sz_size_t valid_length = sz_first_invalid_icelake_(is_valid_m64, load_m64, chunk_size);
 
                 // Don't split a 3-byte sequence at chunk boundary.
                 // Note: `>= 1` is an optimization, not redundant! When valid_length == 0, the mask
@@ -1066,7 +1066,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                     __mmask64 mask_m64 = sz_u64_mask_until_(valid_length);
                     // Fold ASCII A-Z, copy everything else unchanged
                     _mm512_mask_storeu_epi8(target, mask_m64,
-                                            sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, mask_m64));
+                                            sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, mask_m64));
                     target += valid_length, source += valid_length, source_length -= valid_length;
                     continue;
                 }
@@ -1149,7 +1149,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                     is_valid_georgian_mix_m64 &= ~(is_foldable_2byte_m64 | is_four_byte_lead_m64 | is_ef_lead_m64 |
                                                    is_unsafe_e2_m64) &
                                                  ~malformed_lead_m64;
-                    sz_size_t georgian_length = sz_icelake_first_invalid_(is_valid_georgian_mix_m64, load_m64,
+                    sz_size_t georgian_length = sz_first_invalid_icelake_(is_valid_georgian_mix_m64, load_m64,
                                                                           chunk_size);
 
                     // Don't split multi-byte sequences (2-byte C2, 3-byte E1/E2/EA).
@@ -1198,7 +1198,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
 
                         // Also fold ASCII A-Z
                         folded_u8x64 = _mm512_mask_add_epi8(folded_u8x64,
-                                                            sz_icelake_is_ascii_upper_(source_vec.zmm) & prefix_m64,
+                                                            sz_is_ascii_upper_icelake_(source_vec.zmm) & prefix_m64,
                                                             folded_u8x64, ascii_case_offset_u8x64);
 
                         // Fold Micro Sign: 'µ' (U+00B5, C2 B5) → 'μ' (U+03BC, CE BC)
@@ -1266,7 +1266,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                     // Accept ASCII + Latin Ext Add E1 + continuations
                     __mmask64 is_valid_latin_ext_m64 = ~is_non_ascii_m64 | is_latin_ext_e1_m64 | is_cont_m64;
                     is_valid_latin_ext_m64 &= ~(is_four_byte_lead_m64 | is_ef_lead_m64) & ~malformed_lead_m64;
-                    sz_size_t latin_ext_length = sz_icelake_first_invalid_(is_valid_latin_ext_m64, load_m64,
+                    sz_size_t latin_ext_length = sz_first_invalid_icelake_(is_valid_latin_ext_m64, load_m64,
                                                                            chunk_size);
 
                     // Don't split 3-byte sequences
@@ -1296,7 +1296,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
 
                         // Also fold ASCII A-Z
                         folded_u8x64 = _mm512_mask_add_epi8(folded_u8x64,
-                                                            sz_icelake_is_ascii_upper_(source_vec.zmm) & prefix_m64,
+                                                            sz_is_ascii_upper_icelake_(source_vec.zmm) & prefix_m64,
                                                             folded_u8x64, ascii_case_offset_u8x64);
 
                         _mm512_mask_storeu_epi8(target, prefix_m64, folded_u8x64);
@@ -1322,7 +1322,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                                                     ~is_ea_lead_complex_m64 & ~is_ef_lead_m64;
             __mmask64 is_valid_mixed_m64 = ~is_non_ascii_m64 | is_safe_three_byte_lead_m64 | is_cont_m64;
             is_valid_mixed_m64 &= ~is_four_byte_lead_m64 & ~malformed_lead_m64;
-            sz_size_t three_byte_length = sz_icelake_first_invalid_(is_valid_mixed_m64, load_m64, chunk_size);
+            sz_size_t three_byte_length = sz_first_invalid_icelake_(is_valid_mixed_m64, load_m64, chunk_size);
 
             // Don't split a 3-byte sequence: find first incomplete lead and truncate there.
             // Note: `>= 1` is an optimization - skips mask ops when nothing valid.
@@ -1350,7 +1350,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                 if (!problematic_leads_m64) {
                     // No E1 or EF leads in prefix - fold ASCII A-Z, copy 3-byte chars unchanged
                     _mm512_mask_storeu_epi8(target, prefix_3_m64,
-                                            sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_3_m64));
+                                            sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, prefix_3_m64));
                     target += three_byte_length, source += three_byte_length, source_length -= three_byte_length;
                     continue;
                 }
@@ -1423,7 +1423,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                         __mmask64 fold_third_m64 = third_positions_m64 & is_even_third_m64 & prefix_3_m64;
 
                         // Also fold ASCII A-Z (special handling: Latin Ext gets +1, ASCII gets +0x20)
-                        __mmask64 is_upper_ascii_m64 = sz_icelake_is_ascii_upper_(source_vec.zmm);
+                        __mmask64 is_upper_ascii_m64 = sz_is_ascii_upper_icelake_(source_vec.zmm);
                         // First apply +1 to both Latin Ext (fold_third_m64) and ASCII positions
                         __m512i folded_u8x64 = _mm512_mask_add_epi8(
                             source_vec.zmm, (fold_third_m64 | is_upper_ascii_m64) & prefix_3_m64, source_vec.zmm,
@@ -1491,7 +1491,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
 
                             // Also fold any ASCII A-Z that might be mixed in
                             folded_u8x64 = _mm512_mask_add_epi8(
-                                folded_u8x64, sz_icelake_is_ascii_upper_(source_vec.zmm) & prefix_3_m64, folded_u8x64,
+                                folded_u8x64, sz_is_ascii_upper_icelake_(source_vec.zmm) & prefix_3_m64, folded_u8x64,
                                 ascii_case_offset_u8x64);
 
                             _mm512_mask_storeu_epi8(target, prefix_3_m64, folded_u8x64);
@@ -1524,7 +1524,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                         // Has Fullwidth A-Z - apply +0x20 to third byte for those positions
                         // Also fold any ASCII A-Z in the mixed content
                         __mmask64 third_byte_positions_m64 = is_fullwidth_az_m64 << 2;
-                        __mmask64 fold_m64 = (third_byte_positions_m64 | sz_icelake_is_ascii_upper_(source_vec.zmm)) &
+                        __mmask64 fold_m64 = (third_byte_positions_m64 | sz_is_ascii_upper_icelake_(source_vec.zmm)) &
                                              prefix_3_m64;
                         __m512i folded_u8x64 = _mm512_mask_add_epi8(source_vec.zmm, fold_m64, source_vec.zmm,
                                                                     ascii_case_offset_u8x64);
@@ -1538,7 +1538,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
                 // But do not copy if we detected unsafe E2s that weren't handled!
                 if (!is_unsafe_e2_m64) {
                     _mm512_mask_storeu_epi8(target, prefix_3_m64,
-                                            sz_icelake_fold_ascii_in_prefix_(source_vec.zmm, prefix_3_m64));
+                                            sz_fold_ascii_in_prefix_icelake_(source_vec.zmm, prefix_3_m64));
                     target += three_byte_length, source += three_byte_length, source_length -= three_byte_length;
                     continue;
                 }
@@ -1548,7 +1548,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_icelake_(sz_cptr_t source, sz_
         // 4. Handle 4-byte sequences (emoji, rare scripts): detect lead bytes (11110xxx = F0-F7)
         {
             __mmask64 is_valid_four_byte_only_m64 = (is_four_byte_lead_m64 | is_cont_m64) & ~malformed_lead_m64;
-            sz_size_t four_byte_length = sz_icelake_first_invalid_(is_valid_four_byte_only_m64, load_m64, chunk_size);
+            sz_size_t four_byte_length = sz_first_invalid_icelake_(is_valid_four_byte_only_m64, load_m64, chunk_size);
 
             // Don't split a 4-byte sequence: find first incomplete lead and truncate there.
             // Note: `>= 1` is an optimization - skips mask ops when nothing valid.
@@ -1612,10 +1612,10 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_icelake(sz_cptr_t source, sz_si
 }
 
 /*  Undefine local helper macros to avoid namespace pollution */
-#undef sz_icelake_is_ascii_upper_
-#undef sz_icelake_fold_ascii_
-#undef sz_icelake_fold_ascii_in_prefix_
-#undef sz_icelake_transform_georgian_
+#undef sz_is_ascii_upper_icelake_
+#undef sz_fold_ascii_icelake_
+#undef sz_fold_ascii_in_prefix_icelake_
+#undef sz_transform_georgian_icelake_
 
 #if defined(__clang__)
 #pragma clang attribute pop

@@ -43,7 +43,7 @@ extern "C" {
  *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-STRINGZILLA_INLINE void sz_sequence_argsort_sve_3way_partition_(
+STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_sve_(
     sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order, sz_pgram_t *const partitioned_pgrams,
     sz_sorted_idx_t *const partitioned_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {
@@ -132,7 +132,7 @@ STRINGZILLA_INLINE void sz_sequence_argsort_sve_3way_partition_(
 
 /**
  *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_sve
- *      and @c sz_pgrams_sort_sve_, and using the @c sz_sequence_argsort_sve_3way_partition_
+ *      and @c sz_pgrams_sort_sve_, and using the @c sz_sequence_argsort_3way_partition_sve_
  *      under the hood.
  *  @sa Identical to @b Skylake implementation, but uses variable length SVE registers.
  *
@@ -145,7 +145,7 @@ STRINGZILLA_INLINE void sz_sequence_argsort_sve_3way_partition_(
  *  @param[in] start_in_sequence First index (inclusive) of the range to sort.
  *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
  */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_quicksort_pgrams_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_quicksort_pgrams_sve_(
     sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order, sz_pgram_t *temporary_pgrams,
     sz_sorted_idx_t *temporary_order, sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,
     sz_size_t const top_count) {
@@ -158,14 +158,14 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_quicksort_pgrams_(
     }
 
     sz_size_t first_pivot_index, last_pivot_index;
-    sz_sequence_argsort_sve_3way_partition_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_3way_partition_sve_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                             start_in_sequence, end_in_sequence, &first_pivot_index, &last_pivot_index);
 
     if (start_in_sequence + 1 < first_pivot_index)
-        sz_sequence_argsort_sve_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+        sz_sequence_argsort_quicksort_pgrams_sve_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                                   start_in_sequence, first_pivot_index, top_count);
     if (last_pivot_index + 2 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_sve_quicksort_pgrams_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
+        sz_sequence_argsort_quicksort_pgrams_sve_(initial_pgrams, initial_order, temporary_pgrams, temporary_order,
                                                   last_pivot_index + 1, end_in_sequence, top_count);
 }
 
@@ -187,7 +187,7 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_sve_quicksort_pgrams_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
+    sz_sequence_argsort_quicksort_pgrams_sve_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     allocator->free(temporary_pgrams, memory_usage, allocator->handle);
     return sz_success_k;
@@ -196,8 +196,8 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  Combines @c sz_sequence_argsort_serial_export_byte_window_ with
- *  @c sz_sequence_argsort_sve_quicksort_pgrams_, then recurses into every group of equal pgrams.
+ *  Combines @c sz_sequence_argsort_export_byte_window_serial_ with
+ *  @c sz_sequence_argsort_quicksort_pgrams_sve_, then recurses into every group of equal pgrams.
  *
  *  Identical to the @b Skylake implementation, but uses variable length SVE registers.
  *
@@ -212,18 +212,18 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_sort_byte_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_byte_windows_sve_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
     // Export the next pgrams from the sequence.
-    sz_sequence_argsort_serial_export_byte_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_byte_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                    end_in_sequence, start_character, reverse);
 
     // Sort the current pgrams with the SVE quicksort.
-    sz_sequence_argsort_sve_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_quicksort_pgrams_sve_(global_pgrams, global_order, temporary_pgrams, temporary_order,
                                               start_in_sequence, end_in_sequence, top_count);
 
     // For each group of equal pgrams, if there are multiple strings and more characters,
@@ -250,7 +250,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_sort_byte_windows_(
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_sve_sort_byte_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+            sz_sequence_argsort_sort_byte_windows_sve_(sequence, global_pgrams, global_order, temporary_pgrams,
                                                        temporary_order, nested_start, nested_end,
                                                        start_character + pgram_capacity, top_count, reverse);
         else if (has_multiple_strings)
@@ -260,18 +260,18 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_sort_byte_windows_(
     }
 }
 
-/** Uncased twin of @c sz_sequence_argsort_sve_sort_byte_windows_: the folded code-point export
+/** Uncased twin of @c sz_sequence_argsort_sort_byte_windows_sve_: the folded code-point export
  *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
  *  the SVE partition - which is where SVE beats the fully-serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_sort_casefold_windows_(
+STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_sve_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
-    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
+    sz_sequence_argsort_export_casefold_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
                                                        end_in_sequence, folded_skip_count, reverse);
-    sz_sequence_argsort_sve_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
+    sz_sequence_argsort_quicksort_pgrams_sve_(global_pgrams, global_order, temporary_pgrams, temporary_order,
                                               start_in_sequence, end_in_sequence, top_count);
 
     // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
@@ -290,7 +290,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sve_sort_casefold_windows_(
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_sve_sort_casefold_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
+            sz_sequence_argsort_sort_casefold_windows_sve_(sequence, global_pgrams, global_order, temporary_pgrams,
                                                            temporary_order, nested_start, nested_end,
                                                            folded_skip_count + fields_per_pgram, top_count, reverse);
         else if (has_multiple_strings)
@@ -330,7 +330,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
     if (!global_pgrams) return sz_bad_alloc_k;
 
-    sz_sequence_argsort_sve_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
+    sz_sequence_argsort_sort_byte_windows_sve_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                count, 0, top_count, reverse);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle);
@@ -364,7 +364,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(               //
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
 
-    sz_sequence_argsort_sve_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
+    sz_sequence_argsort_sort_casefold_windows_sve_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
                                                    count, 0, top_count, reverse);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle);

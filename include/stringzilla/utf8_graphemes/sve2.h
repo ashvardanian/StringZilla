@@ -36,19 +36,18 @@ STRINGZILLA_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane
     svuint8_t const n4_u8x = svand_n_u8_x(all_b8x, plane_u8x, 0x0F);
     svuint8_t const n3_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, high_u8x, 4), 0x0F);
     svuint8_t const stage1_index_u8x = svorr_u8_x(all_b8x, svlsl_n_u8_x(all_b8x, n4_u8x, 4), n3_u8x);
-    svuint8_t const page_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_grapheme_break_haswell_astral_stage1_, 256,
-                                                      stage1_index_u8x);
+    svuint8_t const page_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_grapheme_break_astral_stage1_, 256, stage1_index_u8x);
     svuint8_t const n2_u8x = svand_n_u8_x(all_b8x, high_u8x, 0x0F);
-    svuint8_t const leaf2_u8x = sz_utf8_rune_cascade_sve2_(
-        sz_utf8_grapheme_break_haswell_astral_stage2_lo_,
-        (int)sz_utf8_grapheme_break_haswell_astral_stage2_lo_count_k / 16, page_u8x, n2_u8x);
+    svuint8_t const leaf2_u8x = sz_utf8_rune_cascade_sve2_(sz_utf8_grapheme_break_astral_stage2_low_,
+                                                           (int)sz_utf8_grapheme_break_astral_stage2_low_count_k / 16,
+                                                           page_u8x, n2_u8x);
     svuint8_t const n1_u8x = svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, low_u8x, 4), 0x0F);
-    svuint8_t const leaf_lo_u8x = sz_utf8_rune_cascade_sve2_(
-        sz_utf8_grapheme_break_haswell_astral_stage3_lo_,
-        (int)sz_utf8_grapheme_break_haswell_astral_stage3_lo_count_k / 16, leaf2_u8x, n1_u8x);
+    svuint8_t const leaf_lo_u8x = sz_utf8_rune_cascade_sve2_(sz_utf8_grapheme_break_astral_stage3_low_,
+                                                             (int)sz_utf8_grapheme_break_astral_stage3_low_count_k / 16,
+                                                             leaf2_u8x, n1_u8x);
     svuint8_t const leaf_hi_u8x = sz_utf8_rune_cascade_sve2_(
-        sz_utf8_grapheme_break_haswell_astral_stage3_hi_,
-        (int)sz_utf8_grapheme_break_haswell_astral_stage3_hi_count_k / 16, leaf2_u8x, n1_u8x);
+        sz_utf8_grapheme_break_astral_stage3_high_, (int)sz_utf8_grapheme_break_astral_stage3_high_count_k / 16,
+        leaf2_u8x, n1_u8x);
     svuint8_t const n0_u8x = svand_n_u8_x(all_b8x, low_u8x, 0x0F);
     svuint8_t const leaf_group_u8x = svorr_u8_x(all_b8x,
                                                 svand_n_u8_x(all_b8x, svlsr_n_u8_x(all_b8x, leaf_lo_u8x, 4), 0x0F),
@@ -56,9 +55,9 @@ STRINGZILLA_INLINE svuint8_t sz_grapheme_astral_descriptor_sve2_(svuint8_t plane
     svuint8_t const stage4_index_u8x = svorr_u8_x(
         all_b8x, svlsl_n_u8_x(all_b8x, svand_n_u8_x(all_b8x, leaf_lo_u8x, 0x0F), 4), n0_u8x);
     svuint8_t result_u8x = svdup_n_u8(0);
-    for (int group = 0; group < (int)sz_utf8_grapheme_break_haswell_astral_leaf_groups_k; ++group) {
-        svuint8_t const value_u8x = sz_utf8_rune_lut_sve2_(
-            sz_utf8_grapheme_break_haswell_astral_stage4_groups_ + group * 256, 256, stage4_index_u8x);
+    for (int group = 0; group < (int)sz_utf8_grapheme_break_astral_leaf_groups_k; ++group) {
+        svuint8_t const value_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_grapheme_break_astral_stage4_groups_ + group * 256,
+                                                           256, stage4_index_u8x);
         result_u8x = svsel_u8(svcmpeq_n_u8(all_b8x, leaf_group_u8x, (sz_u8_t)group), value_u8x, result_u8x);
     }
     return result_u8x;
@@ -217,7 +216,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_sve2_( //
 
                 // ASCII fast path: one 256-LUT on the raw byte; the cold full-BMP cascade only runs when the
                 // chunk holds a non-ASCII, non-CJK-other lane (a pure-ASCII or pure-CJK chunk skips it).
-                svuint8_t const ascii_desc_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_grapheme_break_haswell_ascii_desc_, 256,
+                svuint8_t const ascii_desc_u8x = sz_utf8_rune_lut_sve2_(sz_utf8_grapheme_break_ascii_desc_lut_, 256,
                                                                         bytes_u8x);
                 svuint8_t desc_u8x = ascii_desc_u8x;
                 svbool_t const non_ascii_b8x = svbic_b_z(loaded_b8x, loaded_b8x, ascii_b8x);
