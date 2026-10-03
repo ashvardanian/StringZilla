@@ -1820,12 +1820,12 @@ inline void free_through_(void *ptr, sz_size_t n, void *allocator_state, void *)
 }
 
 /**
- *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_memory_allocator_t.
+ *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_allocator_t.
  *  @return The status the callback reports.
  */
 template <typename allocator_type_, typename allocator_callback_>
 inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
-    sz_memory_allocator_t c_allocator;
+    sz_allocator_t c_allocator;
     c_allocator.allocate = &allocate_through_<allocator_type_>;
     c_allocator.free = &free_through_<allocator_type_>;
     c_allocator.handle = &allocator;
@@ -3113,7 +3113,7 @@ template <typename allocator_type_ = std::allocator<char>>
 class basic_string {
 
     using char_type = char;
-    using sz_alloc_type = sz_memory_allocator_t;
+    using sz_alloc_type = sz_allocator_t;
     using allocator_traits_t = std::allocator_traits<allocator_type_>;
 
     sz_string_t string_;
@@ -5239,7 +5239,7 @@ status_t argsort(container_type_ const &container, string_extractor_ const &extr
     sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
-    using sz_alloc_type = sz_memory_allocator_t;
+    using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
         return sz_sequence_argsort_best(&sequence, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
@@ -5266,7 +5266,7 @@ status_t argsort_utf8_uncased(container_type_ const &container, string_extractor
     sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
     sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
 
-    using sz_alloc_type = sz_memory_allocator_t;
+    using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
         return sz_sequence_argsort_uncased_best(&sequence, static_cast<sz_size_t>(top_count),
@@ -5322,7 +5322,7 @@ expected<std::size_t> intersect(                                                
     second_sequence.get_length = call_sequence_member_length_<second_container_, second_extractor_>;
 
     std::size_t intersection_count = 0;
-    using sz_alloc_type = sz_memory_allocator_t;
+    using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     status_t status = with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
         static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");

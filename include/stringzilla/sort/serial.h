@@ -587,8 +587,8 @@ STRINGZILLA_CONSTEXPR void sz_sequence_argsort_sort_byte_windows_serial_( //
  *  @param[out] order Output permutation that sorts the elements.
  *  @return @c sz_success_k on success, or @c sz_bad_alloc_k if memory allocation failed.
  */
-STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_size_t count,
-                                                      sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_serial_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
+                                                      sz_sorted_idx_t *order) {
     sz_unused_(allocator);
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
@@ -810,7 +810,7 @@ STRINGZILLA_CONSTEXPR void sz_pgrams_union_serial_(                             
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                       sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                       sz_bool_t reverse, sz_allocator_t *allocator,
                                                        sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
@@ -829,9 +829,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
     }
 
     // Default the allocator, as higher-level libraries may find wrapping custom ones troublesome.
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -860,7 +860,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(            //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     sz_size_t const count = sequence->count;
@@ -868,9 +868,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(            //
         order[sequence_index] = sequence_index;
     if (count < 2) return sz_success_k;
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 

@@ -26,7 +26,6 @@ import pytest
 from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
-    run_across_backends,
     vector_width_bracketing_strings,
 )
 
@@ -121,10 +120,10 @@ SPLIT_MODE_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", SPLIT_MODE_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_split_modes_backend_differential(text):
+def test_utf8_split_modes_backend_differential(backend_results, text):
     """utf8_split_whitespaces must split identically across every SIMD backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps without raising."""
-    results = run_across_backends(
+    results = backend_results(
         lambda capabilities: [bytes(segment) for segment in sz.utf8_split_whitespaces(text, capabilities=capabilities)]
     )
     assert_backends_agree(results, format_inputs=lambda: f"text={text!r}")

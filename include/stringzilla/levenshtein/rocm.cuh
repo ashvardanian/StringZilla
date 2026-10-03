@@ -283,11 +283,11 @@ static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *eng
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_engine_t *engine,
                                                                 sz_sequence_t const *queries,
                                                                 sz_levenshtein_symbol_t symbol,
-                                                                sz_memory_allocator_t *allocator, void *stream) {
-    sz_memory_allocator_t unified;
+                                                                sz_allocator_t *allocator, void *stream) {
+    sz_allocator_t unified;
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
-    else sz_memory_allocator_init_unified_rocm_(&unified);
+    else sz_allocator_init_unified_rocm_(&unified);
     if (queries->count == 0) return sz_unexpected_dimensions_k;
 
     // Every query seeds its score from its own last word, so an empty one has no word to read it off, and the
@@ -327,7 +327,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_e
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_rocm_(sz_levenshtein_engine_t *engine,
                                                                        sz_sequence_t const *queries,
                                                                        sz_levenshtein_symbol_t symbol,
-                                                                       sz_memory_allocator_t *allocator, void *stream) {
+                                                                       sz_allocator_t *allocator, void *stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -527,8 +527,8 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_scoped_rocm_(sz_cpt
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
-                                                            sz_levenshtein_symbol_t symbol,
-                                                            sz_memory_allocator_t *allocator, void *stream) {
+                                                            sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                            void *stream) {
     return sz_levenshtein_engine_init_scoped_rocm_(engine, queries, symbol, allocator, stream);
 }
 

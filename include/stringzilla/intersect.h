@@ -72,10 +72,10 @@ extern "C" {
  *  @sa sz_sequence_intersect_serial, sz_sequence_intersect_westmere, sz_sequence_intersect_icelake,
  *      sz_sequence_intersect_neonaes
  */
-STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                             //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,            //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                        //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,       //
     sz_capability_t capabilities, void *stream);
 
 /**
@@ -238,17 +238,17 @@ typedef enum {
 } sz_sequence_join_semantics_t;
 
 /** @copydoc sz_sequence_intersect_best */
-STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                           //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                      //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_sequence_intersect_best */
-STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                         //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                    //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #endif
@@ -256,9 +256,9 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                     
 #if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_sequence_intersect_best */
-STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                          //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                     //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #endif
@@ -266,9 +266,9 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
 #if STRINGZILLA_TARGET_NEONAES
 
 /** @copydoc sz_sequence_intersect_best */
-STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                          //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                     //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
 
 #endif
@@ -294,10 +294,10 @@ STRINGZILLA_API sz_status_t sz_intersect_find_kernel(sz_kernel_kind_t kind, sz_c
 
 #if STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                             //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,            //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                        //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,       //
     sz_capability_t capabilities, void *stream) {
     sz_unused_(first_sequence), sz_unused_(second_sequence), sz_unused_(allocator), sz_unused_(seed),
         sz_unused_(intersection_count), sz_unused_(first_positions), sz_unused_(second_positions),

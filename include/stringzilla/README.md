@@ -11,7 +11,7 @@ The plain C ABI exposes each kernel family as a stable C 99 surface: substring a
 The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on top of those kernels, adding an owning Small-String-Optimized container, allocation-free splitting and partitioning views, and free functions for hashing, sorting, and translation.
 
 Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_cpu_capabilities_enabled` reports.
-There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_memory_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
+There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
 An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and a stream, which names the device, so choosing a device is choosing the mask and the stream an engine is built with rather than setting a global.
 Its rounds, such as `sz_levenshtein_distances`, take a trailing stream: null on the CPU, while on a GPU they enqueue there and return, leaving the join to the caller.
 A GPU engine's init uses its stream for its own work alone and sizes a round's device memory from the budgets it takes, so no compute verb allocates or joins, and a round carrying more haystacks than its budget, or on Metal more candidates, is refused with `sz_unexpected_dimensions_k`.
@@ -56,7 +56,7 @@ Each init takes the mask, the allocator and a stream last, and each round is a s
 ```c
 sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                       sz_memory_allocator_t *allocator, void *stream);
+                                       sz_allocator_t *allocator, void *stream);
 sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
                                      sz_size_t *distances, sz_size_t distances_stride, void *stream);
 void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream);
@@ -164,16 +164,16 @@ NVCC with CUDA 12 builds the device backends of the engine families, reached by 
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_rocm_capabilities_enabled`.
 With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
-A device round reads memory the device reaches, so `memory.h` declares what builds it, each a `_best` dispatch point over a mask with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
+A device round reads memory the device reaches. `memory.h` declares allocation and sequence reallocation; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 
-- `sz_memory_allocator_init_unified_best` fills a stateless `sz_memory_allocator_t` whose blocks the host and the device share: the heap on the CPU, managed memory on CUDA and ROCm, shared buffers on Metal, each made on the device of the stream it is called with.
-- `sz_sequence_copy_best` copies any host sequence into one tape, `count + 1` offsets and then the bytes, read through the accessors of the mask's group, and only re-points a tape that already is one.
+- `sz_allocator_init_unified_best` fills a stateless `sz_allocator_t` whose blocks the host and the device share: the heap on the CPU, managed memory on CUDA and ROCm, shared buffers on Metal, each made on the device of the stream it is called with.
+- `sz_sequence_realloc_best` packs a host sequence into a tape of `count + 1` offsets followed by the bytes, or borrows an existing tape the selected device can use. It never frees the source or a previous target allocation; `allocated_bytes` is zero for borrowed storage.
 - `sz_stream_synchronize_best` waits for one stream, after which what a round wrote is readable from the host.
 
 ```c
 sz_cuda_capabilities_enabled(0, &caps);
-sz_memory_allocator_init_unified_best(&unified, caps);
-sz_sequence_copy_best(&candidates, &host_candidates, &unified, &candidates_bytes, caps, stream);
+sz_allocator_init_unified_best(&unified, caps);
+sz_sequence_realloc_best(&candidates, &host_candidates, &unified, &candidates_bytes, caps, stream);
 sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
 sz_levenshtein_distances(&engine, &candidates, distances, candidates.count, stream);
 sz_stream_synchronize_best(caps, stream);
@@ -211,14 +211,14 @@ int has = sz_byteset_contains(&set, '\n');
 sz_byteset_invert(&set);               // complement the set
 ```
 
-`sz_memory_allocator_t` is the explicit allocator, a `{ allocate, free, handle }` triple, handed to any function that may allocate:
+`sz_allocator_t` is the explicit allocator, a `{ allocate, free, handle }` triple, handed to any function that may allocate:
 
 ```c
-sz_memory_allocator_t allocator;
-sz_memory_allocator_init_default(&allocator);          // libc malloc/free
+sz_allocator_t allocator;
+sz_allocator_init_default(&allocator);          // libc malloc/free
 // or a fixed arena with no dynamic allocation:
 char arena[4096];
-sz_memory_allocator_init_fixed(&allocator, arena, sizeof(arena));
+sz_allocator_init_fixed(&allocator, arena, sizeof(arena));
 ```
 
 `sz_sequence_t` is the read-only adapter over an arbitrary collection of strings used by the sort and intersect families.
@@ -665,7 +665,7 @@ int main() {
 
 These operate on a read-only `sz_sequence_t` and never reorder the underlying data — they fill an `order` permutation array instead.
 Sorting is __stable__, so equal elements keep their input order, supports descending order via a `reverse` flag, and supports partial / top-K sorting via `top_count` — pass `0` to sort everything.
-Every allocation these kernels need is routed through the `sz_memory_allocator_t` you supply — pass `NULL` for the default `malloc`-based one — so, unlike `std::sort` or `thrust::sort`, no scratch memory is ever allocated behind your back.
+Every allocation these kernels need is routed through the `sz_allocator_t` you supply — pass `NULL` for the default `malloc`-based one — so, unlike `std::sort` or `thrust::sort`, no scratch memory is ever allocated behind your back.
 
 ### C
 
@@ -674,12 +674,12 @@ The C API fills a caller-owned `order` array and reports success through a `sz_s
 ```c
 sz_status_t sz_sequence_argsort_best(
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,
+    sz_allocator_t *allocator, sz_sorted_idx_t *order,
     sz_capability_t capabilities, void *stream);
 
 sz_status_t sz_sequence_argsort_uncased_best(
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,
+    sz_allocator_t *allocator, sz_sorted_idx_t *order,
     sz_capability_t capabilities, void *stream);
 ```
 
@@ -713,7 +713,7 @@ int main(void) {
 ```c
 sz_status_t sz_sequence_intersect_best(
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,
     sz_capability_t capabilities, void *stream);
 ```
@@ -817,13 +817,13 @@ int main(void) {
 
 `sz_string_t` is a tiny memory-owning string with Small-String-Optimization: short strings, up to 22 bytes plus the terminator on 64-bit, live inline with no heap allocation, while longer strings spill to the heap.
 Its length can be read branchlessly, and many length changes avoid branches entirely.
-Every mutating call takes an explicit `sz_memory_allocator_t *`.
+Every mutating call takes an explicit `sz_allocator_t *`.
 
 Lifecycle and read-only access:
 
 ```c
 void sz_string_init(sz_string_t *string);
-sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_memory_allocator_t *allocator);
+sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_allocator_t *allocator);
 sz_bool_t sz_string_is_on_stack(sz_string_t const *string);
 void sz_string_unpack(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length, sz_size_t *space, sz_bool_t *is_external);
 void sz_string_range(sz_string_t const *string, sz_ptr_t *start, sz_size_t *length);
@@ -835,11 +835,11 @@ sz_ordering_t sz_string_order(sz_string_t const *a, sz_string_t const *b);
 Growth and mutation, where all but `sz_string_erase` may allocate and return `STRINGZILLA_NULL_CHAR` on failure:
 
 ```c
-sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_memory_allocator_t *allocator);
-sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator);
+sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_allocator_t *allocator);
+sz_ptr_t sz_string_expand(sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_allocator_t *allocator);
 sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offset, sz_size_t length);
-sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
-void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
+sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_allocator_t *allocator);
+void sz_string_free(sz_string_t *string, sz_allocator_t *allocator);
 ```
 
 `sz_string_expand` opens an uninitialized gap of `added_length` at `offset` that you then populate, often via `sz_copy_best`; `sz_string_erase` removes a range without ever allocating and cannot fail.
@@ -848,8 +848,8 @@ void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
-    sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_default(&allocator);
+    sz_allocator_t allocator;
+    sz_allocator_init_default(&allocator);
 
     sz_string_t s;
     sz_string_init(&s);

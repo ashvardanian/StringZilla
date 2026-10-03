@@ -171,8 +171,7 @@ STRINGZILLA_INLINE sz_size_t sz_string_length(sz_string_t const *string);
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the start of
  *      the string otherwise.
  */
-STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
-                                                  sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_allocator_t *allocator);
 
 /**
  *  @brief Grows the available memory capacity, without changing the contents or the length.
@@ -186,8 +185,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t
  *  @return @c STRINGZILLA_NULL if the operation failed, pointer to the new start of
  *      the string otherwise.
  */
-STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
-                                              sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_allocator_t *allocator);
 
 /**
  *  @brief Grows the string by adding an uninitialized region of @p added_length at the given
@@ -204,7 +202,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
  *      the string otherwise.
  */
 STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
-    sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator);
+    sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_allocator_t *allocator);
 
 /**
  *  @brief Removes a range from a string. Changes the length, but not the capacity. Performs no
@@ -226,10 +224,10 @@ STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offs
  *  @return Whether the operation was successful. The only failures can come from the allocator, and
  *      leave the string unchanged.
  */
-STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_allocator_t *allocator);
 
 /** Frees the string, if it's allocated on the heap, and resets its state either way. */
-STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_allocator_t *allocator);
 
 #pragma endregion
 
@@ -314,8 +312,7 @@ STRINGZILLA_INLINE void sz_string_init(sz_string_t *string) {
     string->words[3] = 0;
 }
 
-STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length,
-                                                  sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t length, sz_allocator_t *allocator) {
     sz_size_t space_needed = length + 1; // space for trailing \0
     sz_assert_(string && allocator && "String and allocator can't be STRINGZILLA_NULL.");
     // Initialize the string to zeros for safety.
@@ -338,8 +335,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_init_length(sz_string_t *string, sz_size_t
     return string->external.start;
 }
 
-STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity,
-                                              sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new_capacity, sz_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "Strings and allocators can't be STRINGZILLA_NULL.");
 
@@ -371,7 +367,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
     return string->external.start;
 }
 
-STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "Strings and allocators can't be STRINGZILLA_NULL.");
 
@@ -400,7 +396,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_memo
 }
 
 STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
-    sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_memory_allocator_t *allocator) {
+    sz_string_t *string, sz_size_t offset, sz_size_t added_length, sz_allocator_t *allocator) {
 
     sz_assert_(string && allocator && "String and allocator can't be STRINGZILLA_NULL.");
 
@@ -482,7 +478,7 @@ STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offs
     return length;
 }
 
-STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE void sz_string_free(sz_string_t *string, sz_allocator_t *allocator) {
     if (!sz_string_is_on_stack(string))
         allocator->free(string->external.start, string->external.space, allocator->handle, STRINGZILLA_NULL);
     sz_string_init(string);

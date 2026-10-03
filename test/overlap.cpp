@@ -39,7 +39,7 @@ namespace ashvardanian::stringzilla::test {
  *  kernels, whose mask sits before the allocator. */
 static sz_status_t overlap_engine_init_dispatched_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                    sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                   sz_size_t candidates_budget, sz_memory_allocator_t *allocator,
+                                                   sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                    void *stream) {
     return sz_overlap_engine_init(engine, queries, window_widths, window_widths_count, candidates_budget,
                                   sz::default_capabilities(), allocator, stream);

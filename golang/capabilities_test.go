@@ -18,21 +18,21 @@ func TestCapabilityNames(t *testing.T) {
 		sz.CapGoldmont:    "goldmont",
 		sz.CapHaswell:     "haswell",
 		sz.CapSkylake:     "skylake",
-		sz.CapIcelake:     "icelake",
-		sz.CapNeon:        "neon",
-		sz.CapNeonAes:     "neonaes",
-		sz.CapNeonSha:     "neonsha",
-		sz.CapSve:         "sve",
-		sz.CapSve2:        "sve2",
-		sz.CapSve2Aes:     "sve2aes",
-		sz.CapRvv:         "rvv",
-		sz.CapRvvCrypto:   "rvvcrypto",
+		sz.CapIceLake:     "icelake",
+		sz.CapNEON:        "neon",
+		sz.CapNEONAES:     "neonaes",
+		sz.CapNEONSHA:     "neonsha",
+		sz.CapSVE:         "sve",
+		sz.CapSVE2:        "sve2",
+		sz.CapSVE2AES:     "sve2aes",
+		sz.CapRVV:         "rvv",
+		sz.CapRVVCrypto:   "rvvcrypto",
 		sz.CapV128:        "v128",
 		sz.CapV128Relaxed: "v128relaxed",
-		sz.CapLoongsonAsx: "loongsonasx",
-		sz.CapPowerVsx:    "powervsx",
-		sz.CapCuda:        "cuda",
-		sz.CapRocm:        "rocm",
+		sz.CapLoongsonASX: "loongsonasx",
+		sz.CapPowerVSX:    "powervsx",
+		sz.CapCUDA:        "cuda",
+		sz.CapROCm:        "rocm",
 		sz.CapMetal:       "metal",
 	} {
 		if got := capability.String(); got != expected {
@@ -55,8 +55,8 @@ func TestCapabilitiesEnabled(t *testing.T) {
 }
 
 func TestDevices(t *testing.T) {
-	if sz.CapCpus&sz.CapGpus != 0 || sz.CapCpus|sz.CapGpus|sz.CapAny != sz.CapAny {
-		t.Errorf("CapCpus %v and CapGpus %v overlap or escape CapAny", sz.CapCpus, sz.CapGpus)
+	if sz.CapCPUs&sz.CapGPUs != 0 || sz.CapCPUs|sz.CapGPUs|sz.CapAny != sz.CapAny {
+		t.Errorf("CapCPUs %v and CapGPUs %v overlap or escape CapAny", sz.CapCPUs, sz.CapGPUs)
 	}
 	if count, err := sz.CountDevices(sz.DeviceCPU); count != 1 || err != nil {
 		t.Errorf("CountDevices(DeviceCPU) = %d, %v, expected one CPU", count, err)
@@ -76,7 +76,7 @@ func TestDevices(t *testing.T) {
 			continue
 		}
 		gpu, err := sz.NewDevice(kind, 0)
-		if err != nil || gpu.CapabilitiesCompiled()&sz.CapCpus != 0 {
+		if err != nil || gpu.CapabilitiesCompiled()&sz.CapCPUs != 0 {
 			t.Errorf("NewDevice(%d, 0) = %v, compiling %v", kind, err, gpu.CapabilitiesCompiled())
 		}
 		if _, err := gpu.ConfigureThread(sz.CapAny); err == nil {

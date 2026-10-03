@@ -621,8 +621,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
 
 /** An allocator refusing every request, for asserting a kernel reports @c sz_bad_alloc_k and leaves
  *  its outputs alone. */
-inline sz_memory_allocator_t refusing_allocator_() noexcept {
-    sz_memory_allocator_t refusing;
+inline sz_allocator_t refusing_allocator_() noexcept {
+    sz_allocator_t refusing;
     refusing.allocate = +[](sz_size_t, void *, void *) -> void * { return nullptr; };
     refusing.free = +[](void *, sz_size_t, void *, void *) {};
     refusing.handle = nullptr;
@@ -635,7 +635,7 @@ inline sz_memory_allocator_t refusing_allocator_() noexcept {
 struct handle_checked_heap_t {
     handle_checked_heap_t const *self = this;
     std::size_t live_allocations = 0;
-    sz_memory_allocator_t allocator {};
+    sz_allocator_t allocator {};
 
     handle_checked_heap_t() noexcept {
         allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
@@ -837,10 +837,9 @@ struct gpu_stream_t {
     ~gpu_stream_t() noexcept { gpu_stream_free(handle); }
 };
 
-/** A sequence copied into one unified tape a kernel reads, through @ref sz_sequence_copy_best, and
- *  returned to its allocator with it. */
+/** A sequence tape from @ref sz_sequence_realloc_best, returned to its allocator when owned. */
 struct gpu_tape_t {
-    sz_memory_allocator_t unified {};
+    sz_allocator_t unified {};
     sz_sequence_t sequence {};
     sz_size_t bytes = 0;
 
@@ -853,8 +852,8 @@ struct gpu_tape_t {
 
     /** Copies @p source in, once; the tape owns its bytes, so @p source may go right after. */
     void copy(sz_sequence_t const &source) {
-        verify(sz_memory_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
-        verify(sz_sequence_copy_best(&sequence, &source, &unified, &bytes, gpu_capabilities(), nullptr) ==
+        verify(sz_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
+        verify(sz_sequence_realloc_best(&sequence, &source, &unified, &bytes, gpu_capabilities(), nullptr) ==
                sz_success_k);
     }
 };

@@ -90,7 +90,7 @@ extern "C" {
  *  @sa sz_sequence_argsort_uncased_best
  */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                     sz_bool_t reverse, sz_allocator_t *allocator,
                                                      sz_sorted_idx_t *order, sz_capability_t capabilities,
                                                      void *stream);
 
@@ -123,29 +123,29 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequen
  */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_best(              //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,              //
+    sz_allocator_t *allocator, sz_sorted_idx_t *order,                     //
     sz_capability_t capabilities, void *stream);
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                       sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                       sz_bool_t reverse, sz_allocator_t *allocator,
                                                        sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_serial(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                               sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                               sz_bool_t reverse, sz_allocator_t *allocator,
                                                                sz_sorted_idx_t *order, void *stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                        sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                        sz_bool_t reverse, sz_allocator_t *allocator,
                                                         sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_haswell(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                                sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                                sz_bool_t reverse, sz_allocator_t *allocator,
                                                                 sz_sorted_idx_t *order, void *stream);
 
 #endif
@@ -154,12 +154,12 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_haswell(sz_sequence_t co
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                        sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                        sz_bool_t reverse, sz_allocator_t *allocator,
                                                         sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                                sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                                sz_bool_t reverse, sz_allocator_t *allocator,
                                                                 sz_sorted_idx_t *order, void *stream);
 
 #endif
@@ -168,12 +168,12 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(sz_sequence_t co
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                    sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                    sz_bool_t reverse, sz_allocator_t *allocator,
                                                     sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                            sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                            sz_bool_t reverse, sz_allocator_t *allocator,
                                                             sz_sorted_idx_t *order, void *stream);
 
 #endif
@@ -182,12 +182,12 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(sz_sequence_t const 
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                     sz_bool_t reverse, sz_allocator_t *allocator,
                                                      sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_neon(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                             sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                             sz_bool_t reverse, sz_allocator_t *allocator,
                                                              sz_sorted_idx_t *order, void *stream);
 
 #endif
@@ -196,12 +196,12 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_neon(sz_sequence_t const
 
 /** @copydoc sz_sequence_argsort_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_rvv(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                    sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                    sz_bool_t reverse, sz_allocator_t *allocator,
                                                     sz_sorted_idx_t *order, void *stream);
 
 /** @copydoc sz_sequence_argsort_uncased_best */
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_rvv(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                            sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                            sz_bool_t reverse, sz_allocator_t *allocator,
                                                             sz_sorted_idx_t *order, void *stream);
 
 #endif
@@ -231,7 +231,7 @@ STRINGZILLA_API sz_status_t sz_sort_find_kernel(sz_kernel_kind_t kind, sz_capabi
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                     sz_bool_t reverse, sz_allocator_t *allocator,
                                                      sz_sorted_idx_t *order, sz_capability_t capabilities,
                                                      void *stream) {
     sz_unused_(sequence), sz_unused_(top_count), sz_unused_(reverse), sz_unused_(allocator), sz_unused_(order),
@@ -241,7 +241,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequen
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_best(              //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order,              //
+    sz_allocator_t *allocator, sz_sorted_idx_t *order,                     //
     sz_capability_t capabilities, void *stream) {
     sz_unused_(sequence), sz_unused_(top_count), sz_unused_(reverse), sz_unused_(allocator), sz_unused_(order),
         sz_unused_(capabilities), sz_unused_(stream);

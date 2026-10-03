@@ -31,9 +31,7 @@ import pytest
 from base import (
     VECTOR_WIDTH_LENGTHS,
     assert_backends_agree,
-    capability_sweep,
     differential_bodies,
-    run_across_backends,
     scale_iterations,
 )
 
@@ -174,7 +172,7 @@ def test_ctr_every_length_and_offset(rng: Random):
     assert len(whole) == span
 
     # A slice taken at any offset, of any length, must equal that slice of the whole stream.
-    offsets = range(0, min(span, scale_iterations(257)))
+    offsets = range(min(span, scale_iterations(257)))
     for offset in offsets:
         assert key.xor(body[offset:], COUNTER_NONCE, offset=offset) == whole[offset:]
         for length in (0, 1, 15, 16, 17, 31, 33, 64):
@@ -494,7 +492,7 @@ def test_empty_inputs_are_accepted():
 
 
 @pytest.mark.parametrize("vector", AUTHENTICATED_VECTORS, ids=AUTHENTICATED_VECTOR_NAMES)
-def test_unit_backend_differential_known_answers(vector):
+def test_unit_backend_differential_known_answers(capabilities, vector):
     """Every backend must reach the published vector, not merely agree with the others, which is the
     only check a shared mistake in the vectorized kernels cannot survive."""
     secret_hex, nonce_hex, associated_hex, plaintext_hex, ciphertext_hex, tag_hex = vector
@@ -502,20 +500,19 @@ def test_unit_backend_differential_known_answers(vector):
     associated, plaintext = bytes.fromhex(associated_hex), bytes.fromhex(plaintext_hex)
     expected_ciphertext, expected_tag = bytes.fromhex(ciphertext_hex), bytes.fromhex(tag_hex)
 
-    for config in capability_sweep():
-        # The schedule is expanded when the key is built, so the key carries the mask.
-        key = sz.Aes256GcmKey(secret, capabilities=config)
-        assert key.encrypt(plaintext, nonce, associated) == (expected_ciphertext, expected_tag)
-        assert key.decrypt(expected_ciphertext, nonce, expected_tag, associated) == plaintext
+    # The schedule is expanded when the key is built, so the key carries the mask.
+    key = sz.Aes256GcmKey(secret, capabilities=capabilities)
+    assert key.encrypt(plaintext, nonce, associated) == (expected_ciphertext, expected_tag)
+    assert key.decrypt(expected_ciphertext, nonce, expected_tag, associated) == plaintext
 
-        counter_key = sz.Aes256CtrKey(COUNTER_VECTOR_SECRET, capabilities=config)
-        offset = COUNTER_VECTOR_BLOCK_INDEX * 16
-        transformed = counter_key.xor(COUNTER_VECTOR_PLAINTEXT, COUNTER_VECTOR_NONCE, offset=offset)
-        assert transformed == COUNTER_VECTOR_CIPHERTEXT
+    counter_key = sz.Aes256CtrKey(COUNTER_VECTOR_SECRET, capabilities=capabilities)
+    offset = COUNTER_VECTOR_BLOCK_INDEX * 16
+    transformed = counter_key.xor(COUNTER_VECTOR_PLAINTEXT, COUNTER_VECTOR_NONCE, offset=offset)
+    assert transformed == COUNTER_VECTOR_CIPHERTEXT
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_ctr(length: int, rng: Random):
+def test_unit_backend_differential_ctr(backend_results, length: int, rng: Random):
     """Counter mode has no standard-library oracle, so every backend must agree with every other, for
     random, tiled, and all-same-character bodies, at offsets that split the first keystream block."""
     for body in differential_bodies(length, rng):
@@ -527,13 +524,13 @@ def test_unit_backend_differential_ctr(length: int, rng: Random):
                 return key.xor(payload, COUNTER_NONCE, offset=offset)
 
             assert_backends_agree(
-                run_across_backends(transform),
+                backend_results(transform),
                 format_inputs=lambda length=length, offset=offset: f"length={length} offset={offset}",
             )
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_gcm(length: int, rng: Random):
+def test_unit_backend_differential_gcm(backend_results, length: int, rng: Random):
     """Authenticated encryption and decryption must agree across every backend, for random, tiled, and
     all-same-character bodies crossed with the associated-data lengths that bracket a hash block."""
     for body in differential_bodies(length, rng):
@@ -546,7 +543,7 @@ def test_unit_backend_differential_gcm(length: int, rng: Random):
                 return key.encrypt(payload, AUTHENTICATED_NONCE, associated)
 
             assert_backends_agree(
-                run_across_backends(encrypt),
+                backend_results(encrypt),
                 format_inputs=lambda: f"length={length} associated_length={associated_length}",
             )
 
@@ -556,11 +553,11 @@ def test_unit_backend_differential_gcm(length: int, rng: Random):
                 key = sz.Aes256GcmKey(AUTHENTICATED_SECRET, capabilities=capabilities)
                 return key.decrypt(ciphertext, AUTHENTICATED_NONCE, tag, associated)
 
-            assert_backends_agree(run_across_backends(decrypt), oracle=payload)
+            assert_backends_agree(backend_results(decrypt), oracle=payload)
 
 
 @pytest.mark.parametrize("chunk_size", [1, 7, 15, 16, 17, 31, 64, 100])
-def test_unit_backend_differential_gcm_streaming(chunk_size: int, rng: Random):
+def test_unit_backend_differential_gcm_streaming(backend_results, chunk_size: int, rng: Random):
     """The chunked state machine must agree across backends and match the one-shot call, since the
     keystream and hash blocks it carries between calls are where a vectorized tail goes wrong."""
     span = 512
@@ -577,19 +574,18 @@ def test_unit_backend_differential_gcm_streaming(chunk_size: int, rng: Random):
     def one_shot(body=body, associated=associated):
         return sz.Aes256GcmKey(AUTHENTICATED_SECRET).encrypt(body, AUTHENTICATED_NONCE, associated)
 
-    assert_backends_agree(run_across_backends(streamed), oracle=one_shot())
+    assert_backends_agree(backend_results(streamed), oracle=one_shot())
 
 
-def test_unit_backend_differential_ctr_seek(rng: Random):
+def test_unit_backend_differential_ctr_seek(capabilities, rng: Random):
     """The seek property must hold under every backend, not only under the one the host picks."""
     span = 512
     body = random_bytes(rng, span)
 
-    for config in capability_sweep():
-        key = sz.Aes256CtrKey(COUNTER_SECRET, capabilities=config)
-        whole = key.xor(body, COUNTER_NONCE)
-        for offset in range(0, 130):
-            assert key.xor(body[offset:], COUNTER_NONCE, offset=offset) == whole[offset:]
+    key = sz.Aes256CtrKey(COUNTER_SECRET, capabilities=capabilities)
+    whole = key.xor(body, COUNTER_NONCE)
+    for offset in range(130):
+        assert key.xor(body[offset:], COUNTER_NONCE, offset=offset) == whole[offset:]
 
 
 # endregion Backend differential

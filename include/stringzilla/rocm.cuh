@@ -20,7 +20,7 @@
 
 #include "stringzilla/types.cuh"
 #include "stringzilla/capabilities.h"  // `sz_cap_rocm_k`
-#include "stringzilla/memory/serial.h" // `sz_sequence_copy_serial_`
+#include "stringzilla/memory/serial.h" // `sz_sequence_realloc_serial_`
 
 #if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
 #include <hip/hip_runtime.h> // `hipLaunchKernel`, `hipMallocManaged`, `hipSetDevice`
@@ -51,8 +51,8 @@ STRINGZILLA_INLINE sz_status_t sz_device_enter_rocm_(void *stream, int *caller) 
 /** Makes @p caller current again, closing the scope @ref sz_device_enter_rocm_ opened. */
 STRINGZILLA_INLINE void sz_device_leave_rocm_(int caller) { sz_unused_(hipSetDevice(caller)); }
 
-/** Whether the current device can dereference @p pointer: managed memory, or that device's own
- *  memory, never host memory, pinned or not. */
+/** Accepts managed memory or the current device's own allocation.
+ *  Host mappings require a device address and are unsupported by this check. */
 STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_rocm_(void const *pointer) {
     int device = 0;
     hipPointerAttribute_t attributes;
@@ -113,7 +113,7 @@ STRINGZILLA_INLINE void sz_memory_free_pinned_rocm_(void *pointer, sz_size_t byt
 
 /** Initializes an allocator handing back memory both the host and the device address, each call
  *  on its stream's device. */
-STRINGZILLA_INLINE void sz_memory_allocator_init_unified_rocm_(sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE void sz_allocator_init_unified_rocm_(sz_allocator_t *allocator) {
     allocator->allocate = &sz_memory_allocate_unified_rocm_;
     allocator->free = &sz_memory_free_device_rocm_;
     allocator->handle = STRINGZILLA_NULL;
@@ -259,10 +259,10 @@ STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, 
 
 #pragma region Device Sequences
 
-/** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_copy_best. */
-STRINGZILLA_INLINE sz_status_t sz_sequence_copy_rocm_(sz_sequence_t *target, sz_sequence_t const *source,
-                                                      sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      void *stream) {
+/** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_realloc_best. */
+STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_rocm_(sz_sequence_t *target, sz_sequence_t const *source,
+                                                         sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                         void *stream) {
     sz_sequence_member_start_t get_start = STRINGZILLA_NULL;
     sz_sequence_member_length_t get_length = STRINGZILLA_NULL;
     int caller = 0;
@@ -278,7 +278,7 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_copy_rocm_(sz_sequence_t *target, sz_
     if (status == sz_success_k && tape && sz_memory_reaches_rocm_(source->handle))
         target->handle = source->handle, target->count = source->count, *allocated_bytes = 0;
     else if (status == sz_success_k &&
-             (status = sz_sequence_copy_serial_(target, source, allocator, allocated_bytes, stream)) == sz_success_k)
+             (status = sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream)) == sz_success_k)
         sz_prefetch_rocm_(target->handle, *allocated_bytes, stream);
     if (status == sz_success_k) target->get_start = get_start, target->get_length = get_length;
     sz_device_leave_rocm_(caller);
@@ -333,15 +333,15 @@ STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream
 
 STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream) { return sz_stream_destroy_rocm_(stream); }
 
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_rocm(sz_memory_allocator_t *allocator) {
-    sz_memory_allocator_init_unified_rocm_(allocator);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator) {
+    sz_allocator_init_unified_rocm_(allocator);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_copy_rocm(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  void *stream) {
-    return sz_sequence_copy_rocm_(target, source, allocator, allocated_bytes, stream);
+STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     void *stream) {
+    return sz_sequence_realloc_rocm_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream) { return sz_stream_synchronize_rocm_(stream); }

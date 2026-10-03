@@ -67,7 +67,7 @@ extern "C" {
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled or
  *      @c sz_cuda_capabilities_enabled report; its group picks the CPU or a GPU vendor.
  *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
- *      @ref sz_memory_allocator_init_unified_best of @p capabilities. Stored by value, so
+ *      @ref sz_allocator_init_unified_best of @p capabilities. Stored by value, so
  *      @ref sz_substrings_engine_free needs none and cannot get the wrong one; on a device it must
  *      be host-writable, as the host writes the automaton there.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
@@ -87,7 +87,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
-                                                      sz_memory_allocator_t *allocator, void *stream);
+                                                      sz_allocator_t *allocator, void *stream);
 
 /** Returns both of the engine's blocks to the allocator that built them, once the work queued on
  *  @p stream is done with them, emptying @p engine. */
@@ -201,7 +201,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *en
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream);
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                         sz_size_t *counts, sz_size_t counts_stride, void *stream);
@@ -226,7 +226,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_engin
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_haswell(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream);
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_haswell(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                          sz_size_t *counts, sz_size_t counts_stride, void *stream);
@@ -253,7 +253,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_haswell(sz_substrings_engi
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_icelake(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream);
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_icelake(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                          sz_size_t *counts, sz_size_t counts_stride, void *stream);
@@ -281,7 +281,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_neon(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                            void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
@@ -309,7 +309,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_cuda(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                            void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
@@ -337,7 +337,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_rocm(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                            void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_rocm(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
@@ -364,7 +364,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_rocm(sz_substrings_engine_
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream);
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_substrings_counts */
 STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                        sz_size_t *counts, sz_size_t counts_stride, void *stream);
@@ -412,7 +412,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
-                                                      sz_memory_allocator_t *allocator, void *stream) {
+                                                      sz_allocator_t *allocator, void *stream) {
     sz_unused_(engine), sz_unused_(needles), sz_unused_(case_sensitivity), sz_unused_(overlap_policy),
         sz_unused_(hot_states), sz_unused_(matches_budget), sz_unused_(haystacks_budget), sz_unused_(capabilities),
         sz_unused_(allocator), sz_unused_(stream);

@@ -841,7 +841,7 @@ struct substrings_simt_vocabulary_t {
     unified_vector<sz_string_view_t> views;
 
     /** Hands back memory both the host and the device address. */
-    sz_memory_allocator_t unified {};
+    sz_allocator_t unified {};
 
     /** Host accessors, which is all the builder needs. */
     sz_sequence_t needles {};
@@ -854,7 +854,7 @@ struct substrings_simt_vocabulary_t {
         std::size_t written = 0;
         for (sz_string_view_t &view : views) view.start = arena.data() + written, written += view.length;
         sz_sequence_from_string_views(views.data(), views.size(), &needles);
-        verify(sz_memory_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
+        verify(sz_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
     }
     substrings_simt_vocabulary_t(substrings_simt_vocabulary_t const &) = delete;
     substrings_simt_vocabulary_t &operator=(substrings_simt_vocabulary_t const &) = delete;
@@ -1527,7 +1527,7 @@ static void check_sequence_copy_simt_() {
     }
     sz_sequence_t again {};
     sz_size_t again_bytes = 1;
-    verify(sz_sequence_copy_best(&again, &tape.sequence, &tape.unified, &again_bytes, gpu_capabilities(), nullptr) ==
+    verify(sz_sequence_realloc_best(&again, &tape.sequence, &tape.unified, &again_bytes, gpu_capabilities(), nullptr) ==
            sz_success_k);
     verify(again_bytes == 0 && again.handle == tape.sequence.handle && again.get_start == tape.sequence.get_start);
 }

@@ -54,7 +54,7 @@ extern "C" {
  *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled or
  *      @c sz_cuda_capabilities_enabled report; its group picks the CPU or a GPU vendor.
  *  @param[in] allocator Source of the engine's blocks, or @c STRINGZILLA_NULL for
- *      @ref sz_memory_allocator_init_unified_best of @p capabilities.
+ *      @ref sz_allocator_init_unified_best of @p capabilities.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
  *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
@@ -67,7 +67,7 @@ extern "C" {
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                                       sz_memory_allocator_t *allocator, void *stream);
+                                                       sz_allocator_t *allocator, void *stream);
 
 /** Returns both of @p engine 's blocks to the allocator that built them, once the work queued on
  *  @p stream is done with them, and leaves it empty. */
@@ -79,8 +79,8 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *
  *  @param[in] engine The prepared batch; its round scratch may grow. It keeps no stream and no
  *      round state on a device, so any number of that device's streams may score it at once.
- *  @param[in] candidates The texts, on the residency @p engine was built for: host accessors on
- *      the CPU, and on a device a tape from @ref sz_sequence_copy_best of the same capabilities.
+ *  @param[in] candidates The texts, on the residency @p engine was built for: host accessors on the
+ *      CPU, and on a device a tape from @ref sz_sequence_realloc_best of the same capabilities.
  *  @param[out] distances The @b [count, candidates] distances, query @c q at
  *      `distances[q * stride + c]`, device-reachable on a device.
  *  @param[in] distances_stride Entries from one query's row to the next, at least the count.
@@ -129,8 +129,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_s
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *queries,
-                                                              sz_levenshtein_symbol_t symbol,
-                                                              sz_memory_allocator_t *allocator, void *stream);
+                                                              sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                              void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *candidates, sz_size_t *distances,
@@ -141,7 +141,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engin
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_haswell(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_memory_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
@@ -153,7 +153,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_skylake(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_memory_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
@@ -165,7 +165,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_icelake(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_memory_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
@@ -176,8 +176,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
-                                                            sz_levenshtein_symbol_t symbol,
-                                                            sz_memory_allocator_t *allocator, void *stream);
+                                                            sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                            void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
@@ -192,8 +192,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_s
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
-                                                            sz_levenshtein_symbol_t symbol,
-                                                            sz_memory_allocator_t *allocator, void *stream);
+                                                            sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                            void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
@@ -208,8 +208,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_rocm(sz_cptr_t a, sz_s
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *queries,
-                                                             sz_levenshtein_symbol_t symbol,
-                                                             sz_memory_allocator_t *allocator, void *stream);
+                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                             void *stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
                                                            sz_sequence_t const *candidates, sz_size_t *distances,
@@ -240,7 +240,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                                       sz_memory_allocator_t *allocator, void *stream) {
+                                                       sz_allocator_t *allocator, void *stream) {
     sz_unused_(engine), sz_unused_(queries), sz_unused_(symbol), sz_unused_(capabilities), sz_unused_(allocator),
         sz_unused_(stream);
     return sz_missing_library_k;

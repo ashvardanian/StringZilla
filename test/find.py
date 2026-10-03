@@ -35,7 +35,6 @@ from base import (
     boundary_strings,
     get_random_string,
     is_equal_strings,
-    run_across_backends,
     unaligned_views,
 )
 
@@ -421,39 +420,39 @@ def oracle_count_byteset(haystack: str, chars: str) -> int:
     return sum(1 for char in haystack if char in charset)
 
 
-def assert_find_family_matches_oracles(haystack: str, needle: str):
+def assert_find_family_matches_oracles(backend_results, haystack: str, needle: str):
     """Sweep every backend for the full `find`-family on one (haystack, needle) pair, asserting
     backend parity and oracle agreement for `find`, `rfind`, `count`, and the byteset family."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.find(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.find(haystack, needle, capabilities=capabilities)),
         oracle=haystack.find(needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.rfind(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.rfind(haystack, needle, capabilities=capabilities)),
         oracle=haystack.rfind(needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.count(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.count(haystack, needle, capabilities=capabilities)),
         oracle=haystack.count(needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.find_first_of(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.find_first_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_first_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.find_last_of(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.find_last_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_last_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.find_first_not_of(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.find_first_not_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_first_not_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.find_last_not_of(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.find_last_not_of(haystack, needle, capabilities=capabilities)),
         oracle=oracle_find_last_not_of(haystack, needle),
     )
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.count_byteset(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.count_byteset(haystack, needle, capabilities=capabilities)),
         oracle=oracle_count_byteset(haystack, needle),
     )
 
@@ -502,30 +501,30 @@ UNALIGNED_VIEW_NEEDLES = ["", "a", "ab", "ba", "abab", "Q"]
 
 @pytest.mark.parametrize("offset", LANE_STRADDLE_OFFSETS)
 @pytest.mark.parametrize("needle_length", NEEDLE_LENGTHS)
-def test_unit_backend_differential_find_lane_boundary(needle_length, offset):
+def test_unit_backend_differential_find_lane_boundary(backend_results, needle_length, offset):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for a needle spliced across a 16/32/64-byte SIMD lane boundary; a divergence is a kernel bug, not
     a binding bug."""
     needle = "N" * needle_length  # never collides with the "x" filler
     haystack = embed_at_offset("x", needle, offset, LANE_HAYSTACK_LENGTH)
-    assert_find_family_matches_oracles(haystack, needle)
+    assert_find_family_matches_oracles(backend_results, haystack, needle)
 
 
 @pytest.mark.parametrize("strategy", NEEDLE_STRATEGIES)
 @pytest.mark.parametrize("alphabet", HAYSTACK_ALPHABETS)
 @pytest.mark.parametrize("haystack_length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_boundary_lengths(haystack_length, alphabet, strategy):
+def test_unit_backend_differential_boundary_lengths(backend_results, haystack_length, alphabet, strategy):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for haystacks bracketing the 16/32/64-byte SIMD register widths, including the degenerate
     all-same-character case, across needles that are absent, a single character, the periodic unit,
     the whole haystack, longer, or empty; a divergence is a kernel bug, not a binding bug."""
     haystack = BOUNDARY_HAYSTACKS_BY_ALPHABET[alphabet][haystack_length]
     needle = needle_for_strategy(haystack, alphabet, strategy)
-    assert_find_family_matches_oracles(haystack, needle)
+    assert_find_family_matches_oracles(backend_results, haystack, needle)
 
 
 @pytest.mark.parametrize("needle", UNALIGNED_VIEW_NEEDLES)
-def test_unit_backend_differential_unaligned_views(needle):
+def test_unit_backend_differential_unaligned_views(backend_results, needle):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for a `Str` slice sharing its parent buffer at a misaligned base pointer; a divergence is a kernel
     bug, not a binding bug."""
@@ -533,15 +532,15 @@ def test_unit_backend_differential_unaligned_views(needle):
     for offset, view in unaligned_views(parent_text):
         native_slice = parent_text[offset:]
         assert_backends_agree(
-            run_across_backends(lambda capabilities, view=view: sz.find(view, needle, capabilities=capabilities)),
+            backend_results(lambda capabilities, view=view: sz.find(view, needle, capabilities=capabilities)),
             oracle=native_slice.find(needle),
         )
         assert_backends_agree(
-            run_across_backends(lambda capabilities, view=view: sz.rfind(view, needle, capabilities=capabilities)),
+            backend_results(lambda capabilities, view=view: sz.rfind(view, needle, capabilities=capabilities)),
             oracle=native_slice.rfind(needle),
         )
         assert_backends_agree(
-            run_across_backends(lambda capabilities, view=view: sz.count(view, needle, capabilities=capabilities)),
+            backend_results(lambda capabilities, view=view: sz.count(view, needle, capabilities=capabilities)),
             oracle=native_slice.count(needle),
         )
 
@@ -549,13 +548,15 @@ def test_unit_backend_differential_unaligned_views(needle):
 @pytest.mark.parametrize("needle_length", [0, 1, 2, 3, 5])
 @pytest.mark.parametrize("haystack_length", [0, 1, 5, 17, 33, 65])
 @pytest.mark.parametrize("variability", [1, 2, 4])
-def test_unit_backend_differential_random_fuzz(rng: Random, variability: int, haystack_length: int, needle_length: int):
+def test_unit_backend_differential_random_fuzz(
+    backend_results, rng: Random, variability: int, haystack_length: int, needle_length: int
+):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
     for small-alphabet random haystacks and needles, which give frequent matches and overlaps, across
     every seed, haystack length, and needle length; a divergence is a kernel bug, not a binding bug."""
     haystack = get_random_string(rng, variability=variability, length=haystack_length)
     needle = get_random_string(rng, variability=variability, length=needle_length)
-    assert_find_family_matches_oracles(haystack, needle)
+    assert_find_family_matches_oracles(backend_results, haystack, needle)
 
 
 # endregion Backend differential

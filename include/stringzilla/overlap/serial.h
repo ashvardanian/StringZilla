@@ -228,7 +228,7 @@ typedef struct sz_overlap_engine_t {
     sz_capability_t capability;
 
     /** What built both blocks below and what grows the second. */
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
 
     /** The forest's block, fixed for the engine's life, its head tier-private. */
     void *memory;
@@ -286,7 +286,7 @@ STRINGZILLA_INLINE void *sz_overlap_engine_head_(sz_overlap_engine_t const *engi
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries, sz_size_t const *window_widths,
                                                        sz_size_t window_widths_count, sz_size_t head_bytes,
-                                                       sz_memory_allocator_t const *allocator, void *stream,
+                                                       sz_allocator_t const *allocator, void *stream,
                                                        sz_overlap_engine_t *engine) {
     if (!window_widths_count) return sz_unexpected_dimensions_k;
     sz_size_t const count = queries->count;
@@ -566,13 +566,13 @@ STRINGZILLA_INLINE void sz_overlap_engine_fill_serial_(sz_overlap_engine_t *engi
  */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                           sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                          sz_size_t candidates_budget, sz_memory_allocator_t *allocator,
+                                                          sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                           void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
-    sz_memory_allocator_t host;
+    sz_allocator_t host;
     if (allocator) host = *allocator;
-    else sz_memory_allocator_init_default(&host);
+    else sz_allocator_init_default(&host);
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, stream,
                                                        engine);
     if (opened != sz_success_k) return opened;

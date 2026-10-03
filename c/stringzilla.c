@@ -270,3 +270,19 @@ STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t ordinal, sz_
 }
 
 #pragma endregion Devices
+
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream) {
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k: return sz_stream_synchronize_serial(stream);
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_stream_synchronize_cuda(stream);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_stream_synchronize_rocm(stream);
+#endif
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_stream_synchronize_metal(stream);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}

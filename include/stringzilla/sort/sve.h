@@ -169,15 +169,15 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_quicksort_pgrams_sve_(
                                                   last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count,
-                                                   sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
+                                                   sz_sorted_idx_t *order) {
     // Initialize the order with 0,1,2,...
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
     if (count < 2) return sz_success_k;
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -302,7 +302,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_sve_(
 #if STRINGZILLA_TARGET_SVE
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                    sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                    sz_bool_t reverse, sz_allocator_t *allocator,
                                                     sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // At 128 bits NEON leads: 53 vs 43 MB/s on Graviton 5 words, with serial at 50.
@@ -318,9 +318,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
         return sz_success_k;
     }
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -339,7 +339,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(               //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Shares the byte arg-sort's partition, and so its 128-bit NEON verdict.
     if (svcntb() <= 16) return sz_sequence_argsort_uncased_neon_(sequence, allocator, order, top_count, reverse);
@@ -349,9 +349,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(               //
         order[sequence_index] = sequence_index;
     if (count < 2) return sz_success_k;
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 

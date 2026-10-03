@@ -67,16 +67,16 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_cuda_(sz_size_t staged_node
  *  @ref sz_overlap_engine_init_scoped_cuda_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_cuda_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                             sz_size_t const *window_widths,
-                                                            sz_size_t window_widths_count,
-                                                            sz_memory_allocator_t *allocator, void *stream) {
+                                                            sz_size_t window_widths_count, sz_allocator_t *allocator,
+                                                            void *stream) {
     if (!sz_device_multiprocessors_cuda_()) return sz_missing_gpu_k;
     if (!window_widths_count || window_widths_count > sz_overlap_gpu_widths_max_k) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != window_widths_count; ++index)
         if (window_widths[index] > sz_overlap_gpu_widest_window_k) return sz_unexpected_dimensions_k;
 
-    sz_memory_allocator_t unified;
+    sz_allocator_t unified;
     if (allocator) unified = *allocator;
-    else sz_memory_allocator_init_unified_cuda_(&unified);
+    else sz_allocator_init_unified_cuda_(&unified);
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count,
                                                        sizeof(sz_overlap_geometry_cuda_t), &unified, stream, engine);
     if (opened != sz_success_k) return opened;
@@ -88,8 +88,8 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_cuda_(sz_overlap_engine_t 
     sz_size_t longest_query = 0;
     for (sz_size_t index = 0; index != engine->count; ++index)
         if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    sz_allocator_t host;
+    sz_allocator_init_default(&host);
     sz_size_t const chain_bytes = (longest_query + 1) * sizeof(sz_f64_t);
     sz_f64_t *const chain = (sz_f64_t *)host.allocate(chain_bytes, host.handle, stream);
     if (!chain) {
@@ -173,7 +173,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_cuda_(sz_overlap_engine_t 
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_cuda_(
     sz_overlap_engine_t *engine, sz_sequence_t const *queries, sz_size_t const *window_widths,
-    sz_size_t window_widths_count, sz_size_t candidates_budget, sz_memory_allocator_t *allocator, void *stream) {
+    sz_size_t window_widths_count, sz_size_t candidates_budget, sz_allocator_t *allocator, void *stream) {
     int caller = 0;
     sz_unused_(candidates_budget);
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
@@ -228,7 +228,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_cuda_(sz_overlap_engine_t *engi
 
 /**
  *  @brief The CUDA kernel of @ref sz_overlap_scores, on the engine's device.
- *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_copy_best binds them,
+ *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_realloc_best binds them,
  *      because the kernel is what calls them, once per candidate, uniform across the warp.
  *  @return @c sz_success_k, @c sz_device_memory_mismatch_k when the engine, the scores or the
  *      candidates are memory the device of @p stream cannot reach, or @c sz_device_code_mismatch_k
@@ -252,7 +252,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_cuda_(sz_overlap_engine_
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                        sz_size_t candidates_budget, sz_memory_allocator_t *allocator,
+                                                        sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                         void *stream) {
     return sz_overlap_engine_init_scoped_cuda_(engine, queries, window_widths, window_widths_count, candidates_budget,
                                                allocator, stream);

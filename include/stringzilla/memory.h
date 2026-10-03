@@ -11,9 +11,8 @@
  *  - @c sz_fill_best - analog to @c memset, often used to initialize memory with a constant.
  *  - @c sz_lookup_best - Look-Up Table @b (LUT) transformation, mapping every byte to a new value.
  *  - @c sz_lookup_utf8 - planned LUT transformation of a UTF-8 string, usable for normalization.
- *  - @c sz_memory_allocator_init_unified_best - an allocator of blocks the host and a device share.
- *  - @c sz_sequence_copy_best - analog to @c memcpy for a whole @c sz_sequence_t, into one tape.
- *  - @c sz_stream_synchronize_best - waits for a device's stream, so the host can read its writes.
+ *  - @c sz_allocator_init_unified_best - an allocator of blocks the host and a device share.
+ *  - @c sz_sequence_realloc_best - reallocates a sequence as a tape for the selected device.
  *
  *  All of the core APIs receive the target output buffer as the first argument, and aim to minimize
  *  the number of "store" instructions, especially unaligned ones that can invalidate 2 cache lines.
@@ -363,12 +362,11 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
  *      its group picks the CPU or a GPU vendor.
  *  @return @c sz_success_k, or @c sz_missing_gpu_k for a GPU vendor this library was built without.
  */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_best(sz_memory_allocator_t *allocator,
-                                                                  sz_capability_t capabilities);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities);
 
 /**
- *  @brief Copies @p source into one tape block from @p allocator, the way @c memcpy copies bytes,
- *      and points @p target at it through the accessors the kernels of @p capabilities call.
+ *  @brief Reallocates @p source as a tape from @p allocator when the selected device cannot use
+ *      its storage, and points @p target at it through that device's accessors.
  *
  *  A tape is count + 1 @c sz_u64_t offsets from the block's own start, then every string's bytes
  *  back to back, so it holds no pointer and whatever addresses the block reads all of it. On CUDA
@@ -376,13 +374,15 @@ STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_best(sz_memory_allo
  *  are host functions.
  *
  *  @param[out] target The tape, untouched unless the call succeeds; it may be @p source itself.
+ *      Neither the source allocation nor any previous target allocation is freed. Save their
+ *      ownership information before replacing a descriptor in place.
  *  @param[in] source The strings, through host-callable accessors over host-readable texts, or a
  *      tape of the same group already.
  *  @param[in] allocator Where the block comes from, host-writable, like the one
- *      @ref sz_memory_allocator_init_unified_best initializes.
+ *      @ref sz_allocator_init_unified_best initializes.
  *  @param[out] allocated_bytes Bytes of the block, which the caller frees by passing
  *      `target->handle`, these bytes, `allocator->handle` and @p stream to `allocator->free`, or
- *      zero when @p source was a tape the device reaches, whose accessors alone were replaced.
+ *      zero when the source tape is borrowed; its owner must keep it alive until work completes.
  *  @param[in] capabilities One device's capabilities; its group picks the accessors.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
@@ -392,62 +392,45 @@ STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_best(sz_memory_allo
  *      this library was built without or a device that doesn't answer.
  *  @note Never joins: the host writes the block, and a device migration is queued on @p stream.
  */
-STRINGZILLA_API sz_status_t sz_sequence_copy_best(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  sz_capability_t capabilities, void *stream);
+STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     sz_capability_t capabilities, void *stream);
 
-/**
- *  @brief Waits for everything enqueued on @p stream, after which what its rounds wrote is readable
- *      from the host.
- *  @param[in] capabilities One device's capabilities; its group picks the runtime that waits.
- *  @param[in] stream Null on the CPU, which has nothing to wait for. On a GPU, the stream to join,
- *      which also names the device, or null for the default stream of the default device.
- *  @return @c sz_success_k; or on a device @c sz_device_memory_mismatch_k for a @p stream it cannot
- *      use, @c sz_device_code_mismatch_k when the runtime reports a failed launch, and
- *      @c sz_missing_gpu_k for a vendor this build lacks or a device that doesn't answer.
- */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream);
-
-/** @copydoc sz_memory_allocator_init_unified_best */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_serial(sz_memory_allocator_t *allocator);
-/** @copydoc sz_sequence_copy_best */
-STRINGZILLA_API sz_status_t sz_sequence_copy_serial(sz_sequence_t *target, sz_sequence_t const *source,
-                                                    sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                    void *stream);
-/** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(void *stream);
+/** @copydoc sz_allocator_init_unified_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator);
+/** @copydoc sz_sequence_realloc_best */
+STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz_sequence_t const *source,
+                                                       sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                       void *stream);
 
 #if STRINGZILLA_TARGET_CUDA
-/** @copydoc sz_memory_allocator_init_unified_best */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_cuda(sz_memory_allocator_t *allocator);
-/** @copydoc sz_sequence_copy_best */
-STRINGZILLA_API sz_status_t sz_sequence_copy_cuda(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  void *stream);
-/** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(void *stream);
+/** @copydoc sz_allocator_init_unified_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator);
+/** @copydoc sz_sequence_realloc_best */
+STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     void *stream);
+
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
-/** @copydoc sz_memory_allocator_init_unified_best */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_rocm(sz_memory_allocator_t *allocator);
-/** @copydoc sz_sequence_copy_best */
-STRINGZILLA_API sz_status_t sz_sequence_copy_rocm(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  void *stream);
-/** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream);
+/** @copydoc sz_allocator_init_unified_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator);
+/** @copydoc sz_sequence_realloc_best */
+STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     void *stream);
+
 #endif
 
 #if STRINGZILLA_TARGET_METAL
-/** @copydoc sz_memory_allocator_init_unified_best */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_metal(sz_memory_allocator_t *allocator);
-/** @copydoc sz_sequence_copy_best */
-STRINGZILLA_API sz_status_t sz_sequence_copy_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                   sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                   void *stream);
-/** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream);
+/** @copydoc sz_allocator_init_unified_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
+/** @copydoc sz_sequence_realloc_best */
+STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
+                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                      void *stream);
+
 #endif
 
 #pragma endregion Unified Memory
@@ -578,22 +561,16 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
     return sz_missing_library_k;
 }
 
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_best(sz_memory_allocator_t *allocator,
-                                                                  sz_capability_t capabilities) {
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
     sz_unused_(allocator), sz_unused_(capabilities);
     return sz_missing_library_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_copy_best(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  sz_capability_t capabilities, void *stream) {
+STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     sz_capability_t capabilities, void *stream) {
     sz_unused_(target), sz_unused_(source), sz_unused_(allocator), sz_unused_(allocated_bytes),
         sz_unused_(capabilities), sz_unused_(stream);
-    return sz_missing_library_k;
-}
-
-STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream) {
-    sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

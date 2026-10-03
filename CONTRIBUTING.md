@@ -151,8 +151,8 @@ Each of these words has one meaning across the library:
 | `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                        |
 | `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                   |
 | `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                               |
-| `unified`                              | Memory both the host and the stream's device address                             | `sz_memory_allocator_init_unified_best`                                         |
-| `tape`                                 | One block holding a sequence's offsets and bytes                                 | What `sz_sequence_copy_best` writes                                             |
+| `unified`                              | Memory both the host and the stream's device address                            | `sz_allocator_init_unified_best`                                                |
+| `tape`                                 | One block holding a sequence's offsets and bytes                                | What `sz_sequence_realloc_best` writes                                          |
 | A capability, like `haswell` or `cuda` | One bit of a mask                                                                | The last token before the role suffix                                           |
 | `kernel`                               | A GPU entry point                                                                | `_kernel_`, right after the capability                                          |
 
@@ -667,7 +667,7 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_cuda_count_devices`, `sz_cuda_capabilities_detected` and `sz_cuda_stream_init`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_memory_allocator_init_unified_cuda` and `sz_sequence_copy_cuda`.
+`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_cuda_count_devices`, `sz_cuda_capabilities_detected` and `sz_cuda_stream_init`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_allocator_init_unified_cuda` and `sz_sequence_realloc_cuda`.
 `stringzilla_cuda_test`, built from `test/main_cuda.cu` and `test/cross_cuda.cu` over the static library, checks the CUDA kernels and the dispatch points over them against the serial answers:
 
 ```sh

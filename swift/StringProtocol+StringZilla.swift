@@ -877,19 +877,19 @@ public struct Capabilities: OptionSet, Sendable, CustomStringConvertible {
     public static let goldmont = Capabilities(rawValue: 1 << 2)
     public static let haswell = Capabilities(rawValue: 1 << 3)
     public static let skylake = Capabilities(rawValue: 1 << 4)
-    public static let icelake = Capabilities(rawValue: 1 << 5)
+    public static let iceLake = Capabilities(rawValue: 1 << 5)
     public static let neon = Capabilities(rawValue: 1 << 6)
-    public static let neonAes = Capabilities(rawValue: 1 << 7)
-    public static let neonSha = Capabilities(rawValue: 1 << 8)
+    public static let neonAES = Capabilities(rawValue: 1 << 7)
+    public static let neonSHA = Capabilities(rawValue: 1 << 8)
     public static let sve = Capabilities(rawValue: 1 << 9)
     public static let sve2 = Capabilities(rawValue: 1 << 10)
-    public static let sve2Aes = Capabilities(rawValue: 1 << 11)
+    public static let sve2AES = Capabilities(rawValue: 1 << 11)
     public static let rvv = Capabilities(rawValue: 1 << 12)
     public static let rvvCrypto = Capabilities(rawValue: 1 << 13)
     public static let v128 = Capabilities(rawValue: 1 << 14)
     public static let v128Relaxed = Capabilities(rawValue: 1 << 15)
-    public static let loongsonAsx = Capabilities(rawValue: 1 << 16)
-    public static let powerVsx = Capabilities(rawValue: 1 << 17)
+    public static let loongsonASX = Capabilities(rawValue: 1 << 16)
+    public static let powerVSX = Capabilities(rawValue: 1 << 17)
 
     public static let cuda = Capabilities(rawValue: 1 << 48)
     public static let rocm = Capabilities(rawValue: 1 << 56)
@@ -980,7 +980,9 @@ public struct Device: Sendable, Equatable {
     /// Device `ordinal` of `kind`.
     /// - Throws: ``Error`` past the last device of `kind`.
     public init(kind: DeviceKind, ordinal: Int) throws {
-        guard ordinal >= 0, ordinal < (try Device.count(kind)) else { throw fail(.missingGpu, "no \(kind) device \(ordinal)") }
+        guard ordinal >= 0, ordinal < (try Device.count(kind)) else {
+            throw fail(.missingGpu, "no \(kind) device \(ordinal)")
+        }
         self.init(kind: kind, unchecked: ordinal)
     }
 

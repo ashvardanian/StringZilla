@@ -31,7 +31,6 @@ from base import (
     get_random_string,
     malformed_utf8_corpus,
     representatives_by_class,
-    run_across_backends,
     scale_iterations,
     vector_width_bracketing_strings,
 )
@@ -347,15 +346,15 @@ GRAPHEME_BACKEND_DIFFERENTIAL_TEXTS = [
 
 
 @pytest.mark.parametrize("text", GRAPHEME_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_graphemes_backend_differential(text):
+def test_utf8_graphemes_backend_differential(backend_results, text):
     """utf8_graphemes must segment identically across every SIMD backend, covering emoji ZWJ sequences,
     combining marks, CRLF, and inputs straddling the 16/32/64-byte SIMD lanes."""
-    results = run_across_backends(lambda capabilities: _grapheme_segment_bytes(text, capabilities))
+    results = backend_results(lambda capabilities: _grapheme_segment_bytes(text, capabilities))
     assert_backends_agree(results, format_inputs=lambda: repr(text))
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_graphemes_backend_differential_malformed(raw):
+def test_utf8_graphemes_backend_differential_malformed(backend_results, raw):
     """Malformed UTF-8 must segment identically and never crash across every SIMD backend, and every
     backend's output must still tile the raw input bytes exactly."""
 
@@ -364,14 +363,14 @@ def test_utf8_graphemes_backend_differential_malformed(raw):
         assert_segments_tile(segments, raw)
         return segments
 
-    results = run_across_backends(segment_and_check)
+    results = backend_results(segment_and_check)
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
 
 
-def test_utf8_graphemes_backend_differential_random(rng: Random):
+def test_utf8_graphemes_backend_differential_random(backend_results, rng: Random):
     """Random ASCII corpora, one cluster per byte, must segment identically across every SIMD backend."""
     text = get_random_string(rng)
-    results = run_across_backends(lambda capabilities: _grapheme_segment_bytes(text, capabilities))
+    results = backend_results(lambda capabilities: _grapheme_segment_bytes(text, capabilities))
     assert_backends_agree(results, format_inputs=lambda: repr(text))
 
 

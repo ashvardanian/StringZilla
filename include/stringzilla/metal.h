@@ -410,18 +410,25 @@ STRINGZILLA_INLINE void sz_memory_free_unified_metal_(void *pointer, sz_size_t b
         if (contexts + index != context && sz_metal_free_in_(contexts + index, pointer, stream)) return;
 }
 
-STRINGZILLA_INLINE sz_status_t sz_memory_allocator_init_unified_metal_(sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_unified_metal_(sz_allocator_t *allocator) {
     allocator->allocate = sz_memory_allocate_unified_metal_;
     allocator->free = sz_memory_free_unified_metal_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }
 
-STRINGZILLA_INLINE sz_status_t sz_sequence_copy_metal_(sz_sequence_t *target, sz_sequence_t const *source,
-                                                       sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                       void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_metal_(sz_sequence_t *target, sz_sequence_t const *source,
+                                                          sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                          void *stream) {
+    sz_metal_context_t *const context = sz_metal_context_(stream);
+    if (!context) return sz_missing_gpu_k;
+    sz_metal_bound_t bound;
     if (source->get_start != sz_sequence_tape_start)
-        return sz_sequence_copy_serial_(target, source, allocator, allocated_bytes, stream);
+        return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
+    sz_u64_t const *const offsets = (sz_u64_t const *)source->handle;
+    sz_size_t const bytes = (sz_size_t)offsets[source->count];
+    if (!sz_metal_resolve_(context, source->handle, bytes, &bound))
+        return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
     *target = *source;
     *allocated_bytes = 0;
     return sz_success_k;
@@ -640,12 +647,12 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_(sz_metal_context_t *context, sz_se
 /** Initializes @p allocator to hand back shared buffers on the device of each call's stream, which
  *  both the host and that device's kernels address. A free waits for the work its stream committed
  *  before it. Stateless, so its handle is null. @return @c sz_success_k. */
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_metal(sz_memory_allocator_t *allocator);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
 
-/** @copydoc sz_sequence_copy_best, for Metal, whose kernels read a tape through host accessors. */
-STRINGZILLA_API sz_status_t sz_sequence_copy_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                   sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                   void *stream);
+/** @copydoc sz_sequence_realloc_best */
+STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
+                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                      void *stream);
 
 /**
  *  @brief Waits for every call committed to @p stream, then returns the frees deferred behind them.
@@ -658,14 +665,14 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream);
 
 #if STRINGZILLA_HEADER_ONLY
 
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_metal(sz_memory_allocator_t *allocator) {
-    return sz_memory_allocator_init_unified_metal_(allocator);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator) {
+    return sz_allocator_init_unified_metal_(allocator);
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_copy_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                   sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                   void *stream) {
-    return sz_sequence_copy_metal_(target, source, allocator, allocated_bytes, stream);
+STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
+                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                      void *stream) {
+    return sz_sequence_realloc_metal_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream) { return sz_stream_synchronize_metal_(stream); }

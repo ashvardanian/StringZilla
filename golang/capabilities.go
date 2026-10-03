@@ -22,26 +22,26 @@ const (
 	CapGoldmont    Capability = C.sz_cap_goldmont_k    // 2016: Intel SHA-NI
 	CapHaswell     Capability = C.sz_cap_haswell_k     // 2013: Intel AVX2
 	CapSkylake     Capability = C.sz_cap_skylake_k     // 2017: Intel AVX-512
-	CapIcelake     Capability = C.sz_cap_icelake_k     // 2019: Intel AVX-512 VBMI2, VAES
-	CapNeon        Capability = C.sz_cap_neon_k        // 2013: ARM NEON
-	CapNeonAes     Capability = C.sz_cap_neonaes_k     // 2013: ARM NEON AES
-	CapNeonSha     Capability = C.sz_cap_neonsha_k     // 2013: ARM NEON SHA
-	CapSve         Capability = C.sz_cap_sve_k         // 2020: ARM SVE
-	CapSve2        Capability = C.sz_cap_sve2_k        // 2022: ARM SVE2
-	CapSve2Aes     Capability = C.sz_cap_sve2aes_k     // 2022: ARM SVE2 AES
-	CapRvv         Capability = C.sz_cap_rvv_k         // 2023: RISC-V Vector
-	CapRvvCrypto   Capability = C.sz_cap_rvvcrypto_k   // RISC-V Vector Crypto
+	CapIceLake     Capability = C.sz_cap_icelake_k     // 2019: Intel AVX-512 VBMI2, VAES
+	CapNEON        Capability = C.sz_cap_neon_k        // 2013: ARM NEON
+	CapNEONAES     Capability = C.sz_cap_neonaes_k     // 2013: ARM NEON AES
+	CapNEONSHA     Capability = C.sz_cap_neonsha_k     // 2013: ARM NEON SHA
+	CapSVE         Capability = C.sz_cap_sve_k         // 2020: ARM SVE
+	CapSVE2        Capability = C.sz_cap_sve2_k        // 2022: ARM SVE2
+	CapSVE2AES     Capability = C.sz_cap_sve2aes_k     // 2022: ARM SVE2 AES
+	CapRVV         Capability = C.sz_cap_rvv_k         // 2023: RISC-V Vector
+	CapRVVCrypto   Capability = C.sz_cap_rvvcrypto_k   // RISC-V Vector Crypto
 	CapV128        Capability = C.sz_cap_v128_k        // 2021: WASM SIMD128
 	CapV128Relaxed Capability = C.sz_cap_v128relaxed_k // 2022: WASM Relaxed SIMD
-	CapLoongsonAsx Capability = C.sz_cap_loongsonasx_k // LoongArch LASX 256-bit SIMD
-	CapPowerVsx    Capability = C.sz_cap_powervsx_k    // Power VSX 128-bit SIMD
+	CapLoongsonASX Capability = C.sz_cap_loongsonasx_k // LoongArch LASX 256-bit SIMD
+	CapPowerVSX    Capability = C.sz_cap_powervsx_k    // Power VSX 128-bit SIMD
 
-	CapCuda  Capability = C.sz_cap_cuda_k  // Any CUDA device
-	CapRocm  Capability = C.sz_cap_rocm_k  // Any ROCm device
+	CapCUDA  Capability = C.sz_cap_cuda_k  // Any CUDA device
+	CapROCm  Capability = C.sz_cap_rocm_k  // Any ROCm device
 	CapMetal Capability = C.sz_cap_metal_k // Any Metal device
 
-	CapCpus Capability = C.sz_cap_cpus_k // Every CPU capability
-	CapGpus Capability = C.sz_cap_gpus_k // Every GPU capability
+	CapCPUs Capability = C.sz_cap_cpus_k // Every CPU capability
+	CapGPUs Capability = C.sz_cap_gpus_k // Every GPU capability
 	CapAny  Capability = ^Capability(0)  // Every capability
 )
 

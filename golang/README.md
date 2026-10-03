@@ -42,7 +42,7 @@ Every call runs on the CPU and dispatches to the best kernel of its enabled capa
 cpu := sz.CPU()
 enabled, _ := cpu.CapabilitiesEnabled() // what dispatch uses: detected on this CPU and compiled in
 fmt.Println(enabled)                    // like "serial,neon,neonaes,neonsha"
-fmt.Println(enabled.Has(sz.CapNeon))    // test one capability
+fmt.Println(enabled.Has(sz.CapNEON))    // test one capability
 ```
 
 ```go
@@ -62,7 +62,7 @@ A `Device` is the host CPU or one GPU of a runtime, `DeviceCUDA`, `DeviceROCm` o
 `CapabilitiesDetected` and `CapabilitiesCompiled` report the two raw axes, what the device executes and what this binary contains for its kind.
 `CapabilitiesEnabled` is both at once, and on the CPU always keeps `CapSerial`.
 `ConfigureThread` pins the goroutine to an OS thread and prepares it for the kernels of its argument, returning the function that unpins it; it fails on a GPU, which has no thread state to configure.
-Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNeon`, `CapSve2` or `CapCuda`, and `CapCpus`, `CapGpus` and `CapAny` group them.
+Every capability is a typed `Capability` constant, like `CapSerial`, `CapHaswell`, `CapNEON`, `CapSVE2` or `CapCUDA`, and `CapCPUs`, `CapGPUs` and `CapAny` group them.
 A call that reports a failure status returns it as an `error` where the function has one, and panics otherwise.
 
 ## Searching and Counting

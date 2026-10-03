@@ -21,7 +21,7 @@
 
 #include "stringzilla/types.cuh"
 #include "stringzilla/capabilities.h"  // `sz_cap_cuda_k`
-#include "stringzilla/memory/serial.h" // `sz_sequence_copy_serial_`
+#include "stringzilla/memory/serial.h" // `sz_sequence_realloc_serial_`
 
 #if STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__) && !defined(__HIP__)
 #include <cuda_runtime.h> // `cudaLaunchKernel`, `cudaMallocManaged`, `cudaSetDevice`
@@ -56,13 +56,8 @@ STRINGZILLA_INLINE sz_status_t sz_device_enter_cuda_(void *stream, int *caller) 
 /** Makes @p caller current again, closing the scope @ref sz_device_enter_cuda_ opened. */
 STRINGZILLA_INLINE void sz_device_leave_cuda_(int caller) { sz_unused_(cudaSetDevice(caller)); }
 
-/**
- *  @brief Whether the current device can dereference @p pointer: managed memory, or that device's
- *      own memory, never host memory, pinned or not.
- *
- *  Page-locked host memory is the case a caller is most likely to expect to work: the runtime
- *  reports it as host, a kernel cannot address it, and this answers @c sz_false_k for it.
- */
+/** Accepts managed memory or the current device's own allocation.
+ *  Host mappings require a device address and are unsupported by this check. */
 STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_cuda_(void const *pointer) {
     int device = 0;
     cudaPointerAttributes attributes;
@@ -129,9 +124,9 @@ STRINGZILLA_INLINE void sz_memory_free_pinned_cuda_(void *pointer, sz_size_t byt
  *  caller's arguments into.
  *
  *  @param[out] allocator The stateless allocator to initialize, each call on its stream's device.
- *  @sa sz_memory_allocator_init_default
+ *  @sa sz_allocator_init_default
  */
-STRINGZILLA_INLINE void sz_memory_allocator_init_unified_cuda_(sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE void sz_allocator_init_unified_cuda_(sz_allocator_t *allocator) {
     allocator->allocate = &sz_memory_allocate_unified_cuda_;
     allocator->free = &sz_memory_free_device_cuda_;
     allocator->handle = STRINGZILLA_NULL;
@@ -337,10 +332,10 @@ STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, 
 
 #pragma region Device Sequences
 
-/** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_copy_best. */
-STRINGZILLA_INLINE sz_status_t sz_sequence_copy_cuda_(sz_sequence_t *target, sz_sequence_t const *source,
-                                                      sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      void *stream) {
+/** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_realloc_best. */
+STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_cuda_(sz_sequence_t *target, sz_sequence_t const *source,
+                                                         sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                         void *stream) {
     sz_sequence_member_start_t get_start = STRINGZILLA_NULL;
     sz_sequence_member_length_t get_length = STRINGZILLA_NULL;
     int caller = 0;
@@ -356,7 +351,7 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_copy_cuda_(sz_sequence_t *target, sz_
     if (status == sz_success_k && tape && sz_memory_reaches_cuda_(source->handle))
         target->handle = source->handle, target->count = source->count, *allocated_bytes = 0;
     else if (status == sz_success_k &&
-             (status = sz_sequence_copy_serial_(target, source, allocator, allocated_bytes, stream)) == sz_success_k)
+             (status = sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream)) == sz_success_k)
         sz_prefetch_cuda_(target->handle, *allocated_bytes, stream);
     if (status == sz_success_k) target->get_start = get_start, target->get_length = get_length;
     sz_device_leave_cuda_(caller);
@@ -411,15 +406,15 @@ STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream
 
 STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream) { return sz_stream_destroy_cuda_(stream); }
 
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_cuda(sz_memory_allocator_t *allocator) {
-    sz_memory_allocator_init_unified_cuda_(allocator);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator) {
+    sz_allocator_init_unified_cuda_(allocator);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_copy_cuda(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  void *stream) {
-    return sz_sequence_copy_cuda_(target, source, allocator, allocated_bytes, stream);
+STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     void *stream) {
+    return sz_sequence_realloc_cuda_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(void *stream) { return sz_stream_synchronize_cuda_(stream); }

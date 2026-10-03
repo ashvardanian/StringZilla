@@ -359,7 +359,7 @@ pub enum Capability {
     Goldmont = 1 << 2,     // Intel SHA-NI
     Haswell = 1 << 3,      // Intel AVX2
     Skylake = 1 << 4,      // Intel AVX-512
-    Icelake = 1 << 5,      // Intel AVX-512 VBMI2 + VAES
+    IceLake = 1 << 5,      // Intel AVX-512 VBMI2 + VAES
     Neon = 1 << 6,         // Arm NEON
     NeonAes = 1 << 7,      // Arm NEON + AES
     NeonSha = 1 << 8,      // Arm NEON + SHA-256
@@ -384,7 +384,7 @@ const CAPABILITIES: [Capability; 21] = [
     Capability::Goldmont,
     Capability::Haswell,
     Capability::Skylake,
-    Capability::Icelake,
+    Capability::IceLake,
     Capability::Neon,
     Capability::NeonAes,
     Capability::NeonSha,
@@ -806,9 +806,9 @@ unsafe impl<Text: AsRef<[u8]>, const COUNT: usize> Strings for [Text; COUNT] {
 /// A batch of strings copied into one tape, `count + 1` offsets counted from the block's own start
 /// and then the bytes, in a single block of a [`UnifiedAllocator`], which an engine reads in place.
 ///
-/// It is C's `sz_sequence_copy_best`, and the tape is freed when the sequence drops. A host engine
-/// reads a tape copied for any capabilities, and a GPU engine one its device reaches, refusing any
-/// other with [`Status::DeviceMemoryMismatch`].
+/// It is C's `sz_sequence_realloc_best`, and the tape is freed when the sequence drops. A host
+/// engine reads a tape copied for any capabilities, and a GPU engine one its device reaches,
+/// refusing any other with [`Status::DeviceMemoryMismatch`].
 ///
 /// # Examples
 ///
@@ -849,7 +849,7 @@ impl Sequence {
         let mut sequence = MaybeUninit::<_SzSequence>::uninit();
         let mut allocated_bytes = 0;
         with_sequence(texts, |source| unsafe {
-            sz_sequence_copy_best(
+            sz_sequence_realloc_best(
                 sequence.as_mut_ptr(),
                 source,
                 &mut allocator,
@@ -902,7 +902,7 @@ unsafe impl Strings for Sequence {
         let mut sequence = MaybeUninit::<_SzSequence>::uninit();
         let mut allocated_bytes = 0;
         unsafe {
-            sz_sequence_copy_best(
+            sz_sequence_realloc_best(
                 sequence.as_mut_ptr(),
                 &self.sequence,
                 &mut allocator,
@@ -952,7 +952,7 @@ unsafe extern "C" fn tape_length(handle: *const c_void, index: usize) -> usize {
 /// Memory the host and the devices of one capability group both address, for the tapes and the
 /// outputs of their engines.
 ///
-/// It is the C library's `sz_memory_allocator_init_unified_best` behind the standard
+/// It is the C library's `sz_allocator_init_unified_best` behind the standard
 /// [`Allocator`](core::alloc::Allocator), so `Vec::new_in` and every other allocator-aware
 /// collection places its contents there. Every block lands on the device of the stream it borrows,
 /// and a block aligned less strictly than its layout asks is refused.
@@ -995,7 +995,7 @@ impl<'stream> UnifiedAllocator<'stream> {
             free: None,
             handle: core::ptr::null_mut(),
         };
-        unsafe { sz_memory_allocator_init_unified_best(&mut allocator, self.stream.capabilities.0) }.check()?;
+        unsafe { sz_allocator_init_unified_best(&mut allocator, self.stream.capabilities.0) }.check()?;
         Ok(allocator)
     }
 }

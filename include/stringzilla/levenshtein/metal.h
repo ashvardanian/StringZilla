@@ -9,11 +9,11 @@
  *  @sa include/stringzilla/levenshtein/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read, the engine's, the candidates' tape and the distances, must come from
- *  @ref sz_memory_allocator_init_unified_metal on that stream's device, and a round's candidates
- *  must be a tape from @ref sz_sequence_copy_metal, since the kernels read the tape itself. Memory
- *  outside the device's registry draws @c sz_device_memory_mismatch_k, and accessors other than a
- *  tape's draw @c sz_device_code_mismatch_k.
+ *  the kernels read, the engine's, the candidates' tape and the distances, must come from @ref
+ *  sz_allocator_init_unified_metal on that stream's device, and a round's candidates must be a tape
+ *  from @ref sz_sequence_realloc_metal, since the kernels read the tape itself. Memory outside the
+ *  device's registry draws @c sz_device_memory_mismatch_k, and accessors other than a tape's draw
+ *  @c sz_device_code_mismatch_k.
  *
  *  The planes are built on the host, bytes and runes alike, since the block is memory both sides
  *  address. The CUDA tier's narrow byte lanes are a throughput rung only, so their queries take the
@@ -162,8 +162,8 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_bind_head_metal_(sz_levenshtein_en
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *queries,
-                                                             sz_levenshtein_symbol_t symbol,
-                                                             sz_memory_allocator_t *allocator, void *stream) {
+                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                             void *stream) {
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return status;
@@ -181,9 +181,9 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     if (symbol == sz_levenshtein_bytes_k && longest > sz_levenshtein_gpu_words_max_k * 64)
         return sz_unexpected_dimensions_k;
 
-    sz_memory_allocator_t unified;
+    sz_allocator_t unified;
     if (allocator) unified = *allocator;
-    else sz_memory_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal(&unified);
     sz_size_t const buckets_bound = sz_levenshtein_query_words(longest);
     status = sz_levenshtein_engine_build_(
         queries, symbol, sz_levenshtein_head_bytes_metal_(queries->count, buckets_bound), &unified, stream, engine);

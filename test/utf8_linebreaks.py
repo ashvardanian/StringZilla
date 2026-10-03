@@ -30,7 +30,6 @@ from base import (
     assert_backends_agree,
     malformed_utf8_corpus,
     representatives_by_class,
-    run_across_backends,
     scale_iterations,
     vector_width_bracketing_strings,
 )
@@ -259,11 +258,11 @@ LINEBREAK_REALISTIC_TEXTS = [
 @pytest.mark.parametrize(
     "text", LINEBREAK_REALISTIC_TEXTS + list(malformed_utf8_corpus()) + vector_width_bracketing_strings()
 )
-def test_utf8_linebreaks_backend_differential(text):
+def test_utf8_linebreaks_backend_differential(backend_results, text):
     """`utf8_linebreaks` agrees across every `capability_sweep()` backend on realistic, malformed, and
     lane-straddling inputs, compared as raw segment bytes so malformed UTF-8 sweeps safely; a divergence
     is a kernel bug, not a binding bug."""
-    results = run_across_backends(
+    results = backend_results(
         lambda capabilities: [bytes(segment) for segment in sz.utf8_linebreaks(text, capabilities=capabilities)]
     )
     assert_backends_agree(results, format_inputs=lambda: f"text={text!r}")

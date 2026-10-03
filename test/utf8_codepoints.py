@@ -28,7 +28,6 @@ from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
-    run_across_backends,
     scale_iterations,
     vector_width_bracketing_strings,
 )
@@ -145,46 +144,46 @@ UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS = [
 
 
 @pytest.mark.parametrize("text", UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_count_backend_differential(text):
+def test_utf8_count_backend_differential(backend_results, text):
     """utf8_count agrees across every capability_sweep() backend and equals Python's own codepoint count
     for CJK, emoji, ZWJ, and vector-width-boundary text; a divergence is a kernel bug, not a binding bug."""
-    results = run_across_backends(lambda capabilities: sz.utf8_count(text, capabilities=capabilities))
+    results = backend_results(lambda capabilities: sz.utf8_count(text, capabilities=capabilities))
     assert_backends_agree(results, oracle=len(text), format_inputs=lambda: repr(text))
 
 
 @pytest.mark.parametrize("text", UTF8_CODEPOINTS_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_codepoints_backend_differential(text):
+def test_utf8_codepoints_backend_differential(backend_results, text):
     """utf8_codepoints agrees across every capability_sweep() backend on the same curated text as the
     utf8_count sweep; a divergence is a kernel bug, not a binding bug."""
-    results = run_across_backends(lambda capabilities: list(sz.utf8_codepoints(text, capabilities=capabilities)))
+    results = backend_results(lambda capabilities: list(sz.utf8_codepoints(text, capabilities=capabilities)))
     assert_backends_agree(results, oracle=[ord(c) for c in text], format_inputs=lambda: repr(text))
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_count_backend_differential_malformed(raw):
+def test_utf8_count_backend_differential_malformed(backend_results, raw):
     """utf8_count agrees across every capability_sweep() backend on the malformed-byte corpus and never
     crashes; a divergence is a kernel bug, not a binding bug."""
-    results = run_across_backends(lambda capabilities: sz.utf8_count(raw, capabilities=capabilities))
+    results = backend_results(lambda capabilities: sz.utf8_count(raw, capabilities=capabilities))
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
     assert 0 <= next(iter(results.values())) <= len(raw)
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_codepoints_backend_differential_malformed(raw):
+def test_utf8_codepoints_backend_differential_malformed(backend_results, raw):
     """utf8_codepoints agrees across every capability_sweep() backend on the malformed-byte corpus, never
     crashes, and only emits valid, non-surrogate Unicode scalar values; a divergence is a kernel bug, not
     a binding bug."""
-    results = run_across_backends(lambda capabilities: list(sz.utf8_codepoints(raw, capabilities=capabilities)))
+    results = backend_results(lambda capabilities: list(sz.utf8_codepoints(raw, capabilities=capabilities)))
     assert_backends_agree(results, format_inputs=lambda: raw.hex())
     for codepoint in next(iter(results.values())):
         assert 0 <= codepoint <= 0x10FFFF and not (0xD800 <= codepoint <= 0xDFFF)
 
 
-def test_utf8_count_backend_differential_random(rng: Random):
+def test_utf8_count_backend_differential_random(backend_results, rng: Random):
     """utf8_count agrees across every capability_sweep() backend and with Python's own codepoint count
     for random ASCII corpora; a divergence is a kernel bug, not a binding bug."""
     text = get_random_string(rng)
-    results = run_across_backends(lambda capabilities: sz.utf8_count(text, capabilities=capabilities))
+    results = backend_results(lambda capabilities: sz.utf8_count(text, capabilities=capabilities))
     assert_backends_agree(results, oracle=len(text), format_inputs=lambda: repr(text))
 
 

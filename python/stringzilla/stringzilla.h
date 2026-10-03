@@ -81,7 +81,7 @@ extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *da
                                                  sz_size_t *count);
 
 /** Helper function to replace the memory allocator in a @c Strs object. */
-extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_memory_allocator_t *allocator);
+extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allocator);
 
 /* `shared.c` */
 
@@ -223,7 +223,7 @@ typedef struct {
             sz_size_t count;
             sz_cptr_t data;
             sz_u32_t *offsets;
-            sz_memory_allocator_t allocator;
+            sz_allocator_t allocator;
         } u32_tape;
 
         /**
@@ -244,7 +244,7 @@ typedef struct {
             sz_size_t count;
             sz_cptr_t data;
             sz_u64_t *offsets;
-            sz_memory_allocator_t allocator;
+            sz_allocator_t allocator;
         } u64_tape;
 
         /** Reordered subviews - owns only the array of individual spans. Each span points to data
@@ -253,7 +253,7 @@ typedef struct {
             sz_size_t count;
             sz_string_view_t *spans;
             PyObject *parent;
-            sz_memory_allocator_t allocator;
+            sz_allocator_t allocator;
         } fragmented;
 
     } data;

@@ -101,7 +101,7 @@ sz_size_t overlap_btree_sort_haswell_(sz_u32_t *keys, sz_size_t count) {
 sz_size_t overlap_btree_probe_haswell_(sz_overlap_btree_t const *btree, sz_u32_t const *keys, sz_size_t count) {
     return sz_overlap_u32x8_btree_probe_haswell(btree, keys, count);
 }
-sz_status_t pgrams_sort_haswell_(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *allocator,
+sz_status_t pgrams_sort_haswell_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
                                  sz_sorted_idx_t *order) {
     return sz_pgrams_sort_haswell_(pgrams, count, allocator, order);
 }
@@ -200,7 +200,7 @@ sz_size_t overlap_btree_sort_skylake_(sz_u32_t *keys, sz_size_t count) {
 sz_size_t overlap_btree_probe_skylake_(sz_overlap_btree_t const *btree, sz_u32_t const *keys, sz_size_t count) {
     return sz_overlap_u32x16_btree_probe_skylake(btree, keys, count);
 }
-sz_status_t pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *allocator,
+sz_status_t pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
                                  sz_sorted_idx_t *order) {
     return sz_pgrams_sort_skylake_(pgrams, count, allocator, order);
 }

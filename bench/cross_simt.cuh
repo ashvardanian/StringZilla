@@ -91,7 +91,7 @@ inline sz_capability_t simt_capabilities() noexcept {
 
 /** A sequence copied into one unified tape a kernel reads, returned to its allocator with it. */
 struct simt_tape_t {
-    sz_memory_allocator_t unified {};
+    sz_allocator_t unified {};
     sz_sequence_t sequence {};
     sz_size_t bytes = 0;
 
@@ -104,8 +104,9 @@ struct simt_tape_t {
 
     /** Copies @p source in, once, migrating it to the device so no round times the first touch. */
     sz_sequence_t const &copy(sz_sequence_t const &source) {
-        if (sz_memory_allocator_init_unified_best(&unified, simt_capabilities()) != sz_success_k ||
-            sz_sequence_copy_best(&sequence, &source, &unified, &bytes, simt_capabilities(), nullptr) != sz_success_k ||
+        if (sz_allocator_init_unified_best(&unified, simt_capabilities()) != sz_success_k ||
+            sz_sequence_realloc_best(&sequence, &source, &unified, &bytes, simt_capabilities(), nullptr) !=
+                sz_success_k ||
             sz_stream_synchronize_best(simt_capabilities(), nullptr) != sz_success_k)
             throw std::runtime_error("The tape would not reach the device.");
         return sequence;
@@ -599,13 +600,13 @@ struct overlap_scores_from_simt {
     overlap_simt_corpus_t &resident;
     std::size_t windows;
     std::string query;
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
     sz_overlap_engine_t engine {};
 
     overlap_scores_from_simt(corpus_t const &corpus, overlap_simt_corpus_t &resident, std::size_t query_bytes,
                              std::size_t width)
         : resident(resident), windows(resident.windows_at(width)), query(overlap_query_text_(corpus, query_bytes)) {
-        sz_memory_allocator_init_unified_best(&allocator, simt_capabilities());
+        sz_allocator_init_unified_best(&allocator, simt_capabilities());
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
@@ -636,7 +637,7 @@ struct overlap_scores_from_sz {
     overlap_simt_corpus_t &resident;
     std::size_t windows;
     std::string query;
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
     std::vector<sz_f32_t> scores;
     sz_overlap_engine_t engine {};
 
@@ -644,7 +645,7 @@ struct overlap_scores_from_sz {
                            std::size_t width)
         : resident(resident), windows(resident.windows_at(width)), query(overlap_query_text_(corpus, query_bytes)),
           scores(resident.scores.size()) {
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_init_default(&allocator);
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
@@ -814,8 +815,8 @@ static void bench_substrings_bm25(environment_t const &env, corpus_t const &corp
 static void bench_substrings_slice(environment_t const &env, corpus_t const &corpus,
                                    substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
                                    substrings_slice_t slice, sz_substrings_case_sensitivity_t sensitivity) {
-    sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_unified_best(&allocator, simt_capabilities());
+    sz_allocator_t allocator;
+    sz_allocator_init_unified_best(&allocator, simt_capabilities());
     substrings_dictionary_t dictionary(env, corpus, slice, sensitivity, allocator);
     std::string const suffix = substrings_label(slice, sensitivity);
     if (dictionary.needles.empty()) {
@@ -863,8 +864,8 @@ enum { substrings_small_batch_haystacks_k = 64 };
 /** Counting and finding over the leading few haystacks, where the gaps between a round's launches
  *  rather than its walk set the rate. */
 static void bench_substrings_small_batch(environment_t const &env, corpus_t const &corpus) {
-    sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_unified_best(&allocator, simt_capabilities());
+    sz_allocator_t allocator;
+    sz_allocator_init_unified_best(&allocator, simt_capabilities());
     substrings_dictionary_t const dictionary(env, corpus, substrings_slice_t::sampled_k, sz_substrings_cased_k,
                                              allocator);
     if (dictionary.needles.empty()) return;
@@ -889,8 +890,8 @@ enum { substrings_documents_k = 8 };
 
 /** BM25 over the corpus cut into a few long documents, the device arm against the CPU one. */
 static void bench_substrings_documents(environment_t const &env, corpus_t const &corpus) {
-    sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_unified_best(&allocator, simt_capabilities());
+    sz_allocator_t allocator;
+    sz_allocator_init_unified_best(&allocator, simt_capabilities());
     substrings_dictionary_t const dictionary(env, corpus, substrings_slice_t::sampled_k, sz_substrings_cased_k,
                                              allocator);
     if (dictionary.needles.empty()) return;

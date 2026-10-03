@@ -47,7 +47,7 @@ typedef struct PyAPI {
     sz_bool_t (*sz_py_export_strings_as_sequence)(PyObject *, sz_sequence_t *);
     sz_bool_t (*sz_py_export_strings_as_u32tape)(PyObject *, sz_cptr_t *, sz_u32_t const **, sz_size_t *);
     sz_bool_t (*sz_py_export_strings_as_u64tape)(PyObject *, sz_cptr_t *, sz_u64_t const **, sz_size_t *);
-    sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_memory_allocator_t *);
+    sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_allocator_t *);
 } PyAPI;
 
 #pragma region Capabilities

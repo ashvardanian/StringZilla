@@ -276,9 +276,9 @@ func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _
     let enabled = try cpu.capabilitiesEnabled
     let names: [(Capabilities, String)] = [
         (.serial, "serial"), (.westmere, "westmere"), (.goldmont, "goldmont"), (.haswell, "haswell"),
-        (.skylake, "skylake"), (.icelake, "icelake"), (.neon, "neon"), (.neonAes, "neonaes"), (.neonSha, "neonsha"),
-        (.sve, "sve"), (.sve2, "sve2"), (.sve2Aes, "sve2aes"), (.rvv, "rvv"), (.rvvCrypto, "rvvcrypto"),
-        (.v128, "v128"), (.v128Relaxed, "v128relaxed"), (.loongsonAsx, "loongsonasx"), (.powerVsx, "powervsx"),
+        (.skylake, "skylake"), (.iceLake, "icelake"), (.neon, "neon"), (.neonAES, "neonaes"), (.neonSHA, "neonsha"),
+        (.sve, "sve"), (.sve2, "sve2"), (.sve2AES, "sve2aes"), (.rvv, "rvv"), (.rvvCrypto, "rvvcrypto"),
+        (.v128, "v128"), (.v128Relaxed, "v128relaxed"), (.loongsonASX, "loongsonasx"), (.powerVSX, "powervsx"),
         (.cuda, "cuda"), (.rocm, "rocm"), (.metal, "metal"),
     ]
     for (capability, name) in names { #expect(capability.description == name) }

@@ -1472,11 +1472,6 @@ def capability_sweep():
     return sweep
 
 
-def run_across_backends(operation) -> dict[object, object]:
-    """Run ``operation(config)`` for every :func:`capability_sweep` config, returning ``{config: result}``."""
-    return {config: operation(config) for config in capability_sweep()}
-
-
 def assert_backends_agree(results, *, oracle=None, format_inputs=None):
     """Assert every backend agrees with the baseline, and the baseline matches ``oracle`` if given.
     ``format_inputs`` is a zero-arg callable rendered only on failure."""

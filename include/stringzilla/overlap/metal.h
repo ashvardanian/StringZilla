@@ -11,12 +11,12 @@
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
  *  the kernels read, the forest, the round block, the candidates' tape and the scores, must come
- *  from @ref sz_memory_allocator_init_unified_metal on that stream's device; memory outside the
- *  device's registry draws @c sz_device_memory_mismatch_k.
+ *  from @ref sz_allocator_init_unified_metal on that stream's device; memory outside the device's
+ *  registry draws @c sz_device_memory_mismatch_k.
  *
  *  The kernels read the tape itself instead of calling a sequence's accessors, since Metal has no
  *  device function pointers to call cheaply, so a round's candidates must come from
- *  @ref sz_sequence_copy_metal; any other sequence draws @c sz_device_code_mismatch_k.
+ *  @ref sz_sequence_realloc_metal; any other sequence draws @c sz_device_code_mismatch_k.
  */
 #ifndef STRINGZILLA_OVERLAP_METAL_H_
 #define STRINGZILLA_OVERLAP_METAL_H_
@@ -104,7 +104,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_enqueue_metal_(sz_metal_call_t *call, 
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                          sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                                         sz_size_t candidates_budget, sz_memory_allocator_t *allocator,
+                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                          void *stream) {
     sz_metal_call_t call;
     sz_status_t const entered = sz_device_enter_metal_(stream, &call);
@@ -113,9 +113,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     for (sz_size_t index = 0; index != window_widths_count; ++index)
         if (window_widths[index] > sz_overlap_gpu_widest_window_k) return sz_unexpected_dimensions_k;
 
-    sz_memory_allocator_t unified;
+    sz_allocator_t unified;
     if (allocator) unified = *allocator;
-    else sz_memory_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal(&unified);
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count,
                                                        sizeof(sz_overlap_geometry_metal_t), &unified, stream, engine);
     if (opened != sz_success_k) return opened;
@@ -132,8 +132,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
         sz_size_t const entries = engine->nodes_offsets[index + 1] - engine->nodes_offsets[index];
         if (entries > widest_nodes) widest_nodes = entries;
     }
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    sz_allocator_t host;
+    sz_allocator_init_default(&host);
     sz_size_t const chain_bytes = (longest_query + 1) * sizeof(sz_f64_t);
     sz_f64_t *const chain = (sz_f64_t *)host.allocate(chain_bytes, host.handle, stream);
     if (!chain) {

@@ -280,13 +280,13 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_quicksort_pgrams_haswell_(
                                                       last_pivot_index + 1, end_in_sequence, top_count);
 }
 
-STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_haswell_(sz_pgram_t *pgrams, sz_size_t count,
-                                                       sz_memory_allocator_t *allocator, sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_haswell_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
+                                                       sz_sorted_idx_t *order) {
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -383,7 +383,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_haswell_(
 #if STRINGZILLA_TARGET_HASWELL
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                        sz_bool_t reverse, sz_memory_allocator_t *allocator,
+                                                        sz_bool_t reverse, sz_allocator_t *allocator,
                                                         sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t count = sequence->count;
@@ -395,9 +395,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
         return sz_success_k;
     }
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -422,7 +422,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_haswell(sz_sequence_t const *seq
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_haswell(           //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     sz_size_t const count = sequence->count;
@@ -430,9 +430,9 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_haswell(           //
         order[sequence_index] = sequence_index;
     if (count < 2) return sz_success_k;
 
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 

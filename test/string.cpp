@@ -303,20 +303,20 @@ void test_strings_tape_overflow_unit() {
 
 #pragma region Allocator
 
-/** Validates @c sz_memory_allocator_t and related construction utilities. */
+/** Validates @c sz_allocator_t and related construction utilities. */
 void test_allocator_unit() {
     // Our behavior for `malloc(0)` is to return a NULL pointer,
     // while the standard is implementation-defined.
     {
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         verify(allocator.allocate(0, allocator.handle, nullptr) == nullptr);
     }
 
     // Non-NULL allocation
     {
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         void *byte = allocator.allocate(1, allocator.handle, nullptr);
         verify(byte != nullptr && "Default allocator returned NULL for a non-zero-length allocation");
         allocator.free(byte, 1, allocator.handle, nullptr);
@@ -325,8 +325,8 @@ void test_allocator_unit() {
     // Use a fixed buffer
     {
         char buffer[1024];
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_fixed(&allocator, buffer, sizeof(buffer));
+        sz_allocator_t allocator;
+        sz_allocator_init_fixed(&allocator, buffer, sizeof(buffer));
         void *byte = allocator.allocate(1, allocator.handle, nullptr);
         verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
         allocator.free(byte, 1, allocator.handle, nullptr);
@@ -1437,7 +1437,7 @@ void test_string_reserve_unit() {
     // C API: grow, shrink, then fit - the buffer, length, contents and terminator stay intact.
     {
         // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
-        sz_memory_allocator_t allocator;
+        sz_allocator_t allocator;
         allocator.allocate = +[](sz_size_t length, void *, void *) -> void * {
             void *const block = std::malloc(length);
             if (block) std::memset(block, '#', length);

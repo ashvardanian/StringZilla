@@ -377,7 +377,7 @@ STRINGZILLA_INLINE void sz_substrings_round_bind_cuda_(sz_substrings_engine_t co
  *  no compute verb ever allocates. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_cuda_(sz_substrings_engine_t *engine, void *stream) {
     sz_substrings_arena_cuda_t const arena = sz_substrings_arena_cuda_(engine, engine->haystacks_budget);
-    sz_memory_allocator_t *const allocator = &engine->allocator;
+    sz_allocator_t *const allocator = &engine->allocator;
     void *const block = allocator->allocate(arena.total, allocator->handle, stream);
     if (!block) return sz_bad_alloc_k;
     if (!sz_memory_reaches_cuda_(block)) {
@@ -548,13 +548,13 @@ STRINGZILLA_INLINE sz_bool_t sz_substrings_resident_cuda_(sz_substrings_engine_t
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream) {
-    sz_memory_allocator_t unified;
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream) {
+    sz_allocator_t unified;
     sz_size_t staged_bytes;
     sz_status_t status;
     if (!sz_device_multiprocessors_cuda_()) return sz_missing_gpu_k;
     if (!allocator) {
-        sz_memory_allocator_init_unified_cuda_(&unified);
+        sz_allocator_init_unified_cuda_(&unified);
         allocator = &unified;
     }
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_gpu_matches_budget_default_k;
@@ -578,7 +578,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_scoped_cuda_(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream) {
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -840,7 +840,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_cuda(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                            void *stream) {
     return sz_substrings_engine_init_scoped_cuda_(engine, needles, case_sensitivity, overlap_policy, hot_states,
                                                   matches_budget, haystacks_budget, allocator, stream);

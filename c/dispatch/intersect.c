@@ -33,10 +33,10 @@ static sz_capability_kernels_t const *sz_sequence_intersect_capabilities(void) {
     return lists;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                             //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,      //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count, //
-    sz_size_t *first_positions, sz_size_t *second_positions,                        //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                        //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
+    sz_size_t *first_positions, sz_size_t *second_positions,                   //
     sz_capability_t capabilities, void *stream) {
     sz_kernel_sequence_intersect_t const kernel = (sz_kernel_sequence_intersect_t)sz_kernel_pick_(
         capabilities, sz_sequence_intersect_capabilities());

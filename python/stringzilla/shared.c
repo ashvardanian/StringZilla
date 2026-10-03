@@ -66,7 +66,7 @@ Strs *strs_make_empty_fragmented_(void) {
     result->data.fragmented.count = 0;
     result->data.fragmented.spans = NULL;
     result->data.fragmented.parent = NULL;
-    sz_memory_allocator_init_default(&result->data.fragmented.allocator);
+    sz_allocator_init_default(&result->data.fragmented.allocator);
     return result;
 }
 

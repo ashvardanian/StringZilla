@@ -32,15 +32,15 @@ STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream
 
 STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream) { return sz_stream_destroy_rocm_(stream); }
 
-STRINGZILLA_API sz_status_t sz_memory_allocator_init_unified_rocm(sz_memory_allocator_t *allocator) {
-    sz_memory_allocator_init_unified_rocm_(allocator);
+STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator) {
+    sz_allocator_init_unified_rocm_(allocator);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_copy_rocm(sz_sequence_t *target, sz_sequence_t const *source,
-                                                  sz_memory_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                  void *stream) {
-    return sz_sequence_copy_rocm_(target, source, allocator, allocated_bytes, stream);
+STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
+                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
+                                                     void *stream) {
+    return sz_sequence_realloc_rocm_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream) { return sz_stream_synchronize_rocm_(stream); }

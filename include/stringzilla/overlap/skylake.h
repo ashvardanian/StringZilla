@@ -488,13 +488,13 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_bt
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                            sz_size_t const *window_widths,
                                                            sz_size_t window_widths_count, sz_size_t candidates_budget,
-                                                           sz_memory_allocator_t *allocator, void *stream) {
+                                                           sz_allocator_t *allocator, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
     sz_size_t const step = sz_overlap_f64x8_positions_per_step_skylake_k;
-    sz_memory_allocator_t host;
+    sz_allocator_t host;
     if (allocator) host = *allocator;
-    else sz_memory_allocator_init_default(&host);
+    else sz_allocator_init_default(&host);
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, stream,
                                                        engine);
     if (opened != sz_success_k) return opened;

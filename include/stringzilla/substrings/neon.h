@@ -75,7 +75,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_neon(sz_substrings_engine_
                                                            sz_substrings_case_sensitivity_t case_sensitivity,
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                            void *stream) {
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,

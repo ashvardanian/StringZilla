@@ -174,7 +174,7 @@ struct substrings_dictionary_t {
     sz_sequence_t replacements {};
 
     /** What every engine over this vocabulary is built from. */
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
 
     /** Whether both sides fold before they meet. */
     sz_substrings_case_sensitivity_t sensitivity;
@@ -189,7 +189,7 @@ struct substrings_dictionary_t {
     std::size_t matches_budget = 0;
 
     substrings_dictionary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
-                            sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &memory)
+                            sz_substrings_case_sensitivity_t sensitivity, sz_allocator_t const &memory)
         : needles(substrings_vocabulary(env, corpus, slice)), needle_views(needles.size()),
           replacement_views(needles.size()), allocator(memory), sensitivity(sensitivity),
           haystacks_budget(corpus.tokens.size()) {
@@ -224,8 +224,8 @@ enum class substrings_residency_t {
 /** Compiles @p dictionary into a host engine, which every CPU tier's verbs then read. */
 inline sz_status_t substrings_init_host(substrings_dictionary_t const &dictionary,
                                         sz_substrings_overlap_policy_t policy, sz_substrings_engine_t &engine) {
-    sz_memory_allocator_t host;
-    sz_memory_allocator_init_default(&host);
+    sz_allocator_t host;
+    sz_allocator_init_default(&host);
     return sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity, policy,
                                      STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(), &host,
                                      nullptr);
@@ -236,7 +236,7 @@ inline sz_status_t substrings_init_host(substrings_dictionary_t const &dictionar
 /** Compiles @p dictionary where a kernel reads it, through the dictionary's unified allocator. */
 inline sz_status_t substrings_init_device(substrings_dictionary_t const &dictionary,
                                           sz_substrings_overlap_policy_t policy, sz_substrings_engine_t &engine) {
-    sz_memory_allocator_t allocator = dictionary.allocator;
+    sz_allocator_t allocator = dictionary.allocator;
     auto const [device, make_status] = sz::device_t::make(
         STRINGZILLA_ARCH_ROCM_ ? sz::device_kind_t::rocm_k : sz::device_kind_t::cuda_k, 0);
     if (sz::failed(make_status)) return static_cast<sz_status_t>(make_status);

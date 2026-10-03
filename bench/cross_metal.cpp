@@ -88,7 +88,7 @@ static std::size_t overlap_metal_count_(environment_t const &env, corpus_t const
  *  both in its unified memory. */
 struct overlap_metal_corpus_t {
     void *queue;
-    sz_memory_allocator_t unified {};
+    sz_allocator_t unified {};
     sz_sequence_t candidates {};
     sz_size_t candidates_bytes = 0;
     sz_f32_t *scores = nullptr;
@@ -116,9 +116,10 @@ struct overlap_metal_corpus_t {
         }
         sz_sequence_t host {};
         sz_sequence_from_string_views(views.data(), count, &host);
-        sz_memory_allocator_init_unified_metal(&unified);
+        sz_allocator_init_unified_metal(&unified);
         scores = static_cast<sz_f32_t *>(unified.allocate(count * sizeof(sz_f32_t), unified.handle, queue));
-        if (!scores || sz_sequence_copy_metal(&candidates, &host, &unified, &candidates_bytes, queue) != sz_success_k)
+        if (!scores ||
+            sz_sequence_realloc_metal(&candidates, &host, &unified, &candidates_bytes, queue) != sz_success_k)
             throw std::runtime_error("Unified memory could not hold the corpus.");
     }
     ~overlap_metal_corpus_t() noexcept {
@@ -181,7 +182,7 @@ struct overlap_scores_from_sz {
     overlap_metal_corpus_t &resident;
     std::size_t windows;
     std::string query;
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
     std::vector<sz_f32_t> scores;
     sz_overlap_engine_t engine {};
 
@@ -189,7 +190,7 @@ struct overlap_scores_from_sz {
                            std::size_t width)
         : resident(resident), windows(resident.windows_at(width)), query(overlap_query_text_(corpus, query_bytes)),
           scores(resident.count) {
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_init_default(&allocator);
         sz_string_view_t const view {query.data(), query.size()};
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);

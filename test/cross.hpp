@@ -2009,7 +2009,7 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
                 fail_backend_(backend.name, "a refused round still wrote the distances");
     }
 
-    sz_memory_allocator_t refusing = refusing_allocator_();
+    sz_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const refused_queries = {"kitten", "sitting"};
     sz_sequence_t const refused_sequence = sequence_from_(refused_queries);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
@@ -2399,7 +2399,7 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
  *  its own axis are reported without touching the outputs. */
 inline void check_overlap_safety_(overlap_backend_t const &backend) {
     handle_checked_heap_t heap;
-    sz_memory_allocator_t refusing = refusing_allocator_();
+    sz_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const words = {"sitting", "kitten"};
     std::vector<std::string> const kitten = {"kitten"};
     std::vector<std::string> const empty = {""};

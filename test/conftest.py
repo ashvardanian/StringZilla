@@ -18,6 +18,7 @@ import random
 import pytest
 from base import (
     SETTINGS,
+    capability_sweep,
     StreamKey,
     UnicodeDataDownloadError,
     get_combining_classes,
@@ -80,8 +81,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 @pytest.fixture
 def seed(request: pytest.FixtureRequest) -> StreamKey:
-    """This test's key: the run seed mixed with its name, parameters and repeat step, as in C++."""
-    return stream_key(SETTINGS.seed, request.node.name)
+    """Share inputs across CPU masks while keeping other parameters and repeat steps distinct."""
+    name = request.node.name
+    callspec = getattr(request.node, "callspec", None)
+    if callspec is not None and {"capability", "capabilities"} & callspec.params.keys():
+        parameters = {key: value for key, value in callspec.params.items() if key not in {"capability", "capabilities"}}
+        name = (request.node.originalname or request.node.name) + repr(parameters)
+    return stream_key(SETTINGS.seed, name)
 
 
 @pytest.fixture
@@ -203,3 +209,20 @@ def normalization_cases():
         return get_normalization_test_cases()
     except UnicodeDataDownloadError:
         pytest.skip("Unicode NormalizationTest data unavailable")
+
+
+@pytest.fixture(params=capability_sweep(), ids=lambda mask: mask.name.lower().replace("|", "+"))
+def capabilities(request: pytest.FixtureRequest) -> sz.Capability:
+    """One CPU mask from the differential correctness sweep, including serial fallback."""
+    return request.param
+
+
+@pytest.fixture
+def backend_results(capabilities):
+    """Compare this item's CPU mask with the serial reference on identical inputs."""
+
+    def run(operation):
+        masks = dict.fromkeys((sz.Capability.SERIAL, capabilities))
+        return {mask: operation(mask) for mask in masks}
+
+    return run

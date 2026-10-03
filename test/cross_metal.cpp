@@ -50,13 +50,13 @@ struct metal_unified_alloc {
     template <typename other_type_>
     metal_unified_alloc(metal_unified_alloc<other_type_> const &other) noexcept : queue(other.queue) {}
     value_type *allocate(std::size_t count) {
-        sz_memory_allocator_t unified;
-        sz_memory_allocator_init_unified_metal(&unified);
+        sz_allocator_t unified;
+        sz_allocator_init_unified_metal(&unified);
         return static_cast<value_type *>(unified.allocate(count * sizeof(value_type), unified.handle, queue));
     }
     void deallocate(value_type *pointer, std::size_t count) {
-        sz_memory_allocator_t unified;
-        sz_memory_allocator_init_unified_metal(&unified);
+        sz_allocator_t unified;
+        sz_allocator_init_unified_metal(&unified);
         unified.free(pointer, count * sizeof(value_type), unified.handle, queue);
     }
     template <typename other_type_>
@@ -84,14 +84,14 @@ struct metal_tape_t {
         reset();
         sz_sequence_t host {};
         sz_sequence_from_string_views(views.data(), views.size(), &host);
-        sz_memory_allocator_t unified;
-        sz_memory_allocator_init_unified_metal(&unified);
-        verify(sz_sequence_copy_metal(&sequence, &host, &unified, &bytes, queue) == sz_success_k);
+        sz_allocator_t unified;
+        sz_allocator_init_unified_metal(&unified);
+        verify(sz_sequence_realloc_metal(&sequence, &host, &unified, &bytes, queue) == sz_success_k);
     }
     void reset() noexcept {
         if (!bytes) return;
-        sz_memory_allocator_t unified;
-        sz_memory_allocator_init_unified_metal(&unified);
+        sz_allocator_t unified;
+        sz_allocator_init_unified_metal(&unified);
         unified.free(const_cast<void *>(sequence.handle), bytes, unified.handle, queue);
         bytes = 0;
     }
@@ -1076,6 +1076,21 @@ std::size_t test_cross_metal(environment_t const &env, void *queue) {
     cross_section_t check(env);
     check.detected = metal_capabilities_();
     check.section("Cross Metal", sz_cap_metal_k);
+    check("test_sequence_realloc_metal", [&] {
+        sz_u64_t host_offsets[] = {2 * sizeof(sz_u64_t), 2 * sizeof(sz_u64_t)};
+        sz_sequence_t host {};
+        host.handle = host_offsets, host.count = 1;
+        host.get_start = sz_sequence_tape_start, host.get_length = sz_sequence_tape_length;
+        sz_allocator_t unified;
+        verify(sz_allocator_init_unified_metal(&unified) == sz_success_k);
+        sz_sequence_t tape {}, borrowed {};
+        sz_size_t bytes = 0, borrowed_bytes = 1;
+        verify(sz_sequence_realloc_metal(&tape, &host, &unified, &bytes, queue) == sz_success_k);
+        verify(bytes == sizeof(host_offsets) && tape.handle != host.handle);
+        verify(sz_sequence_realloc_metal(&borrowed, &tape, &unified, &borrowed_bytes, queue) == sz_success_k);
+        verify(borrowed.handle == tape.handle && !borrowed_bytes);
+        unified.free(const_cast<void *>(tape.handle), bytes, unified.handle, queue);
+    });
     check_metal_backend_(check, queue, metal);
     return check.failures;
 }

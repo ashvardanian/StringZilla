@@ -231,7 +231,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
-                                                      sz_memory_allocator_t *allocator, void *stream) {
+                                                      sz_allocator_t *allocator, void *stream) {
     sz_kernel_substrings_engine_init_t const kernel = (sz_kernel_substrings_engine_init_t)sz_kernel_pick_(
         capabilities, sz_substrings_engine_init_capabilities());
     if (!kernel) return sz_missing_kernel_k;

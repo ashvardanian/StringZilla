@@ -65,9 +65,9 @@ STRINGZILLA_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x
     return matches_mask;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                              //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,          //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                       //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,   //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
@@ -92,9 +92,9 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 

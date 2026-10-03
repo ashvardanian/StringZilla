@@ -40,10 +40,8 @@ from base import (
     VECTOR_WIDTH_LENGTHS,
     StreamKey,
     assert_backends_agree,
-    capability_sweep,
     differential_bodies,
     get_random_string,
-    run_across_backends,
 )
 
 # region Unit
@@ -382,31 +380,31 @@ def test_hmac_sha256_kwargs():
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_bytesum(length: int, rng: Random):
+def test_unit_backend_differential_bytesum(backend_results, length: int, rng: Random):
     """`sz.bytesum` must agree across every backend and match a plain Python byte-sum oracle."""
     for body in differential_bodies(length, rng):
         oracle = sum(body.encode())
         assert_backends_agree(
-            run_across_backends(lambda capabilities, body=body: sz.bytesum(body, capabilities=capabilities)),
+            backend_results(lambda capabilities, body=body: sz.bytesum(body, capabilities=capabilities)),
             oracle=oracle,
         )
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_hash(length: int, seed: StreamKey, rng: Random):
+def test_unit_backend_differential_hash(backend_results, length: int, seed: StreamKey, rng: Random):
     """`sz.hash` has no Python-native oracle, so every backend must at least agree with every other one,
     for the standalone function and the `Str` method alike, across random/tiled/all-same-char bodies."""
     for body in differential_bodies(length, rng):
         assert_backends_agree(
-            run_across_backends(lambda capabilities, body=body: sz.hash(body, seed=seed, capabilities=capabilities))
+            backend_results(lambda capabilities, body=body: sz.hash(body, seed=seed, capabilities=capabilities))
         )
         assert_backends_agree(
-            run_across_backends(lambda capabilities, body=body: Str(body).hash(seed=seed, capabilities=capabilities))
+            backend_results(lambda capabilities, body=body: Str(body).hash(seed=seed, capabilities=capabilities))
         )
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_hash_multiseed(length: int, rng: Random):
+def test_unit_backend_differential_hash_multiseed(backend_results, length: int, rng: Random):
     """`sz.hash_multiseed` (both the tuple-returning and output-buffer forms) must agree across every
     backend, for random/tiled/all-same-char bodies."""
     from array import array
@@ -416,9 +414,7 @@ def test_unit_backend_differential_hash_multiseed(length: int, rng: Random):
 
     for body in differential_bodies(length, rng):
         assert_backends_agree(
-            run_across_backends(
-                lambda capabilities, body=body: sz.hash_multiseed(body, seeds, capabilities=capabilities)
-            )
+            backend_results(lambda capabilities, body=body: sz.hash_multiseed(body, seeds, capabilities=capabilities))
         )
 
         def filled(capabilities, body=body):
@@ -426,12 +422,12 @@ def test_unit_backend_differential_hash_multiseed(length: int, rng: Random):
             sz.hash_multiseed(body, seeds, out=out, capabilities=capabilities)
             return tuple(out)
 
-        assert_backends_agree(run_across_backends(filled))
+        assert_backends_agree(backend_results(filled))
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 @pytest.mark.parametrize("nonce", [0, 1, 42, 314159])
-def test_unit_backend_differential_fill_random(length, nonce):
+def test_unit_backend_differential_fill_random(backend_results, length, nonce):
     """`sz.fill_random` must produce identical bytes from every backend for a fixed nonce, there is no
     Python oracle, so backend self-agreement is the only correctness signal."""
 
@@ -440,11 +436,11 @@ def test_unit_backend_differential_fill_random(length, nonce):
         sz.fill_random(buffer, nonce=nonce, capabilities=capabilities)
         return bytes(buffer)
 
-    assert_backends_agree(run_across_backends(fill))
+    assert_backends_agree(backend_results(fill))
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_sha256(length: int, rng: Random):
+def test_unit_backend_differential_sha256(capabilities, length: int, rng: Random):
     """`sz.sha256` and the `Str.sha256()` method must match `hashlib.sha256`, and so must the
     incremental `sz.Sha256` class under every individual backend config, not merely agree with each
     other, since SHA-256 has a fully independent, standard-library oracle."""
@@ -455,39 +451,37 @@ def test_unit_backend_differential_sha256(length: int, rng: Random):
     assert sz.sha256(text.encode()) == expected_digest
     assert Str(text).sha256() == expected_digest
 
-    for config in capability_sweep():
-        incremental = sz.Sha256(capabilities=config)
-        incremental.update(text)
-        assert incremental.digest() == expected_digest
-        assert incremental.hexdigest() == expected_hex
+    incremental = sz.Sha256(capabilities=capabilities)
+    incremental.update(text)
+    assert incremental.digest() == expected_digest
+    assert incremental.hexdigest() == expected_hex
 
 
 @pytest.mark.parametrize("length", [0, 1, 31, 32, 33, 64, 65, 128, 257, 1024])
-def test_unit_backend_differential_sha256_chunked(length: int, rng: Random):
+def test_unit_backend_differential_sha256_chunked(capabilities, length: int, rng: Random):
     """Chunked `sz.Sha256.update()`, `.reset()`, and `.copy()` must reach the oracle digest under every
     backend config, exercising the streaming state machine rather than just the one-shot entry point."""
     text = get_random_string(rng, length=length)
     expected_digest = hashlib.sha256(text.encode()).digest()
 
-    for config in capability_sweep():
-        chunk_size = max(1, length // 3)
+    chunk_size = max(1, length // 3)
 
-        chunked = sz.Sha256(capabilities=config)
-        for chunk_start in range(0, length, chunk_size):
-            chunked.update(text[chunk_start : chunk_start + chunk_size])
-        assert chunked.digest() == expected_digest
+    chunked = sz.Sha256(capabilities=capabilities)
+    for chunk_start in range(0, length, chunk_size):
+        chunked.update(text[chunk_start : chunk_start + chunk_size])
+    assert chunked.digest() == expected_digest
 
-        # Reset and re-run on the same instance must reach the same digest.
-        chunked.reset().update(text)
-        assert chunked.digest() == expected_digest
+    # Reset and re-run on the same instance must reach the same digest.
+    chunked.reset().update(text)
+    assert chunked.digest() == expected_digest
 
-        # A `.copy()` taken mid-stream must independently reach the same digest as the original.
-        midpoint = length // 2
-        first_half = sz.Sha256(capabilities=config).update(text[:midpoint])
-        second_half = first_half.copy()
-        first_half.update(text[midpoint:])
-        second_half.update(text[midpoint:])
-        assert first_half.digest() == second_half.digest() == expected_digest
+    # A `.copy()` taken mid-stream must independently reach the same digest as the original.
+    midpoint = length // 2
+    first_half = sz.Sha256(capabilities=capabilities).update(text[:midpoint])
+    second_half = first_half.copy()
+    first_half.update(text[midpoint:])
+    second_half.update(text[midpoint:])
+    assert first_half.digest() == second_half.digest() == expected_digest
 
 
 # endregion Backend differential

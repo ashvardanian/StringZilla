@@ -10,8 +10,8 @@
  *  @sa include/stringzilla/substrings/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read must come from @ref sz_memory_allocator_init_unified_metal on that stream's
- *  device, and haystacks and replacements must be tapes from @ref sz_sequence_copy_metal, since the
+ *  the kernels read must come from @ref sz_allocator_init_unified_metal on that stream's device,
+ *  and haystacks and replacements must be tapes from @ref sz_sequence_realloc_metal, since the
  *  kernels read the tapes themselves. A round's dispatches run in order inside one command buffer,
  *  so each sees what the one before it wrote, and nothing is read back until the caller
  *  synchronizes.
@@ -341,15 +341,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_memory_allocator_t *allocator, void *stream) {
-    sz_memory_allocator_t unified;
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream) {
+    sz_allocator_t unified;
     sz_metal_bound_t bound;
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return status;
     if (case_sensitivity == sz_substrings_uncased_k) return sz_device_code_mismatch_k;
     if (allocator) unified = *allocator;
-    else sz_memory_allocator_init_unified_metal(&unified);
+    else sz_allocator_init_unified_metal(&unified);
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_gpu_matches_budget_default_k;
     if (!haystacks_budget) haystacks_budget = (sz_size_t)sz_substrings_gpu_haystacks_budget_default_k;
     status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states, matches_budget,

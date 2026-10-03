@@ -18,8 +18,7 @@ namespace ashvardanian::stringzilla::bench {
 
 /** The pgram sort is always inlined under SVE, so it reaches the portable driver as a plain call,
  *  which a driver without SVE can make. */
-sz_status_t pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count, sz_memory_allocator_t *allocator,
-                             sz_sorted_idx_t *order) {
+sz_status_t pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator, sz_sorted_idx_t *order) {
     return sz_pgrams_sort_sve_(pgrams, count, allocator, order);
 }
 

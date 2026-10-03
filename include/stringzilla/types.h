@@ -21,7 +21,7 @@
  *  The library also defines the following higher-level structures:
  *
  *  - @c sz_string_view_t - a C-style structure like @c std::string_view.
- *  - @c sz_memory_allocator_t - a wrapper for memory-management functions.
+ *  - @c sz_allocator_t - a wrapper for memory-management functions.
  *  - @c sz_sequence_t - a wrapper to access strings forming a sequential container.
  *  - @c sz_byteset_t - a bitset for 256 possible byte values.
  */
@@ -1084,23 +1084,23 @@ typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, v
  *  Both functions take the caller's stream, which on a GPU names the device a block is made on and
  *  the work a release waits behind; host allocators ignore it, and on the CPU it is null.
  *
- *  @sa sz_memory_allocator_init_fixed, sz_memory_allocator_init_unified_best
+ *  @sa sz_allocator_init_fixed, sz_allocator_init_unified_best
  */
-typedef struct sz_memory_allocator_t {
+typedef struct sz_allocator_t {
     sz_memory_allocate_t allocate;
     sz_memory_free_t free;
     void *handle;
-} sz_memory_allocator_t;
+} sz_allocator_t;
 
 /**
  *  @brief Initializes a memory allocator to use the system default @c malloc and @c free.
  *  @param[out] allocator Memory allocator to initialize.
  *  @warning The function is not available if the library was compiled with
  *      @c STRINGZILLA_WITH_LIBC=0.
- *  @note Unlike the C standard library, `malloc(0)` is guaranteed to return a non-null pointer.
+ *  @note Unlike the C standard library, `malloc(0)` is guaranteed to return a null pointer.
  *  @see malloc: https://en.cppreference.com/w/c/memory/malloc
  */
-STRINGZILLA_INLINE void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator);
+STRINGZILLA_INLINE void sz_allocator_init_default(sz_allocator_t *allocator);
 
 /**
  *  @brief Initializes a memory allocator that serves every request from a static-capacity buffer,
@@ -1113,8 +1113,7 @@ STRINGZILLA_INLINE void sz_memory_allocator_init_default(sz_memory_allocator_t *
  *  The @p buffer itself will be prepended with the capacity and the consumed size. Those values
  *  shouldn't be modified.
  */
-STRINGZILLA_INLINE void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer,
-                                                       sz_size_t length);
+STRINGZILLA_INLINE void sz_allocator_init_fixed(sz_allocator_t *allocator, void *buffer, sz_size_t length);
 
 /**
  *  @brief Checks if two memory allocators are equivalent.
@@ -1122,8 +1121,7 @@ STRINGZILLA_INLINE void sz_memory_allocator_init_fixed(sz_memory_allocator_t *al
  *  @param[in] b Second memory allocator.
  *  @return True if the allocators are the same, false otherwise.
  */
-STRINGZILLA_CONSTEXPR sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a,
-                                                          sz_memory_allocator_t const *b);
+STRINGZILLA_CONSTEXPR sz_bool_t sz_allocator_equal(sz_allocator_t const *a, sz_allocator_t const *b);
 
 #pragma endregion
 
@@ -1985,7 +1983,7 @@ STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length
 
 #endif
 
-STRINGZILLA_INLINE void sz_memory_allocator_init_default(sz_memory_allocator_t *allocator) {
+STRINGZILLA_INLINE void sz_allocator_init_default(sz_allocator_t *allocator) {
 #if STRINGZILLA_WITH_LIBC
     allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
     allocator->free = (sz_memory_free_t)sz_memory_free_default_;
@@ -1996,8 +1994,7 @@ STRINGZILLA_INLINE void sz_memory_allocator_init_default(sz_memory_allocator_t *
     allocator->handle = STRINGZILLA_NULL;
 }
 
-STRINGZILLA_INLINE void sz_memory_allocator_init_fixed(sz_memory_allocator_t *allocator, void *buffer,
-                                                       sz_size_t length) {
+STRINGZILLA_INLINE void sz_allocator_init_fixed(sz_allocator_t *allocator, void *buffer, sz_size_t length) {
     // The logic here is simple - put the buffer capacity in the first slots of the buffer.
     // The second slot is used to store the current consumed capacity.
     // The rest of the buffer is used for the actual data.
@@ -2009,8 +2006,7 @@ STRINGZILLA_INLINE void sz_memory_allocator_init_fixed(sz_memory_allocator_t *al
     pointer[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
 }
 
-STRINGZILLA_CONSTEXPR sz_bool_t sz_memory_allocator_equal(sz_memory_allocator_t const *a,
-                                                          sz_memory_allocator_t const *b) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_allocator_equal(sz_allocator_t const *a, sz_allocator_t const *b) {
     if (!a || !b) return sz_false_k;
 
     // Two allocators are considered equal if they have the same function pointers and handle

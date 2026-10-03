@@ -25,7 +25,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_cpu_capabilities_enabled`, `sz_cuda_capabilities_enabled`
-#include "stringzilla/memory.h"       // `sz_memory_allocator_init_unified_best`
+#include "stringzilla/memory.h"       // `sz_allocator_init_unified_best`
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
  *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
@@ -71,6 +71,8 @@
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #include <limits>           // `std::numeric_limits`
+#include <new>              // `std::bad_alloc`
+#include <exception>        // `std::terminate`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `std::is_const_v`, `std::is_arithmetic_v`, `std::is_trivially_destructible`
 #endif
@@ -1502,8 +1504,8 @@ class safe_vector {
  *
  *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
  *  take it. Stateless: @p capabilities_ picks the vendor through
- *  @ref sz_memory_allocator_init_unified_best, every allocation is made on the caller's current
- *  device, and a library built without that vendor hands back null.
+ *  @ref sz_allocator_init_unified_best, every allocation is made on the caller's current
+ *  device, and allocation failure throws @c std::bad_alloc.
  *
  *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */
@@ -1525,14 +1527,22 @@ struct unified_alloc {
     template <typename other_value_type_>
     constexpr unified_alloc(unified_alloc<other_value_type_, capabilities_> const &) noexcept {}
 
-    value_type *allocate(size_type count) const noexcept {
-        sz_memory_allocator_t unified;
-        if (sz_memory_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return nullptr;
-        return (value_type *)unified.allocate(count * sizeof(value_type), unified.handle, nullptr);
+    value_type *allocate(size_type count) const {
+        sz_allocator_t unified;
+        if (count <= (std::numeric_limits<size_type>::max)() / sizeof(value_type) &&
+            sz_allocator_init_unified_best(&unified, capabilities_) == sz_success_k) {
+            pointer result = (pointer)unified.allocate(count * sizeof(value_type), unified.handle, nullptr);
+            if (result) return result;
+        }
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+        throw std::bad_alloc();
+#else
+        std::terminate();
+#endif
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_memory_allocator_t unified;
-        if (sz_memory_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return;
+        sz_allocator_t unified;
+        if (sz_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return;
         unified.free(start, count * sizeof(value_type), unified.handle, nullptr);
     }
     template <typename other_type_>

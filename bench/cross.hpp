@@ -677,8 +677,8 @@ struct argsort_strings_via_sz {
         array.handle = &input;
         array.get_start = get_start;
         array.get_length = get_length;
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         if (func_(&array, 0, sz_false_k, &allocator, output.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The argsort failed.");
 
@@ -730,8 +730,8 @@ struct argsort_ci_strings_via_sz {
         array.handle = &input;
         array.get_start = get_start;
         array.get_length = get_length;
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         if (func_(&array, 0, sz_false_k, &allocator, output.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The uncased argsort failed.");
 
@@ -765,8 +765,8 @@ struct sort_pgrams_via_sz {
         std::copy(input.begin(), input.end(), output_sorted.begin());
         std::iota(output_permutation.begin(), output_permutation.end(), 0);
 
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         if (func_(output_sorted.data(), output_sorted.size(), &allocator, output_permutation.data()) != sz_success_k)
             throw std::runtime_error("The pgram sort failed.");
 
@@ -818,8 +818,8 @@ struct intersect_strings_via_sz {
         array_b.get_length = get_length;
 
         sz_size_t intersections = 0;
-        sz_memory_allocator_t allocator;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
         if (func_(&array_a, &array_b, &allocator, 0, &intersections, output_a.data(), output_b.data(), nullptr) !=
             sz_success_k)
             throw std::runtime_error("The intersection failed.");
@@ -1793,14 +1793,14 @@ struct scores_from_sz {
     corpus_t const &corpus;
     overlap_query_t const &query;
     std::size_t candidates;
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
     std::vector<sz_string_view_t> views;
     std::vector<sz_f32_t> scores;
     sz_overlap_engine_t engine {};
 
     scores_from_sz(corpus_t const &corpus, overlap_query_t const &query, std::size_t candidates)
         : corpus(corpus), query(query), candidates(candidates), views(candidates), scores(candidates) {
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_init_default(&allocator);
         sz_string_view_t const view {query.text.data(), query.text.size()};
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
@@ -1902,7 +1902,7 @@ struct substrings_vocabulary_t {
     substrings_dictionary_t dictionary;
 
     substrings_vocabulary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
-                            sz_substrings_case_sensitivity_t sensitivity, sz_memory_allocator_t const &allocator)
+                            sz_substrings_case_sensitivity_t sensitivity, sz_allocator_t const &allocator)
         : label(substrings_label(slice, sensitivity)), dictionary(env, corpus, slice, sensitivity, allocator) {}
 };
 
@@ -1920,8 +1920,8 @@ inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t
         {substrings_slice_t::frequent_k, sz_substrings_uncased_k},
         {substrings_slice_t::sampled_k, sz_substrings_cased_k},
     };
-    sz_memory_allocator_t allocator;
-    sz_memory_allocator_init_default(&allocator);
+    sz_allocator_t allocator;
+    sz_allocator_init_default(&allocator);
     for (auto const &[slice, sensitivity] : slices)
         vocabularies.emplace_back(env, corpus, slice, sensitivity, allocator);
     return vocabularies;

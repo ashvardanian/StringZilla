@@ -30,9 +30,9 @@ extern "C" {
 #define STRINGZILLA_SEQUENCE_INTERSECT_BUDGET (1)
 #endif
 
-STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                           //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,          //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
+STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                    //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,   //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,
     sz_u64_t (*hasher)(sz_cptr_t, sz_size_t, sz_u64_t)) {
 
@@ -57,9 +57,9 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                   
     }
 
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
-    sz_memory_allocator_t global_alloc;
+    sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_memory_allocator_init_default(&global_alloc);
+        sz_allocator_init_default(&global_alloc);
         allocator = &global_alloc;
     }
 
@@ -142,9 +142,9 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_intersect_serial_(                   
 
 #if STRINGZILLA_TARGET_SERIAL
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                               //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,          //
-    sz_memory_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
+STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                        //
+    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,   //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_sequence_intersect_serial_(first_sequence, second_sequence, allocator, seed, intersection_count_ptr,

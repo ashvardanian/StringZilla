@@ -40,7 +40,7 @@ static sz_status_t substrings_engine_init_dispatched_(sz_substrings_engine_t *en
                                                       sz_substrings_case_sensitivity_t case_sensitivity,
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
-                                                      sz_size_t haystacks_budget, sz_memory_allocator_t *allocator,
+                                                      sz_size_t haystacks_budget, sz_allocator_t *allocator,
                                                       void *stream) {
     return sz_substrings_engine_init(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                      haystacks_budget, sz::default_capabilities(), allocator, stream);
@@ -53,7 +53,7 @@ static substrings_tier_t const substrings_dispatched {substrings_engine_init_dis
 
 /** Compiles @p needles, so a refusal can be asserted on without naming a sequence of its own. */
 static sz_status_t build_over_(std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
-                               sz_memory_allocator_t *allocator, sz_substrings_engine_t *engine) {
+                               sz_allocator_t *allocator, sz_substrings_engine_t *engine) {
     std::vector<sz_string_view_t> views;
     sz_sequence_t const sequence = sequence_over_(needles, views);
     return sz_substrings_engine_init(engine, &sequence, sensitivity, sz_substrings_overlapping_k,
@@ -72,7 +72,7 @@ struct rationed_allocator_t {
     std::size_t bytes_held {};
 
     /** The C-side view, whose handle points back at this object. */
-    sz_memory_allocator_t allocator {};
+    sz_allocator_t allocator {};
 
     explicit rationed_allocator_t(std::size_t granted) noexcept : grants(granted) {
         allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
@@ -223,7 +223,7 @@ void test_substrings_safety(test_context_t &context) {
 
     // A refused allocation is reported as `sz_bad_alloc_k`, and construction is the only verb that allocates.
     {
-        sz_memory_allocator_t refusing = refusing_allocator_();
+        sz_allocator_t refusing = refusing_allocator_();
         sz_substrings_engine_t refused {};
         verify(build_over_(needles, sz_substrings_cased_k, &refusing, &refused) == sz_bad_alloc_k);
         verify(refused.memory == nullptr);

@@ -88,11 +88,11 @@ extern "C" {
     pub(crate) fn sz_metal_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
     pub(crate) fn sz_metal_stream_free(stream: *mut c_void) -> sz_status_t;
 
-    pub(crate) fn sz_memory_allocator_init_unified_best(
+    pub(crate) fn sz_allocator_init_unified_best(
         allocator: *mut _SzMemoryAllocator,
         capabilities: sz_capability_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_sequence_copy_best(
+    pub(crate) fn sz_sequence_realloc_best(
         target: *mut _SzSequence,
         source: *const _SzSequence,
         allocator: *mut _SzMemoryAllocator,
@@ -636,9 +636,10 @@ extern "C" {
 
 }
 
-/// Mirror of `sz_memory_allocator_t`, carried by value inside every engine so a release cannot be
-/// handed the wrong allocator. The engines pass a null allocator and take the unified one of their
-/// capabilities; `UnifiedAllocator` fills one to hand its blocks out, and `Sequence` to free its tape.
+/// Mirror of `sz_allocator_t`, carried by value inside every engine so a release cannot be handed
+/// the wrong allocator. The engines pass a null allocator and take the unified one of their
+/// capabilities; `UnifiedAllocator` fills one to hand its blocks out, and `Sequence` to free its
+/// tape.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct _SzMemoryAllocator {

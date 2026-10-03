@@ -27,6 +27,30 @@ std::size_t test_cross_serial(environment_t const &env) {
     check("test_memory_unit_serial", [&] { check_memory_unit_(memory_serial); });
     check("test_memory_safety_serial", [&] { check_memory_safety_(memory_serial); });
 
+    check("test_sequence_realloc_overflow_serial", [] {
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
+        sz_sequence_t source {}, target {};
+        sz_size_t bytes = 17;
+        source.count = STRINGZILLA_SIZE_MAX;
+        verify(sz_sequence_realloc_serial(&target, &source, &allocator, &bytes, nullptr) == sz_bad_alloc_k);
+        source.count = 1;
+        source.get_length = [](void const *, sz_size_t) { return STRINGZILLA_SIZE_MAX; };
+        verify(sz_sequence_realloc_serial(&target, &source, &allocator, &bytes, nullptr) == sz_bad_alloc_k);
+        verify(!target.handle && bytes == 17);
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+        bool rejected = false;
+        try {
+            unified_alloc<sz_u64_t, sz_cap_serial_k> wide;
+            wide.allocate(STRINGZILLA_SIZE_MAX);
+        }
+        catch (std::bad_alloc const &) {
+            rejected = true;
+        }
+        verify(rejected);
+#endif
+    });
+
     constexpr lookup_backend_t lookup_serial {"serial", sz_lookup_serial};
     check("test_lookup_unit_serial", [&] { check_lookup_unit_(lookup_serial); });
     check("test_lookup_safety_serial", [&] { check_lookup_safety_(lookup_serial); });

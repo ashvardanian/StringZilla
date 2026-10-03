@@ -50,9 +50,9 @@ struct substrings_build_from_sz {
     substrings_dictionary_t const &dictionary;
 
     call_result_t operator()(std::size_t) const {
-        sz_memory_allocator_t allocator;
+        sz_allocator_t allocator;
         sz_substrings_engine_t engine;
-        sz_memory_allocator_init_default(&allocator);
+        sz_allocator_init_default(&allocator);
         if (sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity,
                                       sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
                                       sz::default_capabilities(), &allocator, nullptr) != sz_success_k)

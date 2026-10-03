@@ -28,7 +28,6 @@ from base import (
     assert_backends_agree,
     get_random_string,
     malformed_utf8_corpus,
-    run_across_backends,
     scale_iterations,
     vector_width_bracketing_strings,
 )
@@ -609,78 +608,78 @@ UNCASED_ORDER_BACKEND_DIFFERENTIAL_PAIRS = [
 
 
 @pytest.mark.parametrize("text", UNCASED_FOLD_BACKEND_DIFFERENTIAL_TEXTS)
-def test_utf8_uncased_fold_backend_differential(text):
+def test_utf8_uncased_fold_backend_differential(backend_results, text):
     """utf8_uncased_fold must agree across every SIMD backend over ASCII, mixed-case Unicode such as Straße,
     Café, Greek, and Cyrillic, expansions such as ß and ligatures, and inputs straddling the 16/32/64-byte
     SIMD lanes."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_fold(text, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_fold(text, capabilities=capabilities)),
         format_inputs=lambda: repr(text),
     )
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_fold_backend_differential_malformed(raw):
+def test_utf8_uncased_fold_backend_differential_malformed(backend_results, raw):
     """Malformed UTF-8 must fold identically across every SIMD backend without crashing."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_fold(raw, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_fold(raw, capabilities=capabilities)),
         format_inputs=lambda: raw.hex(),
     )
 
 
-def test_utf8_uncased_fold_backend_differential_random(rng: Random):
+def test_utf8_uncased_fold_backend_differential_random(backend_results, rng: Random):
     """Random ASCII corpora must fold identically across every SIMD backend."""
     text = get_random_string(rng)
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_fold(text, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_fold(text, capabilities=capabilities)),
         format_inputs=lambda: repr(text),
     )
 
 
 @pytest.mark.parametrize("haystack, needle", UNCASED_SEARCH_BACKEND_DIFFERENTIAL_CASES)
-def test_utf8_uncased_search_backend_differential(haystack, needle):
+def test_utf8_uncased_search_backend_differential(backend_results, haystack, needle):
     """utf8_uncased_search must agree across every SIMD backend, including codepoint-expansion needles
     like ß folding to ss and ligatures that can cross a folded haystack's expansion boundaries."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_search(haystack, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_search(haystack, needle, capabilities=capabilities)),
         format_inputs=lambda: f"{haystack!r}/{needle!r}",
     )
 
 
 @pytest.mark.parametrize("text", vector_width_bracketing_strings())
-def test_utf8_uncased_search_backend_differential_vector_width(text):
+def test_utf8_uncased_search_backend_differential_vector_width(backend_results, text):
     """utf8_uncased_search must agree across every SIMD backend when the match sits at a 16/32/64-byte lane
     boundary, searching for the literal padding tail planted after the multibyte codepoint."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_search(text, "TAIL", capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_search(text, "TAIL", capabilities=capabilities)),
         format_inputs=lambda: repr(text),
     )
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_search_backend_differential_malformed(raw):
+def test_utf8_uncased_search_backend_differential_malformed(backend_results, raw):
     """Malformed UTF-8 haystacks must search identically across every SIMD backend without crashing."""
     needle = raw[:2] if len(raw) >= 2 else raw
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_search(raw, needle, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_search(raw, needle, capabilities=capabilities)),
         format_inputs=lambda: raw.hex(),
     )
 
 
 @pytest.mark.parametrize("left, right", UNCASED_ORDER_BACKEND_DIFFERENTIAL_PAIRS)
-def test_utf8_uncased_order_backend_differential(left, right):
+def test_utf8_uncased_order_backend_differential(backend_results, left, right):
     """utf8_uncased_order must agree across every SIMD backend, including German-sharp-S equivalence."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_order(left, right, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_order(left, right, capabilities=capabilities)),
         format_inputs=lambda: f"{left!r}/{right!r}",
     )
 
 
 @pytest.mark.parametrize("raw", malformed_utf8_corpus())
-def test_utf8_uncased_order_backend_differential_malformed(raw):
+def test_utf8_uncased_order_backend_differential_malformed(backend_results, raw):
     """Malformed UTF-8 must order identically against itself across every SIMD backend without crashing."""
     assert_backends_agree(
-        run_across_backends(lambda capabilities: sz.utf8_uncased_order(raw, raw, capabilities=capabilities)),
+        backend_results(lambda capabilities: sz.utf8_uncased_order(raw, raw, capabilities=capabilities)),
         format_inputs=lambda: raw.hex(),
     )
 

@@ -73,8 +73,8 @@ static sz_capability_kernels_t const *sz_sequence_argsort_uncased_capabilities(v
 }
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                     sz_bool_t reverse, sz_memory_allocator_t *allocator,
-                                                     sz_size_t *order, sz_capability_t capabilities, void *stream) {
+                                                     sz_bool_t reverse, sz_allocator_t *allocator, sz_size_t *order,
+                                                     sz_capability_t capabilities, void *stream) {
     sz_kernel_sequence_argsort_t const kernel = (sz_kernel_sequence_argsort_t)sz_kernel_pick_(
         capabilities, sz_sequence_argsort_capabilities());
     return kernel ? kernel(sequence, top_count, reverse, allocator, order, stream) : sz_missing_kernel_k;
@@ -82,7 +82,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequen
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_best(              //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_memory_allocator_t *allocator, sz_size_t *order,                    //
+    sz_allocator_t *allocator, sz_size_t *order,                           //
     sz_capability_t capabilities, void *stream) {
     sz_kernel_sequence_argsort_t const kernel = (sz_kernel_sequence_argsort_t)sz_kernel_pick_(
         capabilities, sz_sequence_argsort_uncased_capabilities());

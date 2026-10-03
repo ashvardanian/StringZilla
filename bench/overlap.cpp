@@ -45,7 +45,7 @@ namespace ashvardanian::stringzilla::bench {
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
 sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                      sz_size_t const *window_widths, sz_size_t window_widths_count,
-                                     sz_size_t candidates_budget, sz_memory_allocator_t *allocator, void *stream) {
+                                     sz_size_t candidates_budget, sz_allocator_t *allocator, void *stream) {
     return sz_overlap_engine_init(engine, queries, window_widths, window_widths_count, candidates_budget,
                                   sz::default_capabilities(), allocator, stream);
 }

@@ -38,7 +38,6 @@ from base import (
     get_random_string,
     numpy_available,
     pyarrow_available,
-    run_across_backends,
     scale_iterations,
     unaligned_views,
 )
@@ -1469,7 +1468,7 @@ TRANSLATE_TABLES = (_TRANSLATE_IDENTITY_TABLE, _TRANSLATE_INVERT_TABLE, _TRANSLA
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_equal(length: int, rng: Random):
+def test_unit_backend_differential_equal(backend_results, length: int, rng: Random):
     """`sz.equal` (the compare kernel) must agree across every backend and match Python's byte-level
     `==`, as must `Str.__eq__`, for random/tiled/all-same-char bodies at every SIMD-relevant length."""
     for body in differential_bodies(length, rng):
@@ -1479,11 +1478,17 @@ def test_unit_backend_differential_equal(length: int, rng: Random):
         assert Str(body) == matching
         assert Str(body) != mismatching
         assert_backends_agree(
-            run_across_backends(lambda capabilities, body=body: sz.equal(body, matching, capabilities=capabilities)),
+            backend_results(
+                lambda capabilities, body=body, matching=matching: sz.equal(body, matching, capabilities=capabilities)
+            ),
             oracle=True,
         )
         assert_backends_agree(
-            run_across_backends(lambda capabilities, body=body: sz.equal(body, mismatching, capabilities=capabilities)),
+            backend_results(
+                lambda capabilities, body=body, mismatching=mismatching: sz.equal(
+                    body, mismatching, capabilities=capabilities
+                )
+            ),
             oracle=False,
         )
 
@@ -1501,20 +1506,20 @@ def test_unit_equal_compares_both_operands():
 
 
 @pytest.mark.parametrize("offset", [0, 1, 3, 7, 15])
-def test_unit_backend_differential_equal_unaligned(offset):
+def test_unit_backend_differential_equal_unaligned(backend_results, offset):
     """Equality on a sliced (misaligned-base-pointer) view must still agree across every backend."""
     text = "ab" * 200
     for _offset, view in unaligned_views(text, offsets=(offset,)):
         matching = text[offset:]
         mismatching = "z" + text[offset + 1 :] if len(matching) > 0 else "nonempty"
         assert_backends_agree(
-            run_across_backends(
+            backend_results(
                 lambda capabilities, view=view, matching=matching: sz.equal(view, matching, capabilities=capabilities)
             ),
             oracle=True,
         )
         assert_backends_agree(
-            run_across_backends(
+            backend_results(
                 lambda capabilities, view=view, mismatching=mismatching: sz.equal(
                     view, mismatching, capabilities=capabilities
                 )
@@ -1524,7 +1529,7 @@ def test_unit_backend_differential_equal_unaligned(offset):
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_contains(length: int, rng: Random):
+def test_unit_backend_differential_contains(backend_results, length: int, rng: Random):
     """`sz.find`, the kernel behind `needle in Str(haystack)`, must agree across every backend, for
     present and absent needles, over random/tiled/all-same-char needles at every SIMD-relevant length."""
     for needle in differential_bodies(length, rng):
@@ -1533,13 +1538,15 @@ def test_unit_backend_differential_contains(length: int, rng: Random):
 
         assert needle in Str(haystack) and absent_needle not in Str(haystack)
         assert_backends_agree(
-            run_across_backends(
-                lambda capabilities, needle=needle: sz.find(haystack, needle, capabilities=capabilities)
+            backend_results(
+                lambda capabilities, needle=needle, haystack=haystack: sz.find(
+                    haystack, needle, capabilities=capabilities
+                )
             ),
             oracle=haystack.find(needle),
         )
         assert_backends_agree(
-            run_across_backends(
+            backend_results(
                 lambda capabilities, absent_needle=absent_needle: sz.find(
                     haystack, absent_needle, capabilities=capabilities
                 )
@@ -1579,7 +1586,7 @@ def test_unit_concat(length: int, rng: Random):
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
-def test_unit_backend_differential_translate(length: int, rng: Random):
+def test_unit_backend_differential_translate(backend_results, length: int, rng: Random):
     """`sz.translate` (the lookup kernel) must agree across every backend and match a scalar oracle, for
     full-body and windowed (overlapping/odd `start`/`end`) translations, both copying and in-place."""
     for body in differential_bodies(length, rng):
@@ -1587,7 +1594,7 @@ def test_unit_backend_differential_translate(length: int, rng: Random):
         for table in TRANSLATE_TABLES:
             full_oracle = lookup_table_oracle(body_bytes, table)
             assert_backends_agree(
-                run_across_backends(
+                backend_results(
                     lambda capabilities, body_bytes=body_bytes, table=table: sz.translate(
                         body_bytes, table, capabilities=capabilities
                     )
@@ -1605,24 +1612,24 @@ def test_unit_backend_differential_translate(length: int, rng: Random):
                 def windowed_copy(capabilities, body_bytes=body_bytes, table=table, start=start, stop=stop):
                     return sz.translate(body_bytes, table, False, start, stop, capabilities=capabilities)
 
-                assert_backends_agree(run_across_backends(windowed_copy), oracle=windowed_slice_oracle)
+                assert_backends_agree(backend_results(windowed_copy), oracle=windowed_slice_oracle)
 
                 def windowed_inplace(capabilities, body_bytes=body_bytes, table=table, start=start, stop=stop):
                     mutable = bytearray(body_bytes)
                     sz.translate(mutable, table, True, start, stop, capabilities=capabilities)
                     return bytes(mutable)
 
-                assert_backends_agree(run_across_backends(windowed_inplace), oracle=bytes(windowed_full_oracle))
+                assert_backends_agree(backend_results(windowed_inplace), oracle=bytes(windowed_full_oracle))
 
 
 @pytest.mark.parametrize("offset", [0, 1, 3, 7, 15])
-def test_unit_backend_differential_translate_unaligned(offset):
+def test_unit_backend_differential_translate_unaligned(backend_results, offset):
     """Translating a misaligned (sliced) view must agree across every backend."""
     text = "ab" * 200
     for _offset, view in unaligned_views(text, offsets=(offset,)):
         oracle = lookup_table_oracle(str(view).encode(), _TRANSLATE_INVERT_TABLE)
         assert_backends_agree(
-            run_across_backends(
+            backend_results(
                 lambda capabilities, view=view: sz.translate(view, _TRANSLATE_INVERT_TABLE, capabilities=capabilities)
             ),
             oracle=oracle,
@@ -1631,7 +1638,7 @@ def test_unit_backend_differential_translate_unaligned(offset):
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 @pytest.mark.parametrize("nonce", [0, 1, 42, 314159])
-def test_unit_backend_differential_fill_random(length, nonce):
+def test_unit_backend_differential_fill_random(backend_results, length, nonce):
     """`sz.fill_random` (the fill+lookup kernel) must produce identical bytes from every backend for a
     fixed nonce; there is no Python oracle, so backend self-agreement is the only correctness signal."""
 
@@ -1640,11 +1647,11 @@ def test_unit_backend_differential_fill_random(length, nonce):
         sz.fill_random(buffer, nonce=nonce, capabilities=capabilities)
         return bytes(buffer)
 
-    assert_backends_agree(run_across_backends(fill))
+    assert_backends_agree(backend_results(fill))
 
 
 @pytest.mark.parametrize("start, end", [(1, 9), (3, 7), (0, 1), (15, 16), (7, 64)])
-def test_unit_backend_differential_fill_random_windowed(start, end):
+def test_unit_backend_differential_fill_random_windowed(backend_results, start, end):
     """`sz.fill_random` over an odd/overlapping [start, end) window inside a larger buffer must agree
     across every backend, both inside the filled window and on the untouched borders."""
     buffer_length = 96
@@ -1655,7 +1662,7 @@ def test_unit_backend_differential_fill_random_windowed(start, end):
         sz.fill_random(buffer, nonce=nonce, start=start, end=end, capabilities=capabilities)
         return bytes(buffer)
 
-    assert_backends_agree(run_across_backends(fill))
+    assert_backends_agree(backend_results(fill))
 
 
 # endregion Backend differential

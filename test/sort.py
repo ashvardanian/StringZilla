@@ -29,7 +29,6 @@ from base import (
     assert_backends_agree,
     get_random_string,
     numpy_available,
-    run_across_backends,
 )
 
 from stringzilla import Str, Strs
@@ -174,17 +173,19 @@ def randomly_cased(rng: Random, text: str) -> str:
     return "".join(char.upper() if rng.randint(0, 1) else char for char in text)
 
 
-def assert_sort_family_matches_oracles(native_list: list, *, top=None, reverse: bool = False, uncased: bool = False):
+def assert_sort_family_matches_oracles(
+    backend_results, native_list: list, *, top=None, reverse: bool = False, uncased: bool = False
+):
     """Sweep every backend for `.sorted()`/`.argsort()` on one batch, asserting backend parity, the
     permutation/order relationship, and (for both byte and uncased modes) a CPython oracle."""
     strs = Strs(native_list)
 
-    sorted_results = run_across_backends(
+    sorted_results = backend_results(
         lambda capabilities: list(
             map(str, strs.sorted(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities))
         )
     )
-    argsort_results = run_across_backends(
+    argsort_results = backend_results(
         lambda capabilities: strs.argsort(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities)
     )
 
@@ -297,34 +298,36 @@ BATCH_BUILDERS = {
 @pytest.mark.parametrize("uncased", [False, True])
 @pytest.mark.parametrize("batch_name", sorted(BATCH_BUILDERS))
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
-def test_unit_backend_differential_sorted_argsort(rng: Random, batch_size: int, batch_name: str, uncased: bool):
+def test_unit_backend_differential_sorted_argsort(
+    backend_results, rng: Random, batch_size: int, batch_name: str, uncased: bool
+):
     """`Strs.sorted()`/`.argsort()` agree across every `capability_sweep()` backend and with CPython
     `sorted()`, byte mode or case-folded when `uncased=True`, across batch sizes bracketing
     SIMD/threading thresholds and the all-equal, single-char, length-1, and empty-mixed corner shapes;
     a divergence is a kernel bug, not a binding bug."""
     native_list = BATCH_BUILDERS[batch_name](rng, batch_size)
-    assert_sort_family_matches_oracles(native_list, uncased=uncased)
+    assert_sort_family_matches_oracles(backend_results, native_list, uncased=uncased)
 
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("top", [None, 1, 5, 50, 10_000])
 @pytest.mark.parametrize("batch_size", BATCH_SIZES)
 def test_unit_backend_differential_sorted_argsort_top_reverse(
-    rng: Random, batch_size: int, top: int | None, reverse: bool
+    backend_results, rng: Random, batch_size: int, top: int | None, reverse: bool
 ):
     """`top=K` partial sort and `reverse=True` descending sort agree across every `capability_sweep()`
     backend and with CPython `sorted()[:K]`, for `top` values from below the batch size up to 10_000,
     far beyond it; a divergence is a kernel bug, not a binding bug."""
     native_list = random_batch(rng, batch_size)
-    assert_sort_family_matches_oracles(native_list, top=top, reverse=reverse)
+    assert_sort_family_matches_oracles(backend_results, native_list, top=top, reverse=reverse)
 
 
-def test_unit_backend_differential_sorted_argsort_empty():
+def test_unit_backend_differential_sorted_argsort_empty(backend_results):
     """An empty `Strs` collection sorts to empty on every `capability_sweep()` backend for every
     `uncased`/`reverse` combination; a divergence is a kernel bug, not a binding bug."""
     for uncased in (False, True):
         for reverse in (False, True):
-            assert_sort_family_matches_oracles([], uncased=uncased, reverse=reverse)
+            assert_sort_family_matches_oracles(backend_results, [], uncased=uncased, reverse=reverse)
 
 
 # endregion Backend differential

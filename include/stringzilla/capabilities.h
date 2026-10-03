@@ -702,20 +702,20 @@ typedef sz_status_t (*sz_kernel_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset
 
 /** Signature of the @c sz_sequence_argsort_best and @c sz_sequence_argsort_uncased_best kernels. */
 typedef sz_status_t (*sz_kernel_sequence_argsort_t)(struct sz_sequence_t const *, sz_size_t, sz_bool_t,
-                                                    sz_memory_allocator_t *, sz_sorted_idx_t *, void *);
+                                                    sz_allocator_t *, sz_sorted_idx_t *, void *);
 
 /** Signature of the benchmark-only @c sz_pgrams_sort_serial_ integer sort helper and its tiers. */
-typedef sz_status_t (*sz_pgrams_sort_t_)(sz_pgram_t *, sz_size_t, sz_memory_allocator_t *, sz_sorted_idx_t *);
+typedef sz_status_t (*sz_pgrams_sort_t_)(sz_pgram_t *, sz_size_t, sz_allocator_t *, sz_sorted_idx_t *);
 
 /** Signature of the @c sz_sequence_intersect_best kernels. */
 typedef sz_status_t (*sz_kernel_sequence_intersect_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
-                                                      sz_memory_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
+                                                      sz_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
                                                       sz_sorted_idx_t *, void *);
 
 /** Signature of every @c sz_levenshtein_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein_engine_t *,
                                                            struct sz_sequence_t const *, sz_levenshtein_symbol_t,
-                                                           sz_memory_allocator_t *, void *);
+                                                           sz_allocator_t *, void *);
 
 /** Signature of every @c sz_levenshtein_distances kernel, at either alphabet. */
 typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
@@ -727,7 +727,7 @@ typedef sz_status_t (*sz_kernel_levenshtein_distance_tiled_t)(sz_cptr_t, sz_size
 
 /** Signature of every @c sz_overlap_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
-                                                       sz_size_t const *, sz_size_t, sz_size_t, sz_memory_allocator_t *,
+                                                       sz_size_t const *, sz_size_t, sz_size_t, sz_allocator_t *,
                                                        void *);
 
 /** Signature of every @c sz_overlap_scores kernel. */
@@ -738,7 +738,7 @@ typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, 
 typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
                                                           sz_substrings_case_sensitivity_t,
                                                           sz_substrings_overlap_policy_t, sz_size_t, sz_size_t,
-                                                          sz_size_t, sz_memory_allocator_t *, void *);
+                                                          sz_size_t, sz_allocator_t *, void *);
 
 /** Signature of every @c sz_substrings_counts kernel. */
 typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
@@ -1208,6 +1208,36 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
 
 #endif // STRINGZILLA_HEADER_ONLY
 
+/**
+ *  @brief Waits for everything enqueued on @p stream, after which what its rounds wrote is readable
+ *      from the host.
+ *  @param[in] capabilities One device's capabilities; its group picks the runtime that waits.
+ *  @param[in] stream Null on the CPU, which has nothing to wait for. On a GPU, the stream to join,
+ *      which also names the device, or null for the default stream of the default device.
+ *  @return @c sz_success_k; or on a device @c sz_device_memory_mismatch_k for a @p stream it cannot
+ *      use, @c sz_device_code_mismatch_k when the runtime reports a failed launch, and
+ *      @c sz_missing_gpu_k for a vendor this build lacks or a device that doesn't answer.
+ */
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream);
+
+/** @copydoc sz_stream_synchronize_best */
+STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(void *stream);
+
+#if STRINGZILLA_TARGET_CUDA
+/** @copydoc sz_stream_synchronize_best */
+STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(void *stream);
+#endif
+
+#if STRINGZILLA_TARGET_ROCM
+/** @copydoc sz_stream_synchronize_best */
+STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream);
+#endif
+
+#if STRINGZILLA_WITH_METAL
+/** @copydoc sz_stream_synchronize_best */
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream);
+#endif
+
 /*  The CUDA and ROCm producers answer from their runtimes in `cuda.cuh` and `rocm.cuh`, which only
  *  their own compilers reach; Metal's answer from here, behind the switch the build stamps. */
 
@@ -1438,6 +1468,11 @@ STRINGZILLA_API sz_status_t sz_metal_stream_init(sz_size_t ordinal, void **strea
     return sz_metal_stream_init_(ordinal, stream);
 }
 STRINGZILLA_API sz_status_t sz_metal_stream_free(void *stream) { return sz_metal_stream_free_(stream); }
+
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream) {
+    sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
+}
 
 #endif // STRINGZILLA_HEADER_ONLY
 

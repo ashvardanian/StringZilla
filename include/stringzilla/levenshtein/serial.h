@@ -444,7 +444,7 @@ typedef struct sz_levenshtein_engine_t {
     sz_capability_t capability;
 
     /** What built both blocks below and what grows the second. */
-    sz_memory_allocator_t allocator;
+    sz_allocator_t allocator;
 
     /** The batch's block, fixed for the engine's life, its head tier-private. */
     void *memory;
@@ -606,7 +606,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_rune_classes_(sz_cptr_t text, sz_s
  *  then prepared into. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t const *queries,
                                                               sz_levenshtein_symbol_t symbol,
-                                                              sz_memory_allocator_t const *allocator, void *stream,
+                                                              sz_allocator_t const *allocator, void *stream,
                                                               sz_levenshtein_engine_shape_t *shapes) {
     if (queries->count == 0) return sz_success_k;
     if (symbol == sz_levenshtein_bytes_k) {
@@ -716,7 +716,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
  *  the planes unwritten. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_size_t head_bytes,
-                                                            sz_memory_allocator_t const *allocator, void *stream,
+                                                            sz_allocator_t const *allocator, void *stream,
                                                             sz_levenshtein_engine_t *engine) {
     sz_size_t const count = queries->count;
     sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
@@ -755,12 +755,12 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_capability_t capability,
-                                                               sz_memory_allocator_t *allocator, void *stream) {
+                                                               sz_capability_t capability, sz_allocator_t *allocator,
+                                                               void *stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_memory_allocator_t host;
+    sz_allocator_t host;
     if (allocator) host = *allocator;
-    else sz_memory_allocator_init_default(&host);
+    else sz_allocator_init_default(&host);
     sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, stream, engine);
     if (built != sz_success_k) return built;
     sz_levenshtein_engine_fill_(engine, queries);
@@ -964,8 +964,8 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_qu
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *queries,
-                                                              sz_levenshtein_symbol_t symbol,
-                                                              sz_memory_allocator_t *allocator, void *stream) {
+                                                              sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                              void *stream) {
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_serial_k, allocator, stream);
 }
 

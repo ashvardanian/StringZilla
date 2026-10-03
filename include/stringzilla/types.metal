@@ -24,7 +24,7 @@ constexpr scalar_type_ sz_size_divide_round_up_metal_(scalar_type_ number, scala
     return (number + divisor - 1) / divisor;
 }
 
-/** A sequence as one tape block, as @c sz_sequence_copy_best writes it: @b [count+1] byte offsets
+/** A sequence tape from @c sz_sequence_realloc_best: @b [count+1] byte offsets
  *  from the block's own start, then the bytes they address. */
 struct sz_sequence_tape_metal_t {
     device ulong const *offsets;
