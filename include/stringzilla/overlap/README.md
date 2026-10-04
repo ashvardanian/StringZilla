@@ -1,6 +1,6 @@
 # Overlap: Window Hashing and Prepared-Query Match Counting
 
-This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
+This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap_scores`, which prepare query windows and score candidate strings.
 Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86 and `neon` on Arm, and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `c/target/cuda.cu` and `c/target/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `c/target/metal.c` compiles.
 The init picks the best capability of a mask once, when the batch of queries is prepared on one device, and every later round scores with that capability's kernel alone.
@@ -8,10 +8,10 @@ A device engine keeps no stream: on CUDA it keeps no per-round state either, so 
 
 ## Methodology
 
-Cells are Mwin/s, millions of windows per second, one window per byte offset at the scored width, over `xlsum.csv` words averaging 9 bytes and lines averaging 3 KB.
+Cells are Mwin/s, millions of windows per second, one window per byte offset at the scored width, over words and lines from `xlsum.csv`.
 A `…` cell is not measured yet.
 
-M5 Pro rows use the first 64 MiB of `xlsum.csv`; cells are medians of three runs.
+The benchmark reads the first 64 MiB of `xlsum.csv` by default; `STRINGWARS_BYTES` controls the input size.
 That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored window widths of 2 and 5 respectively.
 
 ## Short Words

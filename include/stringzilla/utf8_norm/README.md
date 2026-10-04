@@ -7,11 +7,11 @@ Every operation has a serial baseline plus per-ISA SIMD backends, and each `_bes
 
 ## Methodology
 
-Numbers are throughput in MB/s, measured with `bench/utf8_norm.cpp` over the full multilingual `xlsum.csv` corpus, reporting the median of repeated runs.
-Each table fixes one input shape; its columns are the Normalize NFC and Quick Check operations and its rows are a backend on a chip, so reading down a column compares the same operation across the backend ladder while reading across a row compares operations on one backend.
+`bench/utf8_norm.cpp` measures throughput over the first 64 MiB of the multilingual `xlsum.csv` corpus by default.
+`STRINGWARS_BYTES` controls the input size; `STRINGWARS_TOKENS` selects words, lines, or the file as one input.
 The Serial row is the reference; there is no Standard row here, since no standard library ships Unicode normalization.
 For a comparison against ICU, see the main project README.
-Results are split into a Short Words workload (tokens averaging a handful of bytes) and a Long Lines workload (full sentences).
+Results are split into Short Words, Long Lines, and Whole File workloads.
 A `↑` cell means there is no dedicated kernel for that operation at that backend, so the dispatcher reuses the tier above it.
 
 ## Short Words
@@ -22,11 +22,11 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | Haswell @ Xeon4  |          115.8 MB/s |                       201.8 MB/s |
 | Skylake @ Xeon4  |          116.9 MB/s |                       207.7 MB/s |
 | Ice Lake @ Xeon4 |          116.3 MB/s |                       202.8 MB/s |
+| Serial @ M5 Pro  |         414.4 MiB/s |                      488.5 MiB/s |
+| NEON @ M5 Pro    |         466.4 MiB/s |                      610.5 MiB/s |
 | NEON @ Graviton4 |                   … |                                … |
 | SVE2 @ Graviton4 |                   … |                                … |
 | SVE @ Graviton3  |                   … |                                … |
-
-> Measured June 26th, 2026.
 
 ## Long Lines
 
@@ -36,8 +36,17 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | Haswell @ Xeon4  |          359.1 MB/s |                       469.8 MB/s |
 | Skylake @ Xeon4  |          355.4 MB/s |                       506.1 MB/s |
 | Ice Lake @ Xeon4 |          362.3 MB/s |                       505.6 MB/s |
+| Serial @ M5 Pro  |         749.3 MiB/s |                      819.3 MiB/s |
+| NEON @ M5 Pro    |       1,640.4 MiB/s |                    1,857.8 MiB/s |
 | NEON @ Graviton4 |                   … |                                … |
 | SVE2 @ Graviton4 |                   … |                                … |
 | SVE @ Graviton3  |                   … |                                … |
 
-> Measured June 26th, 2026.
+## Whole File
+
+The corpus slice normalized to NFC in one call.
+
+| Backend         | `sz_utf8_norm_best` |
+| :-------------- | ------------------: |
+| Serial @ M5 Pro |         752.1 MiB/s |
+| NEON @ M5 Pro   |       1,647.4 MiB/s |

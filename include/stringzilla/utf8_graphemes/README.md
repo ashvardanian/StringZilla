@@ -7,8 +7,8 @@ Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends 
 ## Methodology
 
 Tables compare whitespace-delimited words and full text lines from `xlsum.csv`, measured with `bench/utf8_segment.cpp` using an output capacity of 16 clusters per call.
-M5 Pro results are medians of three runs over the first 64 MiB, matching the benchmark's default slice size, with averages of 8.55 bytes per word and 4,976.32 bytes per line.
-Xeon4 rates use MB/s; M5 Pro rates use MiB/s.
+The benchmark reads the first 64 MiB by default; `STRINGWARS_BYTES` controls the input size.
+`STRINGWARS_TOKENS` selects words, lines, or the file as one input.
 A `↑` cell means there is no dedicated kernel at that backend, so the dispatcher reuses the tier above it.
 
 ## Short Words
@@ -23,8 +23,6 @@ A `↑` cell means there is no dedicated kernel at that backend, so the dispatch
 | SVE2 @ Graviton4 |                        … |
 | SVE @ Graviton3  |                        … |
 
-> Measured June 26th, 2026.
-
 ## Long Lines
 
 | Backend          | `sz_utf8_graphemes_best` |
@@ -36,5 +34,3 @@ A `↑` cell means there is no dedicated kernel at that backend, so the dispatch
 | NEON @ M5 Pro    |              270.3 MiB/s |
 | SVE2 @ Graviton4 |                        … |
 | SVE @ Graviton3  |                        … |
-
-> Measured June 26th, 2026.

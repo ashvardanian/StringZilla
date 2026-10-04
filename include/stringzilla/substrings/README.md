@@ -34,7 +34,6 @@ The Haswell, Ice Lake and NEON tiers replace a text-side stage instead.
 While a walk stands on the root, the tier's byte-set search jumps to the next byte that leaves the root, drawn from the automaton's own set of live root bytes.
 Whether that pays depends on the text as much as on the vocabulary, so each haystack samples it: the skip runs once fewer than one byte in eight leaves the root.
 Over nucleotides every byte is live and the skip switches itself off, while a sparse vocabulary over large alphabets runs about four times faster.
-The NEON tier is cross-compiled but not yet measured on hardware.
 
 ## The Device
 
@@ -53,7 +52,7 @@ A case-insensitive vocabulary is refused there at init with `sz_device_code_mism
 
 ## Methodology
 
-Cells are haystack MB/s over lines of two corpora: 64 MB of `xlsum.csv` text, 128 MB on a GPU, and 64 MB of random `ACGT` in 4,096-byte lines, 256 MB on a GPU.
+Cells are haystack MB/s over `xlsum.csv` text and random `ACGT` in 4,096-byte lines.
 Vocabularies are the Frequent and Rare one percent of the corpus's words, and 1,000 Sampled substrings of 4 to 16 bytes.
 A `…` cell is not measured yet.
 
@@ -70,6 +69,8 @@ Every match of every needle, including nested ones, over text.
 | CUDA @ SM90           |               … |           … |              … |          … |
 | CUDA @ SM103 MIG      |         8,735.0 |    15,440.0 |        4,895.0 |   11,020.0 |
 | CUDA @ SM120          |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
+| Serial @ M5 Pro       |           905.2 |     1,421.4 |          695.9 |    1,152.0 |
+| NEON @ M5 Pro         |           894.2 |     7,010.1 |          692.9 |    6,233.3 |
 
 ## Leftmost Cover
 
@@ -84,6 +85,8 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 | CUDA @ SM90           |               … |           … |              … |          … |
 | CUDA @ SM103 MIG      |         4,468.0 |     9,405.0 |        4,688.0 |    9,413.0 |
 | CUDA @ SM120          |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
+| Serial @ M5 Pro       |           524.5 |     1,284.9 |          519.8 |    1,295.2 |
+| NEON @ M5 Pro         |           520.9 |     5,498.2 |          516.7 |    5,461.8 |
 
 ## Rewriting
 
@@ -98,6 +101,8 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 | CUDA @ SM90           |                 … |             … |
 | CUDA @ SM103 MIG      |           3,276.0 |       4,152.0 |
 | CUDA @ SM120          |           7,024.6 |      15,923.2 |
+| Serial @ M5 Pro       |             461.5 |       1,244.7 |
+| NEON @ M5 Pro         |             444.3 |       4,818.3 |
 
 ## Scoring
 
@@ -113,6 +118,8 @@ A CPU sums each haystack's terms in ascending needle order and a device in fixed
 | CUDA @ SM90           |              … |          … |
 | CUDA @ SM103 MIG      |        2,728.0 |   10,460.0 |
 | CUDA @ SM120          |        8,140.8 |   31,037.4 |
+| Serial @ M5 Pro       |          640.3 |    1,104.2 |
+| NEON @ M5 Pro         |          637.2 |    4,989.1 |
 
 ## Nucleotides
 
@@ -138,6 +145,8 @@ The frequent slice with both sides folded, which is the cost of matching a vocab
 | Serial @ Xeon 6776P   |   123.6 |   123.5 |   115.2 |
 | Haswell @ Xeon 6776P  |   126.9 |   124.1 |   115.6 |
 | Ice Lake @ Xeon 6776P |   135.9 |   124.1 |   118.3 |
+| Serial @ M5 Pro       |   314.7 |   317.3 |   264.4 |
+| NEON @ M5 Pro         |   314.8 |   314.0 |   263.7 |
 | NEON @ Graviton4      |       … |       … |       … |
 | CUDA @ SM90           |       … |       … |       … |
 | CUDA @ SM103 MIG      | 2,955.0 | 1,528.0 | 1,212.0 |

@@ -409,9 +409,9 @@ STRINGZILLA_API sz_status_t sz_substrings_find_kernel(sz_kernel_kind_t kind, sz_
 #include "stringzilla/substrings/haswell.h"
 #include "stringzilla/substrings/icelake.h"
 #include "stringzilla/substrings/neon.h"
-#include "stringzilla/substrings/metal.h"
 #include "stringzilla/substrings/cuda.cuh"
 #include "stringzilla/substrings/rocm.cuh"
+#include "stringzilla/substrings/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #if STRINGZILLA_HEADER_ONLY

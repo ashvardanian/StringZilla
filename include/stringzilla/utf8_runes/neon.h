@@ -36,10 +36,23 @@ STRINGZILLA_INLINE sz_u64_t sz_utf8_vreinterpretq_u8_u4_neon_(uint8x16_t vec_u8x
 #pragma region Multistep newline and whitespace iteration
 
 STRINGZILLA_INLINE sz_size_t sz_utf8_count_neon_(sz_cptr_t text, sz_size_t length) {
+    if (length < 16) return sz_utf8_count_serial_(text, length);
     sz_u128_vec_t text_vec, headers_vec, continuation_vec;
     uint8x16_t continuation_mask_u8x16 = vdupq_n_u8(0xC0);
     uint8x16_t continuation_pattern_u8x16 = vdupq_n_u8(0x80);
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t wide_count = 0;
+    int8x16_t const start_threshold_i8x16 = vdupq_n_s8(-65);
+    while (length >= 64) {
+        uint8x16_t const starts0_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8), start_threshold_i8x16);
+        uint8x16_t const starts1_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 16), start_threshold_i8x16);
+        uint8x16_t const starts2_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 32), start_threshold_i8x16);
+        uint8x16_t const starts3_u8x16 = vcgtq_s8(vld1q_s8((sz_i8_t const *)text_u8 + 48), start_threshold_i8x16);
+        uint8x16_t const counts_u8x16 = vsubq_u8(vsubq_u8(vdupq_n_u8(0), starts0_u8x16), starts1_u8x16);
+        wide_count += vaddvq_u8(vsubq_u8(vsubq_u8(counts_u8x16, starts2_u8x16), starts3_u8x16));
+        text_u8 += 64;
+        length -= 64;
+    }
     uint64x2_t char_count_u64x2 = vdupq_n_u64(0);
     while (length >= 16) {
         text_vec.u8x16 = vld1q_u8(text_u8);
@@ -55,7 +68,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_neon_(sz_cptr_t text, sz_size_t lengt
         length -= 16;
     }
 
-    sz_size_t char_count = vgetq_lane_u64(char_count_u64x2, 0) + vgetq_lane_u64(char_count_u64x2, 1);
+    sz_size_t char_count = wide_count + vgetq_lane_u64(char_count_u64x2, 0) + vgetq_lane_u64(char_count_u64x2, 1);
     if (length) char_count += sz_utf8_count_serial_((sz_cptr_t)text_u8, length);
     return char_count;
 }
@@ -1281,6 +1294,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_neon_( //
     sz_cptr_t text, sz_size_t length,              //
     sz_rune_t *runes, sz_size_t runes_capacity,    //
     sz_size_t *runes_count) {
+    if (length < 64) return sz_utf8_decode_serial_(text, length, runes, runes_capacity, runes_count);
 
     sz_cptr_t cursor = text;
     sz_cptr_t const end = text + length;

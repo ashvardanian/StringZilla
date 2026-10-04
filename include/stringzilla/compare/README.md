@@ -8,7 +8,6 @@ For hot paths on short inputs, like a sort comparator, pick a capability's kerne
 ## Methodology
 
 Numbers are throughput in GB/s, measured with `bench/token.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column, `std::memcmp` for both Equal and Order.
 Comparison is decided in the first differing bytes, so a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes) are enough to show how token length shifts the balance.
 
@@ -24,8 +23,6 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 | NEON @ Graviton4 |               … |               … |
 | SVE @ Graviton3  |               … |               … |
 
-> Measured June 26th, 2026.
-
 ## Long Lines
 
 | Backend          | `sz_equal_best` | `sz_order_best` |
@@ -37,5 +34,3 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 | Ice Lake @ Xeon4 |               ↑ |               ↑ |
 | NEON @ Graviton4 |               … |               … |
 | SVE @ Graviton3  |               … |               … |
-
-> Measured June 26th, 2026.

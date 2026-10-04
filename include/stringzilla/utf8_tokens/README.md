@@ -6,7 +6,6 @@ Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends 
 ## Methodology
 
 Numbers are throughput in MB/s, measured with `bench/utf8_scan.cpp` over the full multilingual `xlsum.csv` corpus, reporting the median of repeated runs.
-Each table fixes one input shape; its columns are the Whitespace Split and Newline Split operations and its rows are a backend on a chip, so reading down a column compares the same operation across the backend ladder while reading across a row compares operations on one backend.
 Results are split into a Short Words workload (whitespace-delimited tokens averaging a few bytes) and a Long Lines workload (full text lines) to expose how each kernel scales with token length.
 A `↑` cell means there is no dedicated kernel for that operation at that backend, so the dispatcher reuses the tier above it.
 
@@ -21,8 +20,6 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | SVE2 @ Graviton4 |                          … |                       … |
 | SVE @ Graviton3  |                          … |                       … |
 
-> Measured June 26th, 2026.
-
 ## Long Lines
 
 | Backend          | `sz_utf8_whitespaces_best` | `sz_utf8_newlines_best` |
@@ -33,5 +30,3 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | NEON @ Graviton4 |                          … |                       … |
 | SVE2 @ Graviton4 |                          … |                       … |
 | SVE @ Graviton3  |                          … |                       … |
-
-> Measured June 26th, 2026.

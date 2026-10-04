@@ -334,8 +334,7 @@ enum { sz_levenshtein_gpu_grid_rows_max_k = 65535 };
  *  count that scales with the lanes. */
 enum { sz_levenshtein_gpu_lanes_waves_min_k = 12 };
 
-/** Bytes of device-reachable scratch @ref sz_levenshtein_distance_tiled_best needs: a frontier row
- *  across the shorter text, plus one progress counter per tile-column of the longer text. */
+/** Device-reachable scratch bytes required by @ref sz_levenshtein_distance_tiled_best. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_distance_tiled_scratch_bytes(sz_size_t a_length, sz_size_t b_length) {
     sz_size_t const shorter_length = sz_min_of_two(a_length, b_length);
     sz_size_t const longer_length = sz_max_of_two(a_length, b_length);

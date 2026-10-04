@@ -28,6 +28,8 @@ CMakeFiles
 *.a
 *.dll
 *.dylib
+*.profraw
+*.profdata
 *.egg-info
 *.whl
 *.pyd

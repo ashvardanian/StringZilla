@@ -9,7 +9,6 @@ For hot paths on short inputs, pick a capability's kernel, like `sz_copy_neon`, 
 
 Numbers are throughput in GB/s, measured with `bench/memory.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
 Memory operations are bandwidth-bound and measured solo, so they are not tokenized and appear in a single table.
-Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::memcpy`, `std::memmove`, `std::memset`, and `std::transform`.
 A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` reuses the kernel from the tier above it; an empty cell is genuinely-missing data.
 
@@ -24,5 +23,3 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 | Ice Lake @ Xeon4 |              ↑ |              ↑ |              ↑ |         7.7 GB/s |
 | NEON @ Graviton4 |              … |              … |              … |                … |
 | SVE @ Graviton3  |              … |              … |              … |                … |
-
-> Measured June 26th, 2026.

@@ -6,11 +6,10 @@ Each `_best` dispatch point runs the best kernel among the capabilities its call
 
 ## Methodology
 
-Cells are throughput in GB/s, measured with `bench/cipher.cpp` on one core pinned away from the scheduler, reporting the median of nine calibrated samples and reproducible to about one and a half percent.
-Each row is the library compiled with that single backend forced on one fixed chip, and each column is one message size, so coverage and cross-chip comparison read down a single column.
+Cells are throughput in GB/s, measured with `bench/cipher.cpp`, reporting the median of nine calibrated samples.
 The Serial row is the reference; there is no Standard row here, since no standard library ships a block cipher.
 Message size decides how much of a call is key schedule and tag arithmetic rather than bulk work, so results sweep four sizes from a short record to a page-sized buffer.
-A `…` cell is genuinely-missing data, on a backend not yet measured on hardware that runs it.
+A `…` cell is not measured yet.
 
 ## Counter Mode
 
@@ -22,8 +21,6 @@ A `…` cell is genuinely-missing data, on a backend not yet measured on hardwar
 | NEON @ Graviton4 |         … |         … |         … |         … |
 | SVE2 @ Graviton4 |         … |         … |         … |         … |
 
-> Measured August 4th, 2026.
-
 ## Galois/Counter Mode
 
 | Backend          |      256 B |       1 KB |       4 KB |      16 KB |
@@ -33,5 +30,3 @@ A `…` cell is genuinely-missing data, on a backend not yet measured on hardwar
 | Ice Lake @ Xeon4 |  3.19 GB/s |  5.93 GB/s |  7.07 GB/s |  7.74 GB/s |
 | NEON @ Graviton4 |          … |          … |          … |          … |
 | SVE2 @ Graviton4 |          … |          … |          … |          … |
-
-> Measured August 4th, 2026.

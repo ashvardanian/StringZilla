@@ -36,34 +36,34 @@ enum { sz_overlap_f64x4_positions_per_step_haswell_k = 4 };
 enum { sz_overlap_keys_per_register_haswell_k = 8, sz_overlap_keys_per_run_haswell_k = 64 };
 
 /** Exact @c u32 → @c f64, since AVX2 offers only the signed conversion. */
-STRINGZILLA_INLINE __m256d sz_overlap_u32x4_to_f64x4_haswell_(__m128i values_vec) {
+STRINGZILLA_INLINE __m256d sz_overlap_u32x4_to_f64x4_haswell_(__m128i values_u32x4) {
     sz_u256_vec_t signed_vec, wrapped_vec;
-    signed_vec.ymm_pd = _mm256_cvtepi32_pd(values_vec);
+    signed_vec.ymm_pd = _mm256_cvtepi32_pd(values_u32x4);
     wrapped_vec.ymm_pd = _mm256_cmp_pd(signed_vec.ymm_pd, _mm256_setzero_pd(), _CMP_LT_OQ);
     return _mm256_add_pd(signed_vec.ymm_pd, _mm256_and_pd(wrapped_vec.ymm_pd, _mm256_set1_pd(4294967296.0)));
 }
 
 /** Exact @c f64 → @c u32 for values below 2^32, biasing around the signed conversion's ceiling. */
-STRINGZILLA_INLINE __m128i sz_overlap_f64x4_to_u32x4_haswell_(__m256d values_vec) {
-    __m128i const biased_vec = _mm256_cvttpd_epi32(_mm256_sub_pd(values_vec, _mm256_set1_pd(2147483648.0)));
-    return _mm_xor_si128(biased_vec, _mm_set1_epi32((int)0x80000000u));
+STRINGZILLA_INLINE __m128i sz_overlap_f64x4_to_u32x4_haswell_(__m256d values_f64x4) {
+    __m128i const biased_i32x4 = _mm256_cvttpd_epi32(_mm256_sub_pd(values_f64x4, _mm256_set1_pd(2147483648.0)));
+    return _mm_xor_si128(biased_i32x4, _mm_set1_epi32((int)0x80000000u));
 }
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product's rounded head and exact tail reduce together, so the 53-bit mantissa never binds. */
-STRINGZILLA_INLINE __m256d sz_overlap_multiply_add_haswell_(__m256d multiplier_vec, __m256d multiplicand_vec,
-                                                            __m256d addend_vec) {
+STRINGZILLA_INLINE __m256d sz_overlap_multiply_add_haswell_(__m256d multiplier_f64x4, __m256d multiplicand_f64x4,
+                                                            __m256d addend_f64x4) {
     sz_u256_vec_t modulus_vec, reciprocal_vec, high_vec, low_vec, quotient_vec, folded_vec;
     sz_u256_vec_t second_vec, residue_vec, negative_vec;
     modulus_vec.ymm_pd = _mm256_set1_pd((sz_f64_t)sz_overlap_modulus_k);
     reciprocal_vec.ymm_pd = _mm256_set1_pd(1.0 / (sz_f64_t)sz_overlap_modulus_k);
-    high_vec.ymm_pd = _mm256_mul_pd(multiplier_vec, multiplicand_vec);
-    low_vec.ymm_pd = _mm256_fmsub_pd(multiplier_vec, multiplicand_vec, high_vec.ymm_pd);
+    high_vec.ymm_pd = _mm256_mul_pd(multiplier_f64x4, multiplicand_f64x4);
+    low_vec.ymm_pd = _mm256_fmsub_pd(multiplier_f64x4, multiplicand_f64x4, high_vec.ymm_pd);
     quotient_vec.ymm_pd = _mm256_round_pd(_mm256_mul_pd(high_vec.ymm_pd, reciprocal_vec.ymm_pd),
                                           _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     folded_vec.ymm_pd = _mm256_add_pd(
         _mm256_add_pd(_mm256_fnmadd_pd(quotient_vec.ymm_pd, modulus_vec.ymm_pd, high_vec.ymm_pd), low_vec.ymm_pd),
-        addend_vec);
+        addend_f64x4);
     second_vec.ymm_pd = _mm256_round_pd(_mm256_mul_pd(folded_vec.ymm_pd, reciprocal_vec.ymm_pd),
                                         _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     residue_vec.ymm_pd = _mm256_fnmadd_pd(second_vec.ymm_pd, modulus_vec.ymm_pd, folded_vec.ymm_pd);
@@ -74,9 +74,9 @@ STRINGZILLA_INLINE __m256d sz_overlap_multiply_add_haswell_(__m256d multiplier_v
 STRINGZILLA_INLINE sz_f64_t sz_overlap_f64x4_prefix_hash_step_haswell_(sz_f64_t prior, sz_cptr_t text,
                                                                        sz_f64_t *prefix_hashes) {
     sz_u32_t const word = sz_u32_bytes_reverse(sz_u32_load(text).u32);
-    __m128i const shifted_vec = _mm_srlv_epi32(_mm_set1_epi32((int)word), _mm_setr_epi32(24, 16, 8, 0));
+    __m128i const shifted_u32x4 = _mm_srlv_epi32(_mm_set1_epi32((int)word), _mm_setr_epi32(24, 16, 8, 0));
     sz_u256_vec_t chunks_vec, powers_vec, values_vec;
-    chunks_vec.ymm_pd = sz_overlap_u32x4_to_f64x4_haswell_(shifted_vec);
+    chunks_vec.ymm_pd = sz_overlap_u32x4_to_f64x4_haswell_(shifted_u32x4);
     powers_vec.ymm_pd = _mm256_loadu_pd(sz_overlap_powers_of_256_k + 1);
     values_vec.ymm_pd = sz_overlap_multiply_add_haswell_(_mm256_set1_pd(prior), powers_vec.ymm_pd, chunks_vec.ymm_pd);
     _mm256_storeu_pd(prefix_hashes, values_vec.ymm_pd);

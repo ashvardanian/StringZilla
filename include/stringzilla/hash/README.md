@@ -24,7 +24,6 @@ At line length the sixteen-wide kernel is about half again as fast as the single
 ## Methodology
 
 Cells are dual: throughput in GB/s and hash rate in millions of hashes per second, measured with `bench/token.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-Every backend registers its own row in a single binary, so a row is one kernel rather than one build, and each column is one operation — coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `std::accumulate` for Byte Sum and `std::hash` for the hashing columns.
 Token length matters, so results are split into a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes).
 Multi-seed hashing emits eight digests per input, so its hash rate is far higher at comparable throughput; SHA-256's accelerator is the SHA-NI path, shown as the Goldmont row.
@@ -46,8 +45,6 @@ An empty cell is genuinely-missing data.
 | NEON @ Graviton4 |                      … |                      … |                       … |                     … |                      … |
 | SVE @ Graviton3  |                      … |                      … |                       … |                     … |                      … |
 
-> Measured August 5th, 2026.
-
 ## Long Lines
 
 | Backend          |               Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |    Multi-state SHA-256 |
@@ -61,6 +58,3 @@ An empty cell is genuinely-missing data.
 | Ice Lake @ Xeon4 | 4.20 GB/s · 35 Mhash/s | 4.51 GB/s · 37 Mhash/s | 12.62 GB/s · 104 Mhash/s |                     ↑ |                      ↑ |
 | NEON @ Graviton4 |                      … |                      … |                        … |                     … |                      … |
 | SVE @ Graviton3  |                      … |                      … |                        … |                     … |                      … |
-
-> Measured August 5th, 2026.
-

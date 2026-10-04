@@ -2,10 +2,9 @@
  *  @file include/stringzilla/utf8_wordbreaks/neon.h
  *  @author Ash Vardanian
  *  @date June 7, 2026
- *  @brief Fully-vectorized UAX-29 Word_Break segmentation for NEON (AArch64).
+ *  @brief UAX-29 Word_Break segmentation for NEON (AArch64).
  *
- *  The NEON twin of the AVX2 (Haswell) and Ice Lake kernels: no path scalar-walks codepoints or
- *  spills a vector to the stack to call the serial oracle.
+ *  Inputs shorter than 64 bytes use the serial kernel; longer inputs classify 64-byte windows.
  *
  *  Each 64-byte window lives as four @c uint8x16_t quarters (the codepoint substrate twin of
  *  haswell's two @c __m256i halves); every per-codepoint BMP Word_Break property resolves through
@@ -443,8 +442,9 @@ STRINGZILLA_INLINE sz_utf8_word_break_partition_t sz_utf8_word_break_partition_n
 STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_neon_( //
     sz_cptr_t text, sz_size_t length,                  //
     sz_size_t *word_lengths, sz_size_t words_capacity) {
+    if (length < 64) return sz_utf8_wordbreaks_serial_(text, length, word_lengths, words_capacity);
 
-    if (length == 0 || words_capacity == 0) return 0;
+    if (words_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
     sz_size_t words = 0;         // words written to the output

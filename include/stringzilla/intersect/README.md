@@ -7,10 +7,9 @@ The `_best` dispatch point runs the best kernel among the capabilities its calle
 ## Methodology
 
 Numbers are throughput in comparisons/s, rendered as Mcmp/s, measured with `bench/sequence.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-Each row is the library compiled with that single backend forced on one fixed chip, and the single column is the operation, so coverage and cross-chip comparison read down the column.
 The Standard row is the platform's best stock equivalent, `std::unordered_map`.
 Token length affects per-element cost, so results are split into a Short Words table (tokens averaging 5 bytes) and a Long Lines table (tokens averaging 130 bytes).
-An empty cell is genuinely-missing data; `…` rows are placeholders awaiting an Arm run.
+An empty cell or `…` is not measured yet.
 
 ## Short Words
 
@@ -21,8 +20,6 @@ An empty cell is genuinely-missing data; `…` rows are placeholders awaiting an
 | Ice Lake @ Xeon4     |                    24 Mcmp/s |
 | NEON AES @ Graviton4 |                            … |
 
-> Measured June 26th, 2026.
-
 ## Long Lines
 
 | Backend              | `sz_sequence_intersect_best` |
@@ -31,5 +28,3 @@ An empty cell is genuinely-missing data; `…` rows are placeholders awaiting an
 | Serial @ Xeon4       |                    10 Mcmp/s |
 | Ice Lake @ Xeon4     |                    10 Mcmp/s |
 | NEON AES @ Graviton4 |                            … |
-
-> Measured June 26th, 2026.

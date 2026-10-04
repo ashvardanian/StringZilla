@@ -14,10 +14,10 @@ Each backend also exports its building blocks: a `state` per register of candida
 
 ## Methodology
 
-Cells are GCUPS, billions of cell updates per second, over `xlsum.csv` words averaging 9 bytes and lines averaging 3 KB.
+Cells are GCUPS, billions of cell updates per second, over words and lines from `xlsum.csv`.
 A `↑` cell reuses the kernel of the tier above, and a `…` cell is not measured yet.
 
-M5 Pro rows use the first 64 MiB of `xlsum.csv`; cells are medians of three runs.
+The benchmark reads the first 64 MiB of `xlsum.csv` by default; `STRINGWARS_BYTES` controls the input size.
 That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with median query byte limits of 6 and 3,460 respectively.
 UTF-8 rows use the harness's byte-based cell-update count, rather than a count of decoded rune pairs.
 
@@ -36,8 +36,6 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | CUDA @ SM103 MIG   | 33.88 GCUPS | 3,603 GCUPS |
 | CUDA @ SM120       |  3.59 GCUPS |           … |
 
-> Measured September 22nd, 2026, and October 2nd, 2026, for SM103.
-
 ## Batches Over UTF-8 Strings
 
 | Backend            | Short Words |   Long Lines |
@@ -52,5 +50,3 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | CUDA @ SM90        |           … |            … |
 | CUDA @ SM103 MIG   | 36.72 GCUPS |  4,264 GCUPS |
 | CUDA @ SM120       |           … |            … |
-
-> Measured September 22nd, 2026, and October 2nd, 2026, for SM103.

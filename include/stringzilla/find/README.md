@@ -8,7 +8,6 @@ For hot paths on short inputs, like a per-token `find_byte`, pick a capability's
 ## Methodology
 
 Numbers are throughput, shown in GB/s in each cell, measured with `bench/find.cpp` over the `leipzig1M.txt` corpus, reporting the median of repeated runs.
-Each row is the library compiled with that single backend forced on one fixed chip, and each column is one operation, so coverage and cross-chip comparison read down a single column.
 The Standard row is the platform's best stock equivalent per column — `strstr` and `std::find_end` for substring search, `memchr` for the byte variants, and `strpbrk`/`strcspn` for the byte-set variants.
 Substring search depends sharply on needle length, so results are split into a Short Words table with tokens averaging 5 bytes and a Long Lines table with tokens averaging 130 bytes.
 A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` reuses the kernel from the tier above it; an empty cell is genuinely-missing data.
@@ -26,8 +25,6 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 | NEON @ Graviton4 |              … |               … |                   … |                    … |                      … |                       … |
 | SVE @ Graviton3  |              … |               … |                   … |                    … |                      … |                       … |
 
-> Measured June 26th, 2026.
-
 ## Long Lines
 
 | Backend          | `sz_find_best` | `sz_rfind_best` | `sz_find_byte_best` | `sz_rfind_byte_best` | `sz_find_byteset_best` | `sz_rfind_byteset_best` |
@@ -40,5 +37,3 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 | Ice Lake @ Xeon4 |              ↑ |               ↑ |                   ↑ |                    ↑ |              3.56 GB/s |               3.43 GB/s |
 | NEON @ Graviton4 |              … |               … |                   … |                    … |                      … |                       … |
 | SVE @ Graviton3  |              … |               … |                   … |                    … |                      … |                       … |
-
-> Measured June 26th, 2026.

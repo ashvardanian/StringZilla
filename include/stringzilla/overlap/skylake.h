@@ -42,18 +42,18 @@ enum { sz_overlap_keys_per_register_skylake_k = 16, sz_overlap_keys_per_run_skyl
 
 /** (multiplier · multiplicand + addend) mod p, in [0, p), exact for every input below 2³²: the
  *  product's rounded head and exact tail reduce together, so the 53-bit mantissa never binds. */
-STRINGZILLA_INLINE __m512d sz_overlap_multiply_add_skylake_(__m512d multiplier_vec, __m512d multiplicand_vec,
-                                                            __m512d addend_vec) {
+STRINGZILLA_INLINE __m512d sz_overlap_multiply_add_skylake_(__m512d multiplier_f64x8, __m512d multiplicand_f64x8,
+                                                            __m512d addend_f64x8) {
     sz_u512_vec_t modulus_vec, reciprocal_vec, high_vec, low_vec, quotient_vec, folded_vec, second_vec, residue_vec;
     modulus_vec.zmm_pd = _mm512_set1_pd((sz_f64_t)sz_overlap_modulus_k);
     reciprocal_vec.zmm_pd = _mm512_set1_pd(1.0 / (sz_f64_t)sz_overlap_modulus_k);
-    high_vec.zmm_pd = _mm512_mul_pd(multiplier_vec, multiplicand_vec);
-    low_vec.zmm_pd = _mm512_fmsub_pd(multiplier_vec, multiplicand_vec, high_vec.zmm_pd);
+    high_vec.zmm_pd = _mm512_mul_pd(multiplier_f64x8, multiplicand_f64x8);
+    low_vec.zmm_pd = _mm512_fmsub_pd(multiplier_f64x8, multiplicand_f64x8, high_vec.zmm_pd);
     quotient_vec.zmm_pd = _mm512_roundscale_pd(_mm512_mul_pd(high_vec.zmm_pd, reciprocal_vec.zmm_pd),
                                                _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     folded_vec.zmm_pd = _mm512_add_pd(
         _mm512_add_pd(_mm512_fnmadd_pd(quotient_vec.zmm_pd, modulus_vec.zmm_pd, high_vec.zmm_pd), low_vec.zmm_pd),
-        addend_vec);
+        addend_f64x8);
     second_vec.zmm_pd = _mm512_roundscale_pd(_mm512_mul_pd(folded_vec.zmm_pd, reciprocal_vec.zmm_pd),
                                              _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
     residue_vec.zmm_pd = _mm512_fnmadd_pd(second_vec.zmm_pd, modulus_vec.zmm_pd, folded_vec.zmm_pd);
