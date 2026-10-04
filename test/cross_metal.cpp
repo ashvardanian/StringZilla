@@ -336,8 +336,46 @@ static void check_levenshtein_metal_query_safety_(metal_backend_t const &backend
         fail_backend_("dispatched", "an empty query was not refused");
 
     if (sz_levenshtein_distance_tiled_best("abc", 3, "abd", 3, STRINGZILLA_NULL, STRINGZILLA_NULL, backend.capabilities,
-                                           queue) != sz_missing_kernel_k)
-        fail_backend_("dispatched", "the tiled wavefront did not refuse a Metal device");
+                                           queue) != sz_device_memory_mismatch_k)
+        fail_backend_("dispatched", "the tiled wavefront did not refuse unregistered memory");
+}
+
+static void check_levenshtein_tiled_metal_(metal_backend_t const &backend, std::mt19937 &generator) {
+    sz_stream_t const queue = backend.stream;
+    std::array<std::pair<sz_size_t, sz_size_t>, 5> const shapes {
+        {{0, 17}, {127, 129}, {257, 513}, {513, 257}, {16385, 16385}}};
+    for (auto const [a_length, b_length] : shapes) {
+        metal_vector<char> a(a_length, 0, metal_unified_alloc<char>(queue));
+        metal_vector<char> b(b_length, 0, metal_unified_alloc<char>(queue));
+        for (char &byte : a) byte = (char)generator();
+        for (char &byte : b) byte = (char)generator();
+        sz_string_view_t const a_view {a.data(), a.size()}, b_view {b.data(), b.size()};
+        sz_sequence_t queries {}, candidates {};
+        sz_sequence_from_string_views(&a_view, 1, &queries);
+        sz_sequence_from_string_views(&b_view, 1, &candidates);
+        handle_checked_heap_t heap;
+        sz_levenshtein_engine_t engine {};
+        verify(sz_levenshtein_engine_init_serial(&engine, &queries, sz_levenshtein_bytes_k, &heap.allocator, nullptr) ==
+               sz_success_k);
+        sz_size_t expected;
+        verify(sz_levenshtein_distances_serial(&engine, &candidates, &expected, 1, nullptr) == sz_success_k);
+        sz_levenshtein_engine_free(&engine, nullptr);
+        verify(heap.live_allocations == 0);
+
+        sz_size_t const scratch_bytes = sz_levenshtein_distance_tiled_scratch_bytes(a_length, b_length);
+        metal_vector<sz_u8_t> scratch(scratch_bytes + 32, 0xA5, metal_unified_alloc<sz_u8_t>(queue));
+        metal_vector<sz_size_t> distance(1, STRINGZILLA_SIZE_MAX, metal_unified_alloc<sz_size_t>(queue));
+        verify(sz_levenshtein_distance_tiled_metal(a.data(), a_length, b.data(), b_length, scratch.data(),
+                                                   distance.data(), queue) == sz_success_k);
+        verify(sz_stream_synchronize_metal(queue) == sz_success_k);
+        verify(distance[0] == expected);
+        distance[0] = STRINGZILLA_SIZE_MAX;
+        verify(sz_levenshtein_distance_tiled_best(a.data(), a_length, b.data(), b_length, scratch.data(),
+                                                  distance.data(), backend.capabilities, queue) == sz_success_k);
+        verify(sz_stream_synchronize_metal(queue) == sz_success_k);
+        verify(distance[0] == expected);
+        for (sz_size_t index = scratch_bytes; index != scratch.size(); ++index) verify(scratch[index] == 0xA5);
+    }
 }
 
 /** The scoring verb commits and returns, so a round big enough to outlive the call is still
@@ -897,6 +935,12 @@ static void test_substrings_metal_equivalence(test_context_t &context, metal_bac
     std::mt19937 &generator = context.generator;
     check_policies_(backend, {"ushers"}, {"he", "she", "his", "hers"});
 
+    std::string folded_edges;
+    std::string const folded_tile = std::string(63, 'x') + "ßſKﬃStraße .";
+    for (unsigned repeat = 0; repeat != 128; ++repeat) folded_edges += folded_tile;
+    check_policies_(backend, {"sßſKﬃStraße", std::string("s\xc0\x80SS", 5), folded_edges},
+                    {"s", "ss", "k", "ffi", "strasse"}, sz_substrings_cover_exact_k, sz_substrings_uncased_k);
+
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
     std::size_t const rounds = context.iterations(8);
     for (std::size_t round = 0; round != rounds; ++round) {
@@ -947,15 +991,6 @@ static void test_substrings_metal_safety(metal_backend_t const &backend) {
     substrings_metal_engines_t engines(vocabulary.tape.sequence(), sz_substrings_overlapping_k, backend);
     sz_sequence_t const corpus_tape_sequence = corpus.tape.sequence();
     sz_sequence_t const *const haystacks = &corpus_tape_sequence;
-
-    {
-        sz_substrings_engine_t uncased {};
-        sz_sequence_t const vocabulary_tape_sequence = vocabulary.tape.sequence();
-        verify(sz_substrings_engine_init(&uncased, &vocabulary_tape_sequence, sz_substrings_uncased_k,
-                                         sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                         backend.capabilities, STRINGZILLA_NULL, queue) == sz_device_code_mismatch_k);
-        verify(uncased.memory == STRINGZILLA_NULL);
-    }
 
     // A device verb refuses memory outside the registry rather than reading it from a kernel.
     {
@@ -1156,6 +1191,8 @@ static std::size_t test_cross_metal_(environment_t const &env, sz_stream_t queue
     cross_section_t check(env);
     check.detected = metal.capabilities;
     check.section("Cross Metal", sz_cap_metal_k);
+    check("test_levenshtein_tiled_metal",
+          [&](test_context_t &context) { check_levenshtein_tiled_metal_(metal, context.generator); });
     check("test_allocator_metal", [&] {
         sz_allocator_t unified, device;
         verify(sz_allocator_init_unified_best(&unified, sz_cap_metal_k) == sz_success_k);

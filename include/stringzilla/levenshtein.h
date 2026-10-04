@@ -114,7 +114,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *en
  *  @param[in] scratch The frontier, device-reachable and at least
  *      @ref sz_levenshtein_distance_tiled_scratch_bytes bytes, owned by the caller.
  *  @param[out] distance Device-reachable slot the distance lands in once @p stream is joined.
- *  @param[in] capabilities One device's capabilities; only CUDA and ROCm have the wavefront.
+ *  @param[in] capabilities One device's capabilities; CUDA, ROCm and Metal have the wavefront.
  *  @param[in] stream The GPU stream to queue on, which also names the device; null for the default.
  *  @return @c sz_success_k once enqueued, @c sz_missing_kernel_k for any other capability,
  *      @c sz_unexpected_dimensions_k when either text is longer than the kernel indexes,
@@ -227,6 +227,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
                                                            sz_sequence_t const *candidates, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_stream_t stream);
+/** @copydoc sz_levenshtein_distance_tiled_best */
+STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_metal(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
+                                                                sz_stream_t stream);
 #endif
 
 /**

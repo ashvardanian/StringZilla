@@ -17,8 +17,8 @@
  *
  *  The planes are built on the host, bytes and runes alike, since the block is memory both sides
  *  address. The CUDA tier's narrow byte lanes are a throughput rung only, so their queries take the
- *  one-word threaded rung here, and the tiled wavefront has no Metal arm: Apple GPUs promise no
- *  forward progress between threadgroups, which its cross-block wait needs.
+ *  one-word threaded rung here. The tiled wavefront uses ordered diagonal dispatches, since Apple
+ *  GPUs promise no forward progress between threadgroups.
  */
 #ifndef STRINGZILLA_LEVENSHTEIN_METAL_H_
 #define STRINGZILLA_LEVENSHTEIN_METAL_H_
@@ -251,6 +251,57 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
         }
     }
     return sz_metal_commit_(&call, sz_success_k);
+}
+
+typedef struct sz_levenshtein_tiled_arguments_metal_t {
+    sz_u32_t shorter_length, longer_length, tile_rows, diagonal, row_first;
+} sz_levenshtein_tiled_arguments_metal_t;
+
+STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_metal(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
+                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
+                                                                sz_stream_t stream) {
+    if (a_length > ((sz_size_t)1 << 32) - 256 || b_length > ((sz_size_t)1 << 32) - 256)
+        return sz_unexpected_dimensions_k;
+    sz_metal_call_t call;
+    sz_status_t status = sz_device_enter_metal_(stream, &call);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    sz_metal_bound_t buffers[4];
+    if (!sz_metal_resolve_call_(&call, distance, sizeof(sz_size_t), &buffers[3]))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    sz_size_t const shorter_length = sz_min_of_two(a_length, b_length);
+    sz_size_t const longer_length = sz_max_of_two(a_length, b_length);
+    sz_metal_size_t const one = {1, 1, 1};
+    if (!shorter_length) {
+        status = sz_metal_encode_(&call, sz_levenshtein_source_metal_, "sz_levenshtein_store_metal_kernel_",
+                                  buffers + 3, 1, &longer_length, sizeof(longer_length), one, one);
+        return sz_metal_commit_(&call, status);
+    }
+    sz_cptr_t const shorter = a_length <= b_length ? a : b;
+    sz_cptr_t const longer = a_length <= b_length ? b : a;
+    sz_size_t const rows = sz_size_divide_round_up(shorter_length, sz_levenshtein_tile_side_k);
+    sz_size_t const columns = sz_size_divide_round_up(longer_length, sz_levenshtein_tile_side_k);
+    // Three delta-coded edge planes fit within the public scratch bound: 3 * 132 < 4 * 128.
+    if (!sz_metal_resolve_call_(&call, shorter, shorter_length, &buffers[0]) ||
+        !sz_metal_resolve_call_(&call, longer, longer_length, &buffers[1]) ||
+        !sz_metal_resolve_call_(&call, scratch, rows * 3 * 132, &buffers[2]))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    void *const pipeline = sz_metal_pipeline_(call.context, sz_levenshtein_source_metal_,
+                                              "sz_levenshtein_tiled_metal_kernel_");
+    if (!pipeline || sz_metal_count_(pipeline, "threadExecutionWidth") != 32 ||
+        sz_metal_count_(pipeline, "maxTotalThreadsPerThreadgroup") < 32)
+        return sz_metal_commit_(&call, sz_device_code_mismatch_k);
+    sz_levenshtein_tiled_arguments_metal_t arguments;
+    arguments.shorter_length = (sz_u32_t)shorter_length, arguments.longer_length = (sz_u32_t)longer_length;
+    arguments.tile_rows = (sz_u32_t)rows;
+    sz_metal_size_t const threads = {32, 1, 1};
+    for (sz_size_t diagonal = 0; diagonal != rows + columns - 1; ++diagonal) {
+        sz_size_t const first = diagonal >= columns ? diagonal - columns + 1 : 0;
+        sz_size_t const end = sz_min_of_two(diagonal + 1, rows);
+        sz_metal_size_t const groups = {end - first, 1, 1};
+        arguments.diagonal = (sz_u32_t)diagonal, arguments.row_first = (sz_u32_t)first;
+        sz_metal_enqueue_(call.encoder, pipeline, buffers, 4, &arguments, sizeof(arguments), groups, threads);
+    }
+    return sz_metal_commit_(&call, status);
 }
 
 #pragma endregion Metal

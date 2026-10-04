@@ -4,7 +4,7 @@
  *  @date September 25, 2026
  *  @brief Levenshtein distances on Apple GPUs of Metal family 7, M1 and newer: Myers' bit-parallel
  *      recurrence over a batch of prepared queries, one candidate per thread for a narrow query and
- *      one per simdgroup for a wide one.
+ *      one per simdgroup for a wide one, and a tiled wavefront for a long single pair.
  *
  *  @sa include/stringzilla/levenshtein/metal.h, which embeds and launches this source
  *  @sa include/stringzilla/levenshtein/simt.cuh, the CUDA sibling this mirrors step for step
@@ -422,3 +422,114 @@ sz_levenshtein_warped_metal_kernel_<7, true>(device uchar *, device ulong const 
 template [[host_name("sz_levenshtein_distances_utf8_k8_metal_kernel_")]] kernel void
 sz_levenshtein_warped_metal_kernel_<8, true>(device uchar *, device ulong const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+
+struct sz_levenshtein_tiled_arguments_metal_t {
+    uint shorter_length, longer_length, tile_rows, diagonal, row_first;
+};
+
+inline uint4 sz_levenshtein_edge_load_metal_(device uchar const *edge, uint lane) {
+    device char const *differences = (device char const *)(edge + 4) + lane * 4;
+    int4 const prefix = int4(differences[0], differences[0] + differences[1],
+                             differences[0] + differences[1] + differences[2],
+                             differences[0] + differences[1] + differences[2] + differences[3]);
+    uint const first = *(device uint const *)edge + simd_prefix_exclusive_sum(prefix.w);
+    return uint4(prefix) + first;
+}
+
+kernel void sz_levenshtein_store_metal_kernel_(device ulong *distance [[buffer(0)]],
+                                               constant ulong &value [[buffer(1)]]) {
+    *distance = value;
+}
+
+kernel void sz_levenshtein_tiled_metal_kernel_(device uchar const *shorter [[buffer(0)]],
+                                               device uchar const *longer [[buffer(1)]],
+                                               device uchar *scratch [[buffer(2)]],
+                                               device ulong *distance [[buffer(3)]],
+                                               constant sz_levenshtein_tiled_arguments_metal_t &arguments [[buffer(4)]],
+                                               uint group [[threadgroup_position_in_grid]],
+                                               uint lane [[thread_index_in_threadgroup]]) {
+    uint const tile_row = arguments.row_first + group, tile_column = arguments.diagonal - tile_row;
+    uint const first_row = tile_row * 128, first_column = tile_column * 128;
+    ulong const plane_bytes = ulong(arguments.tile_rows) * 132;
+    device uchar *right = scratch + ulong(tile_row) * 132;
+    device uchar const *incoming = scratch + plane_bytes * (1 + ((arguments.diagonal - 1) & 1)) +
+                                   ulong(max(tile_row, 1u) - 1) * 132;
+    device uchar *bottom = scratch + plane_bytes * (1 + (arguments.diagonal & 1)) + ulong(tile_row) * 132;
+    threadgroup uchar query[128];
+    threadgroup uint left[129], outgoing[129];
+    uint4 const incoming_left = tile_column ? sz_levenshtein_edge_load_metal_(right, lane)
+                                            : uint4(first_row + lane * 4) + uint4(1, 2, 3, 4);
+    uint4 carry = tile_row ? sz_levenshtein_edge_load_metal_(incoming, lane)
+                           : uint4(first_column + lane * 4) + uint4(1, 2, 3, 4);
+    uchar target[4];
+#pragma unroll
+    for (uint element = 0; element != 4; ++element) {
+        uint const row = first_row + lane * 4 + element, column = first_column + lane * 4 + element;
+        query[lane * 4 + element] = row < arguments.shorter_length ? shorter[row] : 0xFE;
+        target[element] = column < arguments.longer_length ? longer[column] : 0xFF;
+        left[lane * 4 + element + 1] = incoming_left[element];
+    }
+    uint const top_last = simd_shuffle(carry.w, 31);
+    if (lane == 0) {
+        left[0] = tile_column ? *(device uint const *)right : first_row;
+        outgoing[0] = top_last;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint4 previous_right = uint4(0);
+    uint previous_topright = 0;
+    for (uint step = 0; step != 63; ++step) {
+        uint const micro_row = step - lane;
+        uint4 shuffled_right;
+#pragma unroll
+        for (uint element = 0; element != 4; ++element)
+            shuffled_right[element] = simd_shuffle_up(previous_right[element], 1);
+        uint const shuffled_topright = simd_shuffle_up(previous_topright, 1);
+        if (micro_row >= 32) continue;
+        uint4 const left_column = lane ? shuffled_right
+                                       : uint4(left[micro_row * 4 + 1], left[micro_row * 4 + 2],
+                                               left[micro_row * 4 + 3], left[micro_row * 4 + 4]);
+        uint const corner = lane ? shuffled_topright : left[micro_row * 4];
+        uint const topright = carry.w;
+        uint above[5] = {corner, carry.x, carry.y, carry.z, carry.w};
+        uint4 right_column;
+#pragma unroll
+        for (uint row = 0; row != 4; ++row) {
+            uint current[5];
+            current[0] = left_column[row];
+#pragma unroll
+            for (uint column = 0; column != 4; ++column) {
+                uint const cell = min(above[column] + uint(query[micro_row * 4 + row] != target[column]),
+                                      min(above[column + 1], current[column]) + 1);
+                current[column + 1] = cell;
+                if (first_row + micro_row * 4 + row + 1 == arguments.shorter_length &&
+                    first_column + lane * 4 + column + 1 == arguments.longer_length)
+                    *distance = cell;
+            }
+            right_column[row] = current[4];
+#pragma unroll
+            for (uint column = 0; column != 5; ++column) above[column] = current[column];
+        }
+        carry = uint4(above[1], above[2], above[3], above[4]);
+        previous_right = right_column;
+        previous_topright = topright;
+        if (lane == 31)
+#pragma unroll
+            for (uint element = 0; element != 4; ++element)
+                outgoing[micro_row * 4 + element + 1] = right_column[element];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint const shuffled_bottom = simd_shuffle_up(carry.w, 1);
+    uint const previous_bottom = lane ? shuffled_bottom : left[128];
+    device char *const right_deltas = (device char *)(right + 4);
+    device char *const bottom_deltas = (device char *)(bottom + 4);
+#pragma unroll
+    for (uint element = 0; element != 4; ++element) {
+        uint const index = lane * 4 + element;
+        right_deltas[index] = char(outgoing[index + 1] - outgoing[index]);
+        bottom_deltas[index] = char(carry[element] - (element ? carry[element - 1] : previous_bottom));
+    }
+    if (lane == 0) {
+        *(device uint *)right = outgoing[0];
+        *(device uint *)bottom = left[128];
+    }
+}

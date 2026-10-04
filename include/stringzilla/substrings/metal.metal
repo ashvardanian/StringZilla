@@ -68,7 +68,7 @@ struct sz_substrings_report_metal_t {
 struct sz_substrings_arguments_metal_t {
     ulong engine_host, scratch_host;
     ulong hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
-    ulong hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy;
+    ulong hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
     ulong report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
     ulong emitted, reported, keep_offsets, gap_offsets, overflow_rows;
     ulong slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
@@ -86,6 +86,7 @@ struct sz_substrings_automaton_metal_t {
     device sz_substrings_output_metal_t const *outputs;
     device ulong const *outputs_offsets;
     uint hot_count, classes_count, root, max_source_match_bytes;
+    bool uncased;
 };
 
 inline sz_substrings_automaton_metal_t sz_substrings_automaton_metal_(
@@ -103,6 +104,7 @@ inline sz_substrings_automaton_metal_t sz_substrings_automaton_metal_(
     automaton.outputs_offsets = sz_reach_metal_<ulong>(engine, engine_host, arguments.outputs_offsets);
     automaton.hot_count = (uint)arguments.hot_count, automaton.classes_count = (uint)arguments.classes_count;
     automaton.root = (uint)arguments.root, automaton.max_source_match_bytes = (uint)arguments.max_source_match_bytes;
+    automaton.uncased = arguments.case_sensitivity != 0;
     return automaton;
 }
 
@@ -150,6 +152,107 @@ inline void sz_substrings_tally_metal_(thread sz_substrings_tally_metal_t const 
     }
     atomic_fetch_add_explicit(tally->overflow + needle, 1u, memory_order_relaxed);
     atomic_store_explicit(tally->overflowed, 1u, memory_order_relaxed);
+}
+
+constant uint sz_substrings_folded_image_max_metal_k = 9;
+
+inline ulong sz_substrings_resolve_match_metal_(device uchar const *haystack, ulong source_end, uint trailing,
+                                                uint folded_match_bytes, uint shift, thread bool &repeats) {
+    uchar ring[sz_substrings_folded_image_max_metal_k] = {};
+    ulong const wanted = (ulong)folded_match_bytes + shift;
+    ulong position = source_end, start_here = ~0ul, start_earlier = ~0ul;
+    ulong bytes = 0;
+    uint pending = 0;
+    bool periodic = shift != 0;
+    repeats = false;
+    for (ulong stepped = 0; stepped < trailing + wanted; ++stepped) {
+        if (!pending) {
+            if (!position) break;
+            ulong candidate = position - 1;
+            for (uint back = 0; back != 3 && candidate && (haystack[candidate] & 0xc0) == 0x80; ++back) --candidate;
+            sz_utf8_folded_image_metal_t image;
+            uint const source_bytes = sz_utf8_fold_next_metal_(haystack + candidate, haystack + position, image);
+            if (!image.rune_ends || candidate + source_bytes != position) {
+                bytes = haystack[--position];
+                pending = 1;
+            }
+            else {
+                bytes = image.bytes;
+                pending = image.length;
+                position = candidate;
+            }
+        }
+        uchar const byte = uchar(bytes >> (8 * --pending));
+        if (stepped < trailing) continue;
+        ulong const taken = stepped - trailing + 1;
+        if (shift) {
+            if (taken > shift && ring[(taken - shift) % sz_substrings_folded_image_max_metal_k] != byte)
+                periodic = false;
+            ring[taken % sz_substrings_folded_image_max_metal_k] = byte;
+        }
+        if (taken == folded_match_bytes) start_here = position;
+        if (taken == wanted) start_earlier = position;
+        if (!periodic && taken >= folded_match_bytes) break;
+    }
+    repeats = periodic && start_here != ~0ul && start_here == start_earlier;
+    return start_here != ~0ul ? start_here : source_end;
+}
+
+inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                                     device uchar const *haystack, ulong length, ulong chunk_begin,
+                                                     ulong chunk_end, ulong haystack_index, ulong pass,
+                                                     device sz_substrings_match_metal_t *matches_at_chunk,
+                                                     thread sz_substrings_tally_metal_t const *tally) {
+    ulong const warm_up = automaton.max_source_match_bytes ? automaton.max_source_match_bytes - 1 : 0;
+    ulong walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
+    for (uint back = 0; back != 3 && walk_begin && (haystack[walk_begin] & 0xc0) == 0x80; ++back) --walk_begin;
+    uint state = automaton.root;
+    ulong folded = 0, last_break_folded_end = 0, found = 0;
+    for (ulong position = walk_begin; position < length;) {
+        sz_utf8_folded_image_metal_t image;
+        uint const source_bytes = sz_utf8_fold_next_metal_(haystack + position, haystack + length, image);
+        position += source_bytes;
+        bool const breaks_boundary = popcount(image.rune_ends) != 1 || image.length != source_bytes;
+        uint previous_rune_end = 0;
+        for (uint image_index = 0; image_index != image.length;) {
+            ++folded;
+            if (!image.rune_ends) {
+                ++image_index;
+                state = automaton.root;
+                continue;
+            }
+            state = sz_substrings_step_metal_(automaton, state, uchar(image.bytes >> (8 * image_index)));
+            if (!((image.rune_ends >> image_index++) & 1u)) continue;
+            uint const trailing = image.length - image_index;
+            uint const shift = previous_rune_end ? image_index - previous_rune_end : 0;
+            previous_rune_end = image_index;
+            if (breaks_boundary) last_break_folded_end = folded + trailing;
+            if (position > chunk_end) return found;
+            if (position <= chunk_begin || !((automaton.accepts_words[state >> 5] >> (state & 31u)) & 1u)) continue;
+            uint const count = automaton.outputs_counts[state];
+            ulong const first = automaton.outputs_offsets[state];
+            for (uint index = 0; index != count; ++index) {
+                sz_substrings_output_metal_t const output = automaton.outputs[first + index];
+                uint const folded_length = output.folded_match_bytes;
+                if (folded < folded_length) continue;
+                bool repeats = false;
+                ulong const source_end = position - walk_begin;
+                ulong const source_offset = folded - folded_length >= last_break_folded_end
+                                                ? source_end - folded_length
+                                                : sz_substrings_resolve_match_metal_(haystack + walk_begin, source_end,
+                                                                                     trailing, folded_length, shift,
+                                                                                     repeats);
+                if (repeats) continue;
+                if (pass == sz_substrings_gpu_writing_metal_k)
+                    matches_at_chunk[found] = {haystack_index, output.needle_index, walk_begin + source_offset,
+                                               source_end - source_offset};
+                else if (pass == sz_substrings_gpu_tallying_metal_k)
+                    sz_substrings_tally_metal_(tally, output.needle_index);
+                ++found;
+            }
+        }
+    }
+    return found;
 }
 
 /**
@@ -371,11 +474,15 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
         device sz_substrings_match_metal_t *matches_at_chunk = arguments.pass == sz_substrings_gpu_writing_metal_k
                                                                    ? emitted + chunk_slots[chunk_index]
                                                                    : nullptr;
-        ulong const found = chunk_begin < chunk_end
-                                ? sz_substrings_walk_chunk_metal_(
-                                      automaton, sz_sequence_tape_start_metal_(tape, haystack_index), chunk_begin,
-                                      chunk_end, haystack_index, arguments.pass, matches_at_chunk, nullptr)
-                                : 0;
+        device uchar const *haystack = sz_sequence_tape_start_metal_(tape, haystack_index);
+        ulong const found = chunk_begin >= chunk_end ? 0
+                            : automaton.uncased
+                                ? sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin,
+                                                                          chunk_end, haystack_index, arguments.pass,
+                                                                          matches_at_chunk, nullptr)
+                                : sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end,
+                                                                  haystack_index, arguments.pass, matches_at_chunk,
+                                                                  nullptr);
         if (arguments.pass == sz_substrings_gpu_sizing_metal_k) chunk_slots[chunk_index] = found;
     }
 }
@@ -688,8 +795,12 @@ inline void sz_substrings_bm25_walk_metal_(thread sz_substrings_automaton_metal_
     ulong const chunk_begin = thread_index * chunk_bytes;
     if (chunk_begin >= length) return;
     ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
-    sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end, haystack_index,
-                                    sz_substrings_gpu_tallying_metal_k, nullptr, tally);
+    if (automaton.uncased)
+        sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin, chunk_end, haystack_index,
+                                                sz_substrings_gpu_tallying_metal_k, nullptr, tally);
+    else
+        sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end, haystack_index,
+                                        sz_substrings_gpu_tallying_metal_k, nullptr, tally);
 }
 
 /** Sums the terms of the threadgroup's own @p tally in fixed point into @p score, zeroing every

@@ -15,9 +15,6 @@
  *  kernels read the tapes themselves. A round's dispatches run in order inside one command buffer,
  *  so each sees what the one before it wrote, and nothing is read back until the caller
  *  synchronizes.
- *
- *  A case-insensitive vocabulary is refused at init: its walk folds the haystack through the
- *  Unicode tables the host tiers read, which have no Metal port.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_METAL_H_
 #define STRINGZILLA_SUBSTRINGS_METAL_H_
@@ -39,6 +36,10 @@ extern "C" {
 
 /** The MSL source of the substrings kernels, compiled once per device behind the shared prelude. */
 static char const sz_substrings_source_metal_[] = {
+#embed "stringzilla/utf8_uncased_fold/tables.h"
+    ,
+#embed "stringzilla/utf8_uncased_fold/metal.metal"
+    ,
 #embed "stringzilla/substrings/metal.metal"
     , 0};
 #pragma clang diagnostic pop
@@ -104,7 +105,7 @@ static char const *const sz_substrings_kernels_metal_[] = {
 typedef struct {
     sz_u64_t engine_host, scratch_host;
     sz_u64_t hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
-    sz_u64_t hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy;
+    sz_u64_t hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
     sz_u64_t report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
     sz_u64_t emitted, reported, keep_offsets, gap_offsets, overflow_rows;
     sz_u64_t slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
@@ -240,6 +241,7 @@ STRINGZILLA_INLINE void sz_substrings_arguments_metal_(sz_substrings_engine_t co
     arguments->root = engine->root, arguments->needles_count = engine->needles_count;
     arguments->max_source_match_bytes = engine->max_source_match_bytes;
     arguments->overlap_policy = (sz_u64_t)engine->overlap_policy;
+    arguments->case_sensitivity = (sz_u64_t)engine->case_sensitivity;
     arguments->haystacks_count = haystacks->count;
 }
 
@@ -347,7 +349,6 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (case_sensitivity == sz_substrings_uncased_k) return sz_metal_commit_(&call, sz_device_code_mismatch_k);
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_gpu_matches_budget_default_k;

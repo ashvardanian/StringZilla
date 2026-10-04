@@ -116,11 +116,17 @@ static sz_capability_kernels_t const *sz_levenshtein_distance_tiled_capabilities
         (sz_kernel_punned_t)&sz_levenshtein_distance_tiled_rocm,
 #endif
     };
+    static sz_kernel_punned_t const metal[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_METAL
+        (sz_kernel_punned_t)&sz_levenshtein_distance_tiled_metal,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {0, sz_no_kernels_},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
-        {0, sz_no_kernels_},
+        {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
 }
