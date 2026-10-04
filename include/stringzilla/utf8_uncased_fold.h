@@ -50,7 +50,7 @@ extern "C" {
  *      // target now contains "hello", target_length = 5
  *  @endcode
  *
- *  On CUDA and ROCm the fold is enqueued on @p stream, which names the device: the source, the
+ *  On CUDA, ROCm and Metal, folding queues on @p stream, which names the device: the source, the
  *  target and the length slot must all be memory that device reaches, and the length lands once
  *  @p stream is joined, the call itself allocating nothing and joining nothing.
  *
@@ -63,7 +63,7 @@ extern "C" {
  *      device; null for the default.
  *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
  *      and on a GPU @c sz_device_memory_mismatch_k for a buffer or a @p stream the device cannot
- *      use or @c sz_unexpected_dimensions_k for a text of more than five tebibytes.
+ *      use or @c sz_unexpected_dimensions_k for a text whose folded length cannot be counted.
  *  @warning The caller must ensure the target buffer is large enough. No bounds checking is
  *      performed. Use `source_length * 3` for safety.
  */
@@ -160,6 +160,13 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(                          
     sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_METAL
+/** @copydoc sz_utf8_uncased_fold_best */
+STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_metal(                                   //
+    sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
+    sz_stream_t stream);
+#endif
+
 #pragma endregion
 
 #pragma region Backends
@@ -176,6 +183,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(                          
 #include "stringzilla/utf8_uncased_fold/powervsx.h"
 #include "stringzilla/utf8_uncased_fold/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/rocm.cuh"
+#include "stringzilla/utf8_uncased_fold/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #pragma endregion

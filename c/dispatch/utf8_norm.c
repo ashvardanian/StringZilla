@@ -61,6 +61,12 @@ static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
         (sz_kernel_punned_t)&sz_utf8_norm_rocm,
 #endif
     };
+    static sz_kernel_punned_t const metal[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_METAL
+        (sz_kernel_punned_t)&sz_utf8_norm_metal,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
@@ -71,7 +77,7 @@ static sz_capability_kernels_t const *sz_utf8_norm_capabilities(void) {
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
-        {0, sz_no_kernels_},
+        {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
     return lists;
 }

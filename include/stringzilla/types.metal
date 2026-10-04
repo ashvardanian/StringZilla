@@ -61,3 +61,27 @@ template <typename type_>
 inline device type_ *sz_reach_metal_(device uchar *block, ulong block_host, ulong host) {
     return (device type_ *)(block + (host - block_host));
 }
+
+/** Decodes one well-formed rune, returning zero for an opaque malformed byte. */
+inline uint sz_utf8_decode_rune_metal_(device uchar const *text, ulong length, ulong offset, thread uint &rune) {
+    if (offset >= length) return 0;
+    uint const lead = text[offset];
+    if (lead < 0x80) {
+        rune = lead;
+        return 1;
+    }
+    if (lead < 0xC2 || lead > 0xF4) return 0;
+    uint const needed = lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
+    if (length - offset < needed) return 0;
+    uint const second = text[offset + 1];
+    if ((second & 0xC0) != 0x80 || (lead == 0xE0 && second < 0xA0) || (lead == 0xED && second >= 0xA0) ||
+        (lead == 0xF0 && second < 0x90) || (lead == 0xF4 && second >= 0x90))
+        return 0;
+    for (uint index = 2; index < needed; ++index)
+        if ((text[offset + index] & 0xC0) != 0x80) return 0;
+    if (needed == 2) rune = (lead & 0x1F) << 6 | (second & 0x3F);
+    else if (needed == 3) rune = (lead & 0x0F) << 12 | (second & 0x3F) << 6 | (text[offset + 2] & 0x3F);
+    else
+        rune = (lead & 0x07) << 18 | (second & 0x3F) << 12 | (text[offset + 2] & 0x3F) << 6 | (text[offset + 3] & 0x3F);
+    return needed;
+}

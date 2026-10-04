@@ -40,10 +40,11 @@ extern "C" {
  *  an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
  *  part in canonical ordering, and processing resyncs at the next byte.
  *
- *  On CUDA and ROCm the normalization is enqueued on @p stream, which names the device: the source,
- *  the target and the length slot must all be memory that device reaches, and the length lands once
- *  @p stream is joined. Each call copies the normalization tables to the device on @p stream ahead
- *  of its kernel, allocating nothing and joining nothing.
+ *  On CUDA, ROCm and Metal normalization is enqueued on @p stream, which names the device: the
+ *  source, target and length slot must be memory that device reaches, and the length lands once
+ *  @p stream is joined. Calls allocate no output or scratch and join nothing. CUDA and ROCm copy
+ *  the shared normalization tables to the device ahead of the kernel; Metal embeds them in its
+ *  compiled library and requires buffers from @ref sz_allocator_init_unified_metal.
  *
  *  @param[in] source UTF-8 string to normalize.
  *  @param[in] source_length Number of bytes in @p source.
@@ -55,7 +56,7 @@ extern "C" {
  *      device; null for the default.
  *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
  *      and on a GPU @c sz_device_memory_mismatch_k for a buffer or a @p stream the device cannot
- *      use or @c sz_unexpected_dimensions_k for a text of more than nine hundred gibibytes.
+ *      use or @c sz_unexpected_dimensions_k for a text whose expanded length cannot be counted.
  *  @warning No bounds checking is performed on @p target.
  */
 STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
@@ -239,6 +240,13 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_rocm(                                  
     sz_size_t *target_length, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_METAL
+/** @copydoc sz_utf8_norm_best */
+STRINGZILLA_API sz_status_t sz_utf8_norm_metal(                                        //
+    sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_ptr_t target, //
+    sz_size_t *target_length, sz_stream_t stream);
+#endif
+
 #pragma endregion
 
 #pragma region Backends
@@ -258,6 +266,7 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_rocm(                                  
 #include "stringzilla/utf8_norm/powervsx.h"
 #include "stringzilla/utf8_norm/cuda.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh"
+#include "stringzilla/utf8_norm/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #pragma endregion

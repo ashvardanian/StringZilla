@@ -29,6 +29,8 @@
 
 #include <stringzilla/stringzilla.h> // Primary C API
 
+#include "cross.hpp"
+
 #endif
 
 namespace ashvardanian::stringzilla::test {
@@ -70,6 +72,8 @@ struct metal_backend_t {
     sz_kernel_substrings_find_t substrings_find;
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
+    sz_kernel_utf8_uncased_fold_t utf8_uncased_fold;
+    sz_kernel_utf8_norm_t utf8_norm;
 };
 
 #pragma region Levenshtein Helpers
@@ -1025,6 +1029,78 @@ static void test_substrings_metal_safety(metal_backend_t const &backend) {
 
 #pragma endregion Substrings Checks
 
+static auto utf8_fold_staged_metal_(metal_backend_t const &backend) {
+    return [&backend](sz_cptr_t source, sz_size_t length, sz_ptr_t target, sz_size_t *target_length,
+                      sz_stream_t) -> sz_status_t {
+        metal_vector<char> input(source, source + length, metal_unified_alloc<char>(backend.stream));
+        metal_vector<char> output(length * 3 + 4, char(0x5A), metal_unified_alloc<char>(backend.stream));
+        metal_vector<sz_size_t> written(1, 0, metal_unified_alloc<sz_size_t>(backend.stream));
+        sz_status_t status = backend.utf8_uncased_fold(input.data(), length, output.data(), written.data(),
+                                                       backend.stream);
+        if (status != sz_success_k) return status;
+        status = sz_stream_synchronize_metal(backend.stream);
+        if (status != sz_success_k) return status;
+        verify(written[0] <= length * 3);
+        verify(std::all_of(output.begin() + length * 3, output.end(), [](char byte) { return byte == char(0x5A); }));
+        std::copy_n(output.data(), written[0], target);
+        *target_length = written[0];
+        return sz_success_k;
+    };
+}
+
+static auto utf8_norm_staged_metal_(metal_backend_t const &backend) {
+    return [&backend](sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t target,
+                      sz_size_t *target_length, sz_stream_t) -> sz_status_t {
+        metal_vector<char> input(source, source + length, metal_unified_alloc<char>(backend.stream));
+        metal_vector<char> output(length * 18 + 4, char(0x5A), metal_unified_alloc<char>(backend.stream));
+        metal_vector<sz_size_t> written(1, 0, metal_unified_alloc<sz_size_t>(backend.stream));
+        sz_status_t status = backend.utf8_norm(input.data(), length, form, output.data(), written.data(),
+                                               backend.stream);
+        if (status != sz_success_k) return status;
+        status = sz_stream_synchronize_metal(backend.stream);
+        if (status != sz_success_k) return status;
+        verify(written[0] <= length * 18);
+        verify(std::all_of(output.begin() + length * 18, output.end(), [](char byte) { return byte == char(0x5A); }));
+        std::copy_n(output.data(), written[0], target);
+        *target_length = written[0];
+        return sz_success_k;
+    };
+}
+
+static void check_utf8_metal_safety_(test_context_t &context, metal_backend_t const &backend) {
+    auto const fold = utf8_fold_staged_metal_(backend);
+    auto const norm = utf8_norm_staged_metal_(backend);
+    std::vector<char> expected, produced;
+    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
+        expected.resize(length * 18 + 4), produced.resize(length * 18 + 4);
+        sz_size_t reference = kernel_result<sz_size_t>(sz_utf8_uncased_fold_serial, input, length, expected.data());
+        sz_size_t actual = kernel_result<sz_size_t>(fold, input, length, produced.data());
+        verify(reference == actual && std::equal(expected.begin(), expected.begin() + reference, produced.begin()));
+        for (auto form : {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k, sz_normal_form_nfkc_k}) {
+            reference = kernel_result<sz_size_t>(sz_utf8_norm_serial, input, length, form, expected.data());
+            actual = kernel_result<sz_size_t>(norm, input, length, form, produced.data());
+            verify(reference == actual && std::equal(expected.begin(), expected.begin() + reference, produced.begin()));
+        }
+    });
+    metal_vector<char> source(1, 'A', metal_unified_alloc<char>(backend.stream));
+    metal_vector<char> target(18, 0, metal_unified_alloc<char>(backend.stream));
+    metal_vector<sz_size_t> length(1, 0, metal_unified_alloc<sz_size_t>(backend.stream));
+    char host_source = 'A', host_target[18] = {};
+    sz_size_t host_length = 0;
+    verify(backend.utf8_uncased_fold(&host_source, 1, target.data(), length.data(), backend.stream) ==
+           sz_device_memory_mismatch_k);
+    verify(backend.utf8_uncased_fold(source.data(), 1, host_target, length.data(), backend.stream) ==
+           sz_device_memory_mismatch_k);
+    verify(backend.utf8_uncased_fold(source.data(), 1, target.data(), &host_length, backend.stream) ==
+           sz_device_memory_mismatch_k);
+    verify(backend.utf8_norm(&host_source, 1, sz_normal_form_nfc_k, target.data(), length.data(), backend.stream) ==
+           sz_device_memory_mismatch_k);
+    verify(backend.utf8_norm(source.data(), 1, sz_normal_form_nfc_k, host_target, length.data(), backend.stream) ==
+           sz_device_memory_mismatch_k);
+    verify(backend.utf8_norm(source.data(), 1, sz_normal_form_nfc_k, target.data(), &host_length, backend.stream) ==
+           sz_device_memory_mismatch_k);
+}
+
 #pragma region Drivers
 
 /** Registers every check of the Metal kernels, or of the dispatch points, in @p check. */
@@ -1046,6 +1122,19 @@ static void check_metal_backend_(cross_section_t &check, metal_backend_t const &
     check("test_substrings_equivalence_" + suffix,
           [&](test_context_t &context) { test_substrings_metal_equivalence(context, backend); });
     check("test_substrings_safety_" + suffix, [&] { test_substrings_metal_safety(backend); });
+    check("test_utf8_uncased_fold_equivalence_" + suffix, [&](test_context_t &context) {
+        check_uncased_fold_equivalence_(context, sz_utf8_uncased_fold_serial, utf8_fold_staged_metal_(backend), 4000,
+                                        context.iterations(1200));
+    });
+    check("test_utf8_norm_equivalence_" + suffix, [&](test_context_t &context) {
+        auto const staged = utf8_norm_staged_metal_(backend);
+        struct {
+            decltype(staged) norm;
+            sz_kernel_utf8_find_denormalized_t find_denormalized;
+        } const candidate {staged, sz_utf8_find_denormalized_serial};
+        check_utf8_norm_equivalence_(context, candidate);
+    });
+    check("test_utf8_safety_" + suffix, [&](test_context_t &context) { check_utf8_metal_safety_(context, backend); });
 }
 
 static std::size_t test_cross_metal_(environment_t const &env, sz_stream_t queue, std::size_t ordinal) {
@@ -1061,6 +1150,8 @@ static std::size_t test_cross_metal_(environment_t const &env, sz_stream_t queue
         sz_substrings_find_metal,
         sz_substrings_replace_metal,
         sz_substrings_bm25_scores_metal,
+        sz_utf8_uncased_fold_metal,
+        sz_utf8_norm_metal,
     };
     cross_section_t check(env);
     check.detected = metal.capabilities;
@@ -1130,6 +1221,13 @@ static std::size_t test_cross_dispatch_metal_(environment_t const &env, sz_strea
         sz_substrings_find,
         sz_substrings_replace,
         sz_substrings_bm25_scores,
+        [](sz_cptr_t source, sz_size_t length, sz_ptr_t target, sz_size_t *written, sz_stream_t stream) {
+            return sz_utf8_uncased_fold_best(source, length, target, written, sz_cap_metal_k, stream);
+        },
+        [](sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t target, sz_size_t *written,
+           sz_stream_t stream) {
+            return sz_utf8_norm_best(source, length, form, target, written, sz_cap_metal_k, stream);
+        },
     };
     cross_section_t check(env);
     check.detected = dispatched.capabilities;

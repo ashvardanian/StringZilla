@@ -7,10 +7,14 @@
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
+#include "stringzilla/utf8_norm.h"
+#include "stringzilla/utf8_uncased_fold.h"
 
 #include "stringzilla/levenshtein/metal.h"
 #include "stringzilla/overlap/metal.h"
 #include "stringzilla/substrings/metal.h"
+#include "stringzilla/utf8_norm/metal.h"
+#include "stringzilla/utf8_uncased_fold/metal.h"
 
 /*  `build.rs` compiles every `.c` under `c/`, so without Metal this unit defines nothing. */
 #if STRINGZILLA_WITH_METAL
