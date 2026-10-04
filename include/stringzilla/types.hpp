@@ -1503,9 +1503,9 @@ class safe_vector {
  *      group's devices all address.
  *
  *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
- *  take it. Stateless: @p capabilities_ picks the vendor through
- *  @ref sz_allocator_init_unified_best, every allocation is made on the caller's current
- *  device, and allocation failure throws @c std::bad_alloc.
+ *  take it. @p capabilities_ picks the vendor; the borrowed stream names its device and must
+ *  outlive the allocations. A null stream uses the vendor's default device selection.
+ *  Allocation failure or unsupported alignment throws @c std::bad_alloc.
  *
  *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */
@@ -1517,6 +1517,9 @@ struct unified_alloc {
     using difference_type = std::ptrdiff_t;
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
+    using is_always_equal = std::false_type;
+
+    void *stream = nullptr;
 
     template <typename other_value_type_>
     struct rebind {
@@ -1524,16 +1527,22 @@ struct unified_alloc {
     };
 
     constexpr unified_alloc() noexcept = default;
+    explicit constexpr unified_alloc(void *stream) noexcept : stream(stream) {}
     template <typename other_value_type_>
-    constexpr unified_alloc(unified_alloc<other_value_type_, capabilities_> const &) noexcept {}
+    constexpr unified_alloc(unified_alloc<other_value_type_, capabilities_> const &other) noexcept
+        : stream(other.stream) {}
 
     value_type *allocate(size_type count) const {
         sz_allocator_t unified;
-        if (count <= (std::numeric_limits<size_type>::max)() / sizeof(value_type) &&
-            sz_allocator_init_unified_best(&unified, capabilities_) == sz_success_k) {
-            pointer result = (pointer)unified.allocate(count * sizeof(value_type), unified.handle, nullptr);
-            if (result) return result;
-        }
+        pointer result = nullptr;
+        count = count ? count : 1;
+        if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) goto failed;
+        if (sz_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) goto failed;
+        result = static_cast<pointer>(unified.allocate(count * sizeof(value_type), unified.handle, stream));
+        if (!result) goto failed;
+        if (reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
+        unified.free(result, count * sizeof(value_type), unified.handle, stream);
+    failed:
 #if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
         throw std::bad_alloc();
 #else
@@ -1543,15 +1552,15 @@ struct unified_alloc {
     void deallocate(pointer start, size_type count) const noexcept {
         sz_allocator_t unified;
         if (sz_allocator_init_unified_best(&unified, capabilities_) != sz_success_k) return;
-        unified.free(start, count * sizeof(value_type), unified.handle, nullptr);
+        unified.free(start, (count ? count : 1) * sizeof(value_type), unified.handle, stream);
     }
     template <typename other_type_>
-    bool operator==(unified_alloc<other_type_, capabilities_> const &) const noexcept {
-        return true;
+    bool operator==(unified_alloc<other_type_, capabilities_> const &other) const noexcept {
+        return stream == other.stream;
     }
     template <typename other_type_>
-    bool operator!=(unified_alloc<other_type_, capabilities_> const &) const noexcept {
-        return false;
+    bool operator!=(unified_alloc<other_type_, capabilities_> const &other) const noexcept {
+        return !(*this == other);
     }
 };
 

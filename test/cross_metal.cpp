@@ -19,7 +19,6 @@
 #include <array>       // `std::array`
 #include <string>      // `std::string`
 #include <thread>      // `std::thread`
-#include <type_traits> // `std::false_type`
 #include <vector>      // `std::vector`
 
 #include <fmt/format.h>
@@ -37,33 +36,8 @@ static sz_capability_t metal_capabilities_() {
     return capabilities;
 }
 
-/** Unified memory on the device of @c queue, which both sides address, so any @c std::vector can
- *  hold what a kernel reads. */
 template <typename value_type_>
-struct metal_unified_alloc {
-    using value_type = value_type_;
-    using is_always_equal = std::false_type;
-
-    void *queue;
-
-    explicit metal_unified_alloc(void *queue) noexcept : queue(queue) {}
-    template <typename other_type_>
-    metal_unified_alloc(metal_unified_alloc<other_type_> const &other) noexcept : queue(other.queue) {}
-    value_type *allocate(std::size_t count) {
-        sz_allocator_t unified;
-        sz_allocator_init_unified_metal(&unified);
-        return static_cast<value_type *>(unified.allocate(count * sizeof(value_type), unified.handle, queue));
-    }
-    void deallocate(value_type *pointer, std::size_t count) {
-        sz_allocator_t unified;
-        sz_allocator_init_unified_metal(&unified);
-        unified.free(pointer, count * sizeof(value_type), unified.handle, queue);
-    }
-    template <typename other_type_>
-    bool operator==(metal_unified_alloc<other_type_> const &other) const noexcept {
-        return queue == other.queue;
-    }
-};
+using metal_unified_alloc = unified_alloc<value_type_, sz_cap_metal_k>;
 
 template <typename value_type_>
 using metal_vector = std::vector<value_type_, metal_unified_alloc<value_type_>>;
@@ -1076,6 +1050,17 @@ std::size_t test_cross_metal(environment_t const &env, void *queue) {
     cross_section_t check(env);
     check.detected = metal_capabilities_();
     check.section("Cross Metal", sz_cap_metal_k);
+    check("test_unified_alloc_metal", [&] {
+        metal_unified_alloc<sz_size_t> allocator(queue);
+        metal_unified_alloc<char> rebound(allocator);
+        verify(rebound == metal_unified_alloc<char>(queue));
+        verify(allocator != metal_unified_alloc<sz_size_t>());
+        metal_vector<sz_size_t> source(2, 42, allocator);
+        metal_vector<sz_size_t> target(1, 0, metal_unified_alloc<sz_size_t>());
+        target = std::move(source);
+        verify(target.get_allocator() == allocator);
+        verify(target.size() == 2 && target[0] == 42 && target[1] == 42);
+    });
     check("test_sequence_realloc_metal", [&] {
         sz_u64_t host_offsets[] = {2 * sizeof(sz_u64_t), 2 * sizeof(sz_u64_t)};
         sz_sequence_t host {};
