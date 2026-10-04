@@ -69,6 +69,12 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t 
                                                       sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_NEON
+/** @copydoc sz_utf8_graphemes_best */
+STRINGZILLA_API sz_status_t sz_utf8_graphemes_neon(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
+                                                   sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_graphemes_best */
 STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
@@ -83,6 +89,7 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_sve2(sz_cptr_t text, sz_size_t len
 #if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/utf8_graphemes/haswell.h"
 #include "stringzilla/utf8_graphemes/icelake.h"
+#include "stringzilla/utf8_graphemes/neon.h"
 #include "stringzilla/utf8_graphemes/sve2.h"
 #endif // STRINGZILLA_HEADER_ONLY
 

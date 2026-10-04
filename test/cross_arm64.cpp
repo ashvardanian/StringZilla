@@ -102,6 +102,14 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_utf8_wordbreaks_equivalence_neon",
           [&](test_context_t &context) { check_utf8_wordbreaks_equivalence_(context, utf8_wordbreaks_neon); });
 
+    constexpr utf8_segment_backend_t utf8_graphemes_neon {"neon", sz_utf8_graphemes_neon};
+    check("test_utf8_graphemes_unit_neon", [&] { check_utf8_graphemes_unit_(utf8_graphemes_neon); });
+    check("test_utf8_graphemes_rules_neon", [&] { check_utf8_graphemes_rules_(utf8_graphemes_neon); });
+    check("test_utf8_graphemes_safety_neon",
+          [&](test_context_t &context) { check_utf8_graphemes_safety_(context, utf8_graphemes_neon); });
+    check("test_utf8_graphemes_equivalence_neon",
+          [&](test_context_t &context) { check_utf8_graphemes_equivalence_(context, utf8_graphemes_neon); });
+
     constexpr utf8_segment_backend_t utf8_sentences_neon {"neon", sz_utf8_sentences_neon};
     check("test_utf8_sentences_unit_neon", [&] { check_utf8_sentences_unit_(utf8_sentences_neon); });
     check("test_utf8_sentences_rules_neon", [&] { check_utf8_sentences_rules_(utf8_sentences_neon); });

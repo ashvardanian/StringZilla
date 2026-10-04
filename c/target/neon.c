@@ -17,6 +17,7 @@
 #include "stringzilla/utf8_runes/neon.h"
 #include "stringzilla/utf8_tokens/neon.h"
 #include "stringzilla/utf8_wordbreaks/neon.h"
+#include "stringzilla/utf8_graphemes/neon.h"
 #include "stringzilla/utf8_sentences/neon.h"
 #include "stringzilla/utf8_linebreaks/neon.h"
 #include "stringzilla/utf8_uncased_fold/neon.h"

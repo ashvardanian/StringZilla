@@ -21,6 +21,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_neon>(env, "neon");
         bench_utf8_delimiters_kernels<sz_utf8_delimiters_neon>(env, "neon");
         bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_neon>(env, "neon");
+        bench_utf8_graphemes_kernels<sz_utf8_graphemes_neon>(env, "neon");
         bench_utf8_sentences_kernels<sz_utf8_sentences_neon>(env, "neon");
         bench_utf8_linebreaks_kernels<sz_utf8_linebreaks_neon>(env, "neon");
         bench_utf8_norm_kernels<sz_utf8_norm_neon>(env, "neon");

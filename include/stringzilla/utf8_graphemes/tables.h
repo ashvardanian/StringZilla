@@ -662,7 +662,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_leaf_[2624] = {
 #pragma endregion Grapheme_Break tables
 
 #pragma region Haswell AVX2 nibble cascade descriptor tables
-#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_ || STRINGZILLA_ARCH_ARM64_SVE2_
 
 /**
  *  @brief SIMD descriptor tables mapping a codepoint to its packed Grapheme_Cluster_Break
@@ -896,11 +896,11 @@ static const sz_u8_t sz_utf8_grapheme_break_astral_stage4_groups_[2816] = {
     0,  0,  0,
 };
 
-#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_ || STRINGZILLA_ARCH_ARM64_SVE2_
 #pragma endregion Haswell AVX2 nibble cascade descriptor tables
 
 #pragma region Flat BMP classifier tables
-#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
+#if STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_ || STRINGZILLA_ARCH_ARM64_SVE2_
 // clang-format off
 
 /**
@@ -1803,7 +1803,7 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_flat_bmp_[13888] = {
 };
 
 // clang-format on
-#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_SVE2_
+#endif // STRINGZILLA_ARCH_X8664_HASWELL_ || STRINGZILLA_ARCH_ARM64_NEON_ || STRINGZILLA_ARCH_ARM64_SVE2_
 #pragma endregion Flat BMP classifier tables
 
 #ifdef __cplusplus
