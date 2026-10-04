@@ -331,6 +331,15 @@ void test_allocator_unit() {
         verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
         allocator.free(byte, 1, allocator.handle, nullptr);
     }
+    {
+        sz_allocator_t allocator;
+        sz_allocator_init_default(&allocator);
+        sz_allocator_t const original = allocator;
+        verify(sz_allocator_init_device_best(&allocator, sz_cap_serial_k) == sz_missing_kernel_k);
+        verify(sz_allocator_init_pinned_best(&allocator, sz_cap_serial_k) == sz_missing_kernel_k);
+        verify(allocator.allocate == original.allocate && allocator.free == original.free &&
+               allocator.handle == original.handle);
+    }
 }
 
 #pragma endregion Allocator

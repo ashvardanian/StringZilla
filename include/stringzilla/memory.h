@@ -348,7 +348,7 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
 
 #pragma endregion Core API
 
-#pragma region Unified Memory
+#pragma region Memory Management
 
 /**
  *  @brief Initializes an allocator whose blocks both the host and the device of @p capabilities
@@ -363,6 +363,15 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
  *  @return @c sz_success_k, or @c sz_missing_gpu_k for a GPU vendor this library was built without.
  */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities);
+
+/** Initializes device storage on CUDA and ROCm, or unified storage on Metal.
+ *  Each callback uses its stream's device. CPU returns @c sz_missing_kernel_k; GPU vendors omitted
+ *  from the build return @c sz_missing_gpu_k. */
+STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *allocator, sz_capability_t capabilities);
+
+/** Initializes page-locked CUDA or ROCm host storage, using each callback's stream.
+ *  CPU and Metal return @c sz_missing_kernel_k; unbuilt GPU vendors return @c sz_missing_gpu_k. */
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *allocator, sz_capability_t capabilities);
 
 /**
  *  @brief Reallocates @p source as a tape from @p allocator when the selected device cannot use
@@ -406,6 +415,10 @@ STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator);
+/** @copydoc sz_allocator_init_device_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator);
+/** @copydoc sz_allocator_init_pinned_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator);
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
@@ -416,6 +429,10 @@ STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_s
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator);
+/** @copydoc sz_allocator_init_device_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator);
+/** @copydoc sz_allocator_init_pinned_best */
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator);
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
@@ -433,7 +450,7 @@ STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_
 
 #endif
 
-#pragma endregion Unified Memory
+#pragma endregion Memory Management
 
 #pragma region Helper API
 
@@ -562,6 +579,16 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
+    sz_unused_(allocator), sz_unused_(capabilities);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
+    sz_unused_(allocator), sz_unused_(capabilities);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
     sz_unused_(allocator), sz_unused_(capabilities);
     return sz_missing_library_k;
 }

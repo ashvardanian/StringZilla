@@ -411,6 +411,20 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *alloc
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator) {
+    allocator->allocate = sz_memory_allocate_device_cuda_;
+    allocator->free = sz_memory_free_device_cuda_;
+    allocator->handle = STRINGZILLA_NULL;
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator) {
+    allocator->allocate = sz_memory_allocate_pinned_cuda_;
+    allocator->free = sz_memory_free_pinned_cuda_;
+    allocator->handle = STRINGZILLA_NULL;
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
                                                      void *stream) {

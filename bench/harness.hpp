@@ -68,6 +68,7 @@
 #include <functional>   // `std::equal_to`
 #include <limits>       // `std::numeric_limits`
 #include <map>          // `std::map`
+#include <new>          // `std::bad_alloc`
 #include <numeric>      // `std::accumulate`
 #include <optional>     // `std::optional`
 #include <random>       // `std::random_device`, `std::mt19937`
@@ -252,20 +253,12 @@ inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
 inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
 inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_rocm_;
 inline constexpr auto gpu_copy = &sz_copy_rocm_;
-inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_rocm_;
-inline constexpr auto gpu_free_device = &sz_memory_free_device_rocm_;
-inline constexpr auto gpu_allocate_pinned = &sz_memory_allocate_pinned_rocm_;
-inline constexpr auto gpu_free_pinned = &sz_memory_free_pinned_rocm_;
 #elif STRINGZILLA_ARCH_CUDA_
 inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
 inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
 inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
 inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_cuda_;
 inline constexpr auto gpu_copy = &sz_copy_cuda_;
-inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_cuda_;
-inline constexpr auto gpu_free_device = &sz_memory_free_device_cuda_;
-inline constexpr auto gpu_allocate_pinned = &sz_memory_allocate_pinned_cuda_;
-inline constexpr auto gpu_free_pinned = &sz_memory_free_pinned_cuda_;
 #endif
 
 #if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
@@ -305,10 +298,19 @@ struct device_alloc {
     constexpr device_alloc(device_alloc<other_value_type_> const &) noexcept {}
 
     value_type *allocate(size_type count) const noexcept {
-        return (value_type *)gpu_allocate_device(count * sizeof(value_type), nullptr, nullptr);
+        if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) return nullptr;
+        sz_allocator_t allocator;
+        if (sz_allocator_init_device_best(&allocator, gpu_baseline_k) != sz_success_k) return nullptr;
+        pointer result = static_cast<pointer>(
+            allocator.allocate(count * sizeof(value_type), allocator.handle, nullptr));
+        if (!result || reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
+        allocator.free(result, count * sizeof(value_type), allocator.handle, nullptr);
+        return nullptr;
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        gpu_free_device(start, count * sizeof(value_type), nullptr, nullptr);
+        sz_allocator_t allocator;
+        if (sz_allocator_init_device_best(&allocator, gpu_baseline_k) != sz_success_k) return;
+        allocator.free(start, count * sizeof(value_type), allocator.handle, nullptr);
     }
     template <typename other_type_>
     bool operator==(device_alloc<other_type_> const &) const noexcept {
@@ -320,8 +322,7 @@ struct device_alloc {
     }
 };
 
-/** Allocator over @b pinned page-locked host memory, which the driver copies at the bus rate and
- *  which no kernel can address: the staging side of a transfer. */
+/** Page-locked host storage for transfers to and from the device. */
 template <typename value_type_>
 struct pinned_alloc {
     using value_type = value_type_;
@@ -340,11 +341,23 @@ struct pinned_alloc {
     template <typename other_value_type_>
     constexpr pinned_alloc(pinned_alloc<other_value_type_> const &) noexcept {}
 
-    value_type *allocate(size_type count) const noexcept {
-        return (value_type *)gpu_allocate_pinned(count * sizeof(value_type), nullptr, nullptr);
+    value_type *allocate(size_type count) const {
+        sz_allocator_t allocator;
+        pointer result = nullptr;
+        count = count ? count : 1;
+        if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) goto failed;
+        if (sz_allocator_init_pinned_best(&allocator, gpu_baseline_k) != sz_success_k) goto failed;
+        result = static_cast<pointer>(allocator.allocate(count * sizeof(value_type), allocator.handle, nullptr));
+        if (!result) goto failed;
+        if (reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
+        allocator.free(result, count * sizeof(value_type), allocator.handle, nullptr);
+    failed:
+        throw std::bad_alloc();
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        gpu_free_pinned(start, count * sizeof(value_type), nullptr, nullptr);
+        sz_allocator_t allocator;
+        if (sz_allocator_init_pinned_best(&allocator, gpu_baseline_k) != sz_success_k) return;
+        allocator.free(start, (count ? count : 1) * sizeof(value_type), allocator.handle, nullptr);
     }
     template <typename other_type_>
     bool operator==(pinned_alloc<other_type_> const &) const noexcept {

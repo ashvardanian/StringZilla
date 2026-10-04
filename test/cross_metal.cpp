@@ -1050,7 +1050,13 @@ std::size_t test_cross_metal(environment_t const &env, void *queue) {
     cross_section_t check(env);
     check.detected = metal_capabilities_();
     check.section("Cross Metal", sz_cap_metal_k);
-    check("test_unified_alloc_metal", [&] {
+    check("test_allocator_metal", [&] {
+        sz_allocator_t unified, device;
+        verify(sz_allocator_init_unified_best(&unified, sz_cap_metal_k) == sz_success_k);
+        verify(sz_allocator_init_device_best(&device, sz_cap_metal_k) == sz_success_k);
+        verify(device.allocate == unified.allocate && device.free == unified.free && device.handle == unified.handle);
+        verify(sz_allocator_init_pinned_best(&device, sz_cap_metal_k) == sz_missing_kernel_k);
+        verify(device.allocate == unified.allocate && device.free == unified.free && device.handle == unified.handle);
         metal_unified_alloc<sz_size_t> allocator(queue);
         metal_unified_alloc<char> rebound(allocator);
         verify(rebound == metal_unified_alloc<char>(queue));

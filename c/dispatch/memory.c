@@ -252,6 +252,38 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *alloc
     }
 }
 
+STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
+    sz_unused_(allocator);
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k: return sz_missing_kernel_k;
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_allocator_init_device_cuda(allocator);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_allocator_init_device_rocm(allocator);
+#endif
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_allocator_init_unified_metal(allocator);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}
+
+STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
+    sz_unused_(allocator);
+    switch (sz_capability_group_of_(capabilities)) {
+    case sz_capability_group_cpu_k:
+    case sz_capability_group_metal_k: return sz_missing_kernel_k;
+#if STRINGZILLA_TARGET_CUDA
+    case sz_capability_group_cuda_k: return sz_allocator_init_pinned_cuda(allocator);
+#endif
+#if STRINGZILLA_TARGET_ROCM
+    case sz_capability_group_rocm_k: return sz_allocator_init_pinned_rocm(allocator);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}
+
 STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
                                                      sz_capability_t capabilities, void *stream) {

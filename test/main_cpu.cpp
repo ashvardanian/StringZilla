@@ -99,12 +99,17 @@ sz_status_t call_stub_(sz_status_t (*best)(arguments_types_...)) noexcept {
 /** Every dispatch point reports the missing library in a header-only build. */
 void test_dispatch_stubs_unit() {
     sz_status_t const statuses[] = {
+        call_stub_(sz_stream_synchronize_best),
         call_stub_(sz_equal_best),
         call_stub_(sz_order_best),
         call_stub_(sz_copy_best),
         call_stub_(sz_move_best),
         call_stub_(sz_fill_best),
         call_stub_(sz_lookup_best),
+        call_stub_(sz_allocator_init_unified_best),
+        call_stub_(sz_allocator_init_device_best),
+        call_stub_(sz_allocator_init_pinned_best),
+        call_stub_(sz_sequence_realloc_best),
         call_stub_(sz_find_byte_best),
         call_stub_(sz_rfind_byte_best),
         call_stub_(sz_find_best),
