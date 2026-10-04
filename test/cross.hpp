@@ -4454,11 +4454,10 @@ inline void check_utf8_norm_unit_(utf8_norm_kernels_t kernels) {
  *  under all four normal forms, so the comparison stresses canonical ordering, every
  *  decomposition/composition path, and SIMD-block straddles. Below a multiplier of 1.0 the
  *  codepoint space is strided, not truncated, so the astral planes stay reachable on a cheap run.
- *  The candidate holds kernels or anything called like them, as a device kernel on staged buffers.
+ *  The normalizer may stage device buffers while retaining the same callable interface.
  */
-template <typename kernels_type_>
-inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ const &candidate) {
-    utf8_norm_kernels_t const reference {sz_utf8_norm_serial, sz_utf8_find_denormalized_serial};
+template <typename normalize_type_>
+inline void check_utf8_normalize_equivalence_(test_context_t &context, normalize_type_ const &normalize) {
     std::size_t const codepoint_stride = context.sweep_stride(0x110000);
     std::vector<sz_rune_t> all_runes;
     all_runes.reserve(0x110000 / codepoint_stride);
@@ -4474,8 +4473,6 @@ inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ 
     static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
                                                    sz_normal_form_nfkc_k};
 
-    // One iteration pushes every assigned codepoint through 4 forms x 4 kernel calls. Three passes,
-    // one in codepoint order and two shuffled, are this family's share of the suite budget.
     std::size_t const iterations = context.iterations(3);
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         if (iteration > 0) std::shuffle(all_runes.begin(), all_runes.end(), generator);
@@ -4484,9 +4481,9 @@ inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ 
         sz_size_t input_length = (sz_size_t)(write_cursor - input_buffer.data());
 
         for (sz_normal_form_t normal_form : norm_forms) {
-            sz_size_t reference_length = kernel_result<sz_size_t>(reference.norm, input_buffer.data(), input_length,
-                                                                  normal_form, output_reference.data());
-            sz_size_t candidate_length = kernel_result<sz_size_t>(candidate.norm, input_buffer.data(), input_length,
+            sz_size_t reference_length = kernel_result<sz_size_t>(sz_utf8_norm_serial, input_buffer.data(),
+                                                                  input_length, normal_form, output_reference.data());
+            sz_size_t candidate_length = kernel_result<sz_size_t>(normalize, input_buffer.data(), input_length,
                                                                   normal_form, output_candidate.data());
             if (reference_length != candidate_length ||
                 std::memcmp(output_reference.data(), output_candidate.data(), reference_length) != 0) {
@@ -4494,16 +4491,23 @@ inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ 
                              (int)normal_form, iteration, (size_t)reference_length, (size_t)candidate_length);
                 verify(false);
             }
-            sz_cptr_t viol_reference = kernel_result<sz_cptr_t>(reference.find_denormalized, input_buffer.data(),
-                                                                input_length, normal_form);
-            sz_cptr_t viol_candidate = kernel_result<sz_cptr_t>(candidate.find_denormalized, input_buffer.data(),
-                                                                input_length, normal_form);
-            if (viol_reference != viol_candidate) {
-                fmt::println(stderr, "norm violation mismatch (form={}, iter={})", (int)normal_form, iteration);
-                verify(false);
-            }
         }
     }
+}
+
+/** Checks normalization and quick-check results on the same generated inputs. */
+template <typename kernels_type_>
+inline void check_utf8_norm_equivalence_(test_context_t &context, kernels_type_ const &candidate) {
+    check_utf8_normalize_equivalence_(context, [&](sz_cptr_t input, sz_size_t length, sz_normal_form_t form,
+                                                   sz_ptr_t output, sz_size_t *written, sz_stream_t stream) {
+        sz_cptr_t const reference = kernel_result<sz_cptr_t>(sz_utf8_find_denormalized_serial, input, length, form);
+        sz_cptr_t const produced = kernel_result<sz_cptr_t>(candidate.find_denormalized, input, length, form);
+        if (reference != produced) {
+            fmt::println(stderr, "norm violation mismatch (form={})", (int)form);
+            verify(false);
+        }
+        return candidate.norm(input, length, form, output, written, stream);
+    });
 }
 
 /**

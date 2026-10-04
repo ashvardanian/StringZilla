@@ -9,9 +9,7 @@
 #include "harness.hpp"
 
 #if STRINGZILLA_ARCH_CUDA_
-#include "stringzilla/cuda.cuh"
-
-#include "cross_simt.cuh" // `simt_backend`, `check_simt_backend_`
+#include "cross_device.hpp" // `device_kernels`, `check_device_kernels_`
 #endif
 
 namespace ashvardanian::stringzilla::test {
@@ -33,18 +31,9 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     runtime.stream = stream.handle;
     verify(sz_capabilities_detected_cuda(ordinal, &runtime.capabilities) == sz_success_k);
     verify(sz_allocator_init_unified_cuda(&runtime.unified) == sz_success_k);
-    verify(sz_allocator_init_device_cuda(&runtime.device) == sz_success_k);
-    runtime.query = sz_stream_query_cuda_;
-    runtime.reachable = sz_memory_accessible_cuda_;
-    runtime.fill = sz_fill_cuda_;
     runtime.init = sz_stream_init_cuda;
     runtime.free = sz_stream_free_cuda;
-    int caller = 0;
-    verify(sz_device_enter_cuda_(runtime.stream, &caller) == sz_success_k);
-    runtime.multiprocessors = sz_device_multiprocessors_cuda_();
-    runtime.threads_per_multiprocessor = sz_device_threads_per_multiprocessor_cuda_();
-    sz_device_leave_cuda_(caller);
-    simt_backend const cuda {
+    device_kernels const cuda {
         "cuda",
         runtime,
         sz_levenshtein_distances_cuda,
@@ -60,8 +49,8 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     cross_section_t check(env);
     check.detected = runtime.capabilities;
     check.section("Cross CUDA", sz_cap_cuda_k);
-    check_simt_backend_(check, cuda);
-    auto const failures = capability_failures + check.failures + test_cross_dispatch_simt(env, runtime);
+    check_device_kernels_(check, cuda);
+    auto const failures = capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
     return failures;
 #else
     sz_unused_(env);

@@ -26,9 +26,7 @@ The linked suite runs the CPU checks once, then checks each selected GPU. Two ad
 The GPU tests check each vendor's engine kernels by name, and the dispatch points over them, against the serial answers.
 
 - `cross_cuda.cu`, `cross_rocm.hip`, `cross_metal.cpp` — vendor entry points called by the common runner.
-- `cross_simt.cuh` — the device checks CUDA and ROCm share, over device-reachable memory, device-bound sequences, a caller's own stream, and the refusals that keep host pointers off the device.
-- `cross_cuda.cu`, `cross_rocm.hip` — the CUDA and ROCm kernels by name, through `cross_simt.cuh`.
-- `cross_metal.cpp` — the Metal kernels of edit distances, window overlap and multi-pattern search on Apple GPUs.
+- `cross_device.hpp` — the device checks CUDA, ROCm and Metal share, over device-reachable memory, device-bound sequences, a caller's own stream, and the refusals that keep host pointers off the device.
 
 All enabled vendors build into `stringzilla_test`; CUDA and ROCm can coexist in one build and run.
 `STRINGZILLA_DEVICES=cuda:0,rocm:1` selects vendor-qualified ordinals. Unset, the runner visits device zero of each available compiled vendor; an explicit unavailable device is an error.

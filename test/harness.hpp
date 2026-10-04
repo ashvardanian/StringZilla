@@ -308,11 +308,7 @@ struct device_backend_t {
     sz::device_t selected = sz::device_t::cpu();
     sz_capability_t capabilities = 0;
     sz_stream_t stream = nullptr;
-    sz_allocator_t unified {}, device {};
-    std::optional<std::size_t> multiprocessors, threads_per_multiprocessor;
-    sz_bool_t (*query)(sz_stream_t) = nullptr;
-    sz_bool_t (*reachable)(void const *) = nullptr;
-    sz_status_t (*fill)(void *, sz_size_t, sz_u8_t, sz_stream_t) = nullptr;
+    sz_allocator_t unified {};
     sz_status_t (*init)(sz_size_t, sz_stream_t *) = nullptr;
     sz_status_t (*free)(sz_stream_t) = nullptr;
 };

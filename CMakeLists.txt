@@ -24,8 +24,7 @@
 #
 # * stringzilla_bench: The dispatch points against the standard baselines, and every kernel the static library
 #   defines against its serial twin.
-# * stringzilla_cpu_header_bench: The kernels compiled inline, header-only, with the private helpers only the tier
-#   headers define.
+# * stringzilla_cpu_header_bench: The public capability kernels compiled inline, header-only.
 #
 # Python, Node, and Swift build their artifacts through this file, while Rust's `build.rs` and Go's cgo link
 # `stringzilla_static`; Java and C# load `stringzilla_shared`.
