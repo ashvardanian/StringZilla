@@ -13,12 +13,13 @@
  *  - @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
  *  - @c status_t, @c bool_t, @c ordering_t, @c rune_t, @c rune_length_t, @c error_cost_t - logic.
  *
- *  The library also defines the following higher-level structures:
+ *  The header also provides these higher-level types:
  *
- *  - `span<value_type>` - a view to a contiguous memory block of @c value_type elements.
+ *  - `std::span<value_type>` - a view to a contiguous memory block of @c value_type elements.
  *  - `dummy_alloc<value_type>` - a dummy memory allocator shaped like @c std::allocator.
- *  - `arrow_strings_tape<char_type, offset_type>` - a tape data-structure to efficiently store a
- *    sequence of strings.
+ *  - `vector<value_type, allocator_type>` - owning storage with fallible allocation.
+ *  - `tape<char_type, offset_type, allocator_type>` - an owning sequence of packed strings.
+ *  - `tape_view<char_type, offset_type>` - a borrowed view over string bytes and offsets.
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
@@ -73,6 +74,7 @@
 #include <limits>           // `std::numeric_limits`
 #include <new>              // `std::bad_alloc`
 #include <exception>        // `std::terminate`
+#include <span>             // `std::span`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
 #include <type_traits>      // `std::is_const_v`, `std::is_arithmetic_v`, `std::is_trivially_destructible`
 #endif
@@ -337,150 +339,6 @@ struct error_costs_unary_t {
     constexpr error_cost_magnitude_t magnitude() const noexcept { return 1; }
 };
 
-template <typename value_type_, sz_size_t extent_ = STRINGZILLA_SIZE_MAX>
-struct span {
-
-    using value_type = value_type_;              // ? For STL compatibility
-    using size_type = sz_size_t;                 // ? For STL compatibility
-    using difference_type = sz_ssize_t;          // ? For STL compatibility
-    static constexpr sz_size_t extent = extent_; // ? For STL compatibility
-
-    value_type *data_ {};
-
-    constexpr span() noexcept = default;
-    constexpr span(value_type *data) noexcept : data_(data) {}
-    constexpr span(value_type *data, size_type size) noexcept : data_(data) {
-        sz_assert_(extent == size && "The second argument is only intended for compatibility");
-        sz_unused_(size);
-    }
-
-    constexpr explicit operator bool() const noexcept { return data_ != nullptr; }
-
-    constexpr value_type *begin() const noexcept { return data_; }
-    constexpr value_type *end() const noexcept { return data_ + extent; }
-    constexpr value_type *data() const noexcept { return data_; }
-    constexpr size_type size() const noexcept { return extent; }
-    constexpr size_type length() const noexcept { return extent; }
-    constexpr size_type size_bytes() const noexcept { return extent * sizeof(value_type); }
-    constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
-    constexpr value_type &front() const noexcept { return data_[0]; }
-    constexpr value_type &back() const noexcept { return data_[extent - 1]; }
-    constexpr bool empty() const noexcept { return extent == 0; }
-
-    constexpr operator span<value_type const>() const noexcept
-        requires(!std::is_const_v<value_type>)
-    {
-        return {data_};
-    }
-
-    template <typename other_value_type_>
-    constexpr span<other_value_type_, extent * sizeof(value_type) / sizeof(other_value_type_)> cast() const noexcept {
-        return span<other_value_type_, extent * sizeof(value_type) / sizeof(other_value_type_)>(
-            reinterpret_cast<other_value_type_ *>(data_));
-    }
-
-    constexpr span<value_type, STRINGZILLA_SIZE_MAX> subspan(size_type offset, size_type count) const noexcept {
-        sz_assert_(offset + count <= extent && "Subspan out of bounds");
-        return span<value_type, STRINGZILLA_SIZE_MAX>(data_ + offset, count);
-    }
-};
-
-template <typename value_type_>
-struct span<value_type_, STRINGZILLA_SIZE_MAX> {
-    using value_type = value_type_;                           // ? For STL compatibility
-    using size_type = sz_size_t;                              // ? For STL compatibility
-    using difference_type = sz_ssize_t;                       // ? For STL compatibility
-    static constexpr sz_size_t extent = STRINGZILLA_SIZE_MAX; // ? For STL compatibility
-
-    value_type *data_ {};
-    size_type size_ {};
-
-    constexpr span() noexcept = default;
-    constexpr span(value_type *data, size_type size) noexcept : data_(data), size_(size) {}
-    constexpr span(value_type *data, value_type *end) noexcept
-        : data_(data), size_(static_cast<size_type>(end - data)) {}
-
-    constexpr explicit operator bool() const noexcept { return data_ != nullptr; }
-
-    constexpr value_type *begin() const noexcept { return data_; }
-    constexpr value_type *end() const noexcept { return data_ + size_; }
-    constexpr value_type *data() const noexcept { return data_; }
-    constexpr size_type size() const noexcept { return size_; }
-    constexpr size_type length() const noexcept { return size_; }
-    constexpr size_type size_bytes() const noexcept { return size_ * sizeof(value_type); }
-    constexpr value_type &operator[](size_type i) const noexcept { return data_[i]; }
-    constexpr value_type &front() const noexcept { return data_[0]; }
-    constexpr value_type &back() const noexcept { return data_[size_ - 1]; }
-    constexpr bool empty() const noexcept { return size_ == 0; }
-
-    constexpr operator span<value_type const>() const noexcept
-        requires(!std::is_const_v<value_type>)
-    {
-        return {data_, size_};
-    }
-
-    template <typename other_value_type_>
-    constexpr span<other_value_type_> cast() const noexcept {
-        return span<other_value_type_>(reinterpret_cast<other_value_type_ *>(data_),
-                                       size_ * sizeof(value_type) / sizeof(other_value_type_));
-    }
-
-    constexpr span subspan(size_type offset, size_type count) const noexcept {
-        sz_assert_(offset + count <= size_ && "Subspan out of bounds");
-        return span(data_ + offset, count);
-    }
-
-    /** Returns the i-th of @p n equal slices of this span, where the last one
-     *  absorbs the remainder. */
-    constexpr span part_i_of_n(size_type i, size_type n) const noexcept {
-        size_type const slice = size_ / n;
-        size_type const offset = i * slice;
-        size_type const count = (i + 1 == n) ? size_ - offset : slice;
-        return span(data_ + offset, count);
-    }
-
-    /** Lexicographic equality comparison for STL compatibility. */
-    constexpr bool operator==(span const &other) const noexcept {
-        if (size_ != other.size_) return false;
-        for (size_type i = 0; i < size_; ++i)
-            if (data_[i] != other.data_[i]) return false;
-        return true;
-    }
-
-    /** Lexicographic inequality comparison for STL compatibility. */
-    constexpr bool operator!=(span const &other) const noexcept { return !(*this == other); }
-
-    /** Lexicographic less-than comparison for STL compatibility. */
-    constexpr bool operator<(span const &other) const noexcept {
-        size_type const min_size = size_ < other.size_ ? size_ : other.size_;
-        for (size_type i = 0; i < min_size; ++i) {
-            if (data_[i] < other.data_[i]) return true;
-            if (data_[i] > other.data_[i]) return false;
-        }
-        return size_ < other.size_;
-    }
-};
-
-template <std::size_t extent_, typename value_type_>
-span<value_type_, extent_> to_span(span<value_type_, extent_> span) noexcept {
-    return span;
-}
-
-template <std::size_t extent_ = STRINGZILLA_SIZE_MAX, typename container_type_ = void>
-span<typename container_type_::value_type, extent_> to_span(container_type_ &container) noexcept {
-    return {container.data(), container.size()};
-}
-
-template <std::size_t extent_ = STRINGZILLA_SIZE_MAX, typename container_type_ = void>
-span<typename container_type_::value_type const, extent_> to_view(container_type_ const &container) noexcept {
-    return {container.data(), container.size()};
-}
-
-template <typename container_type_>
-span<byte_t const> to_bytes_view(container_type_ const &container) noexcept {
-    return to_view(container).template cast<byte_t const>();
-}
-
 template <typename value_type_>
 struct dummy_alloc {
     using value_type = value_type_;     // ? For STL compatibility
@@ -535,7 +393,7 @@ typename std::allocator_traits<allocator_type_>::pointer allocate_or_null_(alloc
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
  *
- *  @note Designed for @c arrow_strings_tape and @c arrow_strings_view compatibility with STL
+ *  @note Designed for @c tape and @c tape_view compatibility with STL
  *      algorithms and ranges.
  */
 template <typename container_type_>
@@ -648,10 +506,10 @@ struct indexed_container_iterator {
     }
 };
 
-/** Length convention for @ref arrow_strings_view element spans. */
-enum class arrow_termination_t {
+/** Length convention for @ref tape_view element spans. */
+enum class tape_termination_t {
 
-    /** Matches @ref arrow_strings_tape: a trailing @c '\0' is excluded, so elements
+    /** Matches @ref tape: a trailing @c '\0' is excluded, so elements
      *  read as C-strings. */
     nul_terminated_k,
 
@@ -661,45 +519,43 @@ enum class arrow_termination_t {
 };
 
 /**
- *  @brief Apache @b Arrow-compatible view over back-to-back variable-length byte spans in one
- *      buffer, delimited by a `count + 1` offsets array. Doesn't own the memory.
+ *  @brief Borrowed variable-length elements in a buffer, delimited by a `count + 1` offsets array.
  *
  *  @tparam char_type_ Buffer element type: @c char, @c std::byte, or a wider unit.
  *  @tparam offset_type_ Offset type into the buffer, typically @c int32_t or @c int64_t.
- *  @tparam termination_ Length convention, see @ref arrow_termination_t.
- *  @sa arrow_strings_tape
+ *  @tparam termination_ Length convention, see @ref tape_termination_t.
+ *  @sa tape
  *
- *  The default @c nul_terminated_k, matching @ref arrow_strings_tape, excludes the trailing NUL, so
- *  element @c i spans `offsets[i]` to `offsets[i+1] - 1` and reads as a C-string; @c packed_k spans
- *  the full `offsets[i]` to `offsets[i+1]`. A device-resident cuDF string or `list<uint8>` column
- *  is thus `arrow_strings_view<std::byte, int64_t, arrow_termination_t::packed_k>`.
+ *  Elements exclude the trailing NUL by default, matching @ref tape. Use @c packed_k for
+ *  terminator-free Apache Arrow and cuDF columns.
  */
 template <typename char_type_, typename offset_type_,
-          arrow_termination_t termination_ = arrow_termination_t::nul_terminated_k>
-struct arrow_strings_view {
+          tape_termination_t termination_ = tape_termination_t::nul_terminated_k>
+struct tape_view {
     using char_t = char_type_;
     using offset_t = offset_type_;
-    using self_t = arrow_strings_view<char_t, offset_t, termination_>;
+    using self_t = tape_view<char_t, offset_t, termination_>;
 
-    using value_t = span<char_t const>;
+    using value_t = std::span<char_t const>;
     using value_type = value_t; // ? For STL compatibility
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
 
     /** Bytes excluded from every element's length — one for the NULL terminator, zero for the
      *  terminator-free Apache Arrow / cuDF convention. */
-    static constexpr std::size_t terminator_width_k = termination_ == arrow_termination_t::nul_terminated_k ? 1u : 0u;
+    static constexpr std::size_t terminator_width_k = termination_ == tape_termination_t::nul_terminated_k ? 1u : 0u;
 
-    span<char_t const> buffer_;
-    span<offset_t const> offsets_;
+    std::span<char_t const> buffer_;
+    std::span<offset_t const> offsets_;
 
-    constexpr arrow_strings_view() noexcept : buffer_ {}, offsets_ {} {}
-    constexpr arrow_strings_view(span<char_t const> buf, span<offset_t const> offs) noexcept
-        : buffer_(buf), offsets_(offs) {}
+    constexpr tape_view() noexcept : buffer_ {}, offsets_ {} {}
+    constexpr tape_view(std::span<char_t const> buffer, std::span<offset_t const> offsets) noexcept
+        : buffer_(buffer), offsets_(offsets) {}
 
     constexpr std::size_t size() const noexcept { return offsets_.size() != 0 ? offsets_.size() - 1 : 0; }
     constexpr value_t operator[](std::size_t i) const noexcept {
-        return {&buffer_[offsets_[i]], static_cast<std::size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
+        return {buffer_.data() + offsets_[i],
+                static_cast<std::size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
     }
 
     /**
@@ -708,10 +564,10 @@ struct arrow_strings_view {
      *
      *  @note Starts at `offsets_[0]`, which a tape that is a slice of a wider one leaves non-zero.
      */
-    constexpr span<char_t const> tape_bytes() const noexcept {
-        return size() == 0 ? span<char_t const> {}
-                           : span<char_t const> {&buffer_[offsets_[0]],
-                                                 static_cast<std::size_t>(offsets_[size()] - offsets_[0])};
+    constexpr std::span<char_t const> tape_bytes() const noexcept {
+        return size() == 0 ? std::span<char_t const> {}
+                           : std::span<char_t const> {buffer_.data() + offsets_[0],
+                                                      static_cast<std::size_t>(offsets_[size()] - offsets_[0])};
     }
 
     /**
@@ -737,10 +593,10 @@ struct arrow_strings_view {
     constexpr iterator_t cend() const noexcept { return end(); }
 };
 
-/** The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref arrow_strings_view: element
+/** The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref tape_view: element
  *  @c i is the full `[offsets[i], offsets[i+1])` span, no NULL excluded. */
 template <typename char_type_, typename offset_type_>
-using arrow_packed_view = arrow_strings_view<char_type_, offset_type_, arrow_termination_t::packed_k>;
+using packed_tape_view = tape_view<char_type_, offset_type_, tape_termination_t::packed_k>;
 
 /**
  *  @brief Apache @b Arrow-compatible tape data-structure to store a sequence of
@@ -750,14 +606,14 @@ using arrow_packed_view = arrow_strings_view<char_type_, offset_type_, arrow_ter
  *  @b ~O(1) access to each string by storing the offsets of each string in a separate array.
  */
 template <typename char_type_, typename offset_type_, typename allocator_type_>
-struct arrow_strings_tape {
+struct tape {
     using char_t = char_type_;
     using offset_t = offset_type_;
     using allocator_t = allocator_type_;
-    using self_t = arrow_strings_tape<char_t, offset_t, allocator_t>;
+    using self_t = tape<char_t, offset_t, allocator_t>;
 
-    using value_t = span<char_t const>;
-    using view_t = arrow_strings_view<char_t, offset_t>;
+    using value_t = std::span<char_t const>;
+    using view_t = tape_view<char_t, offset_t>;
     using value_type = value_t; // ? For STL compatibility
     using iterator_t = indexed_container_iterator<self_t>;
     using iterator = iterator_t; // ? For STL compatibility
@@ -769,25 +625,25 @@ struct arrow_strings_tape {
     static constexpr std::size_t max_offset_k = static_cast<std::size_t>((std::numeric_limits<offset_t>::max)());
 
   private:
-    span<char_t> buffer_;
-    span<offset_t> offsets_;
+    std::span<char_t> buffer_;
+    std::span<offset_t> offsets_;
     char_alloc_t char_alloc_;
     offset_alloc_t offset_alloc_;
     std::size_t count_ = 0;
 
   public:
-    constexpr arrow_strings_tape() = default;
+    constexpr tape() = default;
 
-    arrow_strings_tape(arrow_strings_tape const &) = delete;
-    arrow_strings_tape &operator=(arrow_strings_tape const &) = delete;
+    tape(tape const &) = delete;
+    tape &operator=(tape const &) = delete;
 
-    constexpr arrow_strings_tape(arrow_strings_tape &&other) noexcept
+    constexpr tape(tape &&other) noexcept
         : buffer_(other.buffer_), offsets_(other.offsets_), char_alloc_(std::move(other.char_alloc_)),
           offset_alloc_(std::move(other.offset_alloc_)), count_(other.count_) {
         other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
     }
 
-    constexpr arrow_strings_tape &operator=(arrow_strings_tape &&other) noexcept {
+    constexpr tape &operator=(tape &&other) noexcept {
         reset();
         buffer_ = other.buffer_, offsets_ = other.offsets_;
         char_alloc_ = std::move(other.char_alloc_), offset_alloc_ = std::move(other.offset_alloc_);
@@ -796,14 +652,14 @@ struct arrow_strings_tape {
         return *this;
     }
 
-    constexpr arrow_strings_tape(span<char_t> buffer, span<offset_t> offsets, allocator_t allocator)
+    constexpr tape(std::span<char_t> buffer, std::span<offset_t> offsets, allocator_t allocator)
         : buffer_(buffer), offsets_(offsets), char_alloc_(allocator), offset_alloc_(allocator) {}
 
-    constexpr ~arrow_strings_tape() noexcept { reset(); }
+    constexpr ~tape() noexcept { reset(); }
     constexpr void reset() noexcept {
-        if (buffer_.data_) char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_), buffer_ = {};
-        if (offsets_.data_)
-            offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_), offsets_ = {};
+        if (buffer_.data()) char_alloc_.deallocate(const_cast<char_t *>(buffer_.data()), buffer_.size()), buffer_ = {};
+        if (offsets_.data())
+            offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data()), offsets_.size()), offsets_ = {};
         count_ = 0;
     }
 
@@ -818,35 +674,41 @@ struct arrow_strings_tape {
         // iterators, like `std::istream_iterator`, would compile but silently copy nothing.
         static_assert(std::is_base_of<std::forward_iterator_tag,
                                       typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
-                      "arrow_strings_tape::assign needs multi-pass (forward) iterators");
+                      "tape::assign needs multi-pass (forward) iterators");
 
         reset(); // ? Drops the old contents, so every failure below leaves an empty tape rather than a stale one
 
-        // Estimate required memory: total characters + one extra per string for the NULL.
         std::size_t count = 0;
         std::size_t combined_length = 0;
-        for (auto it = first; it != last; ++it, ++count) combined_length += it->length();
-        combined_length += count; // ? NULL-terminate every string
+        for (auto it = first; it != last; ++it, ++count) {
+            if (it->size() >= max_offset_k - combined_length) return status_t::overflow_risk_k;
+            combined_length += it->size() + 1;
+        }
+        if (!count) return status_t::success_k;
+        if (count >= (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t)) return status_t::overflow_risk_k;
 
-        if (combined_length > max_offset_k) return status_t::overflow_risk_k;
-
-        // Allocate exactly the required memory
-        buffer_ = {allocate_or_null_(char_alloc_, combined_length), combined_length};
-        offsets_ = {allocate_or_null_(offset_alloc_, count + 1), count + 1};
-        if (!buffer_.data_ || !offsets_.data_) return status_t::bad_alloc_k;
+        char_t *buffer = allocate_or_null_(char_alloc_, combined_length);
+        if (!buffer) return status_t::bad_alloc_k;
+        buffer_ = {buffer, combined_length};
+        offset_t *offsets = allocate_or_null_(offset_alloc_, count + 1);
+        if (!offsets) {
+            reset();
+            return status_t::bad_alloc_k;
+        }
+        offsets_ = {offsets, count + 1};
 
         // Copy the strings to the buffer and store the offsets
-        char_t *buffer_ptr = buffer_.data_;
-        offset_t *offsets_ptr = offsets_.data_;
+        char_t *buffer_ptr = buffer_.data();
+        offset_t *offsets_ptr = offsets_.data();
         for (auto it = first; it != last; ++it) {
-            *offsets_ptr++ = static_cast<offset_t>(buffer_ptr - buffer_.data_);
+            *offsets_ptr++ = static_cast<offset_t>(buffer_ptr - buffer_.data());
             // Perform a byte-level copy of the string, similar to `sz_copy`
             char_t const *from_ptr = it->data();
-            std::size_t const from_length = it->length();
+            std::size_t const from_length = it->size();
             for (std::size_t i = 0; i != from_length; ++i) *buffer_ptr++ = *from_ptr++;
             *buffer_ptr++ = '\0'; // ? NULL-terminated
         }
-        *offsets_ptr = static_cast<offset_t>(buffer_ptr - buffer_.data_);
+        *offsets_ptr = static_cast<offset_t>(buffer_ptr - buffer_.data());
         count_ = count;
         return status_t::success_k;
     }
@@ -858,173 +720,54 @@ struct arrow_strings_tape {
     }
 #endif
 
-    status_t append(span<char_t const> string) noexcept {
-        std::size_t const string_length = string.length();
-        std::size_t const required = string_length + 1; // Space needed for the new string and its NULL
-        std::size_t current_used = count_ > 0 ? offsets_.data_[count_] : 0;
+    status_t append(std::span<char_t const> string) noexcept {
+        std::size_t const string_length = string.size();
+        std::size_t const current_used = count_ ? offsets_[count_] : 0;
+        if (string_length >= max_offset_k - current_used) return status_t::overflow_risk_k;
+        std::size_t const needed = current_used + string_length + 1;
+        std::size_t const max_offsets = (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t);
+        if (count_ >= max_offsets - 1) return status_t::overflow_risk_k;
 
-        if (required > max_offset_k - current_used) return status_t::overflow_risk_k;
-
-        // Reallocate the buffer if needed (oversubscribe in powers of two).
-        if (current_used + required > buffer_.size_) {
-            std::size_t new_capacity = sz_size_bit_ceil(current_used + required);
-            char_t *new_buffer = allocate_or_null_(char_alloc_, new_capacity);
-            if (!new_buffer) return status_t::bad_alloc_k;
-            if (buffer_.data_) {
-                // Copy the existing data to the new array, before deallocating the old one.
-                char_t const *src = buffer_.data_, *end = buffer_.data_ + current_used;
-                char_t *tgt = new_buffer;
-                for (; src != end; ++src, ++tgt) *tgt = *src;
-                char_alloc_.deallocate(const_cast<char_t *>(buffer_.data_), buffer_.size_);
+        if (count_ + 2 > offsets_.size()) {
+            std::size_t const capacity = sz_size_bit_ceil(count_ + 2);
+            if (!capacity || capacity > max_offsets) return status_t::overflow_risk_k;
+            offset_t *offsets = allocate_or_null_(offset_alloc_, capacity);
+            if (!offsets) return status_t::bad_alloc_k;
+            if (offsets_.data()) {
+                for (std::size_t i = 0; i <= count_; ++i) offsets[i] = offsets_[i];
+                offset_alloc_.deallocate(offsets_.data(), offsets_.size());
             }
-            buffer_.data_ = new_buffer;
-            buffer_.size_ = new_capacity;
+            offsets_ = {offsets, capacity};
         }
 
-        // Reallocate the offsets array if needed. Appending writes both `offsets_[count_]` (the new string's start)
-        // and `offsets_[count_ + 1]` (its end), so the array must hold `count_ + 2` entries before we touch it.
-        if (count_ + 2 > offsets_.size_) {
-            std::size_t new_offsets_capacity = sz_size_bit_ceil(count_ + 2);
-            offset_t *new_offsets = allocate_or_null_(offset_alloc_, new_offsets_capacity);
-            if (!new_offsets) return status_t::bad_alloc_k;
-            if (offsets_.data_) {
-                // Copy the existing offsets to the new array, before deallocating the old one.
-                offset_t const *src = offsets_.data_, *end = offsets_.data_ + count_ + 1;
-                offset_t *tgt = new_offsets;
-                for (; src != end; ++src, ++tgt) *tgt = *src;
-                offset_alloc_.deallocate(const_cast<offset_t *>(offsets_.data_), offsets_.size_);
-            }
-            offsets_.data_ = new_offsets;
-            offsets_.size_ = new_offsets_capacity;
+        std::span<char_t> next = buffer_;
+        if (needed > buffer_.size()) {
+            std::size_t const capacity = sz_size_bit_ceil(needed);
+            if (!capacity) return status_t::overflow_risk_k;
+            char_t *buffer = allocate_or_null_(char_alloc_, capacity);
+            if (!buffer) return status_t::bad_alloc_k;
+            next = {buffer, capacity};
+            for (std::size_t i = 0; i < current_used; ++i) next[i] = buffer_[i];
         }
-
-        // Record the starting offset for the new string.
-        offsets_.data_[count_] = static_cast<offset_t>(current_used);
-        // Copy the string into the buffer.
-        for (std::size_t i = 0; i < string_length; ++i) buffer_.data_[current_used++] = string[i];
-        // Append the NULL terminator.
-        buffer_.data_[current_used++] = '\0';
-        // Update the offsets array with the new end-of-buffer position.
-        offsets_.data_[++count_] = static_cast<offset_t>(current_used);
+        // The input may point into the old buffer, so copy it before releasing that allocation.
+        for (std::size_t i = 0; i < string_length; ++i) next[current_used + i] = string[i];
+        next[needed - 1] = '\0';
+        if (next.data() != buffer_.data() && buffer_.data()) char_alloc_.deallocate(buffer_.data(), buffer_.size());
+        buffer_ = next;
+        offsets_[count_] = static_cast<offset_t>(current_used);
+        offsets_[++count_] = static_cast<offset_t>(needed);
         return status_t::success_k;
     }
 
     constexpr value_type operator[](std::size_t i) const noexcept {
         sz_assert_(i < count_ && "Index out of bounds");
-        return {buffer_.data_ + offsets_.data_[i], offsets_.data_[i + 1] - offsets_.data_[i] - 1};
+        return {buffer_.data() + offsets_.data()[i], offsets_.data()[i + 1] - offsets_.data()[i] - 1};
     }
 
     constexpr std::size_t size() const noexcept { return count_; }
-    constexpr view_t view() const noexcept { return {{buffer_.data(), buffer_.size()}, {offsets_.data_, count_ + 1}}; }
-    constexpr span<char_t> const &buffer() const noexcept { return buffer_; }
-    constexpr span<offset_t> const &offsets() const noexcept { return offsets_; }
-};
-
-/** Similar to @c thrust::constant_iterator, always returning the same value. */
-template <typename value_type_>
-struct constant_iterator {
-
-    using value_type = value_type_;
-    using reference = value_type_ const &;
-    using pointer = value_type_ const *;
-    using difference_type = sz_ssize_t;
-#if STRINGZILLA_WITH_STL
-    using iterator_category = std::random_access_iterator_tag;
-#endif
-
-    constexpr constant_iterator(value_type const &value, difference_type pos = 0) noexcept : value_(value), pos_(pos) {}
-    constexpr reference operator*() const { return value_; }
-    constexpr pointer operator->() const { return &value_; }
-
-    constexpr constant_iterator &operator++() {
-        ++pos_;
-        return *this;
-    }
-    constexpr constant_iterator operator++(int) {
-        constant_iterator temp(*this);
-        ++pos_;
-        return temp;
-    }
-    constexpr constant_iterator &operator--() {
-        --pos_;
-        return *this;
-    }
-    constexpr constant_iterator operator--(int) {
-        constant_iterator temp(*this);
-        --pos_;
-        return temp;
-    }
-    constexpr constant_iterator &operator+=(difference_type n) {
-        pos_ += n;
-        return *this;
-    }
-    constexpr constant_iterator &operator-=(difference_type n) {
-        pos_ -= n;
-        return *this;
-    }
-
-    constexpr constant_iterator operator+(difference_type n) const { return constant_iterator(value_, pos_ + n); }
-    constexpr constant_iterator operator-(difference_type n) const { return constant_iterator(value_, pos_ - n); }
-    constexpr difference_type operator-(constant_iterator const &other) const { return pos_ - other.pos_; }
-
-    constexpr reference operator[](difference_type) const { return value_; }
-    constexpr bool operator==(constant_iterator const &other) const { return pos_ == other.pos_; }
-    constexpr bool operator!=(constant_iterator const &other) const { return pos_ != other.pos_; }
-    constexpr bool operator<(constant_iterator const &other) const { return pos_ < other.pos_; }
-    constexpr bool operator>(constant_iterator const &other) const { return pos_ > other.pos_; }
-    constexpr bool operator<=(constant_iterator const &other) const { return pos_ <= other.pos_; }
-    constexpr bool operator>=(constant_iterator const &other) const { return pos_ >= other.pos_; }
-
-  private:
-    value_type value_;
-    difference_type pos_;
-};
-
-template <typename begin_type_, typename end_type_>
-struct random_access_range {
-
-    using value_type = typename std::iterator_traits<begin_type_>::value_type;
-    using reference_type = typename std::iterator_traits<begin_type_>::reference;
-    using difference_type = typename std::iterator_traits<begin_type_>::difference_type;
-
-    begin_type_ begin_;
-    end_type_ end_;
-
-    constexpr std::size_t size() const { return static_cast<std::size_t>(end_ - begin_); }
-    constexpr begin_type_ begin() const { return begin_; }
-    constexpr end_type_ end() const { return end_; }
-
-    reference_type operator[](std::size_t index) const {
-        sz_assert_(index < size());
-        return *(begin_ + index);
-    }
-};
-
-template <typename begin_type_, typename end_type_>
-random_access_range(begin_type_, end_type_) -> random_access_range<begin_type_, end_type_>;
-
-template <typename value_type_, std::size_t count_>
-struct safe_array {
-    using value_type = value_type_;
-    using size_type = std::size_t;
-    using iterator = value_type *;
-    using const_iterator = value_type const *;
-    static constexpr size_type count_k = count_;
-
-    value_type data_[count_k] = {};
-
-    constexpr value_type &operator[](size_type i) noexcept { return data_[i]; }
-    constexpr value_type const &operator[](size_type i) const noexcept { return data_[i]; }
-    constexpr size_type size() const noexcept { return count_k; }
-    constexpr value_type *data() noexcept { return data_; }
-    constexpr value_type const *data() const noexcept { return data_; }
-    constexpr iterator begin() noexcept { return data_; }
-    constexpr const_iterator begin() const noexcept { return data_; }
-    constexpr iterator end() noexcept { return data_ + count_k; }
-    constexpr const_iterator end() const noexcept { return data_ + count_k; }
-
-    operator span<value_type, count_k>() noexcept { return span<value_type, count_k>(data_); }
-    operator span<value_type const, count_k>() const noexcept { return span<value_type const, count_k>(data_); }
+    constexpr view_t view() const noexcept { return {buffer_, offsets_.first(offsets_.empty() ? 0 : count_ + 1)}; }
+    constexpr std::span<char_t> const &buffer() const noexcept { return buffer_; }
+    constexpr std::span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
 
 template <typename first_, typename second_>
@@ -1268,7 +1011,7 @@ constexpr head_body_tail_t head_body_tail(element_type_ *first_address, std::siz
 /** Safer alternative to @c std::vector, that avoids exceptions and copy constructors: every member
  *  that allocates returns a @c status_t instead of throwing. */
 template <typename value_type_, typename allocator_type_>
-class safe_vector {
+class vector {
   public:
     using value_type = value_type_;
     using size_type = std::size_t;
@@ -1302,9 +1045,9 @@ class safe_vector {
     }
 
   public:
-    safe_vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
-    safe_vector(allocator_type allocator) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(allocator) {}
-    ~safe_vector() noexcept { reset(); }
+    vector() noexcept : data_(nullptr), size_(0), capacity_(0), alloc_() {}
+    vector(allocator_type allocator) noexcept : data_(nullptr), size_(0), capacity_(0), alloc_(allocator) {}
+    ~vector() noexcept { reset(); }
 
     void clear() noexcept {
         if constexpr (!std::is_trivially_destructible<value_type>::value)
@@ -1321,19 +1064,19 @@ class safe_vector {
     }
 
     /** @warning Use @c assign instead to handle out-of-memory failures. */
-    safe_vector(safe_vector const &other) = delete;
+    vector(vector const &other) = delete;
 
     /** @warning Use @c assign instead to handle out-of-memory failures. */
-    safe_vector &operator=(safe_vector const &other) = delete;
+    vector &operator=(vector const &other) = delete;
 
-    safe_vector(safe_vector &&other) noexcept
+    vector(vector &&other) noexcept
         : data_(other.data_), size_(other.size_), capacity_(other.capacity_), alloc_(std::move(other.alloc_)) {
         other.data_ = nullptr;
         other.size_ = 0;
         other.capacity_ = 0;
     }
 
-    safe_vector &operator=(safe_vector &&other) noexcept {
+    vector &operator=(vector &&other) noexcept {
         if (this != &other) {
             clear();
             if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
@@ -1348,7 +1091,7 @@ class safe_vector {
         return *this;
     }
 
-    status_t assign(span<value_type const> const other) noexcept {
+    status_t assign(std::span<value_type const> const other) noexcept {
         reset();
 
         if (other.size() == 0) return status_t::success_k; // Nothing to do :)
@@ -1370,8 +1113,8 @@ class safe_vector {
     }
 
     template <typename other_allocator_type_>
-    status_t assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
-        return assign(span<value_type const>(other.data(), other.size()));
+    status_t assign(vector<value_type, other_allocator_type_> const &other) noexcept {
+        return assign(std::span<value_type const>(other.data(), other.size()));
     }
 
     status_t reserve(size_type new_cap) noexcept {
@@ -1448,7 +1191,7 @@ class safe_vector {
         return status_t::success_k;
     }
 
-    status_t append(span<value_type const> source) noexcept {
+    status_t append(std::span<value_type const> source) noexcept {
         size_type needed = size_ + source.size();
         if (needed > capacity_) {
             size_type new_cap = capacity_ ? capacity_ : 1;
@@ -1492,8 +1235,8 @@ class safe_vector {
     }
     size_type size() const noexcept { return size_; }
     size_type capacity() const noexcept { return capacity_; }
-    operator span<value_type>() noexcept { return {data_, size_}; }
-    operator span<value_type const>() const noexcept { return {data_, size_}; }
+    operator std::span<value_type>() noexcept { return {data_, size_}; }
+    operator std::span<value_type const>() const noexcept { return {data_, size_}; }
 };
 
 #pragma region Unified Allocators
@@ -1502,10 +1245,9 @@ class safe_vector {
  *  @brief Allocator over the @b unified memory of one device group, which the host and that
  *      group's devices all address.
  *
- *  Standard-allocator shaped, so @c std::vector, @ref arrow_strings_tape and @ref safe_vector all
- *  take it. @p capabilities_ picks the vendor; the borrowed stream names its device and must
- *  outlive the allocations. A null stream uses the vendor's default device selection.
- *  Allocation failure or unsupported alignment throws @c std::bad_alloc.
+ *  Compatible with @c std::vector, @ref tape and @ref vector.
+ *  @p capabilities_ picks the vendor. The stream must outlive its allocations; a null stream
+ *  uses the vendor's default device. Allocation or alignment failure throws @c std::bad_alloc.
  *
  *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */

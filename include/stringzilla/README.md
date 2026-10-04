@@ -749,7 +749,7 @@ expected<size_t> sz::intersect(first, extractor, second, extractor, seed,
                                capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
 ```
 
-The outputs are sized `sz::span<sorted_idx_t>` views over caller-owned storage, and the scratch memory comes from `allocator`.
+The outputs are sized `std::span<sorted_idx_t>` views over caller-owned storage, and the scratch memory comes from `allocator`.
 Size `order` to `container.size()` — the whole span receives a permutation, and a non-zero `top_count` only requests that the first `top_count` entries be fully sorted.
 Size each position span to `min(first.size(), second.size())`; a shorter span returns `unexpected_dimensions_k`.
 `intersect` returns the number of matched pairs as an `expected<size_t>`, so there is no separate count out-parameter.

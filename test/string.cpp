@@ -41,6 +41,7 @@
 #include <numeric>       // `std::accumulate`
 #include <random>        // `std::random_device`
 #include <set>           // `std::set`
+#include <span>          // `std::span`
 #include <sstream>       // `std::ostringstream`
 #include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
@@ -253,11 +254,9 @@ void test_sequence_unit() {
     }
 }
 
-/** Validates that @c arrow_strings_tape::assign works with multi-pass forward iterators. It
- *  walks the range twice, once to measure and once to copy, so single-pass input iterators like
- *  @c std::istream_iterator are rejected at compile time. */
-void test_strings_tape_assign_unit() {
-    sz::arrow_strings_tape<char, std::uint32_t, std::allocator<char>> tape;
+/** Verifies assignment from forward iterators and appending an element from the same tape. */
+void test_tape_assign_unit() {
+    sz::tape<char, std::uint32_t, std::allocator<char>> tape;
 
     // A forward list is walked forward only, but any number of times - all that `assign` needs.
     std::forward_list<std::string> strings {"alpha", "", "gamma"};
@@ -266,20 +265,28 @@ void test_strings_tape_assign_unit() {
     verify(sz::string_view_t(tape[0].data(), tape[0].size()) == "alpha"_sv);
     verify(tape[1].size() == 0);
     verify(sz::string_view_t(tape[2].data(), tape[2].size()) == "gamma"_sv);
+    verify(tape.append(tape[0]) == sz::status_t::success_k);
+    verify(sz::string_view_t(tape[3].data(), tape[3].size()) == "alpha"_sv);
+    verify(tape.assign(strings.end(), strings.end()) == sz::status_t::success_k);
+    verify(tape.view().size() == 0);
+
+    std::uint32_t const offsets[] = {0, 5, 5};
+    sz::packed_tape_view<char, std::uint32_t> const packed({"alpha", 5}, offsets);
+    verify(packed[1].empty());
 }
 
-/** Validates that @c arrow_strings_tape refuses to grow past the range of its offset type. */
-void test_strings_tape_overflow_unit() {
+/** Validates that @c tape refuses to grow past the range of its offset type. */
+void test_tape_overflow_unit() {
     // 8-bit offsets hit the same code path as 32-bit offsets past 4 GB, but already at 256 bytes.
-    using tape_t = sz::arrow_strings_tape<char, std::uint8_t, std::allocator<char>>;
+    using small_tape_t = sz::tape<char, std::uint8_t, std::allocator<char>>;
 
     // Appending past the offset range must fail cleanly and leave the stored strings untouched.
     {
-        tape_t tape;
+        small_tape_t tape;
         std::string const oversized_string(200, 'x');
-        verify(tape.append(sz::to_view(oversized_string)) == sz::status_t::success_k);
+        verify(tape.append(std::span<char const>(oversized_string)) == sz::status_t::success_k);
         // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
-        verify(tape.append(sz::to_view(oversized_string)) == sz::status_t::overflow_risk_k);
+        verify(tape.append(std::span<char const>(oversized_string)) == sz::status_t::overflow_risk_k);
         verify(tape.size() == 1);
         // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
         verify(tape.offsets()[0] == 0);
@@ -289,9 +296,9 @@ void test_strings_tape_overflow_unit() {
 
     // Same for bulk assignment: the combined size must fit the offset range.
     {
-        tape_t tape;
+        small_tape_t tape;
         std::string const stored_string(10, 'z');
-        verify(tape.append(sz::to_view(stored_string)) == sz::status_t::success_k);
+        verify(tape.append(std::span<char const>(stored_string)) == sz::status_t::success_k);
         std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
         verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
         // A rejected assignment releases the old contents, so the tape must not keep reporting them.

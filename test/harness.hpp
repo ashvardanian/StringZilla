@@ -302,7 +302,7 @@ result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... argum
     return result;
 }
 
-using arrow_strings_view_t = arrow_strings_view<char, sz_size_t>;
+using tape_view_t = tape_view<char, sz_size_t>;
 
 /*  The one place a test picks a GPU vendor, by its compiler: the baseline, the producers, and the
  *  vendor's runtime helpers the checks reach past the library. */
@@ -333,11 +333,11 @@ inline constexpr auto gpu_fill = &sz_fill_cuda_;
 #endif
 
 #if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
-using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, std::allocator<char>>;
+using tape_t = tape<char, sz_size_t, std::allocator<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
 #else
-using arrow_strings_tape_t = arrow_strings_tape<char, sz_size_t, unified_alloc<char, gpu_baseline_k>>;
+using tape_t = tape<char, sz_size_t, unified_alloc<char, gpu_baseline_k>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_baseline_k>>;
 #endif
@@ -349,7 +349,7 @@ using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_b
  */
 struct unified_texts_t {
     std::vector<unified_vector<char>> storage;
-    unified_vector<span<char const>> spans;
+    unified_vector<std::span<char const>> spans;
 
     explicit unified_texts_t(std::vector<std::string> const &texts) : storage(texts.size()), spans(texts.size()) {
         for (std::size_t index = 0; index != texts.size(); ++index) {
@@ -358,7 +358,7 @@ struct unified_texts_t {
         }
     }
 
-    span<span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
+    std::span<std::span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
 };
 
 /** A 32-bit generator seed, kept apart from counts so neither passes for the other. */
@@ -507,10 +507,10 @@ inline std::size_t rotating_index(std::size_t step, std::size_t count) noexcept 
     return count ? (step + step / count) % count : 0;
 }
 
-/** Views a C array as a @c sz::span, so tables pass as one argument with their length. */
+/** Views a C array as a @c std::span, so tables pass as one argument with their length. */
 template <typename value_type_, std::size_t count_>
-constexpr span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
-    return span<value_type_ const>(array, count_);
+constexpr std::span<value_type_ const> span_over(value_type_ const (&array)[count_]) noexcept {
+    return std::span<value_type_ const>(array, count_);
 }
 
 /** The byte offset within @p text of each slice @p range yields, to assert where slices land. */
@@ -974,8 +974,8 @@ std::size_t test_cross_wasm(environment_t const &env);
 
 void test_arithmetic_unit();
 void test_sequence_unit();
-void test_strings_tape_assign_unit();
-void test_strings_tape_overflow_unit();
+void test_tape_assign_unit();
+void test_tape_overflow_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 

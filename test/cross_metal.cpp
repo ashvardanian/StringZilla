@@ -17,6 +17,7 @@
 
 #include <algorithm>   // `std::sort`
 #include <array>       // `std::array`
+#include <span>        // `std::span`
 #include <string>      // `std::string`
 #include <thread>      // `std::thread`
 #include <vector>      // `std::vector`
@@ -476,7 +477,7 @@ struct overlap_metal_corpus_t {
 
 /** The serial backend's answers for the same corpus, read off the very tape the device reads. */
 static std::vector<sz_f32_t> overlap_serial_reference_(overlap_metal_corpus_t const &corpus,
-                                                       sz::span<sz_size_t const> widths) {
+                                                       std::span<sz_size_t const> widths) {
     sz_overlap_engine_t engine {};
     verify(sz_overlap_engine_init_serial(&engine, &corpus.query_sequence, widths.data(), widths.size(), 0,
                                          STRINGZILLA_NULL, nullptr) == sz_success_k);

@@ -35,6 +35,7 @@
 #include <array>            // `std::array`
 #include <initializer_list> // `std::initializer_list`
 #include <random>           // `std::mt19937`, `std::uniform_int_distribution`, `std::discrete_distribution`
+#include <span>             // `std::span`
 #include <string>           // `std::string`
 #include <string_view>      // `std::string_view`
 #include <vector>           // `std::vector`
@@ -337,8 +338,8 @@ enum utf8_corpus_category_t {
 /** A family's random-corpus alphabet: snippet table, boundary codepoints and category weights, so
  *  each family biases generation toward its own rules instead of one shared grab-bag. */
 struct utf8_corpus_alphabet_t {
-    sz::span<char const *const> snippets;
-    sz::span<sz_rune_t const> boundary_codepoints;
+    std::span<char const *const> snippets;
+    std::span<sz_rune_t const> boundary_codepoints;
 
     /** Draw weights for snippet, boundary, astral, motif and malformed, in
      *  @c utf8_corpus_category_t order. */
@@ -358,7 +359,7 @@ struct utf8_segment_corpora_t {
     char const *family_name;
 
     /** The family's own corner-case motifs. */
-    sz::span<std::string_view const> motifs;
+    std::span<std::string_view const> motifs;
 
     /** Streams the family's high-density runs, each over several 64-byte windows, to @p sink. */
     void (*dense_runs)(std::mt19937 &generator, utf8_run_sink_t sink, void *context);
@@ -367,7 +368,7 @@ struct utf8_segment_corpora_t {
     void (*straddles)(std::mt19937 &generator, std::size_t gap, utf8_run_sink_t sink, void *context);
 
     /** Optional fixed hand-found regression inputs. */
-    sz::span<std::string_view const> regressions;
+    std::span<std::string_view const> regressions;
 
     /** Per-family random-corpus alphabet; null selects the shared default. */
     utf8_corpus_alphabet_t const *alphabet;
@@ -472,7 +473,7 @@ inline std::string random_valid_utf8_bytes_(std::size_t target_bytes, std::mt199
 /** The malformed-UTF-8 sample pool: overlong encodings, surrogates, lone continuations, invalid
  *  leads, truncated tails, out-of-range leads, and noncharacters. Exposed so a test can sweep every
  *  class deterministically instead of hoping a scaled-down random draw reaches all of them. */
-inline sz::span<char const *const> malformed_classes_() {
+inline std::span<char const *const> malformed_classes_() {
     static char const *const malformed[] = {
         "\xC0\x80",         // overlong 2-byte encoding of NUL
         "\xC1\xBF",         // overlong 2-byte encoding of U+007F
@@ -500,7 +501,7 @@ inline sz::span<char const *const> malformed_classes_() {
 
 /** One entry of @c malformed_classes_(), drawn from @p generator. */
 inline char const *random_malformed_class_(std::mt19937 &generator) {
-    sz::span<char const *const> const pool = malformed_classes_();
+    std::span<char const *const> const pool = malformed_classes_();
     std::uniform_int_distribution<std::size_t> pick(0, pool.size() - 1);
     return pool[pick(generator)];
 }
@@ -570,7 +571,7 @@ static utf8_corpus_alphabet_t const utf8_default_alphabet = {
  *  an unpopulated category. */
 inline void utf8_random_segmentation_corpus_(std::string &out, std::size_t min_length, utf8_corpus_flavor_t flavor,
                                              utf8_corpus_alphabet_t const &alphabet,
-                                             sz::span<std::string_view const> motifs, std::mt19937 &generator) {
+                                             std::span<std::string_view const> motifs, std::mt19937 &generator) {
     out.clear();
     std::array<double, utf8_corpus_category_count_k> weights;
     for (int category = 0; category != utf8_corpus_category_count_k; ++category)
@@ -739,7 +740,7 @@ struct utf8_segment_backend_t {
  *  caller invokes it once per backend, so a wrong constant shared by serial and SIMD is still
  *  caught against external ground truth. */
 inline void check_utf8_segment_unit_(char const *family, sz_kernel_utf8_segmenter_t forward,
-                                     sz::span<utf8_unit_case_t const> cases) {
+                                     std::span<utf8_unit_case_t const> cases) {
     for (utf8_unit_case_t const &golden : cases) {
         utf8_segment_cursor_t cursor = utf8_segment_cursor_make_(forward, golden.text.data(), golden.text.size(),
                                                                  utf8_segment_batch_k);
@@ -787,8 +788,8 @@ struct utf8_rule_case_t {
  *     is left untested.
  */
 inline void check_utf8_rule_coverage_(char const *family, sz_kernel_utf8_segmenter_t reference,
-                                      sz_kernel_utf8_segmenter_t candidate, sz::span<utf8_rule_case_t const> cases,
-                                      sz::span<char const *const> required_rule_ids) {
+                                      sz_kernel_utf8_segmenter_t candidate, std::span<utf8_rule_case_t const> cases,
+                                      std::span<char const *const> required_rule_ids) {
     static sz_size_t const window_phases[] = {0, 61, 62, 63};
     std::string probe;
     for (std::size_t case_index = 0; case_index != cases.size(); ++case_index) {
@@ -866,7 +867,7 @@ inline void for_each_adversarial_utf8_input_(test_context_t &context, std::size_
 /** Feeds the adversarial battery through every @p finders entry, asserting each survives and its
  *  segments tile exactly the input. One battery drives all backends over the same bytes. */
 inline void check_utf8_segment_safety_(test_context_t &context, char const *family,
-                                       sz::span<utf8_segment_backend_t const> finders) {
+                                       std::span<utf8_segment_backend_t const> finders) {
     sz_size_t lengths[utf8_unit_capacity_k + 1];
     auto probe = [&](char const *input, std::size_t input_length) {
         for (utf8_segment_backend_t const &backend : finders) {
@@ -983,7 +984,7 @@ static sz_size_t const utf8_malformed_seam_phases[] = {0, 60, 61, 62, 63};
  *  candidates before the next one is built. */
 struct utf8_differential_context_t {
     sz_kernel_utf8_segmenter_t reference;
-    sz::span<utf8_segment_backend_t const> candidates;
+    std::span<utf8_segment_backend_t const> candidates;
 
     /** `"<family>:<candidate>"` per candidate, named in the divergence record. */
     std::vector<std::string> labels;
@@ -1058,7 +1059,7 @@ inline void utf8_differential_regressions_(utf8_differential_context_t &context)
  *  mutated copy, and a malformed corpus — each compared serial-vs-ISA across the capacity sweep. */
 inline void utf8_differential_fuzz_corpus_(utf8_differential_context_t &context, std::size_t iterations) {
     utf8_corpus_alphabet_t const &alphabet = utf8_context_alphabet_(context);
-    sz::span<std::string_view const> const motifs = context.corpora->motifs;
+    std::span<std::string_view const> const motifs = context.corpora->motifs;
     std::string mutated;
     for (std::size_t iteration = 0; iteration != iterations; ++iteration) {
         utf8_random_segmentation_corpus_(context.scratch, 400, utf8_corpus_flavor_t::valid_k, alphabet, motifs,
@@ -1232,7 +1233,7 @@ inline void utf8_differential_byte_edge_exhaustive_(utf8_differential_context_t 
  *  alignment invariants, and fails with a full repro record at the first divergence.
  */
 inline void check_utf8_segment_equivalence_(test_context_t &test, sz_kernel_utf8_segmenter_t reference,
-                                            sz::span<utf8_segment_backend_t const> candidates,
+                                            std::span<utf8_segment_backend_t const> candidates,
                                             utf8_segment_corpora_t const &corpora, std::size_t iterations) {
     utf8_differential_context_t context;
     context.reference = reference, context.candidates = candidates, context.corpora = &corpora, context.test = &test,

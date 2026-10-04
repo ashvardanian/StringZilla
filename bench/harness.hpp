@@ -272,7 +272,7 @@ using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_b
  *  @brief Allocator over plain @b device memory, which no host code may dereference.
  *
  *  For scratch that only a kernel ever reads or writes, where unified memory would pay page
- *  migration on every access from the wrong side. @ref safe_vector is the only container that grows
+ *  migration on every access from the wrong side. @ref vector is the only container that grows
  *  it, through @c resize_uninitialized, because moving elements on the host is exactly what
  *  @c host_accessible_k forbids.
  */
@@ -376,11 +376,11 @@ using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
 /**
  *  @brief Plain device memory a kernel can write and the host cannot touch.
  *
- *  @c safe_vector is what the engines already store device-resident scratch in, and its
+ *  @c vector is what the engines already store device-resident scratch in, and its
  *  @c try_resize_uninitialized is the only growth a non-host-accessible allocator admits.
  */
 template <typename value_type_>
-using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
+using device_vector = vector<value_type_, device_alloc<value_type_>>;
 
 /**
  *  @brief Queues a copy of a device-resident buffer into @p destination on the default stream,
@@ -388,7 +388,7 @@ using device_vector = safe_vector<value_type_, device_alloc<value_type_>>;
  *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
 template <typename value_type_>
-inline sz_status_t copy_device_to_host(device_vector<value_type_> const &source, span<value_type_> destination) {
+inline sz_status_t copy_device_to_host(device_vector<value_type_> const &source, std::span<value_type_> destination) {
     if (source.size() == 0) return sz_success_k;
     if (destination.size() < source.size()) return sz_unexpected_dimensions_k;
     return gpu_copy(destination.data(), source.data(), source.size() * sizeof(value_type_), nullptr);
@@ -633,7 +633,7 @@ using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
 #else
 using dataset_t = std::basic_string<char, std::char_traits<char>, unified_alloc<char, gpu_baseline_k>>;
-using token_view_t = stringzilla::span<char const>;
+using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t, gpu_baseline_k>>;
 #endif
 

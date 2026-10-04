@@ -2905,7 +2905,7 @@ check_test_destructors_own_nothing() {
 check_cpp_scaffolding_in_one_header() {
     local redefined
     redefined=$(added_code_text |
-        grep -E 'using[[:space:]]+(unified|pinned|device)_vector[[:space:]]*=|using[[:space:]]+arrow_strings_tape_t[[:space:]]*=|(unified|pinned|device)_alloc<[^>]*>[[:space:]]*\{[[:space:]]*\}[[:space:]]*\.[[:space:]]*(allocate|deallocate)' || true)
+        grep -E 'using[[:space:]]+(unified|pinned|device)_vector[[:space:]]*=|using[[:space:]]+tape_t[[:space:]]*=|(unified|pinned|device)_alloc<[^>]*>[[:space:]]*\{[[:space:]]*\}[[:space:]]*\.[[:space:]]*(allocate|deallocate)' || true)
     [ -z "$redefined" ] || reject_with_reason "$redefined" \
         "$staged_path redefines scaffolding its harness.hpp owns; extend that header instead:"
 }

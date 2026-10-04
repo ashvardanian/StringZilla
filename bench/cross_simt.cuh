@@ -50,6 +50,7 @@
 #include <numeric>          // `std::iota`
 #include <optional>         // `std::optional`
 #include <stdexcept>        // `std::runtime_error`
+#include <span>             // `std::span`
 #include <string>           // `std::string`, `std::to_string`
 #include <vector>           // `std::vector`
 
@@ -389,7 +390,7 @@ struct levenshtein_distances_from_simt {
                        STRINGZILLA_NULL) != sz_success_k)
             throw std::runtime_error("The GPU round failed.");
         // Device memory cannot migrate, so the answers cross as one block, not a fault per page.
-        sz::span<sz_size_t> const answers {resident.answers.data(), resident.answers.size()};
+        std::span<sz_size_t> const answers {resident.answers.data(), resident.answers.size()};
         if (copy_device_to_host(resident.distances, answers) != sz_success_k ||
             sz_stream_synchronize_best(batch.engine.capability, STRINGZILLA_NULL) != sz_success_k)
             throw std::runtime_error("The answers would not come back.");

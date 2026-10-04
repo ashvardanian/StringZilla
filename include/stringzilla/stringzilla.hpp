@@ -54,6 +54,7 @@
 #include <concepts>    // `std::convertible_to`
 #include <iosfwd>      // `std::basic_ostream`
 #include <stdexcept>   // `std::out_of_range`
+#include <span>        // `std::span`
 #include <string>      // `std::string`
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
@@ -3018,7 +3019,7 @@ class basic_string_slice {
      *  @note Equivalent to `hashes[i] = hash(seeds[i])`, but amortizes the input loading.
      *  @sa sz_hash_multiseed_best
      */
-    void hash_multiseed(span<std::uint64_t const> seeds, span<std::uint64_t> hashes) const noexcept {
+    void hash_multiseed(std::span<std::uint64_t const> seeds, std::span<std::uint64_t> hashes) const noexcept {
         sz_assert_(seeds.size() == hashes.size() && "Need one output slot per seed");
         best_call_<sz_hash_multiseed_best>(start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()),
                                            static_cast<sz_size_t>(seeds.size()),
@@ -5225,7 +5226,7 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
  *  @return @c success_k, @c unexpected_dimensions_k if @p order is too short, or @c bad_alloc_k.
  */
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
-status_t argsort(container_type_ const &container, string_extractor_ const &extractor, span<sorted_idx_t> order,
+status_t argsort(container_type_ const &container, string_extractor_ const &extractor, std::span<sorted_idx_t> order,
                  std::size_t top_count = 0, bool reverse = false, sz_capability_t capabilities = default_capabilities(),
                  void *stream = nullptr, allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
@@ -5253,7 +5254,7 @@ status_t argsort(container_type_ const &container, string_extractor_ const &extr
  */
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
 status_t argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
-                              span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false,
+                              std::span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false,
                               sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,
                               allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
@@ -5299,7 +5300,7 @@ expected<std::size_t> intersect(                                                
     first_container_ const &first_container, first_extractor_ const &first_extractor,     //
     second_container_ const &second_container, second_extractor_ const &second_extractor, //
     std::uint64_t seed,                                                                   //
-    span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions,              //
+    std::span<sorted_idx_t> first_positions, std::span<sorted_idx_t> second_positions,    //
     sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,        //
     allocator_type_ allocator = {}) noexcept {
 

@@ -27,6 +27,7 @@
 #include <algorithm> // `std::sort`, `std::copy`, `std::min`
 #include <array>     // `std::array`
 #include <random>    // `std::mt19937`, `std::uniform_real_distribution`
+#include <span>      // `std::span`
 #include <string>    // `std::string`
 #include <vector>    // `std::vector`
 
@@ -638,7 +639,7 @@ struct overlap_simt_corpus_t {
 
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 static std::vector<sz_f32_t> overlap_serial_reference_(overlap_simt_corpus_t const &corpus,
-                                                       span<sz_size_t const> widths) {
+                                                       std::span<sz_size_t const> widths) {
     handle_checked_heap_t heap;
     sz_overlap_engine_t engine {};
     verify(sz_overlap_engine_init_serial(&engine, &corpus.query_sequence, widths.data(), widths.size(), 0,

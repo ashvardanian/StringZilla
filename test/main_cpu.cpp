@@ -232,8 +232,8 @@ int main(int, char const **argv) {
     failures += run_test(env.settings, "test_device_unit", test_device_unit);
     failures += run_test(env.settings, "test_arithmetic_unit", test_arithmetic_unit);
     failures += run_test(env.settings, "test_sequence_unit", test_sequence_unit);
-    failures += run_test(env.settings, "test_strings_tape_assign_unit", test_strings_tape_assign_unit);
-    failures += run_test(env.settings, "test_strings_tape_overflow_unit", test_strings_tape_overflow_unit);
+    failures += run_test(env.settings, "test_tape_assign_unit", test_tape_assign_unit);
+    failures += run_test(env.settings, "test_tape_overflow_unit", test_tape_overflow_unit);
     failures += run_test(env.settings, "test_allocator_unit", test_allocator_unit);
     failures += run_test(env.settings, "test_byteset_unit", test_byteset_unit);
 
