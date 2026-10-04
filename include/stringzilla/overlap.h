@@ -151,6 +151,18 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
                                                       sz_size_t scores_candidate_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_NEON
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                        sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                                        sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                                        sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                   sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                   sz_size_t scores_candidate_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_overlap_engine_init */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
@@ -201,9 +213,10 @@ STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_cap
 #if STRINGZILLA_HEADER_ONLY
 #include "stringzilla/overlap/haswell.h"
 #include "stringzilla/overlap/skylake.h"
-#include "stringzilla/overlap/metal.h"
+#include "stringzilla/overlap/neon.h"
 #include "stringzilla/overlap/cuda.cuh"
 #include "stringzilla/overlap/rocm.cuh"
+#include "stringzilla/overlap/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #if STRINGZILLA_HEADER_ONLY

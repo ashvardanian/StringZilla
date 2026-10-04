@@ -1,7 +1,7 @@
 # Overlap: Window Hashing and Prepared-Query Match Counting
 
 This directory holds the kernels behind `sz_overlap_engine_init` and `sz_overlap_scores`, plus the prefix-hash, window-hash, key-sort and B-tree probe primitives every backend shares.
-Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86, and `cuda`, `rocm` and `metal` backends on the device.
+Each operation has a serial baseline plus `haswell` and `skylake` SIMD backends on x86 and `neon` on Arm, and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `c/target/cuda.cu` and `c/target/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `c/target/metal.c` compiles.
 The init picks the best capability of a mask once, when the batch of queries is prepared on one device, and every later round scores with that capability's kernel alone.
 A device engine keeps no stream: on CUDA it keeps no per-round state either, so any number of streams may score it at once, while on Metal `candidates_budget` sizes one round block at init and a round past it is refused with `sz_unexpected_dimensions_k`.
@@ -11,27 +11,34 @@ A device engine keeps no stream: on CUDA it keeps no per-round state either, so 
 Cells are Mwin/s, millions of windows per second, one window per byte offset at the scored width, over `xlsum.csv` words averaging 9 bytes and lines averaging 3 KB.
 A `…` cell is not measured yet.
 
+M5 Pro rows use the first 64 MiB of `xlsum.csv`; cells are medians of three runs.
+That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored window widths of 2 and 5 respectively.
+
 ## Short Words
 
-| Backend          | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
-| :--------------- | ------------------: | ------------: | ------------: | ----------: | -------------: |
-| Serial @ Xeon6   |                   … |        262.17 |        146.69 |       25.11 |          68.58 |
-| Haswell @ Xeon6  |                   … |        279.79 |        156.88 |      214.44 |          98.72 |
-| Skylake @ Xeon6  |                   … |        278.57 |        142.03 |      226.19 |          73.95 |
-| CUDA @ SM90      |                   … |             … |             … |           … |              … |
-| CUDA @ SM103 MIG |               545.1 |             … |             … |           … |              … |
-| CUDA @ SM120     |                   … |             … |             … |           … |              … |
+| Backend          | `sz_overlap_scores` |
+| :--------------- | ------------------: |
+| Serial @ Xeon6   |                   … |
+| Haswell @ Xeon6  |                   … |
+| Skylake @ Xeon6  |                   … |
+| Serial @ M5 Pro  |               180.8 |
+| NEON @ M5 Pro    |               201.7 |
+| CUDA @ SM90      |                   … |
+| CUDA @ SM103 MIG |               545.1 |
+| CUDA @ SM120     |                   … |
 
 ## Long Lines
 
-| Backend          | `sz_overlap_scores` | Prefix hashes | Window hashes | Preparation | Window lookups |
-| :--------------- | ------------------: | ------------: | ------------: | ----------: | -------------: |
-| Serial @ Xeon6   |                   … |        273.26 |        168.11 |       32.33 |          45.26 |
-| Haswell @ Xeon6  |                   … |        280.10 |        192.73 |      163.66 |         138.84 |
-| Skylake @ Xeon6  |                   … |        522.27 |        321.89 |      178.71 |         242.86 |
-| CUDA @ SM90      |                   … |             … |             … |           … |              … |
-| CUDA @ SM103 MIG |               8,919 |             … |             … |           … |              … |
-| CUDA @ SM120     |                   … |             … |             … |           … |              … |
+| Backend          | `sz_overlap_scores` |
+| :--------------- | ------------------: |
+| Serial @ Xeon6   |                   … |
+| Haswell @ Xeon6  |                   … |
+| Skylake @ Xeon6  |                   … |
+| Serial @ M5 Pro  |               133.1 |
+| NEON @ M5 Pro    |               201.7 |
+| CUDA @ SM90      |                   … |
+| CUDA @ SM103 MIG |               8,919 |
+| CUDA @ SM120     |                   … |
 
 ## Window Hashes
 

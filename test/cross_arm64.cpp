@@ -49,6 +49,18 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_sort_equivalence_neon", [&](test_context_t &context) { check_sort_equivalence_(context, sort_neon); });
     check("test_sort_safety_neon", [&] { check_sort_safety_(sort_neon); });
 
+    constexpr levenshtein_backend_t levenshtein_neon {"neon", sz_levenshtein_engine_init_neon,
+                                                      sz_levenshtein_distances_neon};
+    check("test_levenshtein_unit_neon", [&] { check_levenshtein_unit_(levenshtein_neon); });
+    check("test_levenshtein_equivalence_neon",
+          [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_neon); });
+    check("test_levenshtein_safety_neon", [&] { check_levenshtein_safety_(levenshtein_neon); });
+
+    constexpr overlap_backend_t overlap_neon {"neon", sz_overlap_engine_init_neon, sz_overlap_scores_neon};
+    check("test_overlap_equivalence_neon",
+          [&](test_context_t &context) { check_overlap_equivalence_(context, overlap_neon); });
+    check("test_overlap_safety_neon", [&] { check_overlap_safety_(overlap_neon); });
+
     constexpr substrings_tier_t substrings_neon {
         .init = sz_substrings_engine_init_neon,
         .counts = sz_substrings_counts_neon,

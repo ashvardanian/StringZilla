@@ -173,6 +173,18 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
                                                              sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_NEON
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_neon(sz_levenshtein_engine_t *engine,
+                                                            sz_sequence_t const *queries,
+                                                            sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                            sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_neon(sz_levenshtein_engine_t *engine,
+                                                          sz_sequence_t const *candidates, sz_size_t *distances,
+                                                          sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engine_t *engine,
@@ -232,9 +244,10 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 #include "stringzilla/levenshtein/haswell.h"
 #include "stringzilla/levenshtein/skylake.h"
 #include "stringzilla/levenshtein/icelake.h"
-#include "stringzilla/levenshtein/metal.h"
+#include "stringzilla/levenshtein/neon.h"
 #include "stringzilla/levenshtein/cuda.cuh"
 #include "stringzilla/levenshtein/rocm.cuh"
+#include "stringzilla/levenshtein/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #if STRINGZILLA_HEADER_ONLY

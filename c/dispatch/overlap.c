@@ -20,6 +20,9 @@ static sz_capability_kernels_t const *sz_overlap_engine_init_capabilities(void) 
 #if STRINGZILLA_TARGET_SKYLAKE
         (sz_kernel_punned_t)&sz_overlap_engine_init_skylake,
 #endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_overlap_engine_init_neon,
+#endif
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -40,7 +43,7 @@ static sz_capability_kernels_t const *sz_overlap_engine_init_capabilities(void) 
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+        {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
@@ -59,6 +62,9 @@ static sz_capability_kernels_t const *sz_overlap_scores_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
         (sz_kernel_punned_t)&sz_overlap_scores_skylake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_overlap_scores_neon,
 #endif
     };
     static sz_kernel_punned_t const cuda[] = {
@@ -80,7 +86,7 @@ static sz_capability_kernels_t const *sz_overlap_scores_capabilities(void) {
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+        {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},

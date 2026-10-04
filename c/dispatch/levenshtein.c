@@ -24,6 +24,9 @@ static sz_capability_kernels_t const *sz_levenshtein_engine_init_capabilities(vo
 #if STRINGZILLA_TARGET_ICELAKE
         (sz_kernel_punned_t)&sz_levenshtein_engine_init_icelake,
 #endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_levenshtein_engine_init_neon,
+#endif
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -44,7 +47,7 @@ static sz_capability_kernels_t const *sz_levenshtein_engine_init_capabilities(vo
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+        {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
@@ -67,6 +70,9 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
 #if STRINGZILLA_TARGET_ICELAKE
         (sz_kernel_punned_t)&sz_levenshtein_distances_icelake,
 #endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_levenshtein_distances_neon,
+#endif
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -87,7 +93,7 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
+        {sz_cap_serial_k | sz_cap_neon_k * STRINGZILLA_TARGET_NEON | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
