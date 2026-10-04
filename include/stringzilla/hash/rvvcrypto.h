@@ -255,20 +255,20 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_rvvcrypto_(s
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvvcrypto(sz_cptr_t start, sz_size_t length,
                                                                               sz_u64_t seed, sz_u64_t *hash,
-                                                                              void *stream) {
+                                                                              sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_rvvcrypto_(start, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_serial_(state, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_rvvcrypto(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                           void *stream) {
+                                                           sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is exactly one 64-byte window. Track how many bytes it holds and absorb it only once it becomes
@@ -333,13 +333,14 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_rvvcrypto_(sz_hash_state_t cons
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *packed, sz_u64_t *hash,
-                                                           void *stream) {
+                                                           sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_rvvcrypto_(packed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
@@ -447,7 +448,7 @@ STRINGZILLA_INLINE void sz_sha256_process_block_rvvcrypto_(
     hash[7] = cdgh_out[0], hash[6] = cdgh_out[1], hash[3] = cdgh_out[2], hash[2] = cdgh_out[3];
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state_ptr, void *stream) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state_ptr, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
     // Copy all 8 initial words in halves of 4: `vsetvl_e32m1(8)` would clamp to 4 lanes at VLEN=128,
@@ -460,7 +461,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *st
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *state_ptr, sz_cptr_t text,
-                                                             sz_size_t length, void *stream) {
+                                                             sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input = (sz_u8_t const *)text;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
@@ -516,7 +517,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvvcrypto(
-    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
+    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Create a copy of the state for padding
     sz_sha256_state_t state = *state_ptr;

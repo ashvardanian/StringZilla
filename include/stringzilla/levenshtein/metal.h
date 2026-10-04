@@ -163,7 +163,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_bind_head_metal_(sz_levenshtein_en
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *queries,
                                                              sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return status;
@@ -205,7 +205,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
                                                            sz_sequence_t const *candidates, sz_size_t *distances,
-                                                           sz_size_t distances_stride, void *stream) {
+                                                           sz_size_t distances_stride, sz_stream_t stream) {
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     if (!candidates->count) return sz_success_k;
 

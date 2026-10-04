@@ -256,28 +256,28 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_skylake_(sz_cptr_t haystack, sz_size_t hay
 #if STRINGZILLA_TARGET_SKYLAKE
 
 STRINGZILLA_API sz_status_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                 sz_cptr_t *match, void *stream) {
+                                                 sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byte_skylake_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                            sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_skylake_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                  sz_cptr_t *match, void *stream) {
+                                                  sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byte_skylake_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                             sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                             sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_skylake_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;

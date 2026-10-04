@@ -207,21 +207,21 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_sve_(sz_cptr_t haystack, sz_size_t haystac
 #if STRINGZILLA_TARGET_SVE
 
 STRINGZILLA_API sz_status_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                             sz_cptr_t *match, void *stream) {
+                                             sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byte_sve_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                              sz_cptr_t *match, void *stream) {
+                                              sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byte_sve_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                        sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                        sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable substring search only outruns NEON on registers wider than 128 bits.
     *match = svcntb() <= 16 ? sz_find_neon_(haystack, haystack_length, needle, needle_length)
@@ -230,7 +230,7 @@ STRINGZILLA_API sz_status_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_l
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                         sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                         sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable substring search only outruns NEON on registers wider than 128 bits.
     *match = svcntb() <= 16 ? sz_rfind_neon_(haystack, haystack_length, needle, needle_length)

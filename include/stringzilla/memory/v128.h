@@ -206,26 +206,26 @@ STRINGZILLA_INLINE void sz_lookup_v128_(sz_ptr_t target, sz_cptr_t source, sz_si
 
 #if STRINGZILLA_TARGET_V128
 
-STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_copy_v128_(target, source, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_move_v128_(target, source, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_v128_(target, length, value);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                           char const lut[sz_at_least_(256)], void *stream) {
+                                           char const lut[sz_at_least_(256)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_lookup_v128_(target, source, length, lut);
     return sz_success_k;

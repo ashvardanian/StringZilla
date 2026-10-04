@@ -53,7 +53,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_powervsx_(sz_cptr_t text, sz_size_t lengt
     return sum;
 }
 
-STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_powervsx_(text, length);
     return sz_success_k;
@@ -167,7 +168,7 @@ STRINGZILLA_INLINE void sz_hash_state_init_powervsx_(sz_hash_state_t *state, sz_
     state->ins_length = 0;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_powervsx_(state, seed);
     return sz_success_k;
@@ -340,14 +341,14 @@ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_powervsx_(sz_cptr_t start, sz_s
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length,
                                                                              sz_u64_t seed, sz_u64_t *hash,
-                                                                             void *stream) {
+                                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_powervsx_(start, length, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t state = sz_hash_state_load_powervsx_(packed);
@@ -407,13 +408,15 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_powervsx_(sz_hash_state_t const
     }
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *packed, sz_u64_t *hash,
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_powervsx_(packed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
@@ -436,14 +439,14 @@ STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t l
 
 /** Big-endian Power stub: delegates to @c sz_hash_serial to preserve bit-exact digests. */
 STRINGZILLA_API sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                             void *stream) {
+                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_serial_(start, length, seed);
     return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_init_serial. */
-STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_serial_(state, seed);
     return sz_success_k;
@@ -451,21 +454,23 @@ STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, 
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_update_serial. */
 STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_update_serial_(state, text, length);
     return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_hash_state_digest_serial. */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_serial_(state);
     return sz_success_k;
 }
 
 /** Big-endian Power stub: delegates to @c sz_fill_random_serial. */
-STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_random_serial_(target, length, nonce);
     return sz_success_k;
@@ -478,21 +483,22 @@ STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t l
 /*  No VSX SHA extension is targeted, so the SHA-256 family delegates to the serial reference. */
 #pragma region SHA256
 
-STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, void *stream) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_init_serial_(state);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_powervsx(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                            void *stream) {
+                                                            sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_update_serial_(state, text, length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
+    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_digest_serial_(state, digest);
     return sz_success_k;

@@ -164,7 +164,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_newlines_powervsx_( //
 STRINGZILLA_API sz_status_t sz_utf8_newlines_powervsx(                              //
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
-    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *matches_count = sz_utf8_newlines_powervsx_(text, length, match_offsets, match_lengths, matches_capacity,
                                                 bytes_consumed);
@@ -277,7 +277,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_powervsx_( //
 STRINGZILLA_API sz_status_t sz_utf8_whitespaces_powervsx(                           //
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
-    sz_size_t *matches_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *matches_count = sz_utf8_whitespaces_powervsx_(text, length, match_offsets, match_lengths, matches_capacity,
                                                    bytes_consumed);

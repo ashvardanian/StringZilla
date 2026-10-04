@@ -6,9 +6,9 @@
  *
  *  A capability is one bit, like @c sz_cap_haswell_k or @c sz_cap_cuda_k, and a capability group is
  *  the range of bits of one kind of hardware: the CPU's, NVIDIA's, AMD's or Apple's. A mask names
- *  one device: the CPU, through @c sz_cpu_capabilities_enabled, or one GPU of one vendor, through
- *  its own @c sz_cuda_capabilities_enabled, @c sz_rocm_capabilities_enabled or
- *  @c sz_metal_capabilities_enabled, indexed by that runtime's ordinal.
+ *  one device: the CPU, through @c sz_capabilities_enabled_cpu, or one GPU of one vendor, through
+ *  its own @c sz_capabilities_enabled_cuda, @c sz_capabilities_enabled_rocm or
+ *  @c sz_capabilities_enabled_metal, indexed by that runtime's ordinal.
  *
  *  Within each architecture the bits ascend by preference, so the highest bit a mask shares with
  *  a verb's kernels names the kernel that its @c _best and @c sz_find_kernel_punned both pick.
@@ -536,173 +536,177 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
 }
 
 /** Signature of the @c sz_hash_best kernels. */
-typedef sz_status_t (*sz_kernel_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t, sz_u64_t *, void *);
+typedef sz_status_t (*sz_kernel_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t, sz_u64_t *, sz_stream_t);
 
 /** Signature of the @c sz_hash_multiseed_best kernels. */
 typedef sz_status_t (*sz_kernel_hash_multiseed_t)(sz_cptr_t, sz_size_t, sz_u64_t const *, sz_size_t, sz_u64_t *,
-                                                  void *);
+                                                  sz_stream_t);
 
 /** Signature of the @c sz_hash_state_init_best kernels. */
-typedef sz_status_t (*sz_kernel_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t, void *);
+typedef sz_status_t (*sz_kernel_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t, sz_stream_t);
 
 /** Signature of the @c sz_hash_state_update_best kernels. */
-typedef sz_status_t (*sz_kernel_hash_state_update_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t, void *);
+typedef sz_status_t (*sz_kernel_hash_state_update_t)(struct sz_hash_state_t *, sz_cptr_t, sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_hash_state_digest_best kernels. */
-typedef sz_status_t (*sz_kernel_hash_state_digest_t)(struct sz_hash_state_t const *, sz_u64_t *, void *);
+typedef sz_status_t (*sz_kernel_hash_state_digest_t)(struct sz_hash_state_t const *, sz_u64_t *, sz_stream_t);
 
 /** Signature of the @c sz_bytesum_best kernels. */
-typedef sz_status_t (*sz_kernel_bytesum_t)(sz_cptr_t, sz_size_t, sz_u64_t *, void *);
+typedef sz_status_t (*sz_kernel_bytesum_t)(sz_cptr_t, sz_size_t, sz_u64_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_count_best. */
-typedef sz_status_t (*sz_kernel_utf8_count_t)(sz_cptr_t, sz_size_t, sz_size_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_count_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_seek_best. */
-typedef sz_status_t (*sz_kernel_utf8_seek_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_seek_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_decode_best. */
 typedef sz_status_t (*sz_kernel_utf8_decode_t)(sz_cptr_t, sz_size_t, sz_rune_t *, sz_size_t, sz_size_t *, sz_size_t *,
-                                               void *);
+                                               sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_uncased_fold_best. */
-typedef sz_status_t (*sz_kernel_utf8_uncased_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t, sz_size_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_uncased_fold_t)(sz_cptr_t, sz_size_t, sz_ptr_t, sz_size_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_norm_best. */
-typedef sz_status_t (*sz_kernel_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_ptr_t, sz_size_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_norm_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_ptr_t, sz_size_t *,
+                                             sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_find_denormalized_best. */
-typedef sz_status_t (*sz_kernel_utf8_find_denormalized_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_find_denormalized_t)(sz_cptr_t, sz_size_t, sz_normal_form_t, sz_cptr_t *,
+                                                          sz_stream_t);
 
 /** Forward declaration of the prepared uncased needle. */
 struct sz_utf8_uncased_needle_t;
 
 /** Signature of the kernels behind @c sz_utf8_uncased_needle_init_best. */
 typedef sz_status_t (*sz_kernel_utf8_uncased_needle_init_t)(sz_cptr_t, sz_size_t, struct sz_utf8_uncased_needle_t *,
-                                                            void *);
+                                                            sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_uncased_search_best. */
 typedef sz_status_t (*sz_kernel_utf8_uncased_search_t)(sz_cptr_t, sz_size_t, struct sz_utf8_uncased_needle_t const *,
-                                                       sz_cptr_t *, sz_size_t *, void *);
+                                                       sz_cptr_t *, sz_size_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_uncased_order_best. */
 typedef sz_status_t (*sz_kernel_utf8_uncased_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_ordering_t *,
-                                                      void *);
+                                                      sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_find_cased_best. */
-typedef sz_status_t (*sz_kernel_utf8_find_cased_t)(sz_cptr_t, sz_size_t, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_find_cased_t)(sz_cptr_t, sz_size_t, sz_cptr_t *, sz_stream_t);
 
 /** Signature of the tiling segmenters - graphemes, words, sentences, lines. Emits one length per
  *  segment and their count; each segment starts where the previous one ended. */
-typedef sz_status_t (*sz_kernel_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *, void *);
+typedef sz_status_t (*sz_kernel_utf8_segmenter_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *,
+                                                  sz_stream_t);
 
 /** Signature of the token kernels - newlines, whitespace, delimiters. Emits parallel (offset,
  *  length) arrays for each match, their count, and a resume @c bytes_consumed. */
 typedef sz_status_t (*sz_kernel_utf8_tokenizer_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t,
-                                                  sz_size_t *, sz_size_t *, void *);
+                                                  sz_size_t *, sz_size_t *, sz_stream_t);
 
 /** Signature of the @c sz_fill_random_best kernels. */
-typedef sz_status_t (*sz_kernel_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t, void *);
+typedef sz_status_t (*sz_kernel_fill_random_t)(sz_ptr_t, sz_size_t, sz_u64_t, sz_stream_t);
 
 /** Signature of the @c sz_sha256_state_init_best kernels. */
-typedef sz_status_t (*sz_kernel_sha256_state_init_t)(struct sz_sha256_state_t *, void *);
+typedef sz_status_t (*sz_kernel_sha256_state_init_t)(struct sz_sha256_state_t *, sz_stream_t);
 
 /** Signature of the @c sz_sha256_state_update_best kernels. */
-typedef sz_status_t (*sz_kernel_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, sz_size_t, void *);
+typedef sz_status_t (*sz_kernel_sha256_state_update_t)(struct sz_sha256_state_t *, sz_cptr_t, sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_sha256_state_digest_best kernels. */
-typedef sz_status_t (*sz_kernel_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *, void *);
+typedef sz_status_t (*sz_kernel_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *, sz_stream_t);
 
 /** Signature of the @c sz_sha256_multistate_update_best kernels. */
 typedef sz_status_t (*sz_kernel_sha256_multistate_update_t)(struct sz_sha256_state_t *, struct sz_sequence_t const *,
-                                                            void *);
+                                                            sz_stream_t);
 
 /** Signature of the @c sz_sha256_multistate_digest_best kernels. */
 typedef sz_status_t (*sz_kernel_sha256_multistate_digest_t)(struct sz_sha256_state_t const *, sz_size_t, sz_u8_t *,
-                                                            void *);
+                                                            sz_stream_t);
 
 /** Signature of the @c sz_aes256_key_init_best kernels. */
-typedef sz_status_t (*sz_kernel_aes256_key_init_t)(struct sz_aes256_key_t *, sz_u8_t const *, void *);
+typedef sz_status_t (*sz_kernel_aes256_key_init_t)(struct sz_aes256_key_t *, sz_u8_t const *, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_key_init_best kernels. */
-typedef sz_status_t (*sz_kernel_aes256_gcm_key_init_t)(struct sz_aes256_gcm_key_t *, sz_u8_t const *, void *);
+typedef sz_status_t (*sz_kernel_aes256_gcm_key_init_t)(struct sz_aes256_gcm_key_t *, sz_u8_t const *, sz_stream_t);
 
 /** Signature of the @c sz_aes256_ctr_xor_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_ctr_xor_t)(struct sz_aes256_key_t const *, sz_u8_t const *, sz_u64_t, sz_cptr_t,
-                                                  sz_size_t, sz_ptr_t, void *);
+                                                  sz_size_t, sz_ptr_t, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_encrypt_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_encrypt_t)(struct sz_aes256_gcm_key_t const *, sz_u8_t const *, sz_cptr_t,
-                                                      sz_size_t, sz_cptr_t, sz_size_t, sz_ptr_t, sz_u8_t *, void *);
+                                                      sz_size_t, sz_cptr_t, sz_size_t, sz_ptr_t, sz_u8_t *,
+                                                      sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_decrypt_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_decrypt_t)(struct sz_aes256_gcm_key_t const *, sz_u8_t const *, sz_cptr_t,
                                                       sz_size_t, sz_cptr_t, sz_size_t, sz_ptr_t, sz_u8_t const *,
-                                                      void *);
+                                                      sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_encryptor_init_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_encryptor_init_t)(struct sz_aes256_gcm_encryptor_t *,
                                                              struct sz_aes256_gcm_key_t const *, sz_u8_t const *,
-                                                             void *);
+                                                             sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_encryptor_associate_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_encryptor_associate_t)(struct sz_aes256_gcm_encryptor_t *, sz_cptr_t,
-                                                                  sz_size_t, void *);
+                                                                  sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_encryptor_update_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_encryptor_update_t)(struct sz_aes256_gcm_encryptor_t *, sz_cptr_t, sz_size_t,
-                                                               sz_ptr_t, void *);
+                                                               sz_ptr_t, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_encryptor_digest_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_encryptor_digest_t)(struct sz_aes256_gcm_encryptor_t const *, sz_u8_t *,
-                                                               void *);
+                                                               sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_decryptor_init_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_decryptor_init_t)(struct sz_aes256_gcm_decryptor_t *,
                                                              struct sz_aes256_gcm_key_t const *, sz_u8_t const *,
-                                                             void *);
+                                                             sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_decryptor_associate_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_decryptor_associate_t)(struct sz_aes256_gcm_decryptor_t *, sz_cptr_t,
-                                                                  sz_size_t, void *);
+                                                                  sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_decryptor_update_unverified_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_decryptor_update_unverified_t)(struct sz_aes256_gcm_decryptor_t *, sz_cptr_t,
-                                                                          sz_size_t, sz_ptr_t, void *);
+                                                                          sz_size_t, sz_ptr_t, sz_stream_t);
 
 /** Signature of the @c sz_aes256_gcm_decryptor_verify_best kernels. */
 typedef sz_status_t (*sz_kernel_aes256_gcm_decryptor_verify_t)(struct sz_aes256_gcm_decryptor_t const *,
-                                                               sz_u8_t const *, void *);
+                                                               sz_u8_t const *, sz_stream_t);
 
 /** Signature of the @c sz_equal_best kernels. */
-typedef sz_status_t (*sz_kernel_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t, sz_bool_t *, void *);
+typedef sz_status_t (*sz_kernel_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t, sz_bool_t *, sz_stream_t);
 
 /** Signature of the @c sz_order_best kernels. */
-typedef sz_status_t (*sz_kernel_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_ordering_t *, void *);
+typedef sz_status_t (*sz_kernel_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_ordering_t *, sz_stream_t);
 
 /** Signature of the @c sz_lookup_best kernels. */
-typedef sz_status_t (*sz_kernel_lookup_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_cptr_t, void *);
+typedef sz_status_t (*sz_kernel_lookup_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_cptr_t, sz_stream_t);
 
 /** Signature of the @c sz_copy_best kernels. */
-typedef sz_status_t (*sz_kernel_copy_t)(sz_ptr_t, sz_cptr_t, sz_size_t, void *);
+typedef sz_status_t (*sz_kernel_copy_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_move_best kernels. */
-typedef sz_status_t (*sz_kernel_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t, void *);
+typedef sz_status_t (*sz_kernel_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_stream_t);
 
 /** Signature of the @c sz_fill_best kernels. */
-typedef sz_status_t (*sz_kernel_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t, void *);
+typedef sz_status_t (*sz_kernel_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t, sz_stream_t);
 
 /** Signature of the @c sz_find_byte_best and @c sz_rfind_byte_best kernels. */
-typedef sz_status_t (*sz_kernel_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_cptr_t *, sz_stream_t);
 
 /** Signature of the @c sz_find_best and @c sz_rfind_best kernels. */
-typedef sz_status_t (*sz_kernel_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_cptr_t *, sz_stream_t);
 
 /** Signature of the @c sz_find_byteset_best and @c sz_rfind_byteset_best kernels. */
-typedef sz_status_t (*sz_kernel_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_cptr_t *, void *);
+typedef sz_status_t (*sz_kernel_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_cptr_t *, sz_stream_t);
 
 /** Signature of the @c sz_sequence_argsort_best and @c sz_sequence_argsort_uncased_best kernels. */
 typedef sz_status_t (*sz_kernel_sequence_argsort_t)(struct sz_sequence_t const *, sz_size_t, sz_bool_t,
-                                                    sz_allocator_t *, sz_sorted_idx_t *, void *);
+                                                    sz_allocator_t *, sz_sorted_idx_t *, sz_stream_t);
 
 /** Signature of the benchmark-only @c sz_pgrams_sort_serial_ integer sort helper and its tiers. */
 typedef sz_status_t (*sz_pgrams_sort_t_)(sz_pgram_t *, sz_size_t, sz_allocator_t *, sz_sorted_idx_t *);
@@ -710,61 +714,61 @@ typedef sz_status_t (*sz_pgrams_sort_t_)(sz_pgram_t *, sz_size_t, sz_allocator_t
 /** Signature of the @c sz_sequence_intersect_best kernels. */
 typedef sz_status_t (*sz_kernel_sequence_intersect_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
                                                       sz_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
-                                                      sz_sorted_idx_t *, void *);
+                                                      sz_sorted_idx_t *, sz_stream_t);
 
 /** Signature of every @c sz_levenshtein_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein_engine_t *,
                                                            struct sz_sequence_t const *, sz_levenshtein_symbol_t,
-                                                           sz_allocator_t *, void *);
+                                                           sz_allocator_t *, sz_stream_t);
 
 /** Signature of every @c sz_levenshtein_distances kernel, at either alphabet. */
 typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
-                                                         sz_size_t *, sz_size_t, void *);
+                                                         sz_size_t *, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_levenshtein_distance_tiled_best kernel. */
 typedef sz_status_t (*sz_kernel_levenshtein_distance_tiled_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, void *,
-                                                              sz_size_t *, void *);
+                                                              sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_overlap_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
                                                        sz_size_t const *, sz_size_t, sz_size_t, sz_allocator_t *,
-                                                       void *);
+                                                       sz_stream_t);
 
 /** Signature of every @c sz_overlap_scores kernel. */
 typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
-                                                  sz_f32_t *, sz_size_t, sz_size_t, void *);
+                                                  sz_f32_t *, sz_size_t, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
                                                           sz_substrings_case_sensitivity_t,
                                                           sz_substrings_overlap_policy_t, sz_size_t, sz_size_t,
-                                                          sz_size_t, sz_allocator_t *, void *);
+                                                          sz_size_t, sz_allocator_t *, sz_stream_t);
 
 /** Signature of every @c sz_substrings_counts kernel. */
 typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
-                                                     sz_size_t *, sz_size_t, void *);
+                                                     sz_size_t *, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_find kernel. */
 typedef sz_status_t (*sz_kernel_substrings_find_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
-                                                   struct sz_substrings_match_t *, sz_size_t, sz_size_t *, void *);
+                                                   struct sz_substrings_match_t *, sz_size_t, sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_substrings_replace kernel. */
 typedef sz_status_t (*sz_kernel_substrings_replace_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
                                                       struct sz_sequence_t const *, sz_ptr_t, sz_size_t, sz_size_t *,
-                                                      void *);
+                                                      sz_stream_t);
 
 /** Signature of every @c sz_substrings_bm25_scores kernel. */
 typedef sz_status_t (*sz_kernel_substrings_bm25_scores_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
                                                           sz_f32_t const *, struct sz_substrings_bm25_t const *,
-                                                          sz_f32_t const *, sz_f32_t *, sz_size_t, void *);
+                                                          sz_f32_t const *, sz_f32_t *, sz_size_t, sz_stream_t);
 
 /** Any kernel, cast back to its signature before the call. */
 typedef void (*sz_kernel_punned_t)(void);
 
 /** Returns the capabilities whose kernels were compiled into this binary, as decided by the
  *  `STRINGZILLA_TARGET_*` macros. Says nothing about the current CPU - see
- *  @c sz_cpu_capabilities_detected_. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_compiled_(void) {
+ *  @c sz_capabilities_detected_cpu_. */
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cpu_(void) {
     return (sz_capability_t)(                                     //
         (sz_cap_neon_k * STRINGZILLA_TARGET_NEON) |               //
         (sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES) |         //
@@ -788,7 +792,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_compiled_(void) {
 
 /** Returns the capabilities the compiler's own flags guarantee, for the platforms whose OS cannot
  *  be asked. An engine validates a WebAssembly module whole, so there they are what it holds. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_implied_(void) {
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_implied_cpu_(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
 #if defined(__ARM_NEON)
     capabilities |= sz_cap_neon_k;
@@ -830,7 +834,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_implied_(void) {
 }
 
 /*  The detectors below report the full hardware capability set, independent of which
- *  `STRINGZILLA_TARGET_*` kits this build compiled in: @c sz_cpu_capabilities_enabled ANDs their
+ *  `STRINGZILLA_TARGET_*` kits this build compiled in: @c sz_capabilities_enabled_cpu ANDs their
  *  result with the compile-time mask anyway, and the instructions involved are unconditionally
  *  safe. @c cpuid is baseline x86-64 with @c xgetbv behind the OSXSAVE check, and the Arm @c mrs
  *  reads run only once the kernel says it emulates them. Keeping detection unconditional lets even
@@ -839,7 +843,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_cpu_capabilities_implied_(void) {
 #if STRINGZILLA_ARCH_ARM64_
 
 /** The capabilities of the current 64-bit Arm CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_arm64_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_arm64_(void) {
 #if STRINGZILLA_OS_APPLE_
 
     // On Apple Silicon, `mrs` is not allowed in user-space, so we need to use the `sysctl` API.
@@ -908,7 +912,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_arm64_(void) {
         (sz_cap_serial_k));
 
 #else
-    return sz_cpu_capabilities_implied_();
+    return sz_capabilities_implied_cpu_();
 #endif
 }
 
@@ -917,7 +921,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_arm64_(void) {
 #if STRINGZILLA_ARCH_X8664_
 
 /** The capabilities of the current x86-64 CPU, as far as the OS saves the registers they use. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_x8664_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
 
     /// The states of 4 registers populated for a specific "cpuid" assembly call
     union four_registers_t {
@@ -999,7 +1003,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_x8664_(void) {
 #if defined(__riscv) && (__riscv_xlen == 64)
 
 /** The capabilities of the current 64-bit RISC-V CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_riscv64_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
 #if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 
     // The base "V" extension is reported through the auxiliary vector, but the individual
@@ -1044,7 +1048,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_riscv64_(void) {
     return caps;
 
 #else
-    return sz_cpu_capabilities_implied_();
+    return sz_capabilities_implied_cpu_();
 #endif
 }
 
@@ -1053,7 +1057,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_riscv64_(void) {
 #if defined(__loongarch__)
 
 /** The capabilities of the current LoongArch CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_loongarch64_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
 #if STRINGZILLA_OS_LINUX_ && STRINGZILLA_WITH_LIBC
 
     // The SIMD extensions are reported through the auxiliary vector, matching `asm/hwcap.h`:
@@ -1063,7 +1067,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_loongarch64_(voi
     return (sz_capability_t)((sz_cap_loongsonasx_k * ((hwcap & (1UL << 5)) != 0)) | sz_cap_serial_k);
 
 #else
-    return sz_cpu_capabilities_implied_();
+    return sz_capabilities_implied_cpu_();
 #endif
 }
 
@@ -1072,7 +1076,7 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_loongarch64_(voi
 #if defined(__powerpc64__) || defined(__powerpc__)
 
 /** The capabilities of the current IBM POWER CPU. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_power64_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
 #if (STRINGZILLA_OS_LINUX_ || STRINGZILLA_OS_FREEBSD_) && STRINGZILLA_WITH_LIBC
 
     // The `powervsx` kernels target POWER9 (`-mcpu=power9`), so both facts are required,
@@ -1091,42 +1095,42 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_power64_(void) {
     return (sz_capability_t)((sz_cap_powervsx_k * supports_powervsx) | sz_cap_serial_k);
 
 #else
-    return sz_cpu_capabilities_implied_();
+    return sz_capabilities_implied_cpu_();
 #endif
 }
 
 #endif // defined(__powerpc64__) || defined(__powerpc__)
 
-/** Prepares the calling thread for @p capabilities, behind @c sz_cpu_configure_thread. */
-STRINGZILLA_INLINE sz_status_t sz_cpu_configure_thread_(sz_capability_t capabilities) {
+/** Prepares the calling thread for @p capabilities, behind @c sz_thread_configure_cpu. */
+STRINGZILLA_INLINE sz_status_t sz_thread_configure_cpu_(sz_capability_t capabilities) {
     sz_unused_(capabilities);
     return sz_success_k;
 }
 
 /** The capabilities of the current CPU, whatever this binary compiled in. */
-STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_(void) {
+STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_cpu_(void) {
 #if STRINGZILLA_ARCH_X8664_
-    return sz_cpu_capabilities_detected_x8664_();
+    return sz_capabilities_detected_x8664_();
 #elif STRINGZILLA_ARCH_ARM64_
-    return sz_cpu_capabilities_detected_arm64_();
+    return sz_capabilities_detected_arm64_();
 #elif defined(__riscv) && (__riscv_xlen == 64)
-    return sz_cpu_capabilities_detected_riscv64_();
+    return sz_capabilities_detected_riscv64_();
 #elif defined(__loongarch__)
-    return sz_cpu_capabilities_detected_loongarch64_();
+    return sz_capabilities_detected_loongarch64_();
 #elif defined(__powerpc64__) || defined(__powerpc__)
-    return sz_cpu_capabilities_detected_power64_();
+    return sz_capabilities_detected_power64_();
 #else
-    return sz_cpu_capabilities_implied_();
+    return sz_capabilities_implied_cpu_();
 #endif
 }
 
 /*  CPU capabilities, reported along two independent axes and the mask dispatch uses by default:
  *
- *  - @b sz_cpu_capabilities_detected() — what this CPU can execute, from CPUID or HWCAP, or where
+ *  - @b sz_capabilities_detected_cpu() — what this CPU can execute, from CPUID or HWCAP, or where
  *    the OS cannot be asked, what the compiler's own flags guarantee.
- *  - @b sz_cpu_capabilities_compiled() — what this binary contains, as the build set the
+ *  - @b sz_capabilities_compiled_cpu() — what this binary contains, as the build set the
  *    `STRINGZILLA_TARGET_*` macros.
- *  - @b sz_cpu_capabilities_enabled() — both axes at once: the mask to dispatch on the CPU with.
+ *  - @b sz_capabilities_enabled_cpu() — both axes at once: the mask to dispatch on the CPU with.
  *    Always retains @b sz_cap_serial_k.
  *
  *  The two axes are independent, and conflating them is a silent performance cliff rather than a
@@ -1135,23 +1139,23 @@ STRINGZILLA_INLINE sz_capability_t sz_cpu_capabilities_detected_(void) {
  *  one of the raw axes. The library's lookups clamp every CPU mask to @b enabled() themselves, so
  *  @c sz_cap_cpus_k dispatches to the same kernels. */
 
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities);
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities);
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_enabled(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities);
 
 /**
  *  @brief Prepares the calling thread for the kernels of @p capabilities, and only those.
- *  @param[in] capabilities The capabilities to prepare for, like @c sz_cpu_capabilities_enabled.
+ *  @param[in] capabilities The capabilities to prepare for, like @c sz_capabilities_enabled_cpu.
  *  @return @c sz_success_k.
  *
  *  Call it once on each thread that dispatches. Every current capability needs nothing, so today
  *  it returns right away.
  */
-STRINGZILLA_API sz_status_t sz_cpu_configure_thread(sz_capability_t capabilities);
+STRINGZILLA_API sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities);
 
 /**
  *  @brief Writes @p capabilities as a comma-separated name list such as "serial,haswell,skylake".
- *  @param[in] capabilities The mask to name, like @c sz_cpu_capabilities_detected reports.
+ *  @param[in] capabilities The mask to name, like @c sz_capabilities_detected_cpu reports.
  *  @param[out] buffer Destination, always null-terminated; the list is truncated to fit.
  *  @param[in] capacity Size of @p buffer, like @c STRINGZILLA_CAPABILITIES_NAME_CAPACITY; a zero
  *      capacity writes nothing.
@@ -1163,7 +1167,7 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
  *  @brief Finds the kernel of @p kind that its dispatch point would run for @p capabilities, to
  *      resolve it once and call it many times.
  *  @param[in] kind What functionality, like @c sz_kernel_find_k.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[out] kernel The kernel, cast back to its @c sz_kernel_find_t or sibling before the call,
  *      or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
@@ -1183,22 +1187,22 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     return sz_missing_library_k;
 }
 
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities) {
-    *capabilities = sz_cpu_capabilities_detected_();
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_detected_cpu_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities) {
-    *capabilities = sz_cpu_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_compiled_cpu_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_cpu_capabilities_enabled(sz_capability_t *capabilities) {
-    *capabilities = sz_cpu_capabilities_detected_() & sz_cpu_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_detected_cpu_() & sz_capabilities_compiled_cpu_();
     return sz_success_k;
 }
 
-/** @copydoc sz_cpu_configure_thread */
-STRINGZILLA_API sz_status_t sz_cpu_configure_thread(sz_capability_t capabilities) {
-    return sz_cpu_configure_thread_(capabilities);
+/** @copydoc sz_thread_configure_cpu */
+STRINGZILLA_API sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities) {
+    return sz_thread_configure_cpu_(capabilities);
 }
 
 /** @copydoc sz_capabilities_name */
@@ -1218,31 +1222,31 @@ STRINGZILLA_API sz_size_t sz_capabilities_name(sz_capability_t capabilities, cha
  *      use, @c sz_device_code_mismatch_k when the runtime reports a failed launch, and
  *      @c sz_missing_gpu_k for a vendor this build lacks or a device that doesn't answer.
  */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, sz_stream_t stream);
 
 /** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_WITH_METAL
 /** @copydoc sz_stream_synchronize_best */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 #endif
 
 /*  The CUDA and ROCm producers answer from their runtimes in `cuda.cuh` and `rocm.cuh`, which only
  *  their own compilers reach; Metal's answer from here, behind the switch the build stamps. */
 
 /** How many Metal devices the system lists, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_metal_count_devices_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_count_metal_(void) {
 #if STRINGZILLA_WITH_METAL
     return sz_metal_list_devices_();
 #else
@@ -1252,9 +1256,9 @@ STRINGZILLA_INLINE sz_size_t sz_metal_count_devices_(void) {
 
 /** The capabilities Metal device @p ordinal runs, in the order the system lists them. The baseline
  *  needs Apple7, whose threadgroup atomics and simdgroup scans the kernels use. */
-STRINGZILLA_INLINE sz_status_t sz_metal_capabilities_detected_(sz_size_t ordinal, sz_capability_t *capabilities) {
+STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal, sz_capability_t *capabilities) {
     *capabilities = 0;
-    if (ordinal >= sz_metal_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
 #if STRINGZILLA_WITH_METAL
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
@@ -1268,9 +1272,9 @@ STRINGZILLA_INLINE sz_status_t sz_metal_capabilities_detected_(sz_size_t ordinal
 }
 
 /** Opens a command queue on Metal device @p ordinal, in the order the system lists them. */
-STRINGZILLA_INLINE sz_status_t sz_metal_stream_init_(sz_size_t ordinal, void **stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_stream_t *stream) {
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_metal_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
 #if STRINGZILLA_WITH_METAL
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
@@ -1283,7 +1287,7 @@ STRINGZILLA_INLINE sz_status_t sz_metal_stream_init_(sz_size_t ordinal, void **s
 
 /** Waits for @p stream, so its command buffers and the frees deferred behind it drain, then
  *  releases it; a null stream is the default one, which is only waited for. */
-STRINGZILLA_INLINE sz_status_t sz_metal_stream_free_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
 #if STRINGZILLA_WITH_METAL
     sz_status_t const status = sz_stream_synchronize_metal(stream);
     sz_metal_do_(stream, "release");
@@ -1295,17 +1299,17 @@ STRINGZILLA_INLINE sz_status_t sz_metal_stream_free_(void *stream) {
 }
 
 /** The CUDA capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_cuda_capabilities_compiled_(void) {
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cuda_(void) {
     return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA;
 }
 
 /** The ROCm capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_rocm_capabilities_compiled_(void) {
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_rocm_(void) {
     return sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM;
 }
 
 /** The Metal capabilities this binary holds kernels for. */
-STRINGZILLA_CONSTEXPR sz_capability_t sz_metal_capabilities_compiled_(void) {
+STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_metal_(void) {
     return sz_cap_metal_k * STRINGZILLA_TARGET_METAL;
 }
 
@@ -1313,14 +1317,14 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_metal_capabilities_compiled_(void) {
  *  @c cudaSetDevice or @c hipSetDevice takes, or the position in Metal's device list. Each vendor
  *  has four queries:
  *
- *  - @b sz_cuda_count_devices() — how many devices the runtime sees, zero without its kernels.
- *  - @b sz_cuda_capabilities_detected() — what one device runs.
- *  - @b sz_cuda_capabilities_compiled() — what this binary holds kernels for.
- *  - @b sz_cuda_capabilities_enabled() — both at once: the mask to dispatch on that device with.
+ *  - @b sz_device_count_cuda() — how many devices the runtime sees, zero without its kernels.
+ *  - @b sz_capabilities_detected_cuda() — what one device runs.
+ *  - @b sz_capabilities_compiled_cuda() — what this binary holds kernels for.
+ *  - @b sz_capabilities_enabled_cuda() — both at once: the mask to dispatch on that device with.
  *
  *  ROCm and Metal have the same four. Nothing is cached, as the runtimes answer from their own
  *  state: ask once per device and keep the mask. Each vendor also makes a stream on one device
- *  with @b sz_cuda_stream_init() and frees it with @b sz_cuda_stream_free(), for a caller without
+ *  with @b sz_stream_init_cuda() and frees it with @b sz_stream_free_cuda(), for a caller without
  *  the vendor's runtime at hand. These are the only functions an ordinal reaches: everything
  *  consuming a mask takes a stream instead, which names its device. */
 
@@ -1328,7 +1332,7 @@ STRINGZILLA_CONSTEXPR sz_capability_t sz_metal_capabilities_compiled_(void) {
  *  @brief Counts the CUDA devices the process sees.
  *  @return @c sz_success_k, or @c sz_missing_gpu_k without one.
  */
-STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count);
+STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count);
 
 /**
  *  @brief Reports the capabilities CUDA device @p ordinal runs.
@@ -1337,139 +1341,139 @@ STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count);
  *  @return @c sz_success_k, @c sz_missing_gpu_k past the last device, or
  *      @c sz_device_code_mismatch_k when the runtime fails to answer.
  */
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Reports the CUDA capabilities this binary holds kernels for. */
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities);
 
-/** @copydoc sz_cuda_capabilities_detected, narrowed to what this binary holds kernels for. */
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_detected_cuda, narrowed to what this binary holds kernels for. */
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Creates a stream on CUDA device @p ordinal with @c cudaStreamCreate. */
-STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream);
+STRINGZILLA_API sz_status_t sz_stream_init_cuda(sz_size_t ordinal, sz_stream_t *stream);
 
-/** Destroys a stream of @ref sz_cuda_stream_init with @c cudaStreamDestroy, once its work ends. */
-STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream);
+/** Destroys a stream of @ref sz_stream_init_cuda with @c cudaStreamDestroy, once its work ends. */
+STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream);
 
-/** @copydoc sz_cuda_count_devices, for ROCm. */
-STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count);
+/** @copydoc sz_device_count_cuda, for ROCm. */
+STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count);
 
-/** @copydoc sz_cuda_capabilities_detected, for ROCm, whose ordinal @c hipSetDevice takes. */
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_detected_cuda, for ROCm, whose ordinal @c hipSetDevice takes. */
+STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
-/** @copydoc sz_cuda_capabilities_compiled, for ROCm. */
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_compiled(sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_compiled_cuda, for ROCm. */
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities);
 
-/** @copydoc sz_cuda_capabilities_enabled, for ROCm. */
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_enabled_cuda, for ROCm. */
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Creates a stream on ROCm device @p ordinal with @c hipStreamCreate. */
-STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream);
+STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *stream);
 
-/** Destroys a stream of @ref sz_rocm_stream_init with @c hipStreamDestroy, once its work ends. */
-STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream);
+/** Destroys a stream of @ref sz_stream_init_rocm with @c hipStreamDestroy, once its work ends. */
+STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream);
 
-/** @copydoc sz_cuda_count_devices, for Metal. */
-STRINGZILLA_API sz_status_t sz_metal_count_devices(sz_size_t *count);
+/** @copydoc sz_device_count_cuda, for Metal. */
+STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count);
 
-/** @copydoc sz_cuda_capabilities_detected, for Metal, whose devices count in system order. */
-STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_detected_cuda, for Metal, whose devices count in system order. */
+STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
-/** @copydoc sz_cuda_capabilities_compiled, for Metal. */
-STRINGZILLA_API sz_status_t sz_metal_capabilities_compiled(sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_compiled_cuda, for Metal. */
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities);
 
-/** @copydoc sz_cuda_capabilities_enabled, for Metal. */
-STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+/** @copydoc sz_capabilities_enabled_cuda, for Metal. */
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_metal(sz_size_t ordinal, sz_capability_t *capabilities);
 
 /** Opens an @c id<MTLCommandQueue> stream on Metal device @p ordinal with @c newCommandQueue. */
-STRINGZILLA_API sz_status_t sz_metal_stream_init(sz_size_t ordinal, void **stream);
+STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t *stream);
 
-/** Waits for a queue of @ref sz_metal_stream_init, then releases it. */
-STRINGZILLA_API sz_status_t sz_metal_stream_free(void *stream);
+/** Waits for a queue of @ref sz_stream_init_metal, then releases it. */
+STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream);
 
 #if STRINGZILLA_HEADER_ONLY
 
 /*  Compiled for CUDA or ROCm, the producers come from `cuda.cuh` or `rocm.cuh`, included below. */
 #if !STRINGZILLA_TARGET_CUDA
-STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count) {
+STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_unused_(ordinal);
     *capabilities = 0;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream) {
+STRINGZILLA_API sz_status_t sz_stream_init_cuda(sz_size_t ordinal, sz_stream_t *stream) {
     sz_unused_(ordinal);
     *stream = STRINGZILLA_NULL;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream) {
+STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream) {
     sz_unused_(stream);
     return sz_missing_gpu_k;
 }
 #endif // !STRINGZILLA_TARGET_CUDA
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities) {
-    *capabilities = sz_cuda_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_compiled_cuda_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_cuda_capabilities_detected(ordinal, capabilities);
-    *capabilities &= sz_cuda_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_capabilities_detected_cuda(ordinal, capabilities);
+    *capabilities &= sz_capabilities_compiled_cuda_();
     return status;
 }
 #if !STRINGZILLA_TARGET_ROCM
-STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count) {
+STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
+STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
     sz_unused_(ordinal);
     *capabilities = 0;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream) {
+STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *stream) {
     sz_unused_(ordinal);
     *stream = STRINGZILLA_NULL;
     return sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream) {
+STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) {
     sz_unused_(stream);
     return sz_missing_gpu_k;
 }
 #endif // !STRINGZILLA_TARGET_ROCM
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_compiled(sz_capability_t *capabilities) {
-    *capabilities = sz_rocm_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_compiled_rocm_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_rocm_capabilities_detected(ordinal, capabilities);
-    *capabilities &= sz_rocm_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_capabilities_detected_rocm(ordinal, capabilities);
+    *capabilities &= sz_capabilities_compiled_rocm_();
     return status;
 }
-STRINGZILLA_API sz_status_t sz_metal_count_devices(sz_size_t *count) {
-    *count = sz_metal_count_devices_();
+STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {
+    *count = sz_device_count_metal_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
-STRINGZILLA_API sz_status_t sz_metal_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
-    return sz_metal_capabilities_detected_(ordinal, capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_detected_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
+    return sz_capabilities_detected_metal_(ordinal, capabilities);
 }
-STRINGZILLA_API sz_status_t sz_metal_capabilities_compiled(sz_capability_t *capabilities) {
-    *capabilities = sz_metal_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities) {
+    *capabilities = sz_capabilities_compiled_metal_();
     return sz_success_k;
 }
-STRINGZILLA_API sz_status_t sz_metal_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities) {
-    sz_status_t const status = sz_metal_capabilities_detected_(ordinal, capabilities);
-    *capabilities &= sz_metal_capabilities_compiled_();
+STRINGZILLA_API sz_status_t sz_capabilities_enabled_metal(sz_size_t ordinal, sz_capability_t *capabilities) {
+    sz_status_t const status = sz_capabilities_detected_metal_(ordinal, capabilities);
+    *capabilities &= sz_capabilities_compiled_metal_();
     return status;
 }
-STRINGZILLA_API sz_status_t sz_metal_stream_init(sz_size_t ordinal, void **stream) {
-    return sz_metal_stream_init_(ordinal, stream);
+STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t *stream) {
+    return sz_stream_init_metal_(ordinal, stream);
 }
-STRINGZILLA_API sz_status_t sz_metal_stream_free(void *stream) { return sz_metal_stream_free_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream) { return sz_stream_free_metal_(stream); }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, void *stream) {
+STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }

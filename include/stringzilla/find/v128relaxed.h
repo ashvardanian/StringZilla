@@ -37,7 +37,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_v128relaxed_(sz_cptr_t haystack, sz_si
 }
 
 STRINGZILLA_API sz_status_t sz_find_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                     sz_cptr_t *match, void *stream) {
+                                                     sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byte_v128relaxed_(haystack, haystack_length, needle);
     return sz_success_k;
@@ -49,7 +49,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_v128relaxed_(sz_cptr_t haystack, sz_s
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                      sz_cptr_t *match, void *stream) {
+                                                      sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byte_v128relaxed_(haystack, haystack_length, needle);
     return sz_success_k;
@@ -61,7 +61,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_v128relaxed_(sz_cptr_t haystack, sz_size_t 
 }
 
 STRINGZILLA_API sz_status_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                                sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_v128relaxed_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;
@@ -73,7 +73,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_v128relaxed_(sz_cptr_t haystack, sz_size_t
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                 sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                                 sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_v128relaxed_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;
@@ -147,7 +147,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_v128relaxed_(sz_cptr_t haystack, sz
 }
 
 STRINGZILLA_API sz_status_t sz_find_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                        sz_byteset_t const *set, sz_cptr_t *match, void *stream) {
+                                                        sz_byteset_t const *set, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byteset_v128relaxed_(haystack, haystack_length, set);
     return sz_success_k;
@@ -192,7 +192,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_v128relaxed_(sz_cptr_t haystack, s
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                         sz_byteset_t const *set, sz_cptr_t *match, void *stream) {
+                                                         sz_byteset_t const *set, sz_cptr_t *match,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byteset_v128relaxed_(haystack, haystack_length, set);
     return sz_success_k;

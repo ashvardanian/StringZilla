@@ -68,7 +68,7 @@ STRINGZILLA_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x
 STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                       //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,   //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream) {
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // To join to unordered sets of strings, the simplest approach would be to hash them into a dynamically

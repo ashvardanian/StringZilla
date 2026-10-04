@@ -133,8 +133,8 @@ Each word names its group's baseline bit, like `sz_cap_cuda_k`, its functions an
 A function that touches a device is either a producer or a consumer:
 
 - A __producer__ reports a device's capabilities or opens a stream on it.
-  It starts with its group, and it is the only kind of function that takes a device's `ordinal`: `sz_cuda_count_devices(&count)`, `sz_cuda_capabilities_enabled(ordinal, &capabilities)` and `sz_cuda_stream_init(ordinal, &stream)`.
-- A __consumer__ takes the `capabilities` it picks from and, where it queues work, a trailing `void *stream`, but never an ordinal, since the stream names its device: `sz_stream_synchronize_best(capabilities, stream)`.
+  Device queries end with their group. Producers are the only functions that take a device's `ordinal`: `sz_device_count_cuda(&count)`, `sz_capabilities_enabled_cuda(ordinal, &capabilities)` and `sz_stream_init_cuda(ordinal, &stream)`.
+- A __consumer__ takes the `capabilities` it picks from and, where it queues work, a trailing `sz_stream_t stream`, but never an ordinal, since the stream names its device: `sz_stream_synchronize_best(capabilities, stream)`.
   It ends in `best` like any dispatch point, and its twins end in their capability, like `sz_stream_synchronize_cuda(stream)`.
 
 A null stream is the default stream of the default device: the calling thread's current device on CUDA and ROCm, and the system default device on Metal.
@@ -143,11 +143,11 @@ Each of these words has one meaning across the library:
 
 | Word                                   | Meaning                                                                          | Appears as                                                                      |
 | :------------------------------------- | :------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
-| `cpu`, `cuda`, `rocm`, `metal`         | A capability group and its baseline bit                                          | Producer prefix, twin and kernel suffix, `c/<group>/`                           |
+| `cpu`, `cuda`, `rocm`, `metal`         | A capability group and its baseline bit                                          | Device-query, twin and kernel suffix, `c/target/<group>.*`                           |
 | `simt`                                 | The single C source CUDA and HIP both compile                                    | `<family>/simt.cuh`, the suffixes `_simt_`, `_simt_t`, `_simt_k`                |
 | `metal`, as a layer                    | What every Metal tier shares                                                     | `<family>/metal.h`, `<family>/metal.metal`, the suffix `_metal_`                |
 | `gpu`                                  | Adjective for every GPU group                                                    | `sz_cap_gpus_k`, `sz_missing_gpu_k`, `sz_levenshtein_gpu_warp_lanes_k`          |
-| `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_cuda_count_devices`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
+| `device`                               | A processor kernels run on, which a stream belongs to                            | `sz_device_count_cuda`, `sz_device_memory_mismatch_k`, `sz_device_enter_simt_` |
 | `ordinal`                              | A device's index within its group, as its runtime numbers it                     | Producer parameters only                                                        |
 | `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                   |
 | `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                               |
@@ -667,7 +667,7 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_cuda_count_devices`, `sz_cuda_capabilities_detected` and `sz_cuda_stream_init`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_allocator_init_unified_cuda` and `sz_sequence_realloc_cuda`.
+`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_allocator_init_unified_cuda` and `sz_sequence_realloc_cuda`.
 `stringzilla_cuda_test`, built from `test/main_cuda.cu` and `test/cross_cuda.cu` over the static library, checks the CUDA kernels and the dispatch points over them against the serial answers:
 
 ```sh
@@ -998,7 +998,7 @@ That may not be noticeable on a micro-benchmark, but it would be noticeable on r
 It's important to keep compiler support in mind when extending to new instruction sets.
 Check the most recent CI pipeline configurations in `prerelease.yml` and `release.yml` to see which compilers are used.
 When extending capability detection, avoid compiler intrinsics and OS-specific APIs, as they may not be available on all platforms.
-Instead, use inline assembly to read the feature flags, and report them through `sz_cpu_capabilities_detected`.
+Instead, use inline assembly to read the feature flags, and report them through `sz_capabilities_detected_cpu`.
 A new capability's kernels then go into a unit of their own, `c/target/<capability>.c`, and into the lists in `c/dispatch/<family>.c` of every family that has them.
 
 ### Working on Faster Edit Distances

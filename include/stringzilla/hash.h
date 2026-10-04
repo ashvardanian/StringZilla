@@ -101,7 +101,7 @@ extern "C" {
  *  @param[in] text String to aggregate.
  *  @param[in] length Number of bytes in the text.
  *  @param[out] checksum The 64-bit unsigned sum.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -112,7 +112,7 @@ extern "C" {
  *      int main() {
  *          sz_capability_t capabilities;
  *          sz_u64_t checksum;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_bytesum_best("hi", 2, &checksum, capabilities, NULL);
  *          return checksum == 209 ? 0 : 1;
  *      }
@@ -123,7 +123,7 @@ extern "C" {
  *      sz_bytesum_rvv, sz_bytesum_loongsonasx, sz_bytesum_powervsx
  */
 STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
-                                            sz_capability_t capabilities, void *stream);
+                                            sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Computes the 64-bit unsigned hash of a string, similar to @c std::hash in C++.
@@ -132,7 +132,7 @@ STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz
  *  @param[in] length Number of bytes in the text.
  *  @param[in] seed 64-bit unsigned seed for the hash.
  *  @param[out] hash The 64-bit hash value.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -147,7 +147,7 @@ STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz
  *      int main() {
  *          sz_capability_t capabilities;
  *          sz_u64_t first_hash, second_hash;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_hash_best("hello", 5, 0, &first_hash, capabilities, NULL);
  *          sz_hash_best("world", 5, 0, &second_hash, capabilities, NULL);
  *          return first_hash != second_hash ? 0 : 1;
@@ -161,7 +161,7 @@ STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz
  *  @sa sz_hash_state_init_best, sz_hash_state_update_best, sz_hash_state_digest_best
  */
 STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                         sz_capability_t capabilities, void *stream);
+                                         sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Hashes one string under @b many seeds at once, the "multi-seed" hash.
@@ -171,7 +171,7 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
  *  @param[in] seeds Array of @p seeds_count 64-bit seeds.
  *  @param[in] seeds_count Number of seeds, and the number of hashes written to @p hashes.
  *  @param[out] hashes Caller-allocated output buffer of @p seeds_count 64-bit hashes.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -191,7 +191,7 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
  *      int main() {
  *          sz_capability_t capabilities;
  *          sz_u64_t seeds[3] = {1, 2, 3}, hashes[3], hash;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_hash_multiseed_best("token", 5, seeds, 3, hashes, capabilities, NULL);
  *          sz_hash_best("token", 5, 1, &hash, capabilities, NULL);
  *          return hashes[0] == hash ? 0 : 1;
@@ -205,7 +205,7 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
     sz_u64_t const *seeds, sz_size_t seeds_count,   //
-    sz_u64_t *hashes, sz_capability_t capabilities, void *stream);
+    sz_u64_t *hashes, sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief A Pseudorandom Number Generator (PRNG), inspired by the AES-CTR-128 algorithm, but using
@@ -224,7 +224,7 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
  *  @param[out] target Output string buffer to be populated.
  *  @param[in] length Number of bytes in the string.
  *  @param[in] nonce "Number used once" to ensure uniqueness of produced blocks.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -236,7 +236,7 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
  *          sz_capability_t capabilities;
  *          char first_buffer[5], second_buffer[5];
  *          sz_u64_t first_checksum, second_checksum;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_fill_random_best(first_buffer, 5, 0, capabilities, NULL);
  *          sz_fill_random_best(second_buffer, 5, 0, capabilities, NULL); // ? Same nonce, same output
  *          sz_bytesum_best(first_buffer, 5, &first_checksum, capabilities, NULL);
@@ -251,21 +251,21 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
  *      sz_fill_random_loongsonasx, sz_fill_random_powervsx
  */
 STRINGZILLA_API sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
-                                                sz_capability_t capabilities, void *stream);
+                                                sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Initializes the state for incremental construction of a hash.
  *
  *  @param[out] state The state to initialize.
  *  @param[in] seed The 64-bit unsigned seed for the hash.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Every backend shares the state layout, so each call of a stream may pass other @p capabilities.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities,
-                                                    void *stream);
+                                                    sz_stream_t stream);
 
 /**
  *  @brief Updates the state with new data.
@@ -273,37 +273,37 @@ STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u
  *  @param[inout] state The state to stream.
  *  @param[in] text The new data to include in the hash.
  *  @param[in] length The number of bytes in the new data.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                      sz_capability_t capabilities, void *stream);
+                                                      sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finalizes the immutable state into the hash.
  *
  *  @param[in] state The state to fold.
  *  @param[out] hash The 64-bit hash value, as @c sz_hash_best gives for the same bytes and seed.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash,
-                                                      sz_capability_t capabilities, void *stream);
+                                                      sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Initializes the state for incremental SHA256 hashing.
  *
  *  @param[out] state The state to initialize.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
  *  Every backend shares the state layout, so each call of a stream may pass other @p capabilities.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities,
-                                                      void *stream);
+                                                      sz_stream_t stream);
 
 /**
  *  @brief Updates the SHA256 state with new data.
@@ -311,25 +311,25 @@ STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, 
  *  @param[inout] state The state to update.
  *  @param[in] text The new data to hash.
  *  @param[in] length The number of bytes in the new data.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        sz_capability_t capabilities, void *stream);
+                                                        sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finalizes the SHA256 state into the digest, leaving the state open to more data.
  *
  *  @param[in] state The state to finalize.
  *  @param[out] digest Output buffer for the 32-byte (256-bit) digest.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state,
                                                         sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                        sz_capability_t capabilities, void *stream);
+                                                        sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Advances many independent SHA256 states, one message per lane.
@@ -337,7 +337,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *  @param[inout] states Array of at least `texts->count` states, each initialized with
  *      @c sz_sha256_state_init_best.
  *  @param[in] texts Sequence supplying the next chunk of each lane's message, with @c count lanes.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -358,7 +358,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *          sz_u8_t digests[2 * STRINGZILLA_SHA256_DIGEST_LENGTH];
  *          sz_sequence_t texts;
  *          sz_capability_t capabilities;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_sequence_from_null_terminated_strings(chunks, 2, &texts);
  *          sz_sha256_state_init_best(&states[0], capabilities, NULL);
  *          sz_sha256_state_init_best(&states[1], capabilities, NULL);
@@ -377,7 +377,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *  @c sz_sequence_argsort_best gives that ordering.
  */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                             sz_capability_t capabilities, void *stream);
+                                                             sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finalizes many independent SHA256 states, one digest per lane.
@@ -386,7 +386,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *
  *  @param[in] states_count Number of states to finalize, which is the lane count.
  *  @param[out] digests Output buffer of `states_count * STRINGZILLA_SHA256_DIGEST_LENGTH` bytes,
  *      one big-endian digest per lane, in lane order.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -396,182 +396,194 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *
  */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_best(sz_sha256_state_t const *states, sz_size_t states_count,
                                                              sz_u8_t *digests, sz_capability_t capabilities,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_serial(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_serial(sz_cptr_t text, sz_size_t length,
-                                                                           sz_u64_t seed, sz_u64_t *hash, void *stream);
+                                                                           sz_u64_t seed, sz_u64_t *hash,
+                                                                           sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_serial(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                     sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                     sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_serial(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_serial(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                  sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_serial(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_serial(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        void *stream);
+                                                        sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_serial(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_serial(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                        sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_serial(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_serial(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_serial(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                          void *stream);
+                                                          sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_serial(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                               void *stream);
+                                                               sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                               sz_u8_t *digests, void *stream);
+                                                               sz_u8_t *digests, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_westmere(sz_cptr_t text, sz_size_t length,
                                                                              sz_u64_t seed, sz_u64_t *hash,
-                                                                             void *stream);
+                                                                             sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                       sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                       sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_westmere(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_westmere(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                    sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_westmere(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                          void *stream);
+                                                          sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_westmere(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_westmere(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                          sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_GOLDMONT
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_goldmont(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_goldmont(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_goldmont(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                            void *stream);
+                                                            sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_goldmont(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                 void *stream);
+                                                                 sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states,
                                                                  sz_size_t states_count, sz_u8_t *digests,
-                                                                 void *stream);
+                                                                 sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                void *stream);
+                                                                sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                                sz_u8_t *digests, void *stream);
+                                                                sz_u8_t *digests, sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_skylake(sz_cptr_t text, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream);
+                                                                            sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_skylake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         void *stream);
+                                                         sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                void *stream);
+                                                                sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                                sz_u8_t *digests, void *stream);
+                                                                sz_u8_t *digests, sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_icelake(sz_cptr_t text, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream);
+                                                                            sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                      sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                      sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_icelake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_icelake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_icelake(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         void *stream);
+                                                         sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_icelake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_icelake(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 #endif
 
@@ -580,53 +592,55 @@ STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream);
+                                                                            sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                      sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                      sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_neonaes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         void *stream);
+                                                         sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_NEONSHA
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                           void *stream);
+                                                           sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 #endif
 
@@ -634,56 +648,58 @@ STRINGZILLA_API sz_status_t sz_bytesum_sve2(sz_cptr_t text, sz_size_t length, sz
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API sz_status_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                            void *stream);
+                                            sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         void *stream);
+                                                         sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvv(sz_cptr_t text, sz_size_t length, sz_u64_t seed,
-                                                                        sz_u64_t *hash, void *stream);
+                                                                        sz_u64_t *hash, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_rvv(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_rvv(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_rvv(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_rvv(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_rvv(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                     void *stream);
+                                                     sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_rvv(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_rvv(sz_hash_state_t const *state, sz_u64_t *hash, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_rvv(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_rvv(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_rvv(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                       void *stream);
+                                                       sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvv(sz_sha256_state_t const *state,
                                                        sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                       void *stream);
+                                                       sz_stream_t stream);
 
 #endif
 
@@ -692,174 +708,184 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvv(sz_sha256_state_t const *
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvvcrypto(sz_cptr_t text, sz_size_t length,
                                                                               sz_u64_t seed, sz_u64_t *hash,
-                                                                              void *stream);
+                                                                              sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_rvvcrypto(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                     sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_rvvcrypto(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_rvvcrypto(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                           void *stream);
+                                                           sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_rvvcrypto(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                           sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_rvvcrypto(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvvcrypto(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_v128(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_v128(sz_cptr_t text, sz_size_t length,
-                                                                         sz_u64_t seed, sz_u64_t *hash, void *stream);
+                                                                         sz_u64_t seed, sz_u64_t *hash,
+                                                                         sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_v128(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                   sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                   sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_v128(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_v128(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_v128(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_v128(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_v128(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                      void *stream);
+                                                      sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_v128(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_v128(sz_hash_state_t const *state, sz_u64_t *hash, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_v128(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_v128(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_v128(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        void *stream);
+                                                        sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_v128(sz_sha256_state_t const *state,
                                                         sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                        void *stream);
+                                                        sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_v128relaxed(sz_cptr_t text, sz_size_t length,
                                                                                 sz_u64_t seed, sz_u64_t *hash,
-                                                                                void *stream);
+                                                                                sz_stream_t stream);
 
 /** @copydoc sz_hash_multiseed_best */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
-                                                          sz_size_t seeds_count, sz_u64_t *hashes, void *stream);
+                                                          sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                       sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_v128relaxed(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
 STRINGZILLA_API sz_status_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *state, sz_u64_t *hash,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                   sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_loongsonasx(sz_cptr_t text, sz_size_t length,
                                                                                 sz_u64_t seed, sz_u64_t *hash,
-                                                                                void *stream);
+                                                                                sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                       sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_loongsonasx(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_loongsonasx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_loongsonasx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
 STRINGZILLA_API sz_status_t sz_hash_state_digest_loongsonasx(sz_hash_state_t const *state, sz_u64_t *hash,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_loongsonasx(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_loongsonasx(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_loongsonasx(sz_sha256_state_t *state, sz_cptr_t text,
-                                                               sz_size_t length, void *stream);
+                                                               sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_loongsonasx(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_bytesum_best */
-STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream);
+STRINGZILLA_API sz_status_t sz_bytesum_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                sz_stream_t stream);
 
 /** @copydoc sz_hash_best */
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_cptr_t text, sz_size_t length,
                                                                              sz_u64_t seed, sz_u64_t *hash,
-                                                                             void *stream);
+                                                                             sz_stream_t stream);
 
 /** @copydoc sz_fill_random_best */
-STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_random_powervsx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                    sz_stream_t stream);
 
 /** @copydoc sz_hash_state_init_best */
-STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream);
 
 /** @copydoc sz_hash_state_update_best */
 STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                          void *stream);
+                                                          sz_stream_t stream);
 
 /** @copydoc sz_hash_state_digest_best */
-STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash, void *stream);
+STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                          sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, void *stream);
+STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_update_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_update_powervsx(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                            void *stream);
+                                                            sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream);
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 #endif
 
@@ -915,13 +941,13 @@ STRINGZILLA_INLINE sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
-                                            sz_capability_t capabilities, void *stream) {
+                                            sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(checksum), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(seed), sz_unused_(hash), sz_unused_(capabilities),
         sz_unused_(stream);
     return sz_missing_library_k;
@@ -930,64 +956,64 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
     sz_u64_t const *seeds, sz_size_t seeds_count,   //
-    sz_u64_t *hashes, sz_capability_t capabilities, void *stream) {
+    sz_u64_t *hashes, sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(seeds), sz_unused_(seeds_count), sz_unused_(hashes),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
-                                                sz_capability_t capabilities, void *stream) {
+                                                sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(target), sz_unused_(length), sz_unused_(nonce), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities,
-                                                    void *stream) {
+                                                    sz_stream_t stream) {
     sz_unused_(state), sz_unused_(seed), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                      sz_capability_t capabilities, void *stream) {
+                                                      sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(state), sz_unused_(text), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash,
-                                                      sz_capability_t capabilities, void *stream) {
+                                                      sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(state), sz_unused_(hash), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities,
-                                                      void *stream) {
+                                                      sz_stream_t stream) {
     sz_unused_(state), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        sz_capability_t capabilities, void *stream) {
+                                                        sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(state), sz_unused_(text), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state,
                                                         sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                        sz_capability_t capabilities, void *stream) {
+                                                        sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(state), sz_unused_(digest), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                             sz_capability_t capabilities, void *stream) {
+                                                             sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(states), sz_unused_(texts), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_best(sz_sha256_state_t const *states, sz_size_t states_count,
                                                              sz_u8_t *digests, sz_capability_t capabilities,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_unused_(states), sz_unused_(states_count), sz_unused_(digests), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }

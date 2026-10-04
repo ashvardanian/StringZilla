@@ -66,7 +66,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_rocm_(sz_size_t staged_node
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                             sz_size_t const *window_widths,
                                                             sz_size_t window_widths_count, sz_allocator_t *allocator,
-                                                            void *stream) {
+                                                            sz_stream_t stream) {
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
     if (!window_widths_count || window_widths_count > sz_overlap_gpu_widths_max_k) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != window_widths_count; ++index)
@@ -171,7 +171,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
     sz_overlap_engine_t *engine, sz_sequence_t const *queries, sz_size_t const *window_widths,
-    sz_size_t window_widths_count, sz_size_t candidates_budget, sz_allocator_t *allocator, void *stream) {
+    sz_size_t window_widths_count, sz_size_t candidates_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(candidates_budget);
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
@@ -185,7 +185,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
  *  @ref sz_overlap_scores_scoped_rocm_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                       sz_size_t scores_candidate_stride, void *stream) {
+                                                       sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
@@ -239,7 +239,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
 STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_t *engine,
                                                               sz_sequence_t const *candidates, sz_f32_t *scores,
                                                               sz_size_t scores_query_stride,
-                                                              sz_size_t scores_candidate_stride, void *stream) {
+                                                              sz_size_t scores_candidate_stride, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -251,14 +251,14 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
-                                                        void *stream) {
+                                                        sz_stream_t stream) {
     return sz_overlap_engine_init_scoped_rocm_(engine, queries, window_widths, window_widths_count, candidates_budget,
                                                allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                    sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride, void *stream) {
+                                                   sz_size_t scores_candidate_stride, sz_stream_t stream) {
     return sz_overlap_scores_scoped_rocm_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
                                           stream);
 }

@@ -465,7 +465,7 @@ STRINGZILLA_INLINE void sz_fill_random_westmere_(sz_ptr_t text, sz_size_t length
 
 #if STRINGZILLA_TARGET_WESTMERE
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_westmere(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_westmere_(state, seed);
     return sz_success_k;
@@ -473,7 +473,7 @@ STRINGZILLA_API sz_status_t sz_hash_state_init_westmere(sz_hash_state_t *state, 
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_westmere(sz_cptr_t start, sz_size_t length,
                                                                              sz_u64_t seed, sz_u64_t *hash,
-                                                                             void *stream) {
+                                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_westmere_(start, length, seed);
     return sz_success_k;
@@ -481,7 +481,7 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_westmere(sz_
 
 STRINGZILLA_API sz_status_t sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t length,             //
                                                        sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                       sz_u64_t *hashes, void *stream) {
+                                                       sz_u64_t *hashes, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Trivial counts gain nothing from a shared normalization pass and take the one-shot path.
     if (seeds_count == 0) return sz_success_k;
@@ -524,7 +524,7 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_westmere(sz_cptr_t text, sz_size_t
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_westmere(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // Load the packed public state, at any alignment, into an aligned twin once, buffer and absorb
@@ -555,13 +555,14 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_westmere(sz_hash_state_t *state
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_westmere(sz_hash_state_t const *state_ptr, sz_u64_t *hash,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_westmere_(state_ptr);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_westmere(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_westmere(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_random_westmere_(target, length, nonce);
     return sz_success_k;

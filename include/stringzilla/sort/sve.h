@@ -303,7 +303,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_sve_(
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequence, sz_size_t top_count,
                                                     sz_bool_t reverse, sz_allocator_t *allocator,
-                                                    sz_sorted_idx_t *order, void *stream) {
+                                                    sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // At 128 bits NEON leads: 53 vs 43 MB/s on Graviton 5 words, with serial at 50.
     if (svcntb() <= 16) return sz_sequence_argsort_neon_(sequence, allocator, order, top_count, reverse);
@@ -339,7 +339,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(               //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Shares the byte arg-sort's partition, and so its 128-bit NEON verdict.
     if (svcntb() <= 16) return sz_sequence_argsort_uncased_neon_(sequence, allocator, order, top_count, reverse);

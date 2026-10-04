@@ -80,7 +80,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_v128relaxed_(sz_cptr_t text, sz_size_t le
     return sum;
 }
 
-STRINGZILLA_API sz_status_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_v128relaxed(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_v128relaxed_(text, length);
     return sz_success_k;
@@ -374,20 +375,20 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_v128relaxed_
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_v128relaxed(sz_cptr_t start, sz_size_t length,
                                                                                 sz_u64_t seed, sz_u64_t *hash,
-                                                                                void *stream) {
+                                                                                sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_v128relaxed_(start, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_v128relaxed(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_serial_(state, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_v128relaxed(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     sz_hash_state_aligned_t state = sz_hash_state_load_v128relaxed_(packed);
@@ -453,14 +454,14 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_v128relaxed_(sz_hash_state_t co
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_v128relaxed(sz_hash_state_t const *packed, sz_u64_t *hash,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_v128relaxed_(packed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_random_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
@@ -492,7 +493,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_multiseed_replay_v128relaxed_(sz_u512_vec_t 
 
 STRINGZILLA_API sz_status_t sz_hash_multiseed_v128relaxed(sz_cptr_t text, sz_size_t length,             //
                                                           sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                          sz_u64_t *hashes, void *stream) {
+                                                          sz_u64_t *hashes, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     if (seeds_count == 0) return sz_success_k;
     if (seeds_count == 1) {

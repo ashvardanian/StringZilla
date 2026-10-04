@@ -10,7 +10,7 @@ It bundles:
 The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, `sz_copy_best`/`sz_move_best`/`sz_fill_best`/`sz_lookup_best` memory transforms, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
 The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on top of those kernels, adding an owning Small-String-Optimized container, allocation-free splitting and partitioning views, and free functions for hashing, sorting, and translation.
 
-Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_cpu_capabilities_enabled` reports.
+Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_capabilities_enabled_cpu` reports.
 There is no hidden global allocation and no thread pool: every function that may allocate takes an explicit `sz_allocator_t *`, and an engine holds the blocks its allocator handed it until you free it.
 An engine is prepared by `sz_levenshtein_engine_init`, and its twins for overlap and substrings, for one device's capabilities and a stream, which names the device, so choosing a device is choosing the mask and the stream an engine is built with rather than setting a global.
 Its rounds, such as `sz_levenshtein_distances`, take a trailing stream: null on the CPU, while on a GPU they enqueue there and return, leaving the join to the caller.
@@ -56,10 +56,10 @@ Each init takes the mask, the allocator and a stream last, and each round is a s
 ```c
 sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                       sz_allocator_t *allocator, void *stream);
+                                       sz_allocator_t *allocator, sz_stream_t stream);
 sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
-                                     sz_size_t *distances, sz_size_t distances_stride, void *stream);
-void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream);
+                                     sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream);
+void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream);
 ```
 
 Their per-tier building blocks and their design notes live beside the kernels, in [`levenshtein/README.md`](levenshtein/README.md), [`overlap/README.md`](overlap/README.md), and [`substrings/README.md`](substrings/README.md).
@@ -160,8 +160,8 @@ The per-ISA SIMD kernels and the project's own tests are CI-validated with these
 GCC 10 and older miss a conforming STL `insert` and fail to build the tests.
 The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector types from a unit compiled without `v`, and an older compiler builds the libraries without them.
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
-NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_cuda_capabilities_enabled` reports for a device.
-HIP-Clang builds the same sources for AMD GPUs, reached through `sz_rocm_capabilities_enabled`.
+NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
+HIP-Clang builds the same sources for AMD GPUs, reached through `sz_capabilities_enabled_rocm`.
 With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
 A device round reads memory the device reaches. `memory.h` declares allocation and sequence reallocation; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
@@ -171,7 +171,7 @@ A device round reads memory the device reaches. `memory.h` declares allocation a
 - `sz_stream_synchronize_best` waits for one stream, after which what a round wrote is readable from the host.
 
 ```c
-sz_cuda_capabilities_enabled(0, &caps);
+sz_capabilities_enabled_cuda(0, &caps);
 sz_allocator_init_unified_best(&unified, caps);
 sz_sequence_realloc_best(&candidates, &host_candidates, &unified, &candidates_bytes, caps, stream);
 sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
@@ -181,7 +181,7 @@ sz_levenshtein_engine_free(&engine, stream);
 unified.free((void *)candidates.handle, candidates_bytes, unified.handle, stream);
 ```
 
-A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_cuda_capabilities_enabled(ordinal, &caps)`.
+A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_capabilities_enabled_cuda(ordinal, &caps)`.
 
 StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD kit, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
@@ -267,22 +267,22 @@ Like every dispatch point, each takes the mask to pick a capability from and a s
 
 ```c
 sz_status_t sz_find_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, //
-                              sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                              sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, //
-                               sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                               sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_find_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-                         sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                         sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle, sz_size_t needle_length,
-                          sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                          sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 Byte-set scans replace `strspn`/`strcspn` and take a prebuilt `sz_byteset_t`:
 
 ```c
 sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set, //
-                                 sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                                 sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set, //
-                                  sz_cptr_t *match, sz_capability_t capabilities, void *stream);
+                                  sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 Four header-only shortcuts build the set for you from a needle string, optionally inverting it:
@@ -313,7 +313,7 @@ sz_size_t count_occurrences(sz_cptr_t text, sz_size_t length, sz_cptr_t needle, 
 
 int main(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
-    sz_cpu_capabilities_enabled(&capabilities);
+    sz_capabilities_enabled_cpu(&capabilities);
 
     sz_byteset_t whitespace;
     sz_byteset_init(&whitespace);
@@ -566,11 +566,11 @@ All produce identical output across every backend and platform, in both single-s
 
 ```c
 sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, //
-                            sz_capability_t capabilities, void *stream);
+                            sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash, //
-                         sz_capability_t capabilities, void *stream);
+                         sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_hash_multiseed_best(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds, sz_size_t seeds_count,
-                                   sz_u64_t *hashes, sz_capability_t capabilities, void *stream);
+                                   sz_u64_t *hashes, sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 `sz_hash_best` is non-cryptographic, fast for both short and long inputs, passes the SMHasher `--extra` suite, and uses the AES extensions where present.
@@ -579,29 +579,29 @@ sz_status_t sz_hash_multiseed_best(sz_cptr_t text, sz_size_t length, sz_u64_t co
 Incremental hashing uses an opaque `sz_hash_state_t`, whose layout every capability shares, so each call may pass its own mask:
 
 ```c
-sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities, void *stream);
+sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length, //
-                                      sz_capability_t capabilities, void *stream);
+                                      sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash, //
-                                      sz_capability_t capabilities, void *stream);
+                                      sz_capability_t capabilities, sz_stream_t stream);
 sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_hash_state_t const *rhs);
 ```
 
 A streaming SHA-256 is also provided, producing a 32-byte digest, with hardware backends on x86 SHA-NI, ARM NEON-SHA, and others:
 
 ```c
-sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities, void *stream);
+sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length, //
-                                        sz_capability_t capabilities, void *stream);
+                                        sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state, sz_u8_t digest[32], //
-                                        sz_capability_t capabilities, void *stream);
+                                        sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 The same AES primitives back a reproducible pseudo-random fill, useful with `sz_lookup_best` for generating random strings over a chosen alphabet:
 
 ```c
 sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, //
-                                sz_capability_t capabilities, void *stream);
+                                sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 Example combining a single-shot hash, a streamed hash, and a checksum:
@@ -611,7 +611,7 @@ Example combining a single-shot hash, a streamed hash, and a checksum:
 
 int main(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
-    sz_cpu_capabilities_enabled(&capabilities);
+    sz_capabilities_enabled_cpu(&capabilities);
 
     sz_u64_t single = 0;
     sz_hash_best("hello world", 11, 42, &single, capabilities, NULL);
@@ -675,12 +675,12 @@ The C API fills a caller-owned `order` array and reports success through a `sz_s
 sz_status_t sz_sequence_argsort_best(
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
     sz_allocator_t *allocator, sz_sorted_idx_t *order,
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 
 sz_status_t sz_sequence_argsort_uncased_best(
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
     sz_allocator_t *allocator, sz_sorted_idx_t *order,
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 `sz_sequence_argsort_best` orders byte-lexicographically; `sz_sequence_argsort_uncased_best` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
@@ -691,7 +691,7 @@ The `allocator` argument may be `NULL` to use the default allocator.
 
 int main(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
-    sz_cpu_capabilities_enabled(&capabilities);
+    sz_capabilities_enabled_cpu(&capabilities);
 
     char const *strings[] = {"banana", "apple", "cherry"};
     sz_sequence_t sequence;
@@ -715,7 +715,7 @@ sz_status_t sz_sequence_intersect_best(
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 The `seed` randomizes the hash table to resist adversarial inputs; the position arrays must each fit at least `min(first->count, second->count)` entries.
@@ -785,13 +785,13 @@ The four memory kernels mirror `memcpy`, `memmove`, `memset`, and a lookup-table
 
 ```c
 sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memcpy (no overlap)
-                         sz_capability_t capabilities, void *stream);
+                         sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memmove (overlap ok)
-                         sz_capability_t capabilities, void *stream);
+                         sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, // like memset
-                         sz_capability_t capabilities, void *stream);
+                         sz_capability_t capabilities, sz_stream_t stream);
 sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const lut[256],
-                           sz_capability_t capabilities, void *stream);
+                           sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 `sz_lookup_best` applies `target[i] = lut[source[i]]`; `target` and `source` may alias but must not partially overlap, and the table must be exactly 256 bytes.
@@ -802,7 +802,7 @@ sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, 
 
 int main(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
-    sz_cpu_capabilities_enabled(&capabilities);
+    sz_capabilities_enabled_cpu(&capabilities);
 
     char to_lower[256];
     sz_lookup_init_lower(to_lower);
@@ -920,14 +920,14 @@ Within each architecture the bits ascend by preference, so the highest bit a mas
 `sz_cap_cpus_k` and `sz_cap_gpus_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
 
 ```c
-sz_status_t sz_cpu_capabilities_detected(sz_capability_t *capabilities); // what this CPU runs
-sz_status_t sz_cpu_capabilities_compiled(sz_capability_t *capabilities); // what this build holds kernels for
-sz_status_t sz_cpu_capabilities_enabled(sz_capability_t *capabilities);  // both at once, always with serial
-sz_status_t sz_cpu_configure_thread(sz_capability_t capabilities);       // once per dispatching thread
-sz_status_t sz_cuda_count_devices(sz_size_t *count);
-sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities);
-sz_status_t sz_cuda_capabilities_compiled(sz_capability_t *capabilities);
-sz_status_t sz_cuda_capabilities_enabled(sz_size_t ordinal, sz_capability_t *capabilities);
+sz_status_t sz_capabilities_detected_cpu(sz_capability_t *capabilities); // what this CPU runs
+sz_status_t sz_capabilities_compiled_cpu(sz_capability_t *capabilities); // what this build holds kernels for
+sz_status_t sz_capabilities_enabled_cpu(sz_capability_t *capabilities);  // both at once, always with serial
+sz_status_t sz_thread_configure_cpu(sz_capability_t capabilities);       // once per dispatching thread
+sz_status_t sz_device_count_cuda(sz_size_t *count);
+sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
+sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities);
+sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_capability_t *capabilities);
 sz_size_t sz_capabilities_name(sz_capability_t capabilities, char *buffer, sz_size_t capacity); // "serial,haswell"
 char const *sz_status_name(sz_status_t status);
 ```
@@ -936,12 +936,12 @@ ROCm and Metal have the same four queries, spelled `sz_rocm_*` and `sz_metal_*`.
 The library probes the CPU once per process and caches the answer, while header-only builds probe on every call.
 The GPU queries ask the vendor's runtime every time, by that runtime's own device ordinal, and report no devices where the vendor isn't built.
 The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
-Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_cpu_capabilities_enabled()` intersects it with the compile-time mask.
+Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities_enabled_cpu()` intersects it with the compile-time mask.
 Where the OS cannot be asked, detection reports only the kits the compiler's own flags guarantee, never the compiled ones, which the CPU may lack.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
 Nothing is process-wide: narrowing the mask a call passes narrows the choice, so `capabilities & ~sz_cap_sve_k` skips SVE and `sz_cap_serial_k` alone runs the reference kernel.
 A host-only process never starts a GPU driver, as only the GPU queries and the engines built for a GPU reach one.
-`sz_cpu_configure_thread` prepares the calling thread for the capabilities it is given, and only those; every current capability needs nothing, so it is a no-op today, kept so bindings call it where NumKong's call theirs.
+`sz_thread_configure_cpu` prepares the calling thread for the capabilities it is given, and only those; every current capability needs nothing, so it is a no-op today, kept so bindings call it where NumKong's call theirs.
 
 On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: at the common 128-bit vector length the scalable kernels for length-sensitive operations — comparisons, memory transforms, substring search, UTF-8 token scanning — are often slower than their NEON twins, while crypto-heavy operations like hashing prefer SVE2 at any width.
 So each such SVE kernel measures the register width on the running CPU (`svcntb`) and hands the 128-bit case to its NEON twin, and the dispatch point needs no special case.
@@ -958,7 +958,7 @@ Libraries compile every kit the toolchain builds and leave the rest to the mask 
 
 int main(void) {
     sz_capability_t caps;
-    sz_cpu_capabilities_enabled(&caps);
+    sz_capabilities_enabled_cpu(&caps);
     char names[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
     sz_capabilities_name(caps, names, sizeof(names));
     printf("StringZilla %d.%d.%d, backends: %s\n", sz_version_major(), sz_version_minor(), sz_version_patch(), names);
@@ -985,7 +985,7 @@ Each family exports its own finder over its kinds, like `sz_compare_find_kernel`
 Every verb has a kind, `sz_kernel_<verb>_k`, and a pointer type to cast the result to, `sz_kernel_<verb>_t`, taking the dispatch point's arguments short of the mask.
 `sz_kernel_name` spells a kind without its `sz_kernel_` prefix and `_k` suffix, like `"find_byte"`, and `sz_kernel_named` maps such a name back, or to `sz_kernel_unknown_k`.
 Verbs of one shape share a type, like `sz_kernel_find_t` for both `sz_kernel_find_k` and `sz_kernel_rfind_k`, `sz_kernel_utf8_segmenter_t` for the four tiling UTF-8 segmenters, and `sz_kernel_utf8_tokenizer_t` for the newline, whitespace and delimiter finders.
-In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_cpu_configure_thread`.
+In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, defaults to `sz::default_capabilities()`, the enabled CPU mask, while `sz::device_t::make(kind, ordinal)` opens one GPU to ask its `capabilities_enabled()`, and `sz::device_t::cpu().configure_thread(mask)` wraps `sz_thread_configure_cpu`.
 
 ## Memory Ownership and Small String Optimization
 

@@ -127,7 +127,7 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_best(                              
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed,                            //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_tokenizer_t const kernel = (sz_kernel_utf8_tokenizer_t)sz_kernel_pick_(
         capabilities, sz_utf8_newlines_capabilities());
     return kernel ? kernel(text, length, match_offsets, match_lengths, matches_capacity, matches_count, bytes_consumed,
@@ -139,7 +139,7 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_best(                           
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed,                            //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_tokenizer_t const kernel = (sz_kernel_utf8_tokenizer_t)sz_kernel_pick_(
         capabilities, sz_utf8_whitespaces_capabilities());
     return kernel ? kernel(text, length, match_offsets, match_lengths, matches_capacity, matches_count, bytes_consumed,
@@ -151,7 +151,7 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_best(                            
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed,                            //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_tokenizer_t const kernel = (sz_kernel_utf8_tokenizer_t)sz_kernel_pick_(
         capabilities, sz_utf8_delimiters_capabilities());
     return kernel ? kernel(text, length, match_offsets, match_lengths, matches_capacity, matches_count, bytes_consumed,

@@ -78,14 +78,14 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_westmere_(sz_cptr_t a, sz_cptr_t b, sz_siz
 #if STRINGZILLA_TARGET_WESTMERE
 
 STRINGZILLA_API sz_status_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                              sz_ordering_t *ordering, void *stream) {
+                                              sz_ordering_t *ordering, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *ordering = sz_order_westmere_(a, a_length, b, b_length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                              void *stream) {
+                                              sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *equal = sz_equal_westmere_(a, b, length);
     return sz_success_k;

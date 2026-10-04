@@ -2450,7 +2450,7 @@ static void sz_py_tape_capsule_free_(PyObject *capsule) {
     sz_py_tape_free_((sz_py_tape_t *)PyCapsule_GetPointer(capsule, sz_py_tape_name_));
 }
 
-int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability, void *stream,
+int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability, sz_stream_t stream,
                                 sz_sequence_t *sequence) {
     if (sz_py_export_strings(object, name, sequence) != 0) return -1;
     // The host reads a tape of any group through these accessors, while a GPU's own run only there.
@@ -2518,7 +2518,7 @@ static PyObject *Strs_copy(PyObject *self, PyObject *const *args, Py_ssize_t pos
     }
     unsigned long long const bits = PyLong_AsUnsignedLongLong(capabilities_object);
     if (PyErr_Occurred()) return NULL;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
 
     sz_py_tape_t *tape = (sz_py_tape_t *)PyMem_Malloc(sizeof(sz_py_tape_t));

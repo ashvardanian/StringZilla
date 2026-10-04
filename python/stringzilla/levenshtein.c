@@ -80,7 +80,7 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
     sz_sequence_t queries;
     sz_levenshtein_symbol_t symbol;
     sz_capability_t capabilities;
-    void *stream;
+    sz_stream_t stream;
     if (sz_py_export_strings(queries_obj, "queries", &queries) != 0) return -1;
     if (parse_levenshtein_symbol_(symbol_obj, &symbol) != 0) return -1;
     if (sz_py_export_engine_placement(capabilities_object, stream_object, &capabilities, &stream) != 0) return -1;
@@ -160,7 +160,7 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
 
     sz_capability_t const capability = self->engine.capability;
     sz_sequence_t candidates;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(candidates_obj, "candidates", capability, stream, &candidates) != 0) return NULL;

@@ -158,7 +158,7 @@ static sz_capability_kernels_t const *sz_utf8_find_cased_capabilities(void) {
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
                                                              sz_utf8_uncased_needle_t *prepared,
-                                                             sz_capability_t capabilities, void *stream) {
+                                                             sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_uncased_needle_init_t const kernel = (sz_kernel_utf8_uncased_needle_init_t)sz_kernel_pick_(
         capabilities, sz_utf8_uncased_needle_init_capabilities());
     return kernel ? kernel(needle, needle_length, prepared, stream) : sz_missing_kernel_k;
@@ -167,7 +167,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, s
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                         sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
                                                         sz_size_t *match_length, sz_capability_t capabilities,
-                                                        void *stream) {
+                                                        sz_stream_t stream) {
     sz_kernel_utf8_uncased_search_t const kernel = (sz_kernel_utf8_uncased_search_t)sz_kernel_pick_(
         capabilities, sz_utf8_uncased_search_capabilities());
     return kernel ? kernel(haystack, haystack_length, needle, match, match_length, stream) : sz_missing_kernel_k;
@@ -176,14 +176,14 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_s
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
     sz_cptr_t a, sz_size_t a_length,                    //
     sz_cptr_t b, sz_size_t b_length,                    //
-    sz_ordering_t *ordering, sz_capability_t capabilities, void *stream) {
+    sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_uncased_order_t const kernel = (sz_kernel_utf8_uncased_order_t)sz_kernel_pick_(
         capabilities, sz_utf8_uncased_order_capabilities());
     return kernel ? kernel(a, a_length, b, b_length, ordering, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_best(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                    sz_capability_t capabilities, void *stream) {
+                                                    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_find_cased_t const kernel = (sz_kernel_utf8_find_cased_t)sz_kernel_pick_(
         capabilities, sz_utf8_find_cased_capabilities());
     return kernel ? kernel(text, length, match, stream) : sz_missing_kernel_k;

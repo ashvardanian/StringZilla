@@ -36,7 +36,7 @@ extern "C" {
  *  @param[in] b Second string to compare.
  *  @param[in] length Number of bytes to compare in both strings.
  *  @param[out] equal @c sz_true_k if the strings are equal, @c sz_false_k if they differ.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
@@ -48,7 +48,7 @@ extern "C" {
  *      int main() {
  *          sz_capability_t capabilities;
  *          sz_bool_t same, different;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_equal_best("hello", "hello", 5, &same, capabilities, NULL);
  *          sz_equal_best("hello", "world", 5, &different, capabilities, NULL);
  *          return same && !different;
@@ -60,7 +60,7 @@ extern "C" {
  *      sz_equal_loongsonasx, sz_equal_powervsx
  */
 STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                          sz_capability_t capabilities, void *stream);
+                                          sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Compares two strings lexicographically, like @c memcmp in LibC.
@@ -71,7 +71,7 @@ STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t le
  *  @param[in] b_length Number of bytes in the second string.
  *  @param[out] ordering @c sz_less_k if @p a sorts before @p b, @c sz_greater_k if after, or
  *      @c sz_equal_k if the strings are identical.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcmp: https://en.cppreference.com/w/c/string/byte/memcmp
@@ -88,7 +88,7 @@ STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t le
  *      int main() {
  *          sz_capability_t capabilities;
  *          sz_ordering_t first, second, third;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_order_best("apple", 5, "banana", 6, &first, capabilities, NULL);
  *          sz_order_best("grape", 5, "grape", 5, &second, capabilities, NULL);
  *          sz_order_best("zebra", 5, "apple", 5, &third, capabilities, NULL);
@@ -101,119 +101,124 @@ STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t le
  *      sz_order_loongsonasx, sz_order_powervsx
  */
 STRINGZILLA_API sz_status_t sz_order_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, sz_capability_t capabilities, void *stream);
+                                          sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream);
 
 /** @copydoc sz_equal_best */
-STRINGZILLA_API sz_status_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream);
+STRINGZILLA_API sz_status_t sz_equal_serial(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                            sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_serial(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                            sz_ordering_t *ordering, void *stream);
+                                            sz_ordering_t *ordering, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_WESTMERE
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                              void *stream);
+                                              sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_westmere(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                              sz_ordering_t *ordering, void *stream);
+                                              sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_haswell(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                             void *stream);
+                                             sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_haswell(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                             sz_ordering_t *ordering, void *stream);
+                                             sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_skylake(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                             void *stream);
+                                             sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_skylake(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                             sz_ordering_t *ordering, void *stream);
+                                             sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_equal_best */
-STRINGZILLA_API sz_status_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream);
+STRINGZILLA_API sz_status_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                          sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, void *stream);
+                                          sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_equal_best */
-STRINGZILLA_API sz_status_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream);
+STRINGZILLA_API sz_status_t sz_equal_sve(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                         sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                         sz_ordering_t *ordering, void *stream);
+                                         sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_equal_best */
-STRINGZILLA_API sz_status_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream);
+STRINGZILLA_API sz_status_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                         sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                         sz_ordering_t *ordering, void *stream);
+                                         sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_equal_best */
-STRINGZILLA_API sz_status_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream);
+STRINGZILLA_API sz_status_t sz_equal_v128(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                          sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, void *stream);
+                                          sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                                 void *stream);
+                                                 sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_v128relaxed(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                                 sz_ordering_t *ordering, void *stream);
+                                                 sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_loongsonasx(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                                 void *stream);
+                                                 sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_loongsonasx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                                 sz_ordering_t *ordering, void *stream);
+                                                 sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_equal_best */
 STRINGZILLA_API sz_status_t sz_equal_powervsx(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                              void *stream);
+                                              sz_stream_t stream);
 
 /** @copydoc sz_order_best */
 STRINGZILLA_API sz_status_t sz_order_powervsx(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                              sz_ordering_t *ordering, void *stream);
+                                              sz_ordering_t *ordering, sz_stream_t stream);
 #endif
 
 /**
@@ -245,13 +250,13 @@ STRINGZILLA_API sz_status_t sz_compare_find_kernel(sz_kernel_kind_t kind, sz_cap
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                          sz_capability_t capabilities, void *stream) {
+                                          sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(a), sz_unused_(b), sz_unused_(length), sz_unused_(equal), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_order_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, sz_capability_t capabilities, void *stream) {
+                                          sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(a), sz_unused_(a_length), sz_unused_(b), sz_unused_(b_length), sz_unused_(ordering),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

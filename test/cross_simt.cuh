@@ -63,7 +63,7 @@ inline constexpr auto gpu_best =
     [](auto... arguments) noexcept { return call_best<best_>(gpu_capabilities(), arguments...); };
 
 /** Joins @p stream, or the default one, which is what every device verb leaves the caller to do. */
-static void join_(void *stream = nullptr) {
+static void join_(sz_stream_t stream = nullptr) {
     verify(sz_stream_synchronize_best(gpu_capabilities(), stream) == sz_success_k);
 }
 
@@ -1353,7 +1353,7 @@ static void test_substrings_simt_safety(simt_backend_t const &backend) {
  *  reaches them and the stream joined, so the CPU fold checks drive it unchanged. */
 static auto utf8_uncased_fold_staged_(sz_kernel_utf8_uncased_fold_t fold) {
     return [fold](sz_cptr_t source, sz_size_t length, sz_ptr_t target, sz_size_t *target_length,
-                  void *stream) -> sz_status_t {
+                  sz_stream_t stream) -> sz_status_t {
         unified_vector<char> staged_source(source, source + length), staged_target(length * 3 + 4);
         unified_vector<sz_size_t> staged_length(1, 0);
         sz_status_t const status = fold(staged_source.data(), length, staged_target.data(), staged_length.data(),
@@ -1410,7 +1410,7 @@ static void check_utf8_uncased_simt_safety_(test_context_t &context, simt_backen
  *  reaches them and the stream joined, so the CPU normalization checks drive it unchanged. */
 static auto utf8_norm_staged_(sz_kernel_utf8_norm_t norm) {
     return [norm](sz_cptr_t source, sz_size_t length, sz_normal_form_t form, sz_ptr_t target, sz_size_t *target_length,
-                  void *stream) -> sz_status_t {
+                  sz_stream_t stream) -> sz_status_t {
         unified_vector<char> staged_source(source, source + length), staged_target(length * 18 + 18);
         unified_vector<sz_size_t> staged_length(1, 0);
         sz_status_t const status = norm(staged_source.data(), length, form, staged_target.data(), staged_length.data(),

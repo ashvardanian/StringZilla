@@ -307,42 +307,42 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_haswell_(sz_cptr_t haystack, sz_si
 #if STRINGZILLA_TARGET_HASWELL
 
 STRINGZILLA_API sz_status_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                 sz_cptr_t *match, void *stream) {
+                                                 sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byte_haswell_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                                  sz_cptr_t *match, void *stream) {
+                                                  sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byte_haswell_(haystack, haystack_length, needle);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                            sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                            sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_haswell_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                             sz_size_t needle_length, sz_cptr_t *match, void *stream) {
+                                             sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_haswell_(haystack, haystack_length, needle, needle_length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_find_byteset_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                    sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+                                                    sz_byteset_t const *filter, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byteset_haswell_(haystack, haystack_length, filter);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                     sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+                                                     sz_byteset_t const *filter, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byteset_haswell_(haystack, haystack_length, filter);
     return sz_success_k;

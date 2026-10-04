@@ -44,7 +44,7 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_neon_(sz_cptr_t text, sz_size_t length) {
 
 #if STRINGZILLA_TARGET_NEON
 
-STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_neon(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_neon_(text, length);
     return sz_success_k;

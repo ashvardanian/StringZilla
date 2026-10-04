@@ -164,7 +164,7 @@ typedef struct {
 
 /** The shape of every tiling segmenter's dispatch point, like @c sz_utf8_wordbreaks_best. */
 typedef sz_status_t (*sz_py_segmenter_t)(sz_cptr_t text, sz_size_t length, sz_size_t *lengths, sz_size_t capacity,
-                                         sz_size_t *count, sz_capability_t capabilities, void *stream);
+                                         sz_size_t *count, sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Iterator for finding UAX segment boundaries in UTF-8 text - words, grapheme clusters,
@@ -583,11 +583,11 @@ extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_
  *      reaches, and host accessors otherwise; or -1 with a Python exception set, a @c BufferError for
  *      a tape that device would have to copy.
  */
-extern int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability, void *stream,
-                                       sz_sequence_t *sequence);
+extern int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability,
+                                       sz_stream_t stream, sz_sequence_t *sequence);
 
 /** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
-extern int sz_py_export_stream(PyObject *stream_object, void **stream);
+extern int sz_py_export_stream(PyObject *stream_object, sz_stream_t *stream);
 
 /**
  *  @brief Reads how an engine is built: its `capabilities=` and `stream=` keywords.
@@ -598,7 +598,7 @@ extern int sz_py_export_stream(PyObject *stream_object, void **stream);
  *      cannot run and a CPU engine given a stream.
  */
 extern int sz_py_export_engine_placement(PyObject *capabilities_object, PyObject *stream_object,
-                                         sz_capability_t *capabilities, void **stream);
+                                         sz_capability_t *capabilities, sz_stream_t *stream);
 
 /**
  *  @brief Binds @p object as a writable output of @p rank axes, each at least @p extents wide.

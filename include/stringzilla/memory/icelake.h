@@ -110,7 +110,7 @@ STRINGZILLA_INLINE void sz_lookup_icelake_(sz_ptr_t target, sz_cptr_t source, sz
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_icelake(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                              char const lut[sz_at_least_(256)], void *stream) {
+                                              char const lut[sz_at_least_(256)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_lookup_icelake_(target, source, length, lut);
     return sz_success_k;

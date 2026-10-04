@@ -24,7 +24,7 @@ extern "C" {
 enum { sz_utf8_norm_thread_bytes_cuda_k = 64 };
 
 /** Copies every table the device lookups read into the device's copies, in order on @p stream. */
-STRINGZILLA_INLINE sz_status_t sz_utf8_norm_upload_cuda_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_utf8_norm_upload_cuda_(sz_stream_t stream) {
     sz_status_t status = sz_copy_to_symbol_cuda_(sz_utf8_norm_stage1_simt_, sz_utf8_norm_stage1_,
                                                  sizeof(sz_utf8_norm_stage1_), stream);
     if (status == sz_success_k)
@@ -66,7 +66,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_norm_upload_cuda_(void *stream) {
  *  @note Allocates nothing and joins nothing; the tables travel on @p stream ahead of the kernel.
  */
 STRINGZILLA_INLINE sz_status_t sz_utf8_norm_cuda_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                  sz_ptr_t target, sz_size_t *target_length, void *stream) {
+                                                  sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_u8_t const *launch_source = (sz_u8_t const *)source;
     sz_u8_t *launch_target = (sz_u8_t *)target;
     sz_size_t *launch_target_length = target_length;
@@ -97,7 +97,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_norm_cuda_(sz_cptr_t source, sz_size_t so
 
 STRINGZILLA_INLINE sz_status_t sz_utf8_norm_scoped_cuda_(sz_cptr_t source, sz_size_t source_length,
                                                          sz_normal_form_t form, sz_ptr_t target,
-                                                         sz_size_t *target_length, void *stream) {
+                                                         sz_size_t *target_length, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -107,7 +107,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_norm_scoped_cuda_(sz_cptr_t source, sz_si
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_norm_cuda(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                              sz_ptr_t target, sz_size_t *target_length, void *stream) {
+                                              sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     return sz_utf8_norm_scoped_cuda_(source, source_length, form, target, target_length, stream);
 }
 

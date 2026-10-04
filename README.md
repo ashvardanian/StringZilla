@@ -203,7 +203,7 @@ Link `stringzilla::static` through CMake `FetchContent`, or `find_package(string
 ```c
 #include <stringzilla/stringzilla.h>
 sz_capability_t capabilities = sz_cap_serial_k;
-sz_cpu_capabilities_enabled(&capabilities); // what this CPU runs and this binary holds
+sz_capabilities_enabled_cpu(&capabilities); // what this CPU runs and this binary holds
 sz_cptr_t match = NULL;
 sz_find_best(haystack, h_length, "brown", 5, &match, capabilities, NULL); // pointer to the match, or NULL
 ```
@@ -685,15 +685,15 @@ The CUDA and ROCm kernels share `include/stringzilla/levenshtein/simt.cuh`, each
 Due to the high-level of fragmentation of SIMD support in different CPUs, StringZilla names its backends after select CPU generations and instruction-set extensions.
 The full v5 set spans the serial SWAR fallback, x86 (Westmere, Goldmont, Haswell, Skylake, Ice Lake), Arm (NEON, NEON-AES, NEON-SHA, SVE, SVE2, SVE2-AES), RISC-V (RVV, RVV-crypto), LoongArch (LASX), IBM Power (PowerVSX), and WebAssembly (v128 and relaxed v128).
 The libraries compile every one of them the toolchain builds, as one probe per kit under `probes/` finds, at the architecture's baseline flags, so one binary runs on any CPU of its architecture and picks among them at runtime.
-GPUs add one capability per vendor, `cuda`, `rocm` and `metal`, which `sz_cuda_capabilities_enabled` and its ROCm and Metal twins report for one device, named by that runtime's ordinal.
-In C, `sz_cpu_capabilities_detected` reports what the CPU runs as a bitmask, `sz_cpu_capabilities_compiled` what the binary holds kernels for, and `sz_cpu_capabilities_enabled` both at once, while `sz_capabilities_name` spells any mask into a buffer of `STRINGZILLA_CAPABILITIES_NAME_CAPACITY` bytes.
+GPUs add one capability per vendor, `cuda`, `rocm` and `metal`, which `sz_capabilities_enabled_cuda` and its ROCm and Metal twins report for one device, named by that runtime's ordinal.
+In C, `sz_capabilities_detected_cpu` reports what the CPU runs as a bitmask, `sz_capabilities_compiled_cpu` what the binary holds kernels for, and `sz_capabilities_enabled_cpu` both at once, while `sz_capabilities_name` spells any mask into a buffer of `STRINGZILLA_CAPABILITIES_NAME_CAPACITY` bytes.
 Every verb has a dispatch point, like `sz_find_best`, which takes such a mask and a stream, and runs the best capability the mask shares with the verb's list, `serial` first on the CPU.
-The stream is null on the CPU, and on a GPU names the device, null meaning the default one, while `sz_cuda_stream_init(ordinal, &stream)` and its ROCm and Metal twins make one on any other.
+The stream is null on the CPU, and on a GPU names the device, null meaning the default one, while `sz_stream_init_cuda(ordinal, &stream)` and its ROCm and Metal twins make one on any other.
 Every dispatch point returns a status, `sz_missing_kernel_k` when no capability in the mask has the kernel.
 
 ```c
 sz_capability_t capabilities = sz_cap_serial_k;
-sz_cpu_capabilities_enabled(&capabilities); // detected on this CPU and compiled into this binary
+sz_capabilities_enabled_cpu(&capabilities); // detected on this CPU and compiled into this binary
 sz_cptr_t match = NULL;
 sz_find_best(text, length, pattern, 3, &match, capabilities, NULL);                 // the best capability
 sz_find_best(text, length, pattern, 3, &match, capabilities & ~sz_cap_sve_k, NULL); // anything but SVE

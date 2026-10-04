@@ -27,11 +27,11 @@ std::size_t test_cross_dispatch(environment_t const &env);
 /** The first device reports the ROCm baseline, and one past the last reports none. */
 void test_rocm_capabilities_unit() {
     sz_size_t devices = 0;
-    verify(sz_rocm_count_devices(&devices) == sz_success_k && devices != 0);
+    verify(sz_device_count_rocm(&devices) == sz_success_k && devices != 0);
     sz_capability_t reported = 0;
-    verify(sz_rocm_capabilities_detected(0, &reported) == sz_success_k);
+    verify(sz_capabilities_detected_rocm(0, &reported) == sz_success_k);
     verify(reported == sz_cap_rocm_k);
-    verify(sz_rocm_capabilities_detected(devices, &reported) == sz_missing_gpu_k);
+    verify(sz_capabilities_detected_rocm(devices, &reported) == sz_missing_gpu_k);
 }
 
 } // namespace ashvardanian::stringzilla::test

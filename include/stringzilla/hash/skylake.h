@@ -767,13 +767,14 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_skylake_(sz_sha256_sta
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
-STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_skylake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_skylake_(text, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_skylake_(state, seed);
     return sz_success_k;
@@ -781,14 +782,14 @@ STRINGZILLA_API sz_status_t sz_hash_state_init_skylake(sz_hash_state_t *state, s
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_skylake(sz_cptr_t start, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream) {
+                                                                            sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_skylake_(start, length, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_skylake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Skylake has AVX-512BW but neither VBMI, the `vpermb` byte slide, nor VAES, so the absorb
     // stays the four-lane AES-NI Westmere kernel. What Westmere lacks is a masked load: it merges
@@ -818,21 +819,23 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_skylake(sz_hash_state_t *state_
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // ? No better way to fold the state on Skylake is known than the Westmere implementation.
     *hash = sz_hash_state_digest_westmere_(state);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_random_westmere_(target, length, nonce);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                void *stream) {
+                                                                sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t const lanes_count = texts->count;
 
@@ -889,7 +892,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                                sz_u8_t *digests, void *stream) {
+                                                                sz_u8_t *digests, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t first_lane_index = 0;
     for (; first_lane_index < states_count; first_lane_index += 16) {

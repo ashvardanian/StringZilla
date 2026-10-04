@@ -9,12 +9,12 @@
 /** The shape of @c sz_find_best, which every search this file parameterizes on shares. */
 typedef sz_status_t (*sz_py_finder_t)(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                       sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                      void *stream);
+                                      sz_stream_t stream);
 
 /** Finds the first byte of @p haystack present in @p needle, as @c sz_find_byte_from does. */
 static sz_status_t sz_py_find_byte_from_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                         void *stream) {
+                                         sz_stream_t stream) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -24,7 +24,7 @@ static sz_status_t sz_py_find_byte_from_(sz_cptr_t haystack, sz_size_t haystack_
 /** Finds the first byte of @p haystack absent from @p needle, as @c sz_find_byte_not_from does. */
 static sz_status_t sz_py_find_byte_not_from_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                              sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                             void *stream) {
+                                             sz_stream_t stream) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -35,7 +35,7 @@ static sz_status_t sz_py_find_byte_not_from_(sz_cptr_t haystack, sz_size_t hayst
 /** Finds the last byte of @p haystack present in @p needle, as @c sz_rfind_byte_from does. */
 static sz_status_t sz_py_rfind_byte_from_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                          void *stream) {
+                                          sz_stream_t stream) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);
@@ -45,7 +45,7 @@ static sz_status_t sz_py_rfind_byte_from_(sz_cptr_t haystack, sz_size_t haystack
 /** Finds the last byte of @p haystack absent from @p needle, as @c sz_rfind_byte_not_from does. */
 static sz_status_t sz_py_rfind_byte_not_from_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                               sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                              void *stream) {
+                                              sz_stream_t stream) {
     sz_byteset_t set;
     sz_byteset_init(&set);
     for (; needle_length; ++needle, --needle_length) sz_byteset_add(&set, *needle);

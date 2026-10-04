@@ -781,7 +781,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_uncased_search_v128_( //
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128(                                   //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream) {
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_utf8_uncased_search_v128_(haystack, haystack_length, needle->start, needle->length, needle,
                                           match_length);
@@ -789,13 +789,14 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128(                        
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_v128(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                                       sz_ordering_t *ordering, void *stream) {
+                                                       sz_ordering_t *ordering, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *ordering = sz_utf8_uncased_order_serial_(a, a_length, b, b_length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_utf8_find_cased_v128_(text, length);
     return sz_success_k;

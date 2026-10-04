@@ -155,7 +155,7 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
     sz_substrings_overlap_policy_t overlap_policy;
     sz_size_t hot_states = 0, matches_budget = 0, haystacks_budget = 0;
     sz_capability_t capabilities;
-    void *stream;
+    sz_stream_t stream;
     if (sz_py_export_strings(needles_obj, "needles", &needles) != 0) return -1;
     if (parse_case_sensitivity_(case_sensitivity_obj, &case_sensitivity) != 0) return -1;
     if (parse_overlap_policy_(overlap_policy_obj, &overlap_policy) != 0) return -1;
@@ -244,7 +244,7 @@ static PyObject *SubstringsEngine_counts(SubstringsEngine *self, PyObject *const
 
     sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
@@ -340,7 +340,7 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
 
     sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
@@ -468,7 +468,7 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
 
     sz_capability_t const capability = self->engine.capability;
     sz_sequence_t haystacks, replacements;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
@@ -624,7 +624,7 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
     sz_capability_t const capability = self->engine.capability;
     sz_size_t const needles_count = self->engine.needles_count;
     sz_sequence_t haystacks;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;

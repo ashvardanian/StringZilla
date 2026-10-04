@@ -79,7 +79,7 @@ STRINGZILLA_INLINE void sz_move_serial_(sz_ptr_t target, sz_cptr_t source, sz_si
  *  tape accessors, which every group's copy starts from and a device one then replaces. */
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_serial_(sz_sequence_t *target, sz_sequence_t const *source,
                                                            sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                           void *stream) {
+                                                           sz_stream_t stream) {
     sz_size_t const count = source->count;
     if (count >= STRINGZILLA_SIZE_MAX / sizeof(sz_u64_t)) return sz_bad_alloc_k;
     sz_size_t bytes = (count + 1) * sizeof(sz_u64_t);
@@ -105,25 +105,25 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_serial_(sz_sequence_t *target
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_lookup_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                             char const lut[sz_at_least_(256)], void *stream) {
+                                             char const lut[sz_at_least_(256)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_lookup_serial_(target, source, length, lut);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_serial_(target, length, value);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_copy_serial_(target, source, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_move_serial_(target, source, length);
     return sz_success_k;
@@ -136,7 +136,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *all
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz_sequence_t const *source,
                                                        sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     if (source->get_start != sz_sequence_tape_start)
         return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
@@ -145,7 +145,7 @@ STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(void *stream) {
+STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_success_k;
 }

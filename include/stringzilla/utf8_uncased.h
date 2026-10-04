@@ -54,13 +54,13 @@ extern "C" {
  *  @param[in] needle UTF-8 substring to search for, possibly empty.
  *  @param[in] needle_length Number of bytes in @p needle.
  *  @param[out] prepared The prepared needle, every field filled.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
                                                              sz_utf8_uncased_needle_t *prepared,
-                                                             sz_capability_t capabilities, void *stream);
+                                                             sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Uncased substring search in UTF-8 strings.
@@ -142,7 +142,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, s
  *      matches at the start of @p haystack with a zero @p match_length.
  *  @param[out] match The first match in @p haystack, or @c STRINGZILLA_NULL_CHAR if not found.
  *  @param[out] match_length Number of bytes in the matched region.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -155,7 +155,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, s
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                         sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
                                                         sz_size_t *match_length, sz_capability_t capabilities,
-                                                        void *stream);
+                                                        sz_stream_t stream);
 
 /**
  *  @brief Uncased lexicographic comparison of two UTF-8 strings.
@@ -177,7 +177,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_s
  *
  *  @code{.c}
  *      sz_capability_t capabilities;
- *      sz_cpu_capabilities_enabled(&capabilities);
+ *      sz_capabilities_enabled_cpu(&capabilities);
  *      sz_ordering_t ordering;
  *      sz_utf8_uncased_order_best("Hello", 5, "HELLO", 5, &ordering, capabilities, STRINGZILLA_NULL);
  *      // ordering == sz_equal_k
@@ -191,14 +191,14 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_s
  *  @param[in] b Second UTF-8 string to compare.
  *  @param[in] b_length Number of bytes in the second string.
  *  @param[out] ordering @c sz_less_k if a < b, @c sz_equal_k if a = b, @c sz_greater_k if a > b.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
     sz_cptr_t a, sz_size_t a_length,                    //
     sz_cptr_t b, sz_size_t b_length,                    //
-    sz_ordering_t *ordering, sz_capability_t capabilities, void *stream);
+    sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Locate the first cased, or case-foldable, codepoint in a UTF-8 string.
@@ -259,12 +259,12 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
  *  @param[in] text UTF-8 string to check.
  *  @param[in] length Number of bytes in @p text.
  *  @param[out] match The first cased codepoint, or @c STRINGZILLA_NULL_CHAR if all are caseless.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_best(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                    sz_capability_t capabilities, void *stream);
+                                                    sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finds the UTF-8 uncased kernel of @p kind, from the best of @p capabilities.
@@ -281,115 +281,120 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_find_kernel(sz_kernel_kind_t kind, s
 
 /** @copydoc sz_utf8_uncased_needle_init_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_serial(sz_cptr_t needle, sz_size_t needle_length,
-                                                               sz_utf8_uncased_needle_t *prepared, void *stream);
+                                                               sz_utf8_uncased_needle_t *prepared, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_serial(                                 //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_serial( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_serial(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                      sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_haswell(                                //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_haswell( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_haswell(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                       void *stream);
+                                                       sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_icelake(                                //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_icelake( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_icelake(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                       void *stream);
+                                                       sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_neon(                                   //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_neon( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_neon(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_neon(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_sve2(                                   //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_sve2( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_sve2(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_sve2(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_rvv(                                    //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_rvv( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_rvv(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_rvv(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                   sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_v128(                                   //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_v128( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
-STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t length, sz_cptr_t *match, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
+                                                    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_loongsonasx(                            //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_loongsonasx( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_loongsonasx(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                           void *stream);
+                                                           sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_uncased_search_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_powervsx(                               //
     sz_cptr_t haystack, sz_size_t haystack_length, sz_utf8_uncased_needle_t const *needle, //
-    sz_cptr_t *match, sz_size_t *match_length, void *stream);
+    sz_cptr_t *match, sz_size_t *match_length, sz_stream_t stream);
 /** @copydoc sz_utf8_uncased_order_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_powervsx( //
-    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, void *stream);
+    sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length, sz_ordering_t *ordering, sz_stream_t stream);
 /** @copydoc sz_utf8_find_cased_best */
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_powervsx(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                        void *stream);
+                                                        sz_stream_t stream);
 #endif
 
 #pragma endregion
@@ -412,7 +417,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_powervsx(sz_cptr_t text, sz_size_
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, sz_size_t needle_length,
                                                              sz_utf8_uncased_needle_t *prepared,
-                                                             sz_capability_t capabilities, void *stream) {
+                                                             sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(needle), sz_unused_(needle_length), sz_unused_(prepared), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
@@ -420,7 +425,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_needle_init_best(sz_cptr_t needle, s
 STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                         sz_utf8_uncased_needle_t const *needle, sz_cptr_t *match,
                                                         sz_size_t *match_length, sz_capability_t capabilities,
-                                                        void *stream) {
+                                                        sz_stream_t stream) {
     sz_unused_(haystack), sz_unused_(haystack_length), sz_unused_(needle), sz_unused_(match), sz_unused_(match_length),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
@@ -429,14 +434,14 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_search_best(sz_cptr_t haystack, sz_s
 STRINGZILLA_API sz_status_t sz_utf8_uncased_order_best( //
     sz_cptr_t a, sz_size_t a_length,                    //
     sz_cptr_t b, sz_size_t b_length,                    //
-    sz_ordering_t *ordering, sz_capability_t capabilities, void *stream) {
+    sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(a), sz_unused_(a_length), sz_unused_(b), sz_unused_(b_length), sz_unused_(ordering),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_find_cased_best(sz_cptr_t text, sz_size_t length, sz_cptr_t *match,
-                                                    sz_capability_t capabilities, void *stream) {
+                                                    sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(match), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }

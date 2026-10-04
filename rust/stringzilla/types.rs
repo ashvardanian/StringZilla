@@ -32,6 +32,8 @@ pub(crate) type sz_capability_t = u64;
 #[allow(non_camel_case_types)]
 pub(crate) type sz_size_t = usize;
 #[allow(non_camel_case_types)]
+pub(crate) type sz_stream_t = *mut c_void;
+#[allow(non_camel_case_types)]
 pub(crate) type sz_status_t = i32;
 #[allow(non_camel_case_types)]
 pub(crate) type sz_bool_t = i32;
@@ -479,16 +481,16 @@ pub(crate) fn match_offset<T>(result: *const T, haystack_pointer: *const T) -> u
 
 /// One GPU vendor's stream producer and the release of what it made.
 type StreamProducers = (
-    unsafe extern "C" fn(sz_size_t, *mut *mut c_void) -> sz_status_t,
-    unsafe extern "C" fn(*mut c_void) -> sz_status_t,
+    unsafe extern "C" fn(sz_size_t, *mut sz_stream_t) -> sz_status_t,
+    unsafe extern "C" fn(sz_stream_t) -> sz_status_t,
 );
 
 /// The stream producers of the vendor `capabilities` belong to, none for the CPU's.
 fn stream_producers(capabilities: Capabilities) -> Option<StreamProducers> {
     match capabilities.vendor() {
-        Some(Capability::Cuda) => Some((sz_cuda_stream_init, sz_cuda_stream_free)),
-        Some(Capability::Rocm) => Some((sz_rocm_stream_init, sz_rocm_stream_free)),
-        Some(Capability::Metal) => Some((sz_metal_stream_init, sz_metal_stream_free)),
+        Some(Capability::Cuda) => Some((sz_stream_init_cuda, sz_stream_free_cuda)),
+        Some(Capability::Rocm) => Some((sz_stream_init_rocm, sz_stream_free_rocm)),
+        Some(Capability::Metal) => Some((sz_stream_init_metal, sz_stream_free_metal)),
         _ => None,
     }
 }
@@ -497,14 +499,14 @@ impl Capabilities {
     /// Capabilities this CPU supports, whether or not their kernels were compiled in.
     pub fn cpu_detected() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cpu_capabilities_detected(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_detected_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
     /// CPU capabilities whose kernels were compiled in, whether or not this CPU supports them.
     pub fn cpu_compiled() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cpu_capabilities_compiled(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_compiled_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
@@ -513,7 +515,7 @@ impl Capabilities {
     /// CPU mask to this set itself, so calls without a mask pass [`Capabilities::CPUS`].
     pub fn cpu_enabled() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cpu_capabilities_enabled(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_enabled_cpu(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
@@ -521,14 +523,14 @@ impl Capabilities {
     /// [`Capabilities::cpu_enabled`]. Call it once per thread before using those kernels; it is
     /// idempotent.
     pub fn configure_thread(self) -> Result<(), Status> {
-        unsafe { sz_cpu_configure_thread(self.0) }.check()
+        unsafe { sz_thread_configure_cpu(self.0) }.check()
     }
 
     /// How many CUDA devices this process sees, failing with [`Status::MissingGpu`] where the
     /// runtime finds none or this build lacks its kernels.
     pub fn cuda_count_devices() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_cuda_count_devices(&mut count) }.check()?;
+        unsafe { sz_device_count_cuda(&mut count) }.check()?;
         Ok(count)
     }
 
@@ -536,14 +538,14 @@ impl Capabilities {
     /// their kernels were compiled in; fails with [`Status::MissingGpu`] past the last device.
     pub fn cuda_detected(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cuda_capabilities_detected(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_detected_cuda(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
     /// CUDA capabilities whose kernels were compiled in, whether or not any device supports them.
     pub fn cuda_compiled() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cuda_capabilities_compiled(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_compiled_cuda(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
@@ -551,63 +553,63 @@ impl Capabilities {
     /// [`Capabilities::cuda_compiled`]. The mask names the vendor, and a stream the device.
     pub fn cuda_enabled(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_cuda_capabilities_enabled(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_enabled_cuda(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
     /// [`Capabilities::cuda_count_devices`], for ROCm.
     pub fn rocm_count_devices() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_rocm_count_devices(&mut count) }.check()?;
+        unsafe { sz_device_count_rocm(&mut count) }.check()?;
         Ok(count)
     }
 
     /// [`Capabilities::cuda_detected`], for ROCm.
     pub fn rocm_detected(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_rocm_capabilities_detected(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_detected_rocm(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
     /// [`Capabilities::cuda_compiled`], for ROCm.
     pub fn rocm_compiled() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_rocm_capabilities_compiled(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_compiled_rocm(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
     /// [`Capabilities::cuda_enabled`], for ROCm.
     pub fn rocm_enabled(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_rocm_capabilities_enabled(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_enabled_rocm(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
     /// [`Capabilities::cuda_count_devices`], for Metal.
     pub fn metal_count_devices() -> Result<usize, Status> {
         let mut count: sz_size_t = 0;
-        unsafe { sz_metal_count_devices(&mut count) }.check()?;
+        unsafe { sz_device_count_metal(&mut count) }.check()?;
         Ok(count)
     }
 
     /// [`Capabilities::cuda_detected`], for Metal.
     pub fn metal_detected(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_metal_capabilities_detected(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_detected_metal(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 
     /// [`Capabilities::cuda_compiled`], for Metal.
     pub fn metal_compiled() -> Self {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_metal_capabilities_compiled(&mut capabilities) }.infallible();
+        unsafe { sz_capabilities_compiled_metal(&mut capabilities) }.infallible();
         Capabilities(capabilities)
     }
 
     /// [`Capabilities::cuda_enabled`], for Metal.
     pub fn metal_enabled(ordinal: usize) -> Result<Self, Status> {
         let mut capabilities: sz_capability_t = 0;
-        unsafe { sz_metal_capabilities_enabled(ordinal, &mut capabilities) }.check()?;
+        unsafe { sz_capabilities_enabled_metal(ordinal, &mut capabilities) }.check()?;
         Ok(Capabilities(capabilities))
     }
 }
@@ -633,7 +635,7 @@ impl Capabilities {
 #[derive(Debug)]
 pub struct Stream {
     capabilities: Capabilities,
-    handle: *mut c_void,
+    handle: sz_stream_t,
     owned: bool,
 }
 
@@ -670,7 +672,7 @@ impl Stream {
     ///
     /// `handle` must be null or a live stream of the vendor `capabilities` name, a `cudaStream_t`,
     /// a `hipStream_t` or an `id<MTLCommandQueue>`, null on the CPU, and outlive the result.
-    pub unsafe fn from_raw(capabilities: Capabilities, handle: *mut c_void) -> Self {
+    pub unsafe fn from_raw(capabilities: Capabilities, handle: sz_stream_t) -> Self {
         Stream {
             capabilities,
             handle,
@@ -684,7 +686,7 @@ impl Stream {
     }
 
     /// The vendor's handle, null for a default stream.
-    pub fn as_raw(&self) -> *mut c_void {
+    pub fn as_raw(&self) -> sz_stream_t {
         self.handle
     }
 

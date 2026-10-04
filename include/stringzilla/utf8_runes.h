@@ -25,7 +25,7 @@ extern "C" {
  *
  *  @code{.c}
  *      sz_capability_t capabilities;
- *      sz_cpu_capabilities_enabled(&capabilities);
+ *      sz_capabilities_enabled_cpu(&capabilities);
  *      sz_size_t char_count;
  *      sz_utf8_count_best(text, length, &char_count, capabilities, NULL);
  *      printf("String has %zu characters\n", char_count);
@@ -34,12 +34,12 @@ extern "C" {
  *  @param[in] text String to be scanned.
  *  @param[in] length Number of bytes in the string.
  *  @param[out] count Number of UTF-8 characters in the string.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length, sz_size_t *count,
-                                               sz_capability_t capabilities, void *stream);
+                                               sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Skip forward to the Nth UTF-8 character.
@@ -66,12 +66,12 @@ STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length,
  *  @param[in] length Number of bytes in the string.
  *  @param[in] n Number of UTF-8 characters to skip, 0-indexed, so `n = 0` yields @p text.
  *  @param[out] position The Nth character, or NULL if the string has fewer than @p n characters.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
 STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              sz_capability_t capabilities, void *stream);
+                                              sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Unpack a UTF-8 string into UTF-32 codepoints.
@@ -113,7 +113,7 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, 
  *  @param[in] runes_capacity Capacity of the @p runes buffer, in @c sz_rune_t entries.
  *  @param[out] runes_count Number of runes unpacked.
  *  @param[out] bytes_consumed Bytes of @p text decoded, the offset the next call resumes at.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  */
@@ -121,7 +121,7 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_best(       //
     sz_cptr_t text, sz_size_t length,                  //
     sz_rune_t *runes, sz_size_t runes_capacity,        //
     sz_size_t *runes_count, sz_size_t *bytes_consumed, //
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finds the UTF-8 runes kernel of @p kind, from the best of @p capabilities.
@@ -137,126 +137,132 @@ STRINGZILLA_API sz_status_t sz_utf8_runes_find_kernel(sz_kernel_kind_t kind, sz_
 #pragma region Platform Specific Backends
 
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                 sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                void *stream);
+                                                sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_serial( //
     sz_cptr_t text, sz_size_t length,              //
     sz_rune_t *runes, sz_size_t runes_capacity,    //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                  sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                 void *stream);
+                                                 sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_haswell( //
     sz_cptr_t text, sz_size_t length,               //
     sz_rune_t *runes, sz_size_t runes_capacity,     //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                  sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                 void *stream);
+                                                 sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_icelake( //
     sz_cptr_t text, sz_size_t length,               //
     sz_rune_t *runes, sz_size_t runes_capacity,     //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              void *stream);
+                                              sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_neon( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              void *stream);
+                                              sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_sve2( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                             void *stream);
+                                             sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_rvv( //
     sz_cptr_t text, sz_size_t length,           //
     sz_rune_t *runes, sz_size_t runes_capacity, //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              void *stream);
+                                              sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_v128( //
     sz_cptr_t text, sz_size_t length,            //
     sz_rune_t *runes, sz_size_t runes_capacity,  //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128RELAXED
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                      sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                     void *stream);
+                                                     sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                      sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                     void *stream);
+                                                     sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_loongsonasx( //
     sz_cptr_t text, sz_size_t length,                   //
     sz_rune_t *runes, sz_size_t runes_capacity,         //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_count_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream);
+STRINGZILLA_API sz_status_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                   sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                  void *stream);
+                                                  sz_stream_t stream);
 /** @copydoc sz_utf8_decode_best */
 STRINGZILLA_API sz_status_t sz_utf8_decode_powervsx( //
     sz_cptr_t text, sz_size_t length,                //
     sz_rune_t *runes, sz_size_t runes_capacity,      //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream);
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #pragma endregion
@@ -279,13 +285,13 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_powervsx( //
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length, sz_size_t *count,
-                                               sz_capability_t capabilities, void *stream) {
+                                               sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(count), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              sz_capability_t capabilities, void *stream) {
+                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(n), sz_unused_(position), sz_unused_(capabilities),
         sz_unused_(stream);
     return sz_missing_library_k;
@@ -295,7 +301,7 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_best(       //
     sz_cptr_t text, sz_size_t length,                  //
     sz_rune_t *runes, sz_size_t runes_capacity,        //
     sz_size_t *runes_count, sz_size_t *bytes_consumed, //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(runes), sz_unused_(runes_capacity), sz_unused_(runes_count),
         sz_unused_(bytes_consumed), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

@@ -246,19 +246,19 @@ STRINGZILLA_INLINE void sz_move_skylake_(sz_ptr_t target, sz_cptr_t source, sz_s
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
-STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_skylake_(target, length, value);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_copy_skylake_(target, source, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_move_skylake_(target, source, length);
     return sz_success_k;

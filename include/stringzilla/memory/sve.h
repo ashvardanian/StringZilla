@@ -236,7 +236,7 @@ STRINGZILLA_INLINE void sz_lookup_sve_(sz_ptr_t target, sz_cptr_t source, sz_siz
 
 #if STRINGZILLA_TARGET_SVE
 
-STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
     if (svcntb() <= 16) sz_fill_neon_(target, length, value);
@@ -244,7 +244,7 @@ STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
     if (svcntb() <= 16) sz_copy_neon_(target, source, length);
@@ -252,7 +252,7 @@ STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_si
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
     if (svcntb() <= 16) sz_move_neon_(target, source, length);
@@ -261,7 +261,7 @@ STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_si
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                          char const lut[sz_at_least_(256)], void *stream) {
+                                          char const lut[sz_at_least_(256)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Graviton 5: the scalable memory ops only outrun NEON on registers wider than 128 bits.
     if (svcntb() <= 16) sz_lookup_neon_(target, source, length, lut);

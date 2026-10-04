@@ -1702,7 +1702,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_serial(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                        sz_size_t *target_length, void *stream) {
+                                                        sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *target_length = sz_utf8_uncased_fold_serial_(source, source_length, target);
     return sz_success_k;

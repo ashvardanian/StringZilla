@@ -30,7 +30,7 @@ extern "C" {
  *  @param[out] lengths Word byte lengths, at least @p capacity entries.
  *  @param[in] capacity Capacity of @p lengths, in entries.
  *  @param[out] count Number of words written, at most @p capacity.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *
@@ -38,7 +38,7 @@ extern "C" {
  */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                     sz_size_t capacity, sz_size_t *count, sz_capability_t capabilities,
-                                                    void *stream);
+                                                    sz_stream_t stream);
 
 /**
  *  @brief Get the Unicode TR29 Word_Break property for a codepoint.
@@ -108,54 +108,54 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_find_kernel(sz_kernel_kind_t kind
 
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                      sz_size_t capacity, sz_size_t *count, void *stream);
+                                                      sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                       sz_size_t capacity, sz_size_t *count, void *stream);
+                                                       sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                       sz_size_t capacity, sz_size_t *count, void *stream);
+                                                       sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_neon(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                    sz_size_t capacity, sz_size_t *count, void *stream);
+                                                    sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                    sz_size_t capacity, sz_size_t *count, void *stream);
+                                                    sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                   sz_size_t capacity, sz_size_t *count, void *stream);
+                                                   sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                    sz_size_t capacity, sz_size_t *count, void *stream);
+                                                    sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                           sz_size_t capacity, sz_size_t *count, void *stream);
+                                                           sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_wordbreaks_best */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                        sz_size_t capacity, sz_size_t *count, void *stream);
+                                                        sz_size_t capacity, sz_size_t *count, sz_stream_t stream);
 #endif
 
 #pragma endregion
@@ -178,7 +178,7 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_
 
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_best(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
                                                     sz_size_t capacity, sz_size_t *count, sz_capability_t capabilities,
-                                                    void *stream) {
+                                                    sz_stream_t stream) {
     sz_unused_(text), sz_unused_(length), sz_unused_(lengths), sz_unused_(capacity), sz_unused_(count),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

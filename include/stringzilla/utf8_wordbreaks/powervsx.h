@@ -593,7 +593,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_powervsx_( //
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                        sz_size_t capacity, sz_size_t *count, void *stream) {
+                                                        sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_wordbreaks_powervsx_(text, length, lengths, capacity);
     sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));
@@ -610,7 +610,7 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_
  *  little-endian element order shipped on ppc64le CI; the big-endian entry defers to the serial
  *  reference rather than ship an untested branch. */
 STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                        sz_size_t capacity, sz_size_t *count, void *stream) {
+                                                        sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_wordbreaks_serial_(text, length, lengths, capacity);
     return sz_success_k;

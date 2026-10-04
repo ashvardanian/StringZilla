@@ -30,7 +30,7 @@ extern "C" {
 STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                     //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream) {
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Batching four hashes over SVE2-AES measured no faster on Neoverse V3: table probes dominate.
     return sz_sequence_intersect_serial_(first_sequence, second_sequence, allocator, seed, intersection_count,

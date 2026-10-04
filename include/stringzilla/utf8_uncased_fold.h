@@ -44,7 +44,7 @@ extern "C" {
  *      char const *source = "HELLO";
  *      char target[15]; // 5 * 3, a safe overestimate
  *      sz_capability_t capabilities;
- *      sz_cpu_capabilities_enabled(&capabilities);
+ *      sz_capabilities_enabled_cpu(&capabilities);
  *      sz_size_t target_length;
  *      sz_utf8_uncased_fold_best(source, 5, target, &target_length, capabilities, NULL);
  *      // target now contains "hello", target_length = 5
@@ -58,7 +58,7 @@ extern "C" {
  *  @param[in] source_length Number of bytes in the source buffer.
  *  @param[out] target Buffer to write the case-folded UTF-8 string.
  *  @param[out] target_length Number of bytes written to the target buffer.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the
  *      device; null for the default.
  *  @return @c sz_success_k, @c sz_missing_kernel_k when no capability in @p capabilities has it,
@@ -70,7 +70,7 @@ extern "C" {
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_best( //
     sz_cptr_t source, sz_size_t source_length,         //
     sz_ptr_t target, sz_size_t *target_length,         //
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Finds the UTF-8 case folding kernel of @p kind, from the best of @p capabilities.
@@ -88,76 +88,76 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_find_kernel(sz_kernel_kind_t ki
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_serial(                                  //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_haswell(                                 //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_icelake(                                 //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_neon(                                    //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_sve2(                                    //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rvv(                                     //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_v128(                                    //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_loongsonasx(                             //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_powervsx(                                //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_cuda(                                    //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_utf8_uncased_fold_best */
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(                                    //
     sz_cptr_t source, sz_size_t source_length, sz_ptr_t target, sz_size_t *target_length, //
-    void *stream);
+    sz_stream_t stream);
 #endif
 
 #pragma endregion
@@ -185,7 +185,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rocm(                          
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_best( //
     sz_cptr_t source, sz_size_t source_length,         //
     sz_ptr_t target, sz_size_t *target_length,         //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(source), sz_unused_(source_length), sz_unused_(target), sz_unused_(target_length),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

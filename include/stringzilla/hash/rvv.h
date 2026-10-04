@@ -473,27 +473,28 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_rvv_(sz_hash_state_t const *pac
 
 #if STRINGZILLA_TARGET_RVV
 
-STRINGZILLA_API sz_status_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_rvv(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_rvv_(text, length);
     return sz_success_k;
 }
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_rvv(sz_cptr_t start, sz_size_t length,
-                                                                        sz_u64_t seed, sz_u64_t *hash, void *stream) {
+                                                                        sz_u64_t seed, sz_u64_t *hash,
+                                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_rvv_(start, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_rvv(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_rvv(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_serial_(state, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_rvv(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                     void *stream) {
+                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
     // `ins` is exactly one 64-byte window. Track how many bytes it holds and absorb it only once it becomes
@@ -534,13 +535,14 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_rvv(sz_hash_state_t *packed, sz
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_rvv(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_rvv(sz_hash_state_t const *packed, sz_u64_t *hash,
+                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_rvv_(packed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_rvv(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_rvv(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
@@ -560,14 +562,14 @@ STRINGZILLA_API sz_status_t sz_fill_random_rvv(sz_ptr_t target, sz_size_t length
 }
 
 /*  SHA-256 has no AES structure to vectorize within RVV's base profile, so it stays serial. */
-STRINGZILLA_API sz_status_t sz_sha256_state_init_rvv(sz_sha256_state_t *state_ptr, void *stream) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_rvv(sz_sha256_state_t *state_ptr, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_init_serial_(state_ptr);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_rvv(sz_sha256_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_update_serial_(state_ptr, text, length);
     return sz_success_k;
@@ -575,7 +577,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_rvv(sz_sha256_state_t *state_
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvv(sz_sha256_state_t const *state_ptr,
                                                        sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_digest_serial_(state_ptr, digest);
     return sz_success_k;

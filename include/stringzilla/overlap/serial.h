@@ -286,7 +286,7 @@ STRINGZILLA_INLINE void *sz_overlap_engine_head_(sz_overlap_engine_t const *engi
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_sequence_t const *queries, sz_size_t const *window_widths,
                                                        sz_size_t window_widths_count, sz_size_t head_bytes,
-                                                       sz_allocator_t const *allocator, void *stream,
+                                                       sz_allocator_t const *allocator, sz_stream_t stream,
                                                        sz_overlap_engine_t *engine) {
     if (!window_widths_count) return sz_unexpected_dimensions_k;
     sz_size_t const count = queries->count;
@@ -352,7 +352,8 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_ca
 
 /** Grows @p engine 's round block to @p bytes on the device of @p stream, keeping whatever it
  *  already holds when that is enough. */
-STRINGZILLA_INLINE sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engine, sz_size_t bytes,
+                                                       sz_stream_t stream) {
     if (engine->scratch_bytes >= bytes) return sz_success_k;
     if (engine->scratch)
         engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
@@ -372,7 +373,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t co
 
 /** Returns both of @p engine 's blocks to the allocator they were built with, once the work queued
  *  on @p stream is done with them, and leaves it empty. */
-STRINGZILLA_INLINE void sz_overlap_engine_close_(sz_overlap_engine_t *engine, void *stream) {
+STRINGZILLA_INLINE void sz_overlap_engine_close_(sz_overlap_engine_t *engine, sz_stream_t stream) {
     if (engine->scratch)
         engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
     if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle, stream);
@@ -567,7 +568,7 @@ STRINGZILLA_INLINE void sz_overlap_engine_fill_serial_(sz_overlap_engine_t *engi
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                           sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                           sz_size_t candidates_budget, sz_allocator_t *allocator,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
     sz_allocator_t host;
@@ -595,7 +596,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *e
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                     sz_size_t scores_candidate_stride, void *stream) {
+                                                     sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);

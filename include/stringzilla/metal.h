@@ -151,7 +151,7 @@ typedef struct sz_metal_block_t {
 typedef struct sz_metal_pending_t {
 
     /** The @c id<MTLCommandQueue>, retained while pending. */
-    void *queue;
+    sz_stream_t queue;
 
     /** Command buffers committed since a synchronization last took them, in order. */
     void **commands;
@@ -168,7 +168,7 @@ typedef struct sz_metal_context_t {
     void *device;
 
     /** Its default @c id<MTLCommandQueue>, which a null stream means. */
-    void *queue;
+    sz_stream_t queue;
 
     /** Guards every member below. */
     os_unfair_lock lock;
@@ -203,7 +203,7 @@ typedef struct sz_metal_call_t {
     sz_metal_context_t *context;
 
     /** The @c id<MTLCommandQueue> the call encodes into. */
-    void *queue;
+    sz_stream_t queue;
 
     /** The command buffer and compute encoder, both null until the first dispatch opens them. */
     void *commands, *encoder;
@@ -224,7 +224,7 @@ STRINGZILLA_INLINE sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *cont
  *      null one, built on first use and kept for the process.
  *  @return The context, or null without a device or past @ref sz_metal_contexts_max_k devices.
  */
-STRINGZILLA_INLINE sz_metal_context_t *sz_metal_context_(void *stream) {
+STRINGZILLA_INLINE sz_metal_context_t *sz_metal_context_(sz_stream_t stream) {
     os_unfair_lock_t contexts_lock;
     sz_metal_context_t *const contexts = sz_metal_contexts_(&contexts_lock);
     void *const device = stream ? sz_metal_get_(stream, "device") : MTLCreateSystemDefaultDevice();
@@ -240,7 +240,7 @@ STRINGZILLA_INLINE sz_metal_context_t *sz_metal_context_(void *stream) {
             break;
         }
         if (contexts[index].device) continue;
-        void *const queue = sz_metal_get_(device, "newCommandQueue");
+        sz_stream_t const queue = sz_metal_get_(device, "newCommandQueue");
         if (queue) contexts[index].device = device, contexts[index].queue = queue, context = contexts + index;
         kept = queue ? sz_true_k : sz_false_k;
         break;
@@ -251,7 +251,7 @@ STRINGZILLA_INLINE sz_metal_context_t *sz_metal_context_(void *stream) {
 }
 
 /** Resolves the stream a call names: @p stream itself, or @p context 's default queue for null. */
-STRINGZILLA_INLINE void *sz_metal_queue_(sz_metal_context_t const *context, void *stream) {
+STRINGZILLA_INLINE sz_stream_t sz_metal_queue_(sz_metal_context_t const *context, sz_stream_t stream) {
     return stream ? stream : context->queue;
 }
 
@@ -259,7 +259,7 @@ STRINGZILLA_INLINE void *sz_metal_queue_(sz_metal_context_t const *context, void
  *  @brief Opens one call on @p stream 's device, its encoder left for the first dispatch to open.
  *  @return @c sz_success_k, or @c sz_missing_gpu_k without a device.
  */
-STRINGZILLA_INLINE sz_status_t sz_device_enter_metal_(void *stream, sz_metal_call_t *call) {
+STRINGZILLA_INLINE sz_status_t sz_device_enter_metal_(sz_stream_t stream, sz_metal_call_t *call) {
     call->context = sz_metal_context_(stream);
     if (!call->context) return sz_missing_gpu_k;
     call->queue = sz_metal_queue_(call->context, stream);
@@ -308,7 +308,7 @@ STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_find_(sz_metal_context_t
 
 /** The pending entry of @p queue with room for one more command buffer, added when missing.
  *  Called under the lock. @return The entry, or null when it cannot grow. */
-STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_reserve_(sz_metal_context_t *context, void *queue) {
+STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_reserve_(sz_metal_context_t *context, sz_stream_t queue) {
     sz_metal_pending_t *pending = sz_metal_pending_find_(context, queue);
     if (!pending) {
         if (context->pending_count == context->pending_capacity) {
@@ -332,7 +332,7 @@ STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_reserve_(sz_metal_contex
     return pending;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     sz_metal_context_t *const context = sz_metal_context_(stream);
     sz_unused_(handle);
     if (!context) return STRINGZILLA_NULL;
@@ -371,8 +371,8 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void
  *      @p stream names there while that queue has committed work.
  *  @return Whether @p context holds it.
  */
-STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void *pointer, void *stream) {
-    void *const queue = sz_metal_queue_(context, stream);
+STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void *pointer, sz_stream_t stream) {
+    sz_stream_t const queue = sz_metal_queue_(context, stream);
     void *released = STRINGZILLA_NULL;
     os_unfair_lock_lock(&context->lock);
     sz_size_t const upto = sz_metal_blocks_upto_(context, (char const *)pointer);
@@ -392,7 +392,8 @@ STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void
     return held;
 }
 
-STRINGZILLA_INLINE void sz_memory_free_unified_metal_(void *pointer, sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_unified_metal_(void *pointer, sz_size_t bytes, void *handle,
+                                                      sz_stream_t stream) {
     sz_unused_(bytes && handle);
     if (!pointer) return;
     sz_metal_context_t *const context = sz_metal_context_(stream);
@@ -419,7 +420,7 @@ STRINGZILLA_INLINE sz_status_t sz_allocator_init_unified_metal_(sz_allocator_t *
 
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_metal_(sz_sequence_t *target, sz_sequence_t const *source,
                                                           sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                          void *stream) {
+                                                          sz_stream_t stream) {
     sz_metal_context_t *const context = sz_metal_context_(stream);
     if (!context) return sz_missing_gpu_k;
     sz_metal_bound_t bound;
@@ -434,10 +435,10 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_metal_(sz_sequence_t *target,
     return sz_success_k;
 }
 
-STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) {
     sz_metal_context_t *const context = sz_metal_context_(stream);
     if (!context) return sz_missing_gpu_k;
-    void *const queue = sz_metal_queue_(context, stream);
+    sz_stream_t const queue = sz_metal_queue_(context, stream);
     void **commands = STRINGZILLA_NULL;
     sz_size_t commands_count = 0;
     os_unfair_lock_lock(&context->lock);
@@ -652,14 +653,14 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allo
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
                                                       sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      void *stream);
+                                                      sz_stream_t stream);
 
 /**
  *  @brief Waits for every call committed to @p stream, then returns the frees deferred behind them.
  *  @return The first failure: @c sz_device_code_mismatch_k when a command buffer finished in error,
  *      or @c sz_missing_gpu_k without a device.
  */
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream);
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 
 #pragma endregion Public API
 
@@ -671,11 +672,13 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allo
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
                                                       sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      void *stream) {
+                                                      sz_stream_t stream) {
     return sz_sequence_realloc_metal_(target, source, allocator, allocated_bytes, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(void *stream) { return sz_stream_synchronize_metal_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
+    return sz_stream_synchronize_metal_(stream);
+}
 
 #endif // STRINGZILLA_HEADER_ONLY
 

@@ -105,7 +105,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_enqueue_metal_(sz_metal_call_t *call, 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                          sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                          sz_size_t candidates_budget, sz_allocator_t *allocator,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_metal_call_t call;
     sz_status_t const entered = sz_device_enter_metal_(stream, &call);
     if (entered != sz_success_k) return entered;
@@ -184,7 +184,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                     sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                    sz_size_t scores_candidate_stride, void *stream) {
+                                                    sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_status_t status = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                     scores_candidate_stride);
     if (status != sz_success_k) return status;

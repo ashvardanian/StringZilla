@@ -852,13 +852,13 @@ typedef struct sz_substrings_builder_t {
     sz_allocator_t *allocator;
 
     /** The stream every one of those allocations and releases is made on. */
-    void *stream;
+    sz_stream_t stream;
 } sz_substrings_builder_t;
 
 /** Hands every buffer the build took back to its allocator, leaving the builder empty. */
 STRINGZILLA_INLINE void sz_substrings_builder_free_(sz_substrings_builder_t *builder) {
     sz_allocator_t *const allocator = builder->allocator;
-    void *const stream = builder->stream;
+    sz_stream_t const stream = builder->stream;
     if (builder->nodes)
         allocator->free(builder->nodes, builder->nodes_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle,
                         stream);
@@ -895,7 +895,7 @@ STRINGZILLA_INLINE void sz_substrings_builder_free_(sz_substrings_builder_t *bui
 /** Grows the trie to hold one more state, doubling so insertion stays amortized linear. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_grow_nodes_(sz_substrings_builder_t *builder) {
     sz_allocator_t *const allocator = builder->allocator;
-    void *const stream = builder->stream;
+    sz_stream_t const stream = builder->stream;
     sz_size_t const old_capacity = builder->nodes_capacity;
     sz_size_t const new_capacity = old_capacity ? old_capacity * 2 : 1024;
     sz_substrings_trie_node_t *grown;
@@ -1105,7 +1105,7 @@ STRINGZILLA_INLINE sz_u32_t sz_substrings_builder_chase_(sz_substrings_builder_t
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substrings_builder_t *builder) {
     sz_allocator_t *const allocator = builder->allocator;
-    void *const stream = builder->stream;
+    sz_stream_t const stream = builder->stream;
     sz_size_t const states = builder->nodes_count;
     sz_size_t band_first, band_last, discovered, byte;
     sz_u32_t child;
@@ -1153,7 +1153,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substring
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substrings_builder_t *builder,
                                                                     sz_size_t minimum) {
     sz_allocator_t *const allocator = builder->allocator;
-    void *const stream = builder->stream;
+    sz_stream_t const stream = builder->stream;
     sz_size_t const old_capacity = builder->slots_capacity;
     sz_size_t const new_capacity = sz_size_bit_ceil(minimum);
     sz_size_t const old_words = old_capacity ? (old_capacity >> 6) + 8 : 0;
@@ -1570,7 +1570,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_bui
 
 #pragma region Building
 
-STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engine, void *stream) {
+STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engine, sz_stream_t stream) {
     sz_allocator_t *const allocator = &engine->allocator;
     if (engine->memory) allocator->free(engine->memory, engine->memory_bytes, allocator->handle, stream);
     if (engine->scratch) allocator->free(engine->scratch, engine->scratch_bytes, allocator->handle, stream);
@@ -1591,7 +1591,7 @@ STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engin
 /** The serial copy in the kernel's shape, which an engine splices with until its dispatch unit
  *  resolves a faster copy kernel. */
 STRINGZILLA_OUTLINED_ sz_status_t sz_substrings_copy_serial_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_unused_(stream);
     sz_copy_serial_(target, source, length);
     return sz_success_k;
@@ -1610,8 +1610,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
                                                              sz_substrings_overlap_policy_t overlap_policy,
                                                              sz_size_t hot_states, sz_size_t matches_budget,
                                                              sz_capability_t capability,
-                                                             sz_allocator_t const *requested_allocator, void *stream,
-                                                             sz_substrings_engine_t *engine) {
+                                                             sz_allocator_t const *requested_allocator,
+                                                             sz_stream_t stream, sz_substrings_engine_t *engine) {
     sz_substrings_builder_t builder;
     sz_substrings_layout_t layout;
     sz_allocator_t resolved;
@@ -2552,7 +2552,7 @@ STRINGZILLA_INLINE void sz_substrings_report_clear_(sz_substrings_report_t *repo
 }
 
 /** Allocates and zeroes the host arena, which is the second and last block an engine owns. */
-STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engine_t *engine, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_engine_t *engine, sz_stream_t stream) {
     sz_substrings_host_arena_t const arena = sz_substrings_host_arena_(
         engine->needles_count, engine->max_source_match_bytes, engine->overlap_policy);
     sz_allocator_t *const allocator = &engine->allocator;
@@ -2574,7 +2574,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_en
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_capability_t capability, sz_allocator_t *allocator, void *stream) {
+    sz_capability_t capability, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states,
                                                        matches_budget, capability, allocator, stream, engine);
@@ -2855,14 +2855,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream) {
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                           sz_cap_serial_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                        sz_size_t *counts, sz_size_t counts_stride, void *stream) {
+                                                        sz_size_t *counts, sz_size_t counts_stride,
+                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_counts_with_(engine, &walks, haystacks, counts, counts_stride);
@@ -2870,7 +2871,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *
 
 STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                      sz_size_t *matches_offsets, void *stream) {
+                                                      sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);
@@ -2878,7 +2879,8 @@ STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *en
 
 STRINGZILLA_API sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                          sz_sequence_t const *replacements, sz_ptr_t target,
-                                                         sz_size_t target_capacity, sz_size_t *offsets, void *stream) {
+                                                         sz_size_t target_capacity, sz_size_t *offsets,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_replace_with_(engine, &walks, haystacks, replacements, target, target_capacity, offsets);
@@ -2889,7 +2891,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_engin
                                                              sz_f32_t const *document_lengths,
                                                              sz_substrings_bm25_t const *parameters,
                                                              sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                             sz_size_t scores_stride, void *stream) {
+                                                             sz_size_t scores_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_bm25_scores_with_(engine, &walks, haystacks, document_lengths, parameters, needle_weights,

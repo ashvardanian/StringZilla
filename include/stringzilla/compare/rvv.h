@@ -61,14 +61,15 @@ STRINGZILLA_INLINE sz_ordering_t sz_order_rvv_(sz_cptr_t a, sz_size_t a_length, 
 
 #if STRINGZILLA_TARGET_RVV
 
-STRINGZILLA_API sz_status_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream) {
+STRINGZILLA_API sz_status_t sz_equal_rvv(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *equal = sz_equal_rvv_(a, b, length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_order_rvv(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                         sz_ordering_t *ordering, void *stream) {
+                                         sz_ordering_t *ordering, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *ordering = sz_order_rvv_(a, a_length, b, b_length);
     return sz_success_k;

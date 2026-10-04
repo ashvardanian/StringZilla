@@ -303,14 +303,14 @@ static sz_capability_kernels_t const *sz_rfind_byteset_capabilities(void) {
 }
 
 STRINGZILLA_API sz_status_t sz_find_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                              sz_cptr_t *match, sz_capability_t capabilities, void *stream) {
+                                              sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_find_byte_t const kernel = (sz_kernel_find_byte_t)sz_kernel_pick_(capabilities,
                                                                                 sz_find_byte_capabilities());
     return kernel ? kernel(haystack, haystack_length, needle, match, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
-                                               sz_cptr_t *match, sz_capability_t capabilities, void *stream) {
+                                               sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_find_byte_t const kernel = (sz_kernel_find_byte_t)sz_kernel_pick_(capabilities,
                                                                                 sz_rfind_byte_capabilities());
     return kernel ? kernel(haystack, haystack_length, needle, match, stream) : sz_missing_kernel_k;
@@ -318,20 +318,20 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_best(sz_cptr_t haystack, sz_size_t hay
 
 STRINGZILLA_API sz_status_t sz_find_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                         void *stream) {
+                                         sz_stream_t stream) {
     sz_kernel_find_t const kernel = (sz_kernel_find_t)sz_kernel_pick_(capabilities, sz_find_capabilities());
     return kernel ? kernel(haystack, haystack_length, needle, needle_length, match, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length, sz_cptr_t *match, sz_capability_t capabilities,
-                                          void *stream) {
+                                          sz_stream_t stream) {
     sz_kernel_find_t const kernel = (sz_kernel_find_t)sz_kernel_pick_(capabilities, sz_rfind_capabilities());
     return kernel ? kernel(haystack, haystack_length, needle, needle_length, match, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
-                                                 sz_cptr_t *match, sz_capability_t capabilities, void *stream) {
+                                                 sz_cptr_t *match, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_find_byteset_t const kernel = (sz_kernel_find_byteset_t)sz_kernel_pick_(capabilities,
                                                                                       sz_find_byteset_capabilities());
     return kernel ? kernel(haystack, haystack_length, set, match, stream) : sz_missing_kernel_k;
@@ -339,7 +339,7 @@ STRINGZILLA_API sz_status_t sz_find_byteset_best(sz_cptr_t haystack, sz_size_t h
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t haystack_length,
                                                   sz_byteset_t const *set, sz_cptr_t *match,
-                                                  sz_capability_t capabilities, void *stream) {
+                                                  sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_find_byteset_t const kernel = (sz_kernel_find_byteset_t)sz_kernel_pick_(capabilities,
                                                                                       sz_rfind_byteset_capabilities());
     return kernel ? kernel(haystack, haystack_length, set, match, stream) : sz_missing_kernel_k;

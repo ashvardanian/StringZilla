@@ -85,33 +85,35 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_upto16_sve2aes_(sz_cptr_t text, sz_size_t le
  *  SVE2 comes with optional AES extensions, but they yield no performance improvement at all, even
  *  for wider registers, because of the added cost and complexity of dealing with predicates. */
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_sve2aes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_neonaes_(state, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_sve2aes(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_update_neonaes_(state, text, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_sve2aes(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_neonaes_(state);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_sve2aes(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                            void *stream) {
+                                            sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = length <= 16 ? sz_hash_upto16_sve2aes_(text, length, seed) : sz_hash_neonaes_(text, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_random_neonaes_(target, length, nonce);
     return sz_success_k;

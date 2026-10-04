@@ -5143,7 +5143,8 @@ typename concatenation_result<first_type_, second_type_, following_types_...>::t
  *  @sa sz_fill_random_best
  */
 inline status_t fill_random(string_span_t string, std::uint64_t nonce,
-                            sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+                            sz_capability_t capabilities = default_capabilities(),
+                            sz_stream_t stream = nullptr) noexcept {
     return static_cast<status_t>(
         sz_fill_random_best(string.data(), string.size(), static_cast<sz_u64_t>(nonce), capabilities, stream));
 }
@@ -5165,7 +5166,7 @@ inline status_t fill_random(string_span_t string) noexcept {
  *  @sa sz_lookup_best
  */
 inline status_t lookup(string_view_t source, look_up_table_t const &table, char *target,
-                       sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+                       sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) noexcept {
     return static_cast<status_t>(sz_lookup_best((sz_ptr_t)target, (sz_cptr_t)source.data(), (sz_size_t)source.size(),
                                                 (sz_cptr_t)table.raw(), capabilities, stream));
 }
@@ -5177,7 +5178,7 @@ inline status_t lookup(string_view_t source, look_up_table_t const &table, char 
  *  @sa sz_lookup_best
  */
 inline status_t lookup(string_span_t string, look_up_table_t const &table,
-                       sz_capability_t capabilities = default_capabilities(), void *stream = nullptr) noexcept {
+                       sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) noexcept {
     return lookup(string_view_t(string.data(), string.size()), table, string.data(), capabilities, stream);
 }
 
@@ -5228,7 +5229,7 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
 status_t argsort(container_type_ const &container, string_extractor_ const &extractor, std::span<sorted_idx_t> order,
                  std::size_t top_count = 0, bool reverse = false, sz_capability_t capabilities = default_capabilities(),
-                 void *stream = nullptr, allocator_type_ allocator = {}) noexcept {
+                 sz_stream_t stream = nullptr, allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
     // Pack the arguments into a single structure to reference it from the callback.
@@ -5255,7 +5256,7 @@ status_t argsort(container_type_ const &container, string_extractor_ const &extr
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
 status_t argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
                               std::span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false,
-                              sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,
+                              sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr,
                               allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
@@ -5301,7 +5302,7 @@ expected<std::size_t> intersect(                                                
     second_container_ const &second_container, second_extractor_ const &second_extractor, //
     std::uint64_t seed,                                                                   //
     std::span<sorted_idx_t> first_positions, std::span<sorted_idx_t> second_positions,    //
-    sz_capability_t capabilities = default_capabilities(), void *stream = nullptr,        //
+    sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr,  //
     allocator_type_ allocator = {}) noexcept {
 
     std::size_t const max_count = sz_min_of_two(first_container.size(), second_container.size());

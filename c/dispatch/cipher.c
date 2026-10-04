@@ -568,7 +568,7 @@ static sz_capability_kernels_t const *sz_aes256_gcm_decryptor_verify_capabilitie
 }
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_best(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
-                                                    sz_capability_t capabilities, void *stream) {
+                                                    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_key_init_t const kernel = (sz_kernel_aes256_key_init_t)sz_kernel_pick_(
         capabilities, sz_aes256_key_init_capabilities());
     return kernel ? kernel(key, secret, stream) : sz_missing_kernel_k;
@@ -576,7 +576,7 @@ STRINGZILLA_API sz_status_t sz_aes256_key_init_best(sz_aes256_key_t *key, sz_u8_
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_best(sz_aes256_gcm_key_t *key,
                                                         sz_u8_t const secret[sz_at_least_(32)],
-                                                        sz_capability_t capabilities, void *stream) {
+                                                        sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_key_init_t const kernel = (sz_kernel_aes256_gcm_key_init_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_key_init_capabilities());
     return kernel ? kernel(key, secret, stream) : sz_missing_kernel_k;
@@ -587,7 +587,7 @@ STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_best(    //
     sz_u8_t const nonce[sz_at_least_(12)],             //
     sz_u64_t byte_offset,                              //
     sz_cptr_t text, sz_size_t length, sz_ptr_t target, //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_ctr_xor_t const kernel = (sz_kernel_aes256_ctr_xor_t)sz_kernel_pick_(
         capabilities, sz_aes256_ctr_xor_capabilities());
     return kernel ? kernel(key, nonce, byte_offset, text, length, target, stream) : sz_missing_kernel_k;
@@ -599,7 +599,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_best( //
     sz_cptr_t associated, sz_size_t associated_length,  //
     sz_cptr_t text, sz_size_t length, sz_ptr_t target,  //
     sz_u8_t tag[sz_at_least_(16)],                      //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_encrypt_t const kernel = (sz_kernel_aes256_gcm_encrypt_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_encrypt_capabilities());
     return kernel ? kernel(key, nonce, associated, associated_length, text, length, target, tag, stream)
@@ -612,7 +612,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_best( //
     sz_cptr_t associated, sz_size_t associated_length,  //
     sz_cptr_t text, sz_size_t length, sz_ptr_t target,  //
     sz_u8_t const tag[sz_at_least_(16)],                //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_decrypt_t const kernel = (sz_kernel_aes256_gcm_decrypt_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_decrypt_capabilities());
     return kernel ? kernel(key, nonce, associated, associated_length, text, length, target, tag, stream)
@@ -622,7 +622,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_best( //
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_best(sz_aes256_gcm_encryptor_t *encryptor,
                                                               sz_aes256_gcm_key_t const *key,
                                                               sz_u8_t const nonce[sz_at_least_(12)],
-                                                              sz_capability_t capabilities, void *stream) {
+                                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_encryptor_init_t const kernel = (sz_kernel_aes256_gcm_encryptor_init_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_encryptor_init_capabilities());
     return kernel ? kernel(encryptor, key, nonce, stream) : sz_missing_kernel_k;
@@ -630,7 +630,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_best(sz_aes256_gcm_encr
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_best(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                                    sz_size_t length, sz_capability_t capabilities,
-                                                                   void *stream) {
+                                                                   sz_stream_t stream) {
     sz_kernel_aes256_gcm_encryptor_associate_t const kernel = (sz_kernel_aes256_gcm_encryptor_associate_t)
         sz_kernel_pick_(capabilities, sz_aes256_gcm_encryptor_associate_capabilities());
     return kernel ? kernel(encryptor, text, length, stream) : sz_missing_kernel_k;
@@ -638,7 +638,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_best(sz_aes256_gcm
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_best(sz_aes256_gcm_encryptor_t *encryptor, sz_cptr_t text,
                                                                 sz_size_t length, sz_ptr_t target,
-                                                                sz_capability_t capabilities, void *stream) {
+                                                                sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_encryptor_update_t const kernel = (sz_kernel_aes256_gcm_encryptor_update_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_encryptor_update_capabilities());
     return kernel ? kernel(encryptor, text, length, target, stream) : sz_missing_kernel_k;
@@ -646,7 +646,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_best(sz_aes256_gcm_en
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_best(sz_aes256_gcm_encryptor_t const *encryptor,
                                                                 sz_u8_t tag[sz_at_least_(16)],
-                                                                sz_capability_t capabilities, void *stream) {
+                                                                sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_encryptor_digest_t const kernel = (sz_kernel_aes256_gcm_encryptor_digest_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_encryptor_digest_capabilities());
     return kernel ? kernel(encryptor, tag, stream) : sz_missing_kernel_k;
@@ -655,7 +655,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_best(sz_aes256_gcm_en
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_best(sz_aes256_gcm_decryptor_t *decryptor,
                                                               sz_aes256_gcm_key_t const *key,
                                                               sz_u8_t const nonce[sz_at_least_(12)],
-                                                              sz_capability_t capabilities, void *stream) {
+                                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_decryptor_init_t const kernel = (sz_kernel_aes256_gcm_decryptor_init_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_decryptor_init_capabilities());
     return kernel ? kernel(decryptor, key, nonce, stream) : sz_missing_kernel_k;
@@ -663,7 +663,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_best(sz_aes256_gcm_decr
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_best(sz_aes256_gcm_decryptor_t *decryptor, sz_cptr_t text,
                                                                    sz_size_t length, sz_capability_t capabilities,
-                                                                   void *stream) {
+                                                                   sz_stream_t stream) {
     sz_kernel_aes256_gcm_decryptor_associate_t const kernel = (sz_kernel_aes256_gcm_decryptor_associate_t)
         sz_kernel_pick_(capabilities, sz_aes256_gcm_decryptor_associate_capabilities());
     return kernel ? kernel(decryptor, text, length, stream) : sz_missing_kernel_k;
@@ -672,7 +672,8 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_best(sz_aes256_gcm
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_best(sz_aes256_gcm_decryptor_t *decryptor,
                                                                            sz_cptr_t text, sz_size_t length,
                                                                            sz_ptr_t target,
-                                                                           sz_capability_t capabilities, void *stream) {
+                                                                           sz_capability_t capabilities,
+                                                                           sz_stream_t stream) {
     sz_kernel_aes256_gcm_decryptor_update_unverified_t const kernel =
         (sz_kernel_aes256_gcm_decryptor_update_unverified_t)sz_kernel_pick_(
             capabilities, sz_aes256_gcm_decryptor_update_unverified_capabilities());
@@ -681,7 +682,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_best(sz_ae
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_best(sz_aes256_gcm_decryptor_t const *decryptor,
                                                                 sz_u8_t const tag[sz_at_least_(16)],
-                                                                sz_capability_t capabilities, void *stream) {
+                                                                sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_aes256_gcm_decryptor_verify_t const kernel = (sz_kernel_aes256_gcm_decryptor_verify_t)sz_kernel_pick_(
         capabilities, sz_aes256_gcm_decryptor_verify_capabilities());
     return kernel ? kernel(decryptor, tag, stream) : sz_missing_kernel_k;

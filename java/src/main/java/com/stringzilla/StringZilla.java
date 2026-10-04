@@ -92,35 +92,35 @@ public final class StringZilla {
     // initialize, so none of these is `critical(true)`.
     private static final FunctionDescriptor QUERY = FunctionDescriptor.of(JAVA_INT, ADDRESS);
     private static final FunctionDescriptor DEVICE_QUERY = FunctionDescriptor.of(JAVA_INT, JAVA_LONG, ADDRESS);
-    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_DETECTED =
-            down("sz_cpu_capabilities_detected", QUERY);
-    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_COMPILED =
-            down("sz_cpu_capabilities_compiled", QUERY);
-    private static final MethodHandle STRINGZILLA_CPU_CAPABILITIES_ENABLED = down("sz_cpu_capabilities_enabled", QUERY);
-    private static final MethodHandle STRINGZILLA_CPU_CONFIGURE_THREAD =
-            down("sz_cpu_configure_thread", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
-    private static final MethodHandle STRINGZILLA_CUDA_COUNT_DEVICES = down("sz_cuda_count_devices", QUERY);
-    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_DETECTED =
-            down("sz_cuda_capabilities_detected", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_COMPILED =
-            down("sz_cuda_capabilities_compiled", QUERY);
-    private static final MethodHandle STRINGZILLA_CUDA_CAPABILITIES_ENABLED =
-            down("sz_cuda_capabilities_enabled", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_ROCM_COUNT_DEVICES = down("sz_rocm_count_devices", QUERY);
-    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_DETECTED =
-            down("sz_rocm_capabilities_detected", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_COMPILED =
-            down("sz_rocm_capabilities_compiled", QUERY);
-    private static final MethodHandle STRINGZILLA_ROCM_CAPABILITIES_ENABLED =
-            down("sz_rocm_capabilities_enabled", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_METAL_COUNT_DEVICES = down("sz_metal_count_devices", QUERY);
-    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_DETECTED =
-            down("sz_metal_capabilities_detected", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_COMPILED =
-            down("sz_metal_capabilities_compiled", QUERY);
-    private static final MethodHandle STRINGZILLA_METAL_CAPABILITIES_ENABLED =
-            down("sz_metal_capabilities_enabled", DEVICE_QUERY);
-    private static final MethodHandle STRINGZILLA_NAME_CAPABILITIES =
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_CPU =
+            down("sz_capabilities_detected_cpu", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_CPU =
+            down("sz_capabilities_compiled_cpu", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_CPU = down("sz_capabilities_enabled_cpu", QUERY);
+    private static final MethodHandle STRINGZILLA_THREAD_CONFIGURE_CPU =
+            down("sz_thread_configure_cpu", FunctionDescriptor.of(JAVA_INT, JAVA_LONG));
+    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_CUDA = down("sz_device_count_cuda", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_CUDA =
+            down("sz_capabilities_detected_cuda", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_CUDA =
+            down("sz_capabilities_compiled_cuda", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_CUDA =
+            down("sz_capabilities_enabled_cuda", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_ROCM = down("sz_device_count_rocm", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_ROCM =
+            down("sz_capabilities_detected_rocm", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_ROCM =
+            down("sz_capabilities_compiled_rocm", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_ROCM =
+            down("sz_capabilities_enabled_rocm", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_DEVICE_COUNT_METAL = down("sz_device_count_metal", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_DETECTED_METAL =
+            down("sz_capabilities_detected_metal", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_COMPILED_METAL =
+            down("sz_capabilities_compiled_metal", QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_ENABLED_METAL =
+            down("sz_capabilities_enabled_metal", DEVICE_QUERY);
+    private static final MethodHandle STRINGZILLA_CAPABILITIES_NAME =
             downCritical("sz_capabilities_name", FunctionDescriptor.of(JAVA_LONG, JAVA_LONG, ADDRESS, JAVA_LONG));
 
     /** {@code STRINGZILLA_CAPABILITIES_NAME_CAPACITY}, which fits every capability name list. */
@@ -1145,19 +1145,19 @@ public final class StringZilla {
         public static long count(DeviceKind kind) {
             return switch (kind) {
                 case CPU -> 1;
-                case CUDA -> query(STRINGZILLA_CUDA_COUNT_DEVICES, "sz_cuda_count_devices");
-                case ROCM -> query(STRINGZILLA_ROCM_COUNT_DEVICES, "sz_rocm_count_devices");
-                case METAL -> query(STRINGZILLA_METAL_COUNT_DEVICES, "sz_metal_count_devices");
+                case CUDA -> query(STRINGZILLA_DEVICE_COUNT_CUDA, "sz_device_count_cuda");
+                case ROCM -> query(STRINGZILLA_DEVICE_COUNT_ROCM, "sz_device_count_rocm");
+                case METAL -> query(STRINGZILLA_DEVICE_COUNT_METAL, "sz_device_count_metal");
             };
         }
 
         /** What this device runs, as a bitmask, whether or not this binary holds kernels for it. */
         public long capabilitiesDetected() {
             return switch (kind) {
-                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_DETECTED, "sz_cpu_capabilities_detected");
-                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_DETECTED, "sz_cuda_capabilities_detected", ordinal);
-                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_DETECTED, "sz_rocm_capabilities_detected", ordinal);
-                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_DETECTED, "sz_metal_capabilities_detected", ordinal);
+                case CPU -> query(STRINGZILLA_CAPABILITIES_DETECTED_CPU, "sz_capabilities_detected_cpu");
+                case CUDA -> query(STRINGZILLA_CAPABILITIES_DETECTED_CUDA, "sz_capabilities_detected_cuda", ordinal);
+                case ROCM -> query(STRINGZILLA_CAPABILITIES_DETECTED_ROCM, "sz_capabilities_detected_rocm", ordinal);
+                case METAL -> query(STRINGZILLA_CAPABILITIES_DETECTED_METAL, "sz_capabilities_detected_metal", ordinal);
             };
         }
 
@@ -1165,10 +1165,10 @@ public final class StringZilla {
          *  them. Decided at build time. */
         public long capabilitiesCompiled() {
             return switch (kind) {
-                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_COMPILED, "sz_cpu_capabilities_compiled");
-                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_COMPILED, "sz_cuda_capabilities_compiled");
-                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_COMPILED, "sz_rocm_capabilities_compiled");
-                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_COMPILED, "sz_metal_capabilities_compiled");
+                case CPU -> query(STRINGZILLA_CAPABILITIES_COMPILED_CPU, "sz_capabilities_compiled_cpu");
+                case CUDA -> query(STRINGZILLA_CAPABILITIES_COMPILED_CUDA, "sz_capabilities_compiled_cuda");
+                case ROCM -> query(STRINGZILLA_CAPABILITIES_COMPILED_ROCM, "sz_capabilities_compiled_rocm");
+                case METAL -> query(STRINGZILLA_CAPABILITIES_COMPILED_METAL, "sz_capabilities_compiled_metal");
             };
         }
 
@@ -1176,10 +1176,10 @@ public final class StringZilla {
          *  {@link #capabilitiesCompiled()} at once. On the CPU it always includes the serial bit, {@code 1}. */
         public long capabilitiesEnabled() {
             return switch (kind) {
-                case CPU -> query(STRINGZILLA_CPU_CAPABILITIES_ENABLED, "sz_cpu_capabilities_enabled");
-                case CUDA -> query(STRINGZILLA_CUDA_CAPABILITIES_ENABLED, "sz_cuda_capabilities_enabled", ordinal);
-                case ROCM -> query(STRINGZILLA_ROCM_CAPABILITIES_ENABLED, "sz_rocm_capabilities_enabled", ordinal);
-                case METAL -> query(STRINGZILLA_METAL_CAPABILITIES_ENABLED, "sz_metal_capabilities_enabled", ordinal);
+                case CPU -> query(STRINGZILLA_CAPABILITIES_ENABLED_CPU, "sz_capabilities_enabled_cpu");
+                case CUDA -> query(STRINGZILLA_CAPABILITIES_ENABLED_CUDA, "sz_capabilities_enabled_cuda", ordinal);
+                case ROCM -> query(STRINGZILLA_CAPABILITIES_ENABLED_ROCM, "sz_capabilities_enabled_rocm", ordinal);
+                case METAL -> query(STRINGZILLA_CAPABILITIES_ENABLED_METAL, "sz_capabilities_enabled_metal", ordinal);
             };
         }
 
@@ -1189,7 +1189,7 @@ public final class StringZilla {
         public void configureThread(long capabilities) {
             if (kind != DeviceKind.CPU) throw new StatusException(this + ".configureThread", STATUS_MISSING_KERNEL);
             try {
-                check("sz_cpu_configure_thread", (int) STRINGZILLA_CPU_CONFIGURE_THREAD.invokeExact(capabilities));
+                check("sz_thread_configure_cpu", (int) STRINGZILLA_THREAD_CONFIGURE_CPU.invokeExact(capabilities));
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -1200,7 +1200,7 @@ public final class StringZilla {
     public static String capabilitiesName(long capabilities) {
         byte[] names = new byte[CAPABILITIES_NAME_CAPACITY];
         try {
-            long written = (long) STRINGZILLA_NAME_CAPABILITIES.invokeExact(
+            long written = (long) STRINGZILLA_CAPABILITIES_NAME.invokeExact(
                     capabilities, MemorySegment.ofArray(names), (long) names.length);
             return new String(names, 0, (int) written, StandardCharsets.UTF_8);
         } catch (Throwable t) {

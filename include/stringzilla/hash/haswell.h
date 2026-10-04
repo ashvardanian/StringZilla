@@ -547,14 +547,15 @@ STRINGZILLA_INLINE void sz_sha256_multistate_digest_lanes_haswell_(sz_sha256_sta
 
 #if STRINGZILLA_TARGET_HASWELL
 
-STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_haswell_(text, length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                void *stream) {
+                                                                sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t const lanes_count = texts->count;
 
@@ -612,7 +613,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
-                                                                sz_u8_t *digests, void *stream) {
+                                                                sz_u8_t *digests, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t first_lane_index = 0;
     for (; first_lane_index < states_count; first_lane_index += 8) {

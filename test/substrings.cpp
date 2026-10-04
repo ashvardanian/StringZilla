@@ -41,7 +41,7 @@ static sz_status_t substrings_engine_init_dispatched_(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_allocator_t *allocator,
-                                                      void *stream) {
+                                                      sz_stream_t stream) {
     return sz_substrings_engine_init(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                      haystacks_budget, sz::default_capabilities(), allocator, stream);
 }
@@ -75,14 +75,14 @@ struct rationed_allocator_t {
     sz_allocator_t allocator {};
 
     explicit rationed_allocator_t(std::size_t granted) noexcept : grants(granted) {
-        allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *handle, sz_stream_t) -> void * {
             rationed_allocator_t &self = *static_cast<rationed_allocator_t *>(handle);
             if (!self.grants) return nullptr;
             void *const pointer = std::malloc(length ? length : 1);
             if (pointer) --self.grants, self.bytes_held += length;
             return pointer;
         };
-        allocator.free = +[](void *pointer, sz_size_t length, void *handle, void *) {
+        allocator.free = +[](void *pointer, sz_size_t length, void *handle, sz_stream_t) {
             static_cast<rationed_allocator_t *>(handle)->bytes_held -= length;
             std::free(pointer);
         };

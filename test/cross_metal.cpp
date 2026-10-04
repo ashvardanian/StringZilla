@@ -33,7 +33,7 @@ namespace ashvardanian::stringzilla::test {
 /** What Metal device 0 enables, the device whose queue @c main opens, verified to exist. */
 static sz_capability_t metal_capabilities_() {
     sz_capability_t capabilities = 0;
-    verify(sz_metal_capabilities_enabled(0, &capabilities) == sz_success_k);
+    verify(sz_capabilities_enabled_metal(0, &capabilities) == sz_success_k);
     return capabilities;
 }
 
@@ -46,11 +46,11 @@ using metal_vector = std::vector<value_type_, metal_unified_alloc<value_type_>>;
 /** Host views copied into one tape in unified memory, which a kernel reads and the serial reference
  *  calls through the same accessors. */
 struct metal_tape_t {
-    void *queue;
+    sz_stream_t queue;
     sz_sequence_t sequence {};
     sz_size_t bytes = 0;
 
-    explicit metal_tape_t(void *queue) noexcept : queue(queue) {}
+    explicit metal_tape_t(sz_stream_t queue) noexcept : queue(queue) {}
     metal_tape_t(metal_tape_t const &) = delete;
     metal_tape_t &operator=(metal_tape_t const &) = delete;
     ~metal_tape_t() noexcept { reset(); }
@@ -156,7 +156,7 @@ struct levenshtein_metal_corpus_t {
     /** The candidates' tape, which the device reads directly and the serial reference calls. */
     metal_tape_t candidates;
 
-    levenshtein_metal_corpus_t(void *queue, std::size_t count, std::size_t query_symbols, std::size_t query_count,
+    levenshtein_metal_corpus_t(sz_stream_t queue, std::size_t count, std::size_t query_symbols, std::size_t query_count,
                                levenshtein_metal_alphabet_t alphabet)
         : query_views(query_count), candidate_views(count),
           distances(query_count * count, STRINGZILLA_SIZE_MAX, metal_unified_alloc<sz_size_t>(queue)),
@@ -265,7 +265,7 @@ static constexpr std::size_t levenshtein_metal_query_symbols_k[] = {
  *  The corpus alphabet and the engine's symbol are separate, so a byte corpus read as runes feeds
  *  the rune decoder stray continuations, truncated sequences and bytes no rune may start with.
  */
-static void check_levenshtein_metal_equivalence_(void *queue, levenshtein_metal_alphabet_t alphabet,
+static void check_levenshtein_metal_equivalence_(sz_stream_t queue, levenshtein_metal_alphabet_t alphabet,
                                                  sz_levenshtein_symbol_t symbol, metal_backend_t const &backend) {
     for (std::size_t const query_symbols : levenshtein_metal_query_symbols_k)
         for (std::size_t count : {1u, 129u, 2048u}) {
@@ -298,7 +298,7 @@ static void check_levenshtein_metal_equivalence_(void *queue, levenshtein_metal_
 }
 
 /** One backend refusing unregistered memory, and sequences it cannot read, before encoding. */
-static void check_levenshtein_metal_memory_safety_(void *queue, std::mt19937 &generator,
+static void check_levenshtein_metal_memory_safety_(sz_stream_t queue, std::mt19937 &generator,
                                                    metal_backend_t const &backend) {
     levenshtein_metal_corpus_t corpus(queue, 8, 200, 1, levenshtein_metal_alphabet_t::bytes_k);
     sz_levenshtein_engine_t engine {};
@@ -334,7 +334,7 @@ static void check_levenshtein_metal_memory_safety_(void *queue, std::mt19937 &ge
 
 /** The builder refusing a query past what the widest rung holds, in bytes and again in runes, and
  *  a batch holding an empty query, which has no last word to read a score off. */
-static void check_levenshtein_metal_query_safety_(void *queue) {
+static void check_levenshtein_metal_query_safety_(sz_stream_t queue) {
     enum { symbols_k = sz_levenshtein_gpu_words_max_k * 64 + 1 };
     for (levenshtein_metal_alphabet_t const alphabet :
          {levenshtein_metal_alphabet_t::bytes_k, levenshtein_metal_alphabet_t::runes_k}) {
@@ -363,7 +363,7 @@ static void check_levenshtein_metal_query_safety_(void *queue) {
 
 /** The scoring verb commits and returns, so a round big enough to outlive the call is still
  *  running after it, and lands once the queue is synchronized. */
-static void check_levenshtein_metal_asynchrony_(void *queue) {
+static void check_levenshtein_metal_asynchrony_(sz_stream_t queue) {
     levenshtein_metal_corpus_t corpus(queue, 2048, 1024, levenshtein_metal_sweep_queries_k,
                                       levenshtein_metal_alphabet_t::bytes_k);
     sz_levenshtein_engine_t engine {};
@@ -386,10 +386,10 @@ static void check_levenshtein_metal_asynchrony_(void *queue) {
 
 /** Two threads scoring on two queues of one device at once, each joining only its own: encoders
  *  live per call, and the device's shared state sits under one lock. */
-static void check_levenshtein_metal_threads_(void *queue) {
-    void *second = nullptr;
-    verify(sz_metal_stream_init(0, &second) == sz_success_k);
-    auto const round = [](void *stream) {
+static void check_levenshtein_metal_threads_(sz_stream_t queue) {
+    sz_stream_t second = nullptr;
+    verify(sz_stream_init_metal(0, &second) == sz_success_k);
+    auto const round = [](sz_stream_t stream) {
         levenshtein_metal_corpus_t corpus(stream, 2048, 300, levenshtein_metal_sweep_queries_k,
                                           levenshtein_metal_alphabet_t::bytes_k);
         sz_levenshtein_engine_t engine {};
@@ -407,12 +407,12 @@ static void check_levenshtein_metal_threads_(void *queue) {
     std::thread other(round, second);
     round(queue);
     other.join();
-    verify(sz_metal_stream_free(second) == sz_success_k);
+    verify(sz_stream_free_metal(second) == sz_success_k);
 }
 
 /** A tape freed while a round still reads it lives until its queue is joined, and is gone from the
  *  registry after, so a later round over it is refused rather than reading freed memory. */
-static void check_levenshtein_metal_deferred_free_(void *queue) {
+static void check_levenshtein_metal_deferred_free_(sz_stream_t queue) {
     levenshtein_metal_corpus_t corpus(queue, 2048, 1024, levenshtein_metal_sweep_queries_k,
                                       levenshtein_metal_alphabet_t::bytes_k);
     std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
@@ -449,7 +449,7 @@ struct overlap_metal_corpus_t {
     sz_sequence_t query_sequence {};
     metal_tape_t candidates;
 
-    overlap_metal_corpus_t(void *queue, std::mt19937 &generator, std::size_t queries_count, std::size_t count,
+    overlap_metal_corpus_t(sz_stream_t queue, std::mt19937 &generator, std::size_t queries_count, std::size_t count,
                            std::size_t query_length, std::size_t widths_count)
         : views(count), scores(queries_count * count * widths_count, -1.0f, metal_unified_alloc<sz_f32_t>(queue)),
           candidates(queue) {
@@ -493,7 +493,8 @@ static std::vector<sz_f32_t> overlap_serial_reference_(overlap_metal_corpus_t co
 #pragma region Overlap Checks
 
 /** One backend's scores against serial's, bit for bit, over widths from narrowest to widest. */
-static void check_overlap_metal_equivalence_(void *queue, std::mt19937 &generator, metal_backend_t const &backend) {
+static void check_overlap_metal_equivalence_(sz_stream_t queue, std::mt19937 &generator,
+                                             metal_backend_t const &backend) {
     std::array<std::array<sz_size_t, 3>, 2> const width_sets {{{4, 6, 8}, {1, 17, 31}}};
     for (auto const &widths : width_sets)
         for (std::size_t queries_count : {1u, 3u})
@@ -518,7 +519,8 @@ static void check_overlap_metal_equivalence_(void *queue, std::mt19937 &generato
 }
 
 /** One backend refusing unregistered memory, and sequences it cannot read, before encoding. */
-static void check_overlap_metal_memory_safety_(void *queue, std::mt19937 &generator, metal_backend_t const &backend) {
+static void check_overlap_metal_memory_safety_(sz_stream_t queue, std::mt19937 &generator,
+                                               metal_backend_t const &backend) {
     std::array<sz_size_t, 2> const widths {4, 6};
     overlap_metal_corpus_t corpus(queue, generator, 1, 8, 333, widths.size());
     sz_overlap_engine_t engine {};
@@ -562,7 +564,8 @@ static void check_overlap_metal_memory_safety_(void *queue, std::mt19937 &genera
 }
 
 /** The widest window the per-thread ring holds, and the refusals one step past either bound. */
-static void check_overlap_metal_width_safety_(void *queue, std::mt19937 &generator, metal_backend_t const &backend) {
+static void check_overlap_metal_width_safety_(sz_stream_t queue, std::mt19937 &generator,
+                                              metal_backend_t const &backend) {
     std::array<sz_size_t, 1> const widest {sz_overlap_gpu_widest_window_k};
     std::array<sz_size_t, 1> const past {sz_overlap_gpu_widest_window_k + 1};
     std::array<sz_size_t, sz_overlap_gpu_widths_max_k + 1> too_many {};
@@ -593,7 +596,7 @@ static void check_overlap_metal_width_safety_(void *queue, std::mt19937 &generat
 
 /** The scoring verb commits and returns, so a round big enough to outlive the call is still
  *  running after it, and lands once the queue is synchronized. */
-static void check_overlap_metal_asynchrony_(void *queue, std::mt19937 &generator) {
+static void check_overlap_metal_asynchrony_(sz_stream_t queue, std::mt19937 &generator) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     overlap_metal_corpus_t corpus(queue, generator, 8, 4096, 777, widths.size());
     std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
@@ -636,7 +639,8 @@ struct substrings_metal_texts_t {
     /** The texts' tape in unified memory. */
     metal_tape_t tape;
 
-    substrings_metal_texts_t(void *queue, std::vector<std::string> const &texts) : views(texts.size()), tape(queue) {
+    substrings_metal_texts_t(sz_stream_t queue, std::vector<std::string> const &texts)
+        : views(texts.size()), tape(queue) {
         for (std::size_t index = 0; index != texts.size(); ++index) {
             views[index].length = texts[index].size();
             arena.insert(arena.end(), texts[index].begin(), texts[index].end());
@@ -662,9 +666,9 @@ struct substrings_metal_engines_t {
     sz_substrings_engine_t device {};
 
     /** The queue the device engine was built on and is freed on. */
-    void *queue;
+    sz_stream_t queue;
 
-    substrings_metal_engines_t(void *queue, sz_sequence_t const &needles, sz_substrings_overlap_policy_t policy)
+    substrings_metal_engines_t(sz_stream_t queue, sz_sequence_t const &needles, sz_substrings_overlap_policy_t policy)
         : queue(queue) {
         verify(sz_substrings_engine_init_serial(&host, &needles, sz_substrings_cased_k, policy,
                                                 STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, &heap.allocator,
@@ -722,7 +726,7 @@ static std::vector<substrings_metal_case_t> serial_matches_(sz_substrings_engine
 }
 
 /** Every match the device reports, synchronized per call since no verb waits for the caller. */
-static std::vector<substrings_metal_case_t> device_matches_(void *queue, metal_backend_t const &backend,
+static std::vector<substrings_metal_case_t> device_matches_(sz_stream_t queue, metal_backend_t const &backend,
                                                             sz_substrings_engine_t *engine,
                                                             sz_sequence_t const *haystacks) {
     metal_vector<sz_size_t> offsets(haystacks->count + 1, 0, metal_unified_alloc<sz_size_t>(queue));
@@ -770,7 +774,7 @@ static void verify_is_a_cover_(std::vector<substrings_metal_case_t> const &repor
 }
 
 /** The device's matches, counts and rewrite against serial's, over one corpus and policy. */
-static void check_against_serial_(void *queue, metal_backend_t const &backend, substrings_metal_texts_t &corpus,
+static void check_against_serial_(sz_stream_t queue, metal_backend_t const &backend, substrings_metal_texts_t &corpus,
                                   substrings_metal_texts_t &vocabulary, sz_substrings_overlap_policy_t policy,
                                   sz_substrings_cover_fidelity_t fidelity) {
     std::size_t const haystacks_count = corpus.views.size();
@@ -832,8 +836,8 @@ static void check_against_serial_(void *queue, metal_backend_t const &backend, s
 
 /** The device's BM25 against serial's, by byte lengths and by caller-given ones: the device sums in
  *  @c f32 terms and fixed point, so the two agree to rounding rather than bit for bit. */
-static void check_bm25_against_serial_(void *queue, metal_backend_t const &backend, substrings_metal_texts_t &corpus,
-                                       substrings_metal_texts_t &vocabulary) {
+static void check_bm25_against_serial_(sz_stream_t queue, metal_backend_t const &backend,
+                                       substrings_metal_texts_t &corpus, substrings_metal_texts_t &vocabulary) {
     std::size_t const haystacks_count = corpus.views.size();
     sz_sequence_t const *const haystacks = &corpus.tape.sequence;
     substrings_metal_engines_t engines(queue, vocabulary.tape.sequence, sz_substrings_overlapping_k);
@@ -865,8 +869,8 @@ static void check_bm25_against_serial_(void *queue, metal_backend_t const &backe
 }
 
 /** One vocabulary against one corpus under every policy, and scored. */
-static void check_policies_(void *queue, metal_backend_t const &backend, std::vector<std::string> const &haystacks,
-                            std::vector<std::string> const &needles,
+static void check_policies_(sz_stream_t queue, metal_backend_t const &backend,
+                            std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
                             sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
     substrings_metal_texts_t corpus(queue, haystacks), vocabulary(queue, needles);
     check_against_serial_(queue, backend, corpus, vocabulary, sz_substrings_overlapping_k, sz_substrings_cover_exact_k);
@@ -881,7 +885,8 @@ static void check_policies_(void *queue, metal_backend_t const &backend, std::ve
 
 /** The chunk-boundary cases a single-chain host walk cannot express, and random corpora wide
  *  enough that the planner cuts several chunks per haystack, on @p queue. */
-static void test_substrings_metal_equivalence(test_context_t &context, void *queue, metal_backend_t const &backend) {
+static void test_substrings_metal_equivalence(test_context_t &context, sz_stream_t queue,
+                                              metal_backend_t const &backend) {
     std::mt19937 &generator = context.generator;
     check_policies_(queue, backend, {"ushers"}, {"he", "she", "his", "hers"});
 
@@ -929,7 +934,7 @@ static void test_substrings_metal_equivalence(test_context_t &context, void *que
 }
 
 /** What the device verbs refuse, and what the report says when an output cannot hold the answer. */
-static void test_substrings_metal_safety(void *queue, metal_backend_t const &backend) {
+static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t const &backend) {
     substrings_metal_texts_t corpus(queue, {"abcdabcd"}), vocabulary(queue, {"ab", "cd"});
     substrings_metal_engines_t engines(queue, vocabulary.tape.sequence, sz_substrings_overlapping_k);
     sz_sequence_t const *const haystacks = &corpus.tape.sequence;
@@ -1015,7 +1020,7 @@ static void test_substrings_metal_safety(void *queue, metal_backend_t const &bac
 #pragma region Drivers
 
 /** Registers every check of the Metal kernels, or of the dispatch points, in @p check. */
-static void check_metal_backend_(cross_section_t &check, void *queue, metal_backend_t const &backend) {
+static void check_metal_backend_(cross_section_t &check, sz_stream_t queue, metal_backend_t const &backend) {
     std::string const suffix = backend.name;
     check("test_levenshtein_equivalence_" + suffix, [&] {
         check_levenshtein_metal_equivalence_(queue, levenshtein_metal_alphabet_t::bytes_k, sz_levenshtein_bytes_k,
@@ -1038,7 +1043,7 @@ static void check_metal_backend_(cross_section_t &check, void *queue, metal_back
     check("test_substrings_safety_" + suffix, [&] { test_substrings_metal_safety(queue, backend); });
 }
 
-std::size_t test_cross_metal(environment_t const &env, void *queue) {
+std::size_t test_cross_metal(environment_t const &env, sz_stream_t queue) {
     metal_backend_t const metal {
         "metal",
         sz_levenshtein_distances_metal,
@@ -1089,7 +1094,7 @@ std::size_t test_cross_metal(environment_t const &env, void *queue) {
 
 /** The dispatching entry points on @p queue, and the refusals, asynchrony, threading and deferred
  *  frees only a dispatch point's engine init promises. */
-std::size_t test_cross_dispatch(environment_t const &env, void *queue) {
+std::size_t test_cross_dispatch(environment_t const &env, sz_stream_t queue) {
     metal_backend_t const dispatched {
         "dispatched",       sz_levenshtein_distances, sz_overlap_scores,         sz_substrings_counts,
         sz_substrings_find, sz_substrings_replace,    sz_substrings_bm25_scores,

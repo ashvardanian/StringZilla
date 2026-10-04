@@ -69,7 +69,7 @@ static sz_capability_kernels_t const *sz_utf8_uncased_fold_capabilities(void) {
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_best( //
     sz_cptr_t source, sz_size_t source_length,         //
     sz_ptr_t target, sz_size_t *target_length,         //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_uncased_fold_t const kernel = (sz_kernel_utf8_uncased_fold_t)sz_kernel_pick_(
         capabilities, sz_utf8_uncased_fold_capabilities());
     return kernel ? kernel(source, source_length, target, target_length, stream) : sz_missing_kernel_k;

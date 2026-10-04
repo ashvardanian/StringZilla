@@ -157,7 +157,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_siz
 }
 
 STRINGZILLA_API sz_status_t sz_find_byteset_icelake(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                    sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+                                                    sz_byteset_t const *filter, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byteset_icelake_(haystack, haystack_length, filter);
     return sz_success_k;
@@ -213,7 +213,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_icelake_(sz_cptr_t haystack, sz_si
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_icelake(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                     sz_byteset_t const *filter, sz_cptr_t *match, void *stream) {
+                                                     sz_byteset_t const *filter, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byteset_icelake_(haystack, haystack_length, filter);
     return sz_success_k;

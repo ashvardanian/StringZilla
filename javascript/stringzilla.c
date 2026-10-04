@@ -1189,9 +1189,9 @@ napi_value deviceCountAPI(napi_env env, napi_callback_info info) {
     sz_status_t status = sz_success_k;
     switch (kind) {
     case device_cpu_k: break;
-    case device_cuda_k: status = sz_cuda_count_devices(&count); break;
-    case device_rocm_k: status = sz_rocm_count_devices(&count); break;
-    case device_metal_k: status = sz_metal_count_devices(&count); break;
+    case device_cuda_k: status = sz_device_count_cuda(&count); break;
+    case device_rocm_k: status = sz_device_count_rocm(&count); break;
+    case device_metal_k: status = sz_device_count_metal(&count); break;
     default: status = sz_missing_gpu_k;
     }
     if (!check_status(env, status)) return NULL;
@@ -1207,10 +1207,10 @@ napi_value capabilitiesDetectedAPI(napi_env env, napi_callback_info info) {
     sz_capability_t capabilities = 0;
     sz_status_t status;
     switch (kind) {
-    case device_cpu_k: status = sz_cpu_capabilities_detected(&capabilities); break;
-    case device_cuda_k: status = sz_cuda_capabilities_detected(ordinal, &capabilities); break;
-    case device_rocm_k: status = sz_rocm_capabilities_detected(ordinal, &capabilities); break;
-    case device_metal_k: status = sz_metal_capabilities_detected(ordinal, &capabilities); break;
+    case device_cpu_k: status = sz_capabilities_detected_cpu(&capabilities); break;
+    case device_cuda_k: status = sz_capabilities_detected_cuda(ordinal, &capabilities); break;
+    case device_rocm_k: status = sz_capabilities_detected_rocm(ordinal, &capabilities); break;
+    case device_metal_k: status = sz_capabilities_detected_metal(ordinal, &capabilities); break;
     default: status = sz_missing_gpu_k;
     }
     return capabilities_or_throw(env, status, capabilities);
@@ -1223,10 +1223,10 @@ napi_value capabilitiesCompiledAPI(napi_env env, napi_callback_info info) {
     sz_capability_t capabilities = 0;
     sz_status_t status;
     switch (kind) {
-    case device_cpu_k: status = sz_cpu_capabilities_compiled(&capabilities); break;
-    case device_cuda_k: status = sz_cuda_capabilities_compiled(&capabilities); break;
-    case device_rocm_k: status = sz_rocm_capabilities_compiled(&capabilities); break;
-    case device_metal_k: status = sz_metal_capabilities_compiled(&capabilities); break;
+    case device_cpu_k: status = sz_capabilities_compiled_cpu(&capabilities); break;
+    case device_cuda_k: status = sz_capabilities_compiled_cuda(&capabilities); break;
+    case device_rocm_k: status = sz_capabilities_compiled_rocm(&capabilities); break;
+    case device_metal_k: status = sz_capabilities_compiled_metal(&capabilities); break;
     default: status = sz_missing_gpu_k;
     }
     return capabilities_or_throw(env, status, capabilities);
@@ -1239,10 +1239,10 @@ napi_value capabilitiesEnabledAPI(napi_env env, napi_callback_info info) {
     sz_capability_t capabilities = 0;
     sz_status_t status;
     switch (kind) {
-    case device_cpu_k: status = sz_cpu_capabilities_enabled(&capabilities); break;
-    case device_cuda_k: status = sz_cuda_capabilities_enabled(ordinal, &capabilities); break;
-    case device_rocm_k: status = sz_rocm_capabilities_enabled(ordinal, &capabilities); break;
-    case device_metal_k: status = sz_metal_capabilities_enabled(ordinal, &capabilities); break;
+    case device_cpu_k: status = sz_capabilities_enabled_cpu(&capabilities); break;
+    case device_cuda_k: status = sz_capabilities_enabled_cuda(ordinal, &capabilities); break;
+    case device_rocm_k: status = sz_capabilities_enabled_rocm(ordinal, &capabilities); break;
+    case device_metal_k: status = sz_capabilities_enabled_metal(ordinal, &capabilities); break;
     default: status = sz_missing_gpu_k;
     }
     return capabilities_or_throw(env, status, capabilities);

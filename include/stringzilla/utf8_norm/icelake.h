@@ -55,14 +55,15 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_icelake_(sz_cptr_t text, s
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_norm_icelake(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                 sz_ptr_t target, sz_size_t *target_length, void *stream) {
+                                                 sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_icelake_);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_icelake(sz_cptr_t source, sz_size_t source_length,
-                                                              sz_normal_form_t form, sz_cptr_t *match, void *stream) {
+                                                              sz_normal_form_t form, sz_cptr_t *match,
+                                                              sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_icelake_);
     return sz_success_k;

@@ -45,7 +45,7 @@ extern "C" {
  *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
  *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memcpy: https://en.cppreference.com/w/c/string/byte/memcpy
@@ -57,7 +57,7 @@ extern "C" {
  *      int main() {
  *          sz_capability_t capabilities;
  *          char output[2];
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_copy_best(output, "hi", 2, capabilities, NULL);
  *          return output[0] == 'h' && output[1] == 'i' ? 0 : 1;
  *      }
@@ -70,7 +70,7 @@ extern "C" {
  *      sz_copy_v128relaxed, sz_copy_rvv, sz_copy_loongsonasx, sz_copy_powervsx
  */
 STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream);
+                                         sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Similar to @c memmove, copies (moves) contents of one string into another. Unlike
@@ -79,7 +79,7 @@ STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *  @param[out] target String to copy into. Can be @c NULL, if the @p length is zero.
  *  @param[in] source String to copy from. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to copy. Can be a zero.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memmove: https://en.cppreference.com/w/c/string/byte/memmove
@@ -91,7 +91,7 @@ STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *      int main() {
  *          sz_capability_t capabilities;
  *          char buffer[3] = {'a', 'b', 'c'};
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_move_best(buffer, buffer + 1, 2, capabilities, NULL);
  *          return buffer[0] == 'b' && buffer[1] == 'c' && buffer[2] == 'c' ? 0 : 1;
  *      }
@@ -101,7 +101,7 @@ STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *      sz_move_v128relaxed, sz_move_rvv, sz_move_loongsonasx, sz_move_powervsx
  */
 STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream);
+                                         sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Similar to @c memset, fills a string with a given value.
@@ -109,7 +109,7 @@ STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *  @param[out] target String to fill. Can be @c NULL, if the @p length is zero.
  *  @param[in] length Number of bytes to fill. Can be a zero.
  *  @param[in] value Value to fill with.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see memset: https://en.cppreference.com/w/c/string/byte/memset
@@ -121,7 +121,7 @@ STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *     int main() {
  *          sz_capability_t capabilities;
  *          char buffer[2];
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_fill_best(buffer, 2, 'x', capabilities, NULL);
  *          return buffer[0] == 'x' && buffer[1] == 'x' ? 0 : 1;
  *     }
@@ -131,7 +131,7 @@ STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_s
  *      sz_fill_v128relaxed, sz_fill_rvv, sz_fill_loongsonasx, sz_fill_powervsx
  */
 STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_capability_t capabilities,
-                                         void *stream);
+                                         sz_stream_t stream);
 
 /**
  *  @brief Look Up Table @b (LUT) transformation of a @p source string, the same as
@@ -141,7 +141,7 @@ STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u
  *  @param[in] source String to be mapped using the @p lut table into the @p target.
  *  @param[in] length Number of bytes in the string.
  *  @param[in] lut Look Up Table to apply. Must be exactly @b 256 bytes long.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
  *  @see Lookup table: https://en.wikipedia.org/wiki/Lookup_table
@@ -160,7 +160,7 @@ STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u
  *          char to_lower_lut[256];
  *          for (int i = 0; i < 256; ++i) to_lower_lut[i] = tolower(i);
  *          char buffer[3] = {'A', 'B', 'C'};
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_lookup_best(buffer, buffer, 3, to_lower_lut, capabilities, NULL);
  *          return buffer[0] == 'a' && buffer[1] == 'b' && buffer[2] == 'c' ? 0 : 1;
  *     }
@@ -175,166 +175,170 @@ STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u
  */
 STRINGZILLA_API sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
                                            char const lut[sz_at_least_(256)], sz_capability_t capabilities,
-                                           void *stream);
+                                           sz_stream_t stream);
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                             char const lut[sz_at_least_(256)], void *stream);
+                                             char const lut[sz_at_least_(256)], sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_haswell(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_haswell(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                              char const lut[sz_at_least_(256)], void *stream);
+                                              char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_skylake(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_skylake(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_icelake(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                              char const lut[sz_at_least_(256)], void *stream);
+                                              char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_neon(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_neon(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                           char const lut[sz_at_least_(256)], void *stream);
+                                           char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SVE
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_sve(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_sve(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                          char const lut[sz_at_least_(256)], void *stream);
+                                          char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_RVV
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_rvv(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_rvv(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                          char const lut[sz_at_least_(256)], void *stream);
+                                          char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_v128(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_v128(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                           char const lut[sz_at_least_(256)], void *stream);
+                                           char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128RELAXED
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_v128relaxed(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_v128relaxed(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                                  char const lut[sz_at_least_(256)], void *stream);
+                                                  char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_LOONGSONASX
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
+                                                sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_loongsonasx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                                  char const lut[sz_at_least_(256)], void *stream);
+                                                  char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
 
 /** @copydoc sz_copy_best */
-STRINGZILLA_API sz_status_t sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_move_best */
-STRINGZILLA_API sz_status_t sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream);
+STRINGZILLA_API sz_status_t sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream);
 
 /** @copydoc sz_fill_best */
-STRINGZILLA_API sz_status_t sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream);
+STRINGZILLA_API sz_status_t sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream);
 
 /** @copydoc sz_lookup_best */
 STRINGZILLA_API sz_status_t sz_lookup_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                               char const lut[sz_at_least_(256)], void *stream);
+                                               char const lut[sz_at_least_(256)], sz_stream_t stream);
 #endif
 
 /**
@@ -358,7 +362,7 @@ STRINGZILLA_API sz_status_t sz_memory_find_kernel(sz_kernel_kind_t kind, sz_capa
  *  stream it is given, so one allocator serves every device of its vendor.
  *
  *  @param[out] allocator The allocator to initialize.
- *  @param[in] capabilities One device's capabilities, like @c sz_cuda_capabilities_enabled reports;
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cuda reports;
  *      its group picks the CPU or a GPU vendor.
  *  @return @c sz_success_k, or @c sz_missing_gpu_k for a GPU vendor this library was built without.
  */
@@ -403,14 +407,14 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
  */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_capability_t capabilities, void *stream);
+                                                     sz_capability_t capabilities, sz_stream_t stream);
 
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator);
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz_sequence_t const *source,
                                                        sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                       void *stream);
+                                                       sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_CUDA
 /** @copydoc sz_allocator_init_unified_best */
@@ -422,7 +426,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *alloca
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     void *stream);
+                                                     sz_stream_t stream);
 
 #endif
 
@@ -436,7 +440,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *alloca
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     void *stream);
+                                                     sz_stream_t stream);
 
 #endif
 
@@ -446,7 +450,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allo
 /** @copydoc sz_sequence_realloc_best */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
                                                       sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      void *stream);
+                                                      sz_stream_t stream);
 
 #endif
 
@@ -546,26 +550,26 @@ STRINGZILLA_CONSTEXPR void sz_lookup_init_ascii(char lut[sz_at_least_(256)]) {
 #if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_capability_t capabilities,
-                                         void *stream) {
+                                         sz_stream_t stream) {
     sz_unused_(target), sz_unused_(length), sz_unused_(value), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
                                            char const lut[sz_at_least_(256)], sz_capability_t capabilities,
-                                           void *stream) {
+                                           sz_stream_t stream) {
     sz_unused_(target), sz_unused_(source), sz_unused_(length), sz_unused_(lut), sz_unused_(capabilities),
         sz_unused_(stream);
     return sz_missing_library_k;
@@ -595,7 +599,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_capability_t capabilities, void *stream) {
+                                                     sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(target), sz_unused_(source), sz_unused_(allocator), sz_unused_(allocated_bytes),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

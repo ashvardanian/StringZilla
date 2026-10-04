@@ -9,7 +9,7 @@
 /** The shape of every token kernel's dispatch point, like @c sz_utf8_newlines_best. */
 typedef sz_status_t (*sz_py_tokenizer_t)(sz_cptr_t text, sz_size_t length, sz_size_t *offsets, sz_size_t *lengths,
                                          sz_size_t capacity, sz_size_t *count, sz_size_t *bytes_consumed,
-                                         sz_capability_t capabilities, void *stream);
+                                         sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Iterator splitting a UTF-8 string on the separators a token kernel reports.

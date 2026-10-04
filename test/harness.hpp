@@ -308,9 +308,9 @@ using tape_view_t = tape_view<char, sz_size_t>;
  *  vendor's runtime helpers the checks reach past the library. */
 #if STRINGZILLA_ARCH_ROCM_
 inline constexpr sz_capability_t gpu_baseline_k = sz_cap_rocm_k;
-inline constexpr auto gpu_capabilities_enabled = &sz_rocm_capabilities_enabled;
-inline constexpr auto gpu_stream_init = &sz_rocm_stream_init;
-inline constexpr auto gpu_stream_free = &sz_rocm_stream_free;
+inline constexpr auto gpu_capabilities_enabled = &sz_capabilities_enabled_rocm;
+inline constexpr auto gpu_stream_init = &sz_stream_init_rocm;
+inline constexpr auto gpu_stream_free = &sz_stream_free_rocm;
 inline constexpr auto gpu_stream_query = &sz_stream_query_rocm_;
 inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
 inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
@@ -320,9 +320,9 @@ inline constexpr auto gpu_free_device = &sz_memory_free_device_rocm_;
 inline constexpr auto gpu_fill = &sz_fill_rocm_;
 #elif STRINGZILLA_ARCH_CUDA_
 inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
-inline constexpr auto gpu_capabilities_enabled = &sz_cuda_capabilities_enabled;
-inline constexpr auto gpu_stream_init = &sz_cuda_stream_init;
-inline constexpr auto gpu_stream_free = &sz_cuda_stream_free;
+inline constexpr auto gpu_capabilities_enabled = &sz_capabilities_enabled_cuda;
+inline constexpr auto gpu_stream_init = &sz_stream_init_cuda;
+inline constexpr auto gpu_stream_free = &sz_stream_free_cuda;
 inline constexpr auto gpu_stream_query = &sz_stream_query_cuda_;
 inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
 inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
@@ -623,8 +623,8 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
  *  its outputs alone. */
 inline sz_allocator_t refusing_allocator_() noexcept {
     sz_allocator_t refusing;
-    refusing.allocate = +[](sz_size_t, void *, void *) -> void * { return nullptr; };
-    refusing.free = +[](void *, sz_size_t, void *, void *) {};
+    refusing.allocate = +[](sz_size_t, void *, sz_stream_t) -> void * { return nullptr; };
+    refusing.free = +[](void *, sz_size_t, void *, sz_stream_t) {};
     refusing.handle = nullptr;
     return refusing;
 }
@@ -638,13 +638,13 @@ struct handle_checked_heap_t {
     sz_allocator_t allocator {};
 
     handle_checked_heap_t() noexcept {
-        allocator.allocate = +[](sz_size_t length, void *handle, void *) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *handle, sz_stream_t) -> void * {
             handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
             if (heap.self != &heap) return nullptr;
             ++heap.live_allocations;
             return std::malloc(length);
         };
-        allocator.free = +[](void *pointer, sz_size_t, void *handle, void *) {
+        allocator.free = +[](void *pointer, sz_size_t, void *handle, sz_stream_t) {
             --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
             std::free(pointer);
         };
@@ -772,7 +772,7 @@ struct machine_t {
 /** Probes the capabilities @c machine_t reports. */
 inline machine_t probe_machine() noexcept {
     machine_t machine;
-    sz_cpu_capabilities_compiled(&machine.compiled), sz_cpu_capabilities_detected(&machine.detected);
+    sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
 #if STRINGZILLA_ARCH_ROCM_
     int device_count = 0;
     hipDeviceProp_t properties;
@@ -786,12 +786,12 @@ inline machine_t probe_machine() noexcept {
         cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
         machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
 #elif STRINGZILLA_WITH_METAL
-    void *queue = nullptr;
-    if (sz_metal_stream_init(0, &queue) == sz_success_k) {
+    sz_stream_t queue = nullptr;
+    if (sz_stream_init_metal(0, &queue) == sz_success_k) {
         void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
         void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
         machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
-        sz_metal_stream_free(queue);
+        sz_stream_free_metal(queue);
     }
 #endif
     return machine;
@@ -829,7 +829,7 @@ inline sz_capability_t gpu_capabilities() {
 
 /** A stream on device 0 of this translation unit's GPU vendor, opened and freed by the library. */
 struct gpu_stream_t {
-    void *handle = nullptr;
+    sz_stream_t handle = nullptr;
 
     gpu_stream_t() { verify(gpu_stream_init(0, &handle) == sz_success_k); }
     gpu_stream_t(gpu_stream_t const &) = delete;

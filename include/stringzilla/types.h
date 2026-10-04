@@ -1074,8 +1074,13 @@ STRINGZILLA_CONSTEXPR void sz_byteset_invert(sz_byteset_t *s) {
 
 #pragma region Memory Management
 
-typedef void *(*sz_memory_allocate_t)(sz_size_t bytes, void *handle, void *stream);
-typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, void *stream);
+/** Native CUDA cudaStream_t, ROCm hipStream_t, or Metal MTLCommandQueue handle.
+ *  Null selects the current device's default CUDA/ROCm stream, Metal's default device queue,
+ *  or synchronous execution on the CPU. The caller owns the handle. */
+typedef void *sz_stream_t;
+
+typedef void *(*sz_memory_allocate_t)(sz_size_t bytes, void *handle, sz_stream_t stream);
+typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream);
 
 /**
  *  @brief Some complex pattern matching algorithms may require memory allocations. This structure
@@ -1943,7 +1948,7 @@ enum { sz_memory_alignment_k = 64 };
  *  own buffer is: pass one aligned to 64 and every block is, and a malloc'd buffer still carries
  *  its own guarantee.
  */
-STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle, void *stream) {
+STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(stream);
     sz_size_t const capacity = *(sz_size_t *)handle;
     sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
@@ -1956,7 +1961,7 @@ STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void 
 }
 
 /** Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle, void *stream) {
+STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(start && length && handle && stream);
 }
 
@@ -1971,12 +1976,12 @@ STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t lengt
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-STRINGZILLA_INLINE void *sz_memory_allocate_default_(sz_size_t length, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_default_(sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(handle && stream);
     if (length == 0) return STRINGZILLA_NULL;
     return malloc(length);
 }
-STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(handle && length && stream);
     free(start);
 }

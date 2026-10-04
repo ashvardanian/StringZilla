@@ -45,7 +45,7 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_sve_(sz_cptr_t text, sz_size_t length) {
 
 #if STRINGZILLA_TARGET_SVE
 
-STRINGZILLA_API sz_status_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_sve(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_sve_(text, length);
     return sz_success_k;

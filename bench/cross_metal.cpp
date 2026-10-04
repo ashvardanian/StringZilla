@@ -87,7 +87,7 @@ static std::size_t overlap_metal_count_(environment_t const &env, corpus_t const
 /** The corpus as the device of @c queue sees it: one tape of the candidates and one round's scores,
  *  both in its unified memory. */
 struct overlap_metal_corpus_t {
-    void *queue;
+    sz_stream_t queue;
     sz_allocator_t unified {};
     sz_sequence_t candidates {};
     sz_size_t candidates_bytes = 0;
@@ -106,7 +106,7 @@ struct overlap_metal_corpus_t {
         return total;
     }
 
-    overlap_metal_corpus_t(environment_t const &env, corpus_t const &corpus, void *queue) : queue(queue) {
+    overlap_metal_corpus_t(environment_t const &env, corpus_t const &corpus, sz_stream_t queue) : queue(queue) {
         count = overlap_metal_count_(env, corpus);
         std::vector<sz_string_view_t> views(count);
         for (std::size_t index = 0; index != count; ++index) {
@@ -236,8 +236,8 @@ int main() {
     environment_t env {read_settings(), probe_machine()};
     print(env.machine);
     print(env.settings);
-    void *queue = nullptr;
-    if (sz_metal_stream_init(0, &queue) != sz_success_k) return 0;
+    sz_stream_t queue = nullptr;
+    if (sz_stream_init_metal(0, &queue) != sz_success_k) return 0;
     try {
         corpus_t const &corpus = env.corpora.multilingual_lines();
         overlap_metal_corpus_t resident(env, corpus, queue);
@@ -245,11 +245,11 @@ int main() {
         bench_overlap_scores(env, corpus, resident, median_token_bytes(corpus));
     }
     catch (std::exception const &e) {
-        sz_metal_stream_free(queue);
+        sz_stream_free_metal(queue);
         fmt::println(stderr, "Failed with: {}", e.what());
         return 1;
     }
-    sz_metal_stream_free(queue);
+    sz_stream_free_metal(queue);
 
     fmt::println("All benchmarks passed.");
     return 0;

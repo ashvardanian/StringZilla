@@ -721,7 +721,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_siz
 #if STRINGZILLA_TARGET_SVE2
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_sve2(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                      sz_size_t *target_length, void *stream) {
+                                                      sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *target_length = sz_utf8_uncased_fold_sve2_(source, source_length, target);
     return sz_success_k;

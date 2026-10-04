@@ -197,26 +197,26 @@ static sz_capability_kernels_t const *sz_lookup_capabilities(void) {
 }
 
 STRINGZILLA_API sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_copy_t const kernel = (sz_kernel_copy_t)sz_kernel_pick_(capabilities, sz_copy_capabilities());
     return kernel ? kernel(target, source, length, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_move_t const kernel = (sz_kernel_move_t)sz_kernel_pick_(capabilities, sz_move_capabilities());
     return kernel ? kernel(target, source, length, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_capability_t capabilities,
-                                         void *stream) {
+                                         sz_stream_t stream) {
     sz_kernel_fill_t const kernel = (sz_kernel_fill_t)sz_kernel_pick_(capabilities, sz_fill_capabilities());
     return kernel ? kernel(target, length, value, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
                                            char const lut[sz_at_least_(256)], sz_capability_t capabilities,
-                                           void *stream) {
+                                           sz_stream_t stream) {
     sz_kernel_lookup_t const kernel = (sz_kernel_lookup_t)sz_kernel_pick_(capabilities, sz_lookup_capabilities());
     return kernel ? kernel(target, source, length, lut, stream) : sz_missing_kernel_k;
 }
@@ -286,7 +286,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_capability_t capabilities, void *stream) {
+                                                     sz_capability_t capabilities, sz_stream_t stream) {
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k:
         return sz_sequence_realloc_serial(target, source, allocator, allocated_bytes, stream);

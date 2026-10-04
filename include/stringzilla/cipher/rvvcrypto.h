@@ -162,7 +162,7 @@ STRINGZILLA_INLINE void sz_aes256_key_init_rvvcrypto_(sz_aes256_key_t *key, sz_u
 }
 
 STRINGZILLA_API sz_status_t sz_aes256_key_init_rvvcrypto(sz_aes256_key_t *key, sz_u8_t const secret[sz_at_least_(32)],
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_key_init_rvvcrypto_(key, secret);
     return sz_success_k;
@@ -375,7 +375,8 @@ STRINGZILLA_INLINE vuint32m1_t sz_ghash_multiply_rvvcrypto_(vuint32m1_t accumula
 }
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t *key,
-                                                             sz_u8_t const secret[sz_at_least_(32)], void *stream) {
+                                                             sz_u8_t const secret[sz_at_least_(32)],
+                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t const vector_length = 4;
     sz_size_t power_index;
@@ -400,7 +401,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_key_init_rvvcrypto(sz_aes256_gcm_key_t
 STRINGZILLA_API sz_status_t sz_aes256_ctr_xor_rvvcrypto(sz_aes256_key_t const *key,
                                                         sz_u8_t const nonce[sz_at_least_(12)], sz_u64_t byte_offset,
                                                         sz_cptr_t text, sz_size_t length, sz_ptr_t target,
-                                                        void *stream) {
+                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input_bytes = (sz_u8_t const *)text;
     sz_u8_t *output_bytes = (sz_u8_t *)target;
@@ -691,7 +692,7 @@ STRINGZILLA_INLINE void sz_aes256_gcm_digest_rvvcrypto_(sz_aes256_gcm_state_t co
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
                                                                    sz_aes256_gcm_key_t const *key,
                                                                    sz_u8_t const nonce[sz_at_least_(12)],
-                                                                   void *stream) {
+                                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_rvvcrypto_(&encryptor->state, key, nonce);
     return sz_success_k;
@@ -699,7 +700,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_init_rvvcrypto(sz_aes256_gcm
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
                                                                         sz_cptr_t text, sz_size_t length,
-                                                                        void *stream) {
+                                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_rvvcrypto_(&encryptor->state, text, length);
     return sz_success_k;
@@ -707,14 +708,15 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_associate_rvvcrypto(sz_aes25
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_update_rvvcrypto(sz_aes256_gcm_encryptor_t *encryptor,
                                                                      sz_cptr_t text, sz_size_t length, sz_ptr_t target,
-                                                                     void *stream) {
+                                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_transform_rvvcrypto_(&encryptor->state, text, length, target, sz_aes256_gcm_encrypting_k);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_rvvcrypto(sz_aes256_gcm_encryptor_t const *encryptor,
-                                                                     sz_u8_t tag[sz_at_least_(16)], void *stream) {
+                                                                     sz_u8_t tag[sz_at_least_(16)],
+                                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_digest_rvvcrypto_(&encryptor->state, tag);
     return sz_success_k;
@@ -723,7 +725,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encryptor_digest_rvvcrypto(sz_aes256_g
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
                                                                    sz_aes256_gcm_key_t const *key,
                                                                    sz_u8_t const nonce[sz_at_least_(12)],
-                                                                   void *stream) {
+                                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_begin_rvvcrypto_(&decryptor->state, key, nonce);
     return sz_success_k;
@@ -731,7 +733,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_init_rvvcrypto(sz_aes256_gcm
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
                                                                         sz_cptr_t text, sz_size_t length,
-                                                                        void *stream) {
+                                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_associate_rvvcrypto_(&decryptor->state, text, length);
     return sz_success_k;
@@ -739,7 +741,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_associate_rvvcrypto(sz_aes25
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_update_unverified_rvvcrypto(sz_aes256_gcm_decryptor_t *decryptor,
                                                                                 sz_cptr_t text, sz_size_t length,
-                                                                                sz_ptr_t target, void *stream) {
+                                                                                sz_ptr_t target, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_transform_rvvcrypto_(&decryptor->state, text, length, target, sz_aes256_gcm_decrypting_k);
     return sz_success_k;
@@ -754,7 +756,7 @@ STRINGZILLA_INLINE sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto_(sz_aes2
 
 STRINGZILLA_API sz_status_t sz_aes256_gcm_decryptor_verify_rvvcrypto(sz_aes256_gcm_decryptor_t const *decryptor,
                                                                      sz_u8_t const tag[sz_at_least_(16)],
-                                                                     void *stream) {
+                                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_aes256_gcm_decryptor_verify_rvvcrypto_(decryptor, tag);
 }
@@ -767,7 +769,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_encrypt_rvvcrypto(sz_aes256_gcm_key_t 
                                                             sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
                                                             sz_size_t associated_length, sz_cptr_t text,
                                                             sz_size_t length, sz_ptr_t target,
-                                                            sz_u8_t tag[sz_at_least_(16)], void *stream) {
+                                                            sz_u8_t tag[sz_at_least_(16)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_encryptor_t encryptor;
     sz_aes256_gcm_begin_rvvcrypto_(&encryptor.state, key, nonce);
@@ -782,7 +784,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
                                                             sz_u8_t const nonce[sz_at_least_(12)], sz_cptr_t associated,
                                                             sz_size_t associated_length, sz_cptr_t text,
                                                             sz_size_t length, sz_ptr_t target,
-                                                            sz_u8_t const tag[sz_at_least_(16)], void *stream) {
+                                                            sz_u8_t const tag[sz_at_least_(16)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_aes256_gcm_decryptor_t decryptor;
     sz_status_t verdict;

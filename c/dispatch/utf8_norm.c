@@ -132,7 +132,7 @@ static sz_capability_kernels_t const *sz_utf8_find_denormalized_capabilities(voi
 STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
     sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, //
     sz_ptr_t target, sz_size_t *target_length,                        //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_norm_t const kernel = (sz_kernel_utf8_norm_t)sz_kernel_pick_(capabilities,
                                                                                 sz_utf8_norm_capabilities());
     return kernel ? kernel(source, source_length, form, target, target_length, stream) : sz_missing_kernel_k;
@@ -140,7 +140,7 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
 
 STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_best(                             //
     sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form, sz_cptr_t *match, //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_find_denormalized_t const kernel = (sz_kernel_utf8_find_denormalized_t)sz_kernel_pick_(
         capabilities, sz_utf8_find_denormalized_capabilities());
     return kernel ? kernel(source, source_length, form, match, stream) : sz_missing_kernel_k;

@@ -231,7 +231,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
-                                                      sz_allocator_t *allocator, void *stream) {
+                                                      sz_allocator_t *allocator, sz_stream_t stream) {
     sz_kernel_substrings_engine_init_t const kernel = (sz_kernel_substrings_engine_init_t)sz_kernel_pick_(
         capabilities, sz_substrings_engine_init_capabilities());
     if (!kernel) return sz_missing_kernel_k;
@@ -246,12 +246,12 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *en
     return sz_success_k;
 }
 
-STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine, void *stream) {
+STRINGZILLA_API void sz_substrings_engine_free(sz_substrings_engine_t *engine, sz_stream_t stream) {
     sz_substrings_engine_free_(engine, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                 sz_size_t *counts, sz_size_t counts_stride, void *stream) {
+                                                 sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     sz_kernel_substrings_counts_t const kernel = (sz_kernel_substrings_counts_t)sz_kernel_pick_(
         engine->capability, sz_substrings_counts_capabilities());
     return kernel ? kernel(engine, haystacks, counts, counts_stride, stream) : sz_missing_kernel_k;
@@ -259,7 +259,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine,
 
 STRINGZILLA_API sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                               sz_size_t *matches_offsets, void *stream) {
+                                               sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_kernel_substrings_find_t const kernel = (sz_kernel_substrings_find_t)sz_kernel_pick_(
         engine->capability, sz_substrings_find_capabilities());
     return kernel ? kernel(engine, haystacks, matches, matches_capacity, matches_offsets, stream) : sz_missing_kernel_k;
@@ -267,7 +267,7 @@ STRINGZILLA_API sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, s
 
 STRINGZILLA_API sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                   sz_sequence_t const *replacements, sz_ptr_t target,
-                                                  sz_size_t target_capacity, sz_size_t *offsets, void *stream) {
+                                                  sz_size_t target_capacity, sz_size_t *offsets, sz_stream_t stream) {
     sz_kernel_substrings_replace_t const kernel = (sz_kernel_substrings_replace_t)sz_kernel_pick_(
         engine->capability, sz_substrings_replace_capabilities());
     return kernel ? kernel(engine, haystacks, replacements, target, target_capacity, offsets, stream)
@@ -278,7 +278,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores(sz_substrings_engine_t *en
                                                       sz_f32_t const *document_lengths,
                                                       sz_substrings_bm25_t const *parameters,
                                                       sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                      sz_size_t scores_stride, void *stream) {
+                                                      sz_size_t scores_stride, sz_stream_t stream) {
     sz_kernel_substrings_bm25_scores_t const kernel = (sz_kernel_substrings_bm25_scores_t)sz_kernel_pick_(
         engine->capability, sz_substrings_bm25_scores_capabilities());
     return kernel

@@ -909,7 +909,7 @@ struct machine_t {
 /** Probes the capabilities @c machine_t reports. */
 inline machine_t probe_machine() noexcept {
     machine_t machine;
-    sz_cpu_capabilities_compiled(&machine.compiled), sz_cpu_capabilities_detected(&machine.detected);
+    sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
 #if STRINGZILLA_ARCH_ROCM_
     int device_count = 0;
     hipDeviceProp_t properties;
@@ -923,12 +923,12 @@ inline machine_t probe_machine() noexcept {
         cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
         machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
 #elif STRINGZILLA_WITH_METAL
-    void *queue = nullptr;
-    if (sz_metal_stream_init(0, &queue) == sz_success_k) {
+    sz_stream_t queue = nullptr;
+    if (sz_stream_init_metal(0, &queue) == sz_success_k) {
         void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
         void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
         machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
-        sz_metal_stream_free(queue);
+        sz_stream_free_metal(queue);
     }
 #endif
     return machine;

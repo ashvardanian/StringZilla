@@ -26,14 +26,14 @@ extern "C" {
 #endif
 
 STRINGZILLA_API sz_status_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *count,
-                                                      void *stream) {
+                                                      sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_count_v128_(text, length);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                     void *stream) {
+                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *position = sz_utf8_seek_v128_(text, length, n);
     return sz_success_k;

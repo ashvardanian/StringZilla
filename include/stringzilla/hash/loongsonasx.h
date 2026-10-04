@@ -67,7 +67,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_loongsonasx_(sz_cptr_t text, sz_size_t le
     }
 }
 
-STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_loongsonasx(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_loongsonasx_(text, length);
     return sz_success_k;
@@ -476,13 +477,13 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_loongsonasx_
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_loongsonasx(sz_cptr_t start, sz_size_t length,
                                                                                 sz_u64_t seed, sz_u64_t *hash,
-                                                                                void *stream) {
+                                                                                sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_loongsonasx_(start, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_loongsonasx(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_loongsonasx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_serial_(state, seed);
     return sz_success_k;
@@ -578,7 +579,7 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_finalize_loongsonasx_(sz_hash_state_al
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_loongsonasx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Load the packed public state, at any alignment, into an aligned twin once, buffer and absorb
     // on it, then store it back.
@@ -643,14 +644,14 @@ STRINGZILLA_INLINE sz_u64_t sz_hash_state_digest_loongsonasx_(sz_hash_state_t co
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_loongsonasx(sz_hash_state_t const *packed, sz_u64_t *hash,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_loongsonasx_(packed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_random_loongsonasx(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u64_t const *pi_constants = sz_hash_pi_constants_();
     sz_u128_vec_t input_vec, pi_vec, key_vec, generated_vec;
@@ -744,14 +745,14 @@ STRINGZILLA_INLINE void sz_sha256_process_block_loongsonasx_(
     hash[4] += e, hash[5] += f, hash[6] += g, hash[7] += h;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_state_init_loongsonasx(sz_sha256_state_t *state, void *stream) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_loongsonasx(sz_sha256_state_t *state, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_init_serial_(state);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_loongsonasx(sz_sha256_state_t *state_ptr, sz_cptr_t text,
-                                                               sz_size_t length, void *stream) {
+                                                               sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input = (sz_u8_t const *)text;
     sz_size_t const current_block_index = state_ptr->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
@@ -799,7 +800,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_loongsonasx(sz_sha256_state_t
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_loongsonasx(
-    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_sha256_state_t const *state_ptr, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
+    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_sha256_state_t state = *state_ptr;
 

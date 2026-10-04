@@ -64,29 +64,29 @@ extern "C" {
         buffer: *mut c_char,
         capacity: sz_size_t,
     ) -> sz_size_t;
-    pub(crate) fn sz_cpu_capabilities_detected(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cpu_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cpu_capabilities_enabled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cpu_configure_thread(capabilities: sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_rocm_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_metal_count_devices(count: *mut sz_size_t) -> sz_status_t;
-    pub(crate) fn sz_metal_capabilities_detected(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
+    pub(crate) fn sz_capabilities_detected_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_enabled_cpu(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_thread_configure_cpu(capabilities: sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_device_count_cuda(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_detected_cuda(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_cuda(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_enabled_cuda(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_device_count_rocm(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_detected_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_rocm(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_enabled_rocm(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_device_count_metal(count: *mut sz_size_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_detected_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t)
         -> sz_status_t;
-    pub(crate) fn sz_metal_capabilities_compiled(capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_metal_capabilities_enabled(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
-    pub(crate) fn sz_cuda_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
-    pub(crate) fn sz_cuda_stream_free(stream: *mut c_void) -> sz_status_t;
-    pub(crate) fn sz_rocm_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
-    pub(crate) fn sz_rocm_stream_free(stream: *mut c_void) -> sz_status_t;
-    pub(crate) fn sz_metal_stream_init(ordinal: sz_size_t, stream: *mut *mut c_void) -> sz_status_t;
-    pub(crate) fn sz_metal_stream_free(stream: *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_capabilities_compiled_metal(capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_capabilities_enabled_metal(ordinal: sz_size_t, capabilities: *mut sz_capability_t) -> sz_status_t;
+    pub(crate) fn sz_stream_init_cuda(ordinal: sz_size_t, stream: *mut sz_stream_t) -> sz_status_t;
+    pub(crate) fn sz_stream_free_cuda(stream: sz_stream_t) -> sz_status_t;
+    pub(crate) fn sz_stream_init_rocm(ordinal: sz_size_t, stream: *mut sz_stream_t) -> sz_status_t;
+    pub(crate) fn sz_stream_free_rocm(stream: sz_stream_t) -> sz_status_t;
+    pub(crate) fn sz_stream_init_metal(ordinal: sz_size_t, stream: *mut sz_stream_t) -> sz_status_t;
+    pub(crate) fn sz_stream_free_metal(stream: sz_stream_t) -> sz_status_t;
 
     pub(crate) fn sz_allocator_init_unified_best(
         allocator: *mut _SzMemoryAllocator,
@@ -98,37 +98,37 @@ extern "C" {
         allocator: *mut _SzMemoryAllocator,
         allocated_bytes: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_stream_synchronize_best(capabilities: sz_capability_t, stream: *mut c_void) -> sz_status_t;
+    pub(crate) fn sz_stream_synchronize_best(capabilities: sz_capability_t, stream: sz_stream_t) -> sz_status_t;
 
     pub(crate) fn sz_copy_best(
         target: *mut c_void,
         source: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_fill_best(
         target: *mut c_void,
         length: sz_size_t,
         value: u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_move_best(
         target: *mut c_void,
         source: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_fill_random_best(
         text: *mut c_void,
         length: sz_size_t,
         nonce: u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_lookup_best(
         target: *mut c_void,
@@ -136,7 +136,7 @@ extern "C" {
         length: sz_size_t,
         lut: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_find_best(
@@ -146,7 +146,7 @@ extern "C" {
         needle_length: sz_size_t,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_rfind_best(
         haystack: *const c_void,
@@ -155,7 +155,7 @@ extern "C" {
         needle_length: sz_size_t,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_find_byteset_best(
         haystack: *const c_void,
@@ -163,7 +163,7 @@ extern "C" {
         byteset: *const c_void,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_rfind_byteset_best(
         haystack: *const c_void,
@@ -171,7 +171,7 @@ extern "C" {
         byteset: *const c_void,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_utf8_count_best(
@@ -179,7 +179,7 @@ extern "C" {
         length: sz_size_t,
         count: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_seek_best(
         text: *const c_void,
@@ -187,7 +187,7 @@ extern "C" {
         n: sz_size_t,
         position: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_decode_best(
         text: *const c_void,
@@ -197,7 +197,7 @@ extern "C" {
         runes_count: *mut sz_size_t,
         bytes_consumed: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_newlines_best(
         text: *const c_void,
@@ -208,7 +208,7 @@ extern "C" {
         matches_count: *mut sz_size_t,
         bytes_consumed: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_whitespaces_best(
         text: *const c_void,
@@ -219,7 +219,7 @@ extern "C" {
         matches_count: *mut sz_size_t,
         bytes_consumed: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_delimiters_best(
         text: *const c_void,
@@ -230,7 +230,7 @@ extern "C" {
         matches_count: *mut sz_size_t,
         bytes_consumed: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_uncased_fold_best(
         source: *const c_void,
@@ -238,7 +238,7 @@ extern "C" {
         target: *mut c_void,
         target_length: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_norm_best(
         source: *const c_void,
@@ -247,7 +247,7 @@ extern "C" {
         target: *mut c_void,
         target_length: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_find_denormalized_best(
         source: *const c_void,
@@ -255,14 +255,14 @@ extern "C" {
         form: Utf8NormalForm,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_uncased_needle_init_best(
         needle: *const c_void,
         needle_length: sz_size_t,
         prepared: *mut Utf8UncasedNeedle<'_>,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_uncased_search_best(
         haystack: *const c_void,
@@ -271,7 +271,7 @@ extern "C" {
         found: *mut *const c_void,
         match_length: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_uncased_order_best(
         a: *const c_void,
@@ -280,7 +280,7 @@ extern "C" {
         b_length: sz_size_t,
         ordering: *mut sz_ordering_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_utf8_wordbreaks_best(
@@ -290,7 +290,7 @@ extern "C" {
         capacity: sz_size_t,
         count: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_graphemes_best(
         text: *const c_void,
@@ -299,7 +299,7 @@ extern "C" {
         capacity: sz_size_t,
         count: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_sentences_best(
         text: *const c_void,
@@ -308,7 +308,7 @@ extern "C" {
         capacity: sz_size_t,
         count: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_utf8_linebreaks_best(
         text: *const c_void,
@@ -317,7 +317,7 @@ extern "C" {
         capacity: sz_size_t,
         count: *mut sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_equal_best(
@@ -326,7 +326,7 @@ extern "C" {
         length: sz_size_t,
         equal: *mut sz_bool_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_order_best(
         a: *const c_void,
@@ -335,7 +335,7 @@ extern "C" {
         b_length: sz_size_t,
         ordering: *mut sz_ordering_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_bytesum_best(
@@ -343,7 +343,7 @@ extern "C" {
         length: sz_size_t,
         checksum: *mut u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_hash_best(
         text: *const c_void,
@@ -351,7 +351,7 @@ extern "C" {
         seed: u64,
         hash: *mut u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_hash_multiseed_best(
         text: *const c_void,
@@ -360,64 +360,64 @@ extern "C" {
         seeds_count: sz_size_t,
         hashes: *mut u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_hash_state_init_best(
         state: *mut c_void,
         seed: u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_hash_state_update_best(
         state: *mut c_void,
         text: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_hash_state_digest_best(
         state: *const c_void,
         hash: *mut u64,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_state_init_best(
         state: *mut c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_state_update_best(
         state: *mut c_void,
         data: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_state_digest_best(
         state: *const c_void,
         digest: *mut u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_multistate_update_best(
         states: *mut c_void,
         texts: *const _SzSequence,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_multistate_digest_best(
         states: *const c_void,
         states_count: sz_size_t,
         digests: *mut u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_aes256_key_init_best(
         key: *mut c_void,
         secret: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_ctr_xor_best(
         key: *const c_void,
@@ -427,13 +427,13 @@ extern "C" {
         length: sz_size_t,
         output: *mut c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_key_init_best(
         key: *mut c_void,
         secret: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_encrypt_best(
         key: *const c_void,
@@ -445,7 +445,7 @@ extern "C" {
         output: *mut c_void,
         tag: *mut u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_decrypt_best(
         key: *const c_void,
@@ -457,21 +457,21 @@ extern "C" {
         output: *mut c_void,
         tag: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_encryptor_init_best(
         encryptor: *mut c_void,
         key: *const c_void,
         nonce: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_encryptor_associate_best(
         encryptor: *mut c_void,
         text: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_encryptor_update_best(
         encryptor: *mut c_void,
@@ -479,27 +479,27 @@ extern "C" {
         length: sz_size_t,
         output: *mut c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_encryptor_digest_best(
         encryptor: *const c_void,
         tag: *mut u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_decryptor_init_best(
         decryptor: *mut c_void,
         key: *const c_void,
         nonce: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_decryptor_associate_best(
         decryptor: *mut c_void,
         text: *const c_void,
         length: sz_size_t,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_decryptor_update_unverified_best(
         decryptor: *mut c_void,
@@ -507,13 +507,13 @@ extern "C" {
         length: sz_size_t,
         output: *mut c_void,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_aes256_gcm_decryptor_verify_best(
         decryptor: *const c_void,
         tag: *const u8,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_sequence_argsort_best(
@@ -523,7 +523,7 @@ extern "C" {
         allocator: *const c_void,
         order: *mut SortedIdx,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sequence_argsort_uncased_best(
         sequence: *const _SzSequence,
@@ -532,7 +532,7 @@ extern "C" {
         allocator: *const c_void,
         order: *mut SortedIdx,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_sequence_intersect_best(
@@ -544,7 +544,7 @@ extern "C" {
         first_positions: *mut SortedIdx,
         second_positions: *mut SortedIdx,
         capabilities: sz_capability_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     // Cross-product engines. The capability group picks the CPU or one GPU vendor and the stream the
@@ -555,15 +555,15 @@ extern "C" {
         symbol: LevenshteinSymbol,
         capabilities: sz_capability_t,
         allocator: *const c_void,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine, stream: *mut c_void);
+    pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine, stream: sz_stream_t);
     pub(crate) fn sz_levenshtein_distances(
         engine: *mut LevenshteinEngine,
         candidates: *const _SzSequence,
         distances: *mut sz_size_t,
         distances_stride: sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_overlap_engine_init(
@@ -574,16 +574,16 @@ extern "C" {
         candidates_budget: sz_size_t,
         capabilities: sz_capability_t,
         allocator: *const c_void,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine, stream: *mut c_void);
+    pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine, stream: sz_stream_t);
     pub(crate) fn sz_overlap_scores(
         engine: *mut OverlapEngine,
         candidates: *const _SzSequence,
         scores: *mut f32,
         scores_query_stride: sz_size_t,
         scores_candidate_stride: sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
     pub(crate) fn sz_substrings_engine_init(
@@ -596,15 +596,15 @@ extern "C" {
         haystacks_budget: sz_size_t,
         capabilities: sz_capability_t,
         allocator: *const c_void,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine, stream: *mut c_void);
+    pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine, stream: sz_stream_t);
     pub(crate) fn sz_substrings_counts(
         engine: *mut SubstringsEngine,
         haystacks: *const _SzSequence,
         counts: *mut sz_size_t,
         counts_stride: sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_find(
         engine: *mut SubstringsEngine,
@@ -612,7 +612,7 @@ extern "C" {
         matches: *mut SubstringsMatch,
         matches_capacity: sz_size_t,
         matches_offsets: *mut sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_replace(
         engine: *mut SubstringsEngine,
@@ -621,7 +621,7 @@ extern "C" {
         target: *mut u8,
         target_capacity: sz_size_t,
         offsets: *mut sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_bm25_scores(
         engine: *mut SubstringsEngine,
@@ -631,7 +631,7 @@ extern "C" {
         needle_weights: *const f32,
         scores: *mut f32,
         scores_stride: sz_size_t,
-        stream: *mut c_void,
+        stream: sz_stream_t,
     ) -> sz_status_t;
 
 }
@@ -644,9 +644,9 @@ extern "C" {
 #[derive(Clone, Copy)]
 pub(crate) struct _SzMemoryAllocator {
     pub(crate) allocate:
-        Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void, stream: *mut c_void) -> *mut c_void>,
+        Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void, stream: sz_stream_t) -> *mut c_void>,
     pub(crate) free:
-        Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void, stream: *mut c_void)>,
+        Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void, stream: sz_stream_t)>,
     pub(crate) handle: *mut c_void,
 }
 

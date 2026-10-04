@@ -39,7 +39,7 @@ extern "C" {
  *  @param[out] intersection_count Number of matching strings in both sequences.
  *  @param[out] first_positions Offset positions of the matching strings from the @p first_sequence.
  *  @param[out] second_positions Offset positions of the matching strings from @p second_sequence.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled reports.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k on success, @c sz_bad_alloc_k if memory allocation failed, or
  *      @c sz_missing_kernel_k when no capability in @p capabilities has it.
@@ -57,7 +57,7 @@ extern "C" {
  *          sz_sequence_from_null_terminated_strings(first, 3, &first_sequence);
  *          sz_sequence_from_null_terminated_strings(second, 4, &second_sequence);
  *          sz_capability_t capabilities;
- *          sz_cpu_capabilities_enabled(&capabilities);
+ *          sz_capabilities_enabled_cpu(&capabilities);
  *          sz_size_t intersection_count;
  *          sz_sorted_idx_t first_positions[3], second_positions[3]; //? 3 is the size of the smaller sequence
  *          sz_status_t status = sz_sequence_intersect_best(&first_sequence, &second_sequence, NULL, 0,
@@ -76,7 +76,7 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                        /
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,       //
-    sz_capability_t capabilities, void *stream);
+    sz_capability_t capabilities, sz_stream_t stream);
 
 /**
  *  @brief Defines various JOIN semantics for string sequences, including handling of duplicates.
@@ -241,7 +241,7 @@ typedef enum {
 STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                      //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_WESTMERE
 
@@ -249,7 +249,7 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_serial(                      /
 STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                    //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream);
 
 #endif
 
@@ -259,7 +259,7 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                    /
 STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                     //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream);
 
 #endif
 
@@ -269,7 +269,7 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                     /
 STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                     //
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, void *stream);
+    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream);
 
 #endif
 
@@ -298,7 +298,7 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_best(                        /
     sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
     sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,       //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(first_sequence), sz_unused_(second_sequence), sz_unused_(allocator), sz_unused_(seed),
         sz_unused_(intersection_count), sz_unused_(first_positions), sz_unused_(second_positions),
         sz_unused_(capabilities), sz_unused_(stream);

@@ -111,13 +111,13 @@ static sz_capability_kernels_t const *sz_order_capabilities(void) {
 }
 
 STRINGZILLA_API sz_status_t sz_equal_best(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
-                                          sz_capability_t capabilities, void *stream) {
+                                          sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_equal_t const kernel = (sz_kernel_equal_t)sz_kernel_pick_(capabilities, sz_equal_capabilities());
     return kernel ? kernel(a, b, length, equal, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_order_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, sz_capability_t capabilities, void *stream) {
+                                          sz_ordering_t *ordering, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_order_t const kernel = (sz_kernel_order_t)sz_kernel_pick_(capabilities, sz_order_capabilities());
     return kernel ? kernel(a, a_length, b, b_length, ordering, stream) : sz_missing_kernel_k;
 }

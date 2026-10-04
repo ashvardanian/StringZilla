@@ -590,7 +590,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_rvv_(sz_cptr_t source, sz_size
 #if STRINGZILLA_TARGET_RVV
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                     sz_size_t *target_length, void *stream) {
+                                                     sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *target_length = sz_utf8_uncased_fold_rvv_(source, source_length, target);
     return sz_success_k;

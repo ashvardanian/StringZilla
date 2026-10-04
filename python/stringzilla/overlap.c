@@ -101,7 +101,7 @@ static int OverlapEngine_init(OverlapEngine *self, PyObject *args, PyObject *kwa
     sz_sequence_t queries;
     sz_size_t candidates_budget = 0;
     sz_capability_t capabilities;
-    void *stream;
+    sz_stream_t stream;
     if (sz_py_export_strings(queries_obj, "queries", &queries) != 0) return -1;
     if (candidates_budget_object && candidates_budget_object != Py_None) {
         candidates_budget = (sz_size_t)PyLong_AsSize_t(candidates_budget_object);
@@ -192,7 +192,7 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
 
     sz_capability_t const capability = self->engine.capability;
     sz_sequence_t candidates;
-    void *stream = NULL;
+    sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_engine_strings(candidates_obj, "candidates", capability, stream, &candidates) != 0) return NULL;

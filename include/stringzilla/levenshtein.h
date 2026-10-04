@@ -51,8 +51,8 @@ extern "C" {
  *  @param[in] queries The patterns every candidate is scored against, read through host-callable
  *      accessors over host-readable texts, whose symbols and classes size the block.
  *  @param[in] symbol Whether a distance counts bytes or UTF-8 runes.
- *  @param[in] capabilities One device's capabilities, like @c sz_cpu_capabilities_enabled or
- *      @c sz_cuda_capabilities_enabled report; its group picks the CPU or a GPU vendor.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu or
+ *      @c sz_capabilities_enabled_cuda report; its group picks the CPU or a GPU vendor.
  *  @param[in] allocator Source of the engine's blocks, or @c STRINGZILLA_NULL for
  *      @ref sz_allocator_init_unified_best of @p capabilities.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
@@ -67,11 +67,11 @@ extern "C" {
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                                       sz_allocator_t *allocator, void *stream);
+                                                       sz_allocator_t *allocator, sz_stream_t stream);
 
 /** Returns both of @p engine 's blocks to the allocator that built them, once the work queued on
  *  @p stream is done with them, and leaves it empty. */
-STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream);
+STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream);
 
 /**
  *  @brief Edit distances from every prepared query to every candidate, by the kernel of the
@@ -95,7 +95,8 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *      joins, so the caller joins @p stream before reading @p distances.
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
-                                                     sz_size_t *distances, sz_size_t distances_stride, void *stream);
+                                                     sz_size_t *distances, sz_size_t distances_stride,
+                                                     sz_stream_t stream);
 
 /**
  *  @brief One pair's distance through the GPU's tiled wavefront, enqueued on @p stream on the
@@ -124,28 +125,28 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *en
  */
 STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_capability_t capabilities, void *stream);
+                                                               sz_capability_t capabilities, sz_stream_t stream);
 
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *queries,
                                                               sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                              void *stream);
+                                                              sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *candidates, sz_size_t *distances,
-                                                            sz_size_t distances_stride, void *stream);
+                                                            sz_size_t distances_stride, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_haswell(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride, void *stream);
+                                                             sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
@@ -153,11 +154,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_skylake(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride, void *stream);
+                                                             sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ICELAKE
@@ -165,11 +166,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_icelake(sz_levenshtein_engine_t *engine,
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
-                                                               sz_allocator_t *allocator, void *stream);
+                                                               sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *candidates, sz_size_t *distances,
-                                                             sz_size_t distances_stride, void *stream);
+                                                             sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_CUDA
@@ -177,15 +178,15 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                            void *stream);
+                                                            sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
-                                                          sz_size_t distances_stride, void *stream);
+                                                          sz_size_t distances_stride, sz_stream_t stream);
 /** @copydoc sz_levenshtein_distance_tiled_best */
 STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               void *stream);
+                                                               sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
@@ -193,15 +194,15 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_s
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                            void *stream);
+                                                            sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
-                                                          sz_size_t distances_stride, void *stream);
+                                                          sz_size_t distances_stride, sz_stream_t stream);
 /** @copydoc sz_levenshtein_distance_tiled_best */
 STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_rocm(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               void *stream);
+                                                               sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL
@@ -209,11 +210,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_rocm(sz_cptr_t a, sz_s
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engine_t *engine,
                                                              sz_sequence_t const *queries,
                                                              sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                             void *stream);
+                                                             sz_stream_t stream);
 /** @copydoc sz_levenshtein_distances */
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
                                                            sz_sequence_t const *candidates, sz_size_t *distances,
-                                                           sz_size_t distances_stride, void *stream);
+                                                           sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
 /**
@@ -240,25 +241,26 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
-                                                       sz_allocator_t *allocator, void *stream) {
+                                                       sz_allocator_t *allocator, sz_stream_t stream) {
     sz_unused_(engine), sz_unused_(queries), sz_unused_(symbol), sz_unused_(capabilities), sz_unused_(allocator),
         sz_unused_(stream);
     return sz_missing_library_k;
 }
 
-STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, void *stream) {
+STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream) {
     sz_levenshtein_engine_free_(engine, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
-                                                     sz_size_t *distances, sz_size_t distances_stride, void *stream) {
+                                                     sz_size_t *distances, sz_size_t distances_stride,
+                                                     sz_stream_t stream) {
     sz_unused_(engine), sz_unused_(candidates), sz_unused_(distances), sz_unused_(distances_stride), sz_unused_(stream);
     return sz_missing_library_k;
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_capability_t capabilities, void *stream) {
+                                                               sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(a), sz_unused_(a_length), sz_unused_(b), sz_unused_(b_length), sz_unused_(scratch), sz_unused_(distance),
         sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

@@ -40,7 +40,7 @@ extern "C" {
  *      @c sz_device_memory_mismatch_k for a stream the runtime cannot place, in which case the
  *      caller's device stays current.
  */
-STRINGZILLA_INLINE sz_status_t sz_device_enter_rocm_(void *stream, int *caller) {
+STRINGZILLA_INLINE sz_status_t sz_device_enter_rocm_(sz_stream_t stream, int *caller) {
     int device = 0;
     if (hipGetDevice(caller) != hipSuccess) return sz_missing_gpu_k;
     if (!stream) return sz_success_k;
@@ -64,7 +64,7 @@ STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_rocm_(void const *pointer) {
 
 /*  Each allocator below is stateless, ignoring @c handle, and works on the device of its stream. */
 
-STRINGZILLA_INLINE void *sz_memory_allocate_unified_rocm_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_unified_rocm_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -74,7 +74,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_rocm_(sz_size_t bytes, void 
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_device_rocm_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_device_rocm_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -84,7 +84,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_device_rocm_(sz_size_t bytes, void *
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_pinned_rocm_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_pinned_rocm_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -95,7 +95,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_pinned_rocm_(sz_size_t bytes, void *
 }
 
 /** Frees unified and device blocks alike, once the device is done with everything queued before. */
-STRINGZILLA_INLINE void sz_memory_free_device_rocm_(void *pointer, sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_device_rocm_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_rocm_(stream, &caller) != sz_success_k) return;
@@ -103,7 +103,7 @@ STRINGZILLA_INLINE void sz_memory_free_device_rocm_(void *pointer, sz_size_t byt
     sz_device_leave_rocm_(caller);
 }
 
-STRINGZILLA_INLINE void sz_memory_free_pinned_rocm_(void *pointer, sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_pinned_rocm_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_rocm_(stream, &caller) != sz_success_k) return;
@@ -180,21 +180,21 @@ STRINGZILLA_INLINE sz_size_t sz_block_size_rocm_(void const *kernel, sz_size_t s
 /** Launches @p kernel over @p grid blocks of @p block threads on @p stream, its arguments passed by
  *  address. The runtime's own error stays readable through @c hipGetLastError. */
 STRINGZILLA_INLINE sz_status_t sz_launch_rocm_(void const *kernel, dim3 grid, dim3 block, void **arguments,
-                                               sz_size_t shared_bytes, void *stream) {
+                                               sz_size_t shared_bytes, sz_stream_t stream) {
     return hipLaunchKernel(kernel, grid, block, arguments, shared_bytes, (hipStream_t)stream) == hipSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
 }
 
 /** Sets @p length bytes at device-reachable @p target to @p value, in order on @p stream. */
-STRINGZILLA_INLINE sz_status_t sz_fill_rocm_(void *target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_fill_rocm_(void *target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     return hipMemsetAsync(target, value, length, (hipStream_t)stream) == hipSuccess ? sz_success_k
                                                                                     : sz_device_code_mismatch_k;
 }
 
 /** Copies @p length bytes of @p source into @p target, each in host or device memory, in order on
  *  @p stream. */
-STRINGZILLA_INLINE sz_status_t sz_copy_rocm_(void *target, void const *source, sz_size_t length, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_copy_rocm_(void *target, void const *source, sz_size_t length, sz_stream_t stream) {
     return hipMemcpyAsync(target, source, length, hipMemcpyDefault, (hipStream_t)stream) == hipSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
@@ -203,19 +203,19 @@ STRINGZILLA_INLINE sz_status_t sz_copy_rocm_(void *target, void const *source, s
 /** Copies @p bytes of host @p source into the @c __device__ variable at @p symbol, in order on
  *  @p stream. */
 STRINGZILLA_INLINE sz_status_t sz_copy_to_symbol_rocm_(void const *symbol, void const *source, sz_size_t bytes,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     return hipMemcpyToSymbolAsync(symbol, source, bytes, 0, hipMemcpyHostToDevice, (hipStream_t)stream) == hipSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
 }
 
 /** Waits for everything enqueued on @p stream; only an engine's init may. */
-STRINGZILLA_INLINE sz_status_t sz_synchronize_rocm_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_synchronize_rocm_(sz_stream_t stream) {
     return hipStreamSynchronize((hipStream_t)stream) == hipSuccess ? sz_success_k : sz_device_code_mismatch_k;
 }
 
 /** Waits for @p stream on its own device, leaving the caller's current device as it found it. */
-STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_rocm_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_rocm_(sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -225,7 +225,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_rocm_(void *stream) {
 }
 
 /** Creates a stream on @p device, leaving the caller's current device as it was. */
-STRINGZILLA_INLINE sz_status_t sz_stream_create_rocm_(int device, void **stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_create_rocm_(int device, sz_stream_t *stream) {
     int caller = 0;
     sz_status_t status = sz_success_k;
     hipStream_t created = STRINGZILLA_NULL;
@@ -237,19 +237,19 @@ STRINGZILLA_INLINE sz_status_t sz_stream_create_rocm_(int device, void **stream)
 }
 
 /** Destroys @p stream once the work queued on it completes; a null stream is the default one. */
-STRINGZILLA_INLINE sz_status_t sz_stream_destroy_rocm_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_free_rocm_(sz_stream_t stream) {
     if (!stream) return sz_success_k;
     return hipStreamDestroy((hipStream_t)stream) == hipSuccess ? sz_success_k : sz_device_code_mismatch_k;
 }
 
 /** Whether @p stream still has work queued or running; a failed query answers that it has none. */
-STRINGZILLA_INLINE sz_bool_t sz_stream_query_rocm_(void *stream) {
+STRINGZILLA_INLINE sz_bool_t sz_stream_query_rocm_(sz_stream_t stream) {
     return hipStreamQuery((hipStream_t)stream) == hipErrorNotReady ? sz_true_k : sz_false_k;
 }
 
 /** Migrates managed @p pointer to the current device on @p stream, so a kernel reading what the
  *  host just filled takes one bulk move rather than a fault per page. */
-STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, void *stream) {
+STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, sz_stream_t stream) {
     int device = 0;
     if (hipGetDevice(&device) != hipSuccess) return;
     sz_unused_(hipMemPrefetchAsync(pointer, bytes, device, (hipStream_t)stream));
@@ -262,7 +262,7 @@ STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, 
 /** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_realloc_best. */
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_rocm_(sz_sequence_t *target, sz_sequence_t const *source,
                                                          sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_sequence_member_start_t get_start = STRINGZILLA_NULL;
     sz_sequence_member_length_t get_length = STRINGZILLA_NULL;
     int caller = 0;
@@ -290,16 +290,16 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_rocm_(sz_sequence_t *target, 
 #pragma region Devices
 
 /** How many ROCm devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_rocm_count_devices_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_count_rocm_(void) {
     int count = 0;
     return hipGetDeviceCount(&count) == hipSuccess ? (sz_size_t)count : 0;
 }
 
 /** The capabilities ROCm device @p ordinal runs, by the runtime's own numbering. */
-STRINGZILLA_INLINE sz_status_t sz_rocm_capabilities_detected_(sz_size_t ordinal, sz_capability_t *capabilities) {
+STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_rocm_(sz_size_t ordinal, sz_capability_t *capabilities) {
     int multiprocessors = 0;
     *capabilities = 0;
-    if (ordinal >= sz_rocm_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_rocm_()) return sz_missing_gpu_k;
     if (hipDeviceGetAttribute(&multiprocessors, hipDeviceAttributeMultiprocessorCount, (int)ordinal) != hipSuccess)
         return sz_device_code_mismatch_k;
     if (multiprocessors > 0) *capabilities = sz_cap_rocm_k;
@@ -307,9 +307,9 @@ STRINGZILLA_INLINE sz_status_t sz_rocm_capabilities_detected_(sz_size_t ordinal,
 }
 
 /** Creates a stream on ROCm device @p ordinal, leaving the caller's current device as it was. */
-STRINGZILLA_INLINE sz_status_t sz_rocm_stream_init_(sz_size_t ordinal, void **stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_init_rocm_(sz_size_t ordinal, sz_stream_t *stream) {
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_rocm_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_rocm_()) return sz_missing_gpu_k;
     return sz_stream_create_rocm_((int)ordinal, stream);
 }
 
@@ -318,20 +318,20 @@ STRINGZILLA_INLINE sz_status_t sz_rocm_stream_init_(sz_size_t ordinal, void **st
 /*  The library defines these once, in `c/target/rocm.hip`; header-only builds define them here. */
 #if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_ROCM
 
-STRINGZILLA_API sz_status_t sz_rocm_count_devices(sz_size_t *count) {
-    *count = sz_rocm_count_devices_();
+STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
+    *count = sz_device_count_rocm_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 
-STRINGZILLA_API sz_status_t sz_rocm_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
-    return sz_rocm_capabilities_detected_(ordinal, capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_detected_rocm(sz_size_t ordinal, sz_capability_t *capabilities) {
+    return sz_capabilities_detected_rocm_(ordinal, capabilities);
 }
 
-STRINGZILLA_API sz_status_t sz_rocm_stream_init(sz_size_t ordinal, void **stream) {
-    return sz_rocm_stream_init_(ordinal, stream);
+STRINGZILLA_API sz_status_t sz_stream_init_rocm(sz_size_t ordinal, sz_stream_t *stream) {
+    return sz_stream_init_rocm_(ordinal, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_rocm_stream_free(void *stream) { return sz_stream_destroy_rocm_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) { return sz_stream_free_rocm_(stream); }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator) {
     sz_allocator_init_unified_rocm_(allocator);
@@ -354,11 +354,13 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     void *stream) {
+                                                     sz_stream_t stream) {
     return sz_sequence_realloc_rocm_(target, source, allocator, allocated_bytes, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(void *stream) { return sz_stream_synchronize_rocm_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
+    return sz_stream_synchronize_rocm_(stream);
+}
 
 #endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_ROCM
 

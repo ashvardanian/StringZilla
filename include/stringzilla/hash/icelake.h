@@ -160,7 +160,8 @@ STRINGZILLA_INLINE sz_u64_t sz_bytesum_icelake_(sz_cptr_t text, sz_size_t length
     }
 }
 
-STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum, void *stream) {
+STRINGZILLA_API sz_status_t sz_bytesum_icelake(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
+                                               sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *checksum = sz_bytesum_icelake_(text, length);
     return sz_success_k;
@@ -263,13 +264,13 @@ STRINGZILLA_INLINE STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_icelake_(sz_
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_icelake(sz_cptr_t start, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream) {
+                                                                            sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_icelake_(start, length, seed);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_icelake(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_skylake_(state, seed);
     return sz_success_k;
@@ -306,7 +307,7 @@ STRINGZILLA_INLINE void sz_hash_state_absorb_icelake_(sz_hash_state_aligned_t *s
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_icelake(sz_hash_state_t *state_ptr, sz_cptr_t text, sz_size_t length,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // Load the packed public state (any alignment) into an aligned twin once, buffer/absorb on it, then store back.
@@ -348,14 +349,16 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_icelake(sz_hash_state_t *state_
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_icelake(sz_hash_state_t const *state, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_icelake(sz_hash_state_t const *state, sz_u64_t *hash,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // ? We don't know a better way to fold the state on Ice Lake, than to use the Haswell implementation.
     *hash = sz_hash_state_digest_westmere_(state);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_icelake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_icelake(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     if (length <= 16) {
         __m128i input_u8x16 = _mm_set1_epi64x(nonce);
@@ -531,7 +534,7 @@ STRINGZILLA_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_state_
 
 STRINGZILLA_API sz_status_t sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,             //
                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                      sz_u64_t *hashes, void *stream) {
+                                                      sz_u64_t *hashes, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Trivial counts don't benefit from sharing a normalization pass - go straight to the single-shot.
     if (seeds_count == 0) return sz_success_k;

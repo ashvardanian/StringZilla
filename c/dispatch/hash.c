@@ -529,13 +529,13 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
 }
 
 STRINGZILLA_API sz_status_t sz_bytesum_best(sz_cptr_t text, sz_size_t length, sz_u64_t *checksum,
-                                            sz_capability_t capabilities, void *stream) {
+                                            sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_bytesum_t const kernel = (sz_kernel_bytesum_t)sz_kernel_pick_(capabilities, sz_bytesum_capabilities());
     return kernel ? kernel(text, length, checksum, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u64_t seed, sz_u64_t *hash,
-                                         sz_capability_t capabilities, void *stream) {
+                                         sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_hash_t const kernel = (sz_kernel_hash_t)sz_kernel_pick_(capabilities, sz_hash_capabilities());
     return kernel ? kernel(text, length, seed, hash, stream) : sz_missing_kernel_k;
 }
@@ -543,49 +543,49 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
     sz_u64_t const *seeds, sz_size_t seeds_count,   //
-    sz_u64_t *hashes, sz_capability_t capabilities, void *stream) {
+    sz_u64_t *hashes, sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_hash_multiseed_t const kernel = (sz_kernel_hash_multiseed_t)sz_kernel_pick_(
         capabilities, sz_hash_multiseed_capabilities());
     return kernel ? kernel(text, length, seeds, seeds_count, hashes, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
-                                                sz_capability_t capabilities, void *stream) {
+                                                sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_fill_random_t const kernel = (sz_kernel_fill_random_t)sz_kernel_pick_(capabilities,
                                                                                     sz_fill_random_capabilities());
     return kernel ? kernel(target, length, nonce, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_init_best(sz_hash_state_t *state, sz_u64_t seed, sz_capability_t capabilities,
-                                                    void *stream) {
+                                                    sz_stream_t stream) {
     sz_kernel_hash_state_init_t const kernel = (sz_kernel_hash_state_init_t)sz_kernel_pick_(
         capabilities, sz_hash_state_init_capabilities());
     return kernel ? kernel(state, seed, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_best(sz_hash_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                      sz_capability_t capabilities, void *stream) {
+                                                      sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_hash_state_update_t const kernel = (sz_kernel_hash_state_update_t)sz_kernel_pick_(
         capabilities, sz_hash_state_update_capabilities());
     return kernel ? kernel(state, text, length, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_digest_best(sz_hash_state_t const *state, sz_u64_t *hash,
-                                                      sz_capability_t capabilities, void *stream) {
+                                                      sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_hash_state_digest_t const kernel = (sz_kernel_hash_state_digest_t)sz_kernel_pick_(
         capabilities, sz_hash_state_digest_capabilities());
     return kernel ? kernel(state, hash, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_init_best(sz_sha256_state_t *state, sz_capability_t capabilities,
-                                                      void *stream) {
+                                                      sz_stream_t stream) {
     sz_kernel_sha256_state_init_t const kernel = (sz_kernel_sha256_state_init_t)sz_kernel_pick_(
         capabilities, sz_sha256_state_init_capabilities());
     return kernel ? kernel(state, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                        sz_capability_t capabilities, void *stream) {
+                                                        sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_sha256_state_update_t const kernel = (sz_kernel_sha256_state_update_t)sz_kernel_pick_(
         capabilities, sz_sha256_state_update_capabilities());
     return kernel ? kernel(state, text, length, stream) : sz_missing_kernel_k;
@@ -593,14 +593,14 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_best(sz_sha256_state_t *state
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state,
                                                         sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-                                                        sz_capability_t capabilities, void *stream) {
+                                                        sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_sha256_state_digest_t const kernel = (sz_kernel_sha256_state_digest_t)sz_kernel_pick_(
         capabilities, sz_sha256_state_digest_capabilities());
     return kernel ? kernel(state, digest, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                             sz_capability_t capabilities, void *stream) {
+                                                             sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_sha256_multistate_update_t const kernel = (sz_kernel_sha256_multistate_update_t)sz_kernel_pick_(
         capabilities, sz_sha256_multistate_update_capabilities());
     return kernel ? kernel(states, texts, stream) : sz_missing_kernel_k;
@@ -608,7 +608,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *
 
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_best(sz_sha256_state_t const *states, sz_size_t states_count,
                                                              sz_u8_t *digests, sz_capability_t capabilities,
-                                                             void *stream) {
+                                                             sz_stream_t stream) {
     sz_kernel_sha256_multistate_digest_t const kernel = (sz_kernel_sha256_multistate_digest_t)sz_kernel_pick_(
         capabilities, sz_sha256_multistate_digest_capabilities());
     return kernel ? kernel(states, states_count, digests, stream) : sz_missing_kernel_k;

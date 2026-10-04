@@ -992,9 +992,9 @@ public struct Device: Sendable, Equatable {
         var count: sz_size_t = 1
         switch kind {
         case .cpu: break
-        case .cuda: try check(sz_cuda_count_devices(&count))
-        case .rocm: try check(sz_rocm_count_devices(&count))
-        case .metal: try check(sz_metal_count_devices(&count))
+        case .cuda: try check(sz_device_count_cuda(&count))
+        case .rocm: try check(sz_device_count_rocm(&count))
+        case .metal: try check(sz_device_count_metal(&count))
         }
         return Int(count)
     }
@@ -1005,10 +1005,10 @@ public struct Device: Sendable, Equatable {
             var mask: sz_capability_t = 0
             let device = sz_size_t(ordinal)
             switch kind {
-            case .cpu: try check(sz_cpu_capabilities_detected(&mask))
-            case .cuda: try check(sz_cuda_capabilities_detected(device, &mask))
-            case .rocm: try check(sz_rocm_capabilities_detected(device, &mask))
-            case .metal: try check(sz_metal_capabilities_detected(device, &mask))
+            case .cpu: try check(sz_capabilities_detected_cpu(&mask))
+            case .cuda: try check(sz_capabilities_detected_cuda(device, &mask))
+            case .rocm: try check(sz_capabilities_detected_rocm(device, &mask))
+            case .metal: try check(sz_capabilities_detected_metal(device, &mask))
             }
             return Capabilities(rawValue: UInt64(mask))
         }
@@ -1018,10 +1018,10 @@ public struct Device: Sendable, Equatable {
     public var capabilitiesCompiled: Capabilities {
         var mask: sz_capability_t = 0
         switch kind {
-        case .cpu: _ = sz_cpu_capabilities_compiled(&mask)
-        case .cuda: _ = sz_cuda_capabilities_compiled(&mask)
-        case .rocm: _ = sz_rocm_capabilities_compiled(&mask)
-        case .metal: _ = sz_metal_capabilities_compiled(&mask)
+        case .cpu: _ = sz_capabilities_compiled_cpu(&mask)
+        case .cuda: _ = sz_capabilities_compiled_cuda(&mask)
+        case .rocm: _ = sz_capabilities_compiled_rocm(&mask)
+        case .metal: _ = sz_capabilities_compiled_metal(&mask)
         }
         return Capabilities(rawValue: UInt64(mask))
     }
@@ -1033,10 +1033,10 @@ public struct Device: Sendable, Equatable {
             var mask: sz_capability_t = 0
             let device = sz_size_t(ordinal)
             switch kind {
-            case .cpu: try check(sz_cpu_capabilities_enabled(&mask))
-            case .cuda: try check(sz_cuda_capabilities_enabled(device, &mask))
-            case .rocm: try check(sz_rocm_capabilities_enabled(device, &mask))
-            case .metal: try check(sz_metal_capabilities_enabled(device, &mask))
+            case .cpu: try check(sz_capabilities_enabled_cpu(&mask))
+            case .cuda: try check(sz_capabilities_enabled_cuda(device, &mask))
+            case .rocm: try check(sz_capabilities_enabled_rocm(device, &mask))
+            case .metal: try check(sz_capabilities_enabled_metal(device, &mask))
             }
             return Capabilities(rawValue: UInt64(mask))
         }
@@ -1047,6 +1047,6 @@ public struct Device: Sendable, Equatable {
     /// - Throws: ``Error`` on a GPU, which has no thread state to configure.
     public func configureThread(_ capabilities: Capabilities) throws {
         guard kind == .cpu else { throw fail(.missingKernel, "GPUs have no thread state to configure") }
-        try check(sz_cpu_configure_thread(capabilities.native))
+        try check(sz_thread_configure_cpu(capabilities.native))
     }
 }

@@ -76,14 +76,14 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_neon(sz_substrings_engine_
                                                            sz_substrings_overlap_policy_t overlap_policy,
                                                            sz_size_t hot_states, sz_size_t matches_budget,
                                                            sz_size_t haystacks_budget, sz_allocator_t *allocator,
-                                                           void *stream) {
+                                                           sz_stream_t stream) {
     sz_unused_(haystacks_budget);
     return sz_substrings_engine_init_cpu_(engine, needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                           sz_cap_neon_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_size_t *counts, sz_size_t counts_stride, void *stream) {
+                                                      sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_counts_with_(engine, &walks, haystacks, counts, counts_stride);
@@ -91,7 +91,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_neon(sz_substrings_engine_t *en
 
 STRINGZILLA_API sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                     sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                    sz_size_t *matches_offsets, void *stream) {
+                                                    sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);
@@ -99,7 +99,8 @@ STRINGZILLA_API sz_status_t sz_substrings_find_neon(sz_substrings_engine_t *engi
 
 STRINGZILLA_API sz_status_t sz_substrings_replace_neon(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                        sz_sequence_t const *replacements, sz_ptr_t target,
-                                                       sz_size_t target_capacity, sz_size_t *offsets, void *stream) {
+                                                       sz_size_t target_capacity, sz_size_t *offsets,
+                                                       sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_replace_with_(engine, &walks, haystacks, replacements, target, target_capacity, offsets);
@@ -110,7 +111,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_neon(sz_substrings_engine_
                                                            sz_f32_t const *document_lengths,
                                                            sz_substrings_bm25_t const *parameters,
                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                           sz_size_t scores_stride, void *stream) {
+                                                           sz_size_t scores_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_neon_();
     return sz_substrings_bm25_scores_with_(engine, &walks, haystacks, document_lengths, parameters, needle_weights,

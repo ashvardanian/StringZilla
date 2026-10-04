@@ -341,7 +341,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
-    sz_size_t haystacks_budget, sz_allocator_t *allocator, void *stream) {
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_allocator_t unified;
     sz_metal_bound_t bound;
     sz_metal_call_t call;
@@ -380,7 +380,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                       sz_size_t *counts, sz_size_t counts_stride, void *stream) {
+                                                       sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arguments_metal_t arguments;
     sz_metal_call_t call;
@@ -405,7 +405,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *e
 
 STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                     sz_size_t *matches_offsets, void *stream) {
+                                                     sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arguments_metal_t arguments;
     sz_metal_bound_t bound;
@@ -440,7 +440,8 @@ STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *eng
 
 STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
                                                         sz_sequence_t const *replacements, sz_ptr_t target,
-                                                        sz_size_t target_capacity, sz_size_t *offsets, void *stream) {
+                                                        sz_size_t target_capacity, sz_size_t *offsets,
+                                                        sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_size_t const boundaries = haystacks->count + 1;
     sz_substrings_arguments_metal_t arguments;
@@ -497,7 +498,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
                                                             sz_f32_t const *document_lengths,
                                                             sz_substrings_bm25_t const *parameters,
                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,
-                                                            sz_size_t scores_stride, void *stream) {
+                                                            sz_size_t scores_stride, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arena_metal_t const arena = sz_substrings_arena_metal_(engine, haystacks->count);
     sz_bool_t const hashed = (sz_bool_t)(engine->needles_count > sz_substrings_tally_slots_metal_k);

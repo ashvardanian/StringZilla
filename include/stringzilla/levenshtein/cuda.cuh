@@ -257,7 +257,7 @@ enum { sz_levenshtein_masks_threads_cuda_k = sz_levenshtein_byte_classes_k };
  *  @note Joins @p stream, which is what lets the staging be released; only an init is allowed to.
  */
 static sz_status_t sz_levenshtein_build_masks_cuda_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
-                                                    void *stream) {
+                                                    sz_stream_t stream) {
     sz_size_t texts_bytes = 0;
     for (sz_size_t index = 0; index != queries->count; ++index)
         texts_bytes += queries->get_length(queries->handle, index);
@@ -303,7 +303,7 @@ static sz_status_t sz_levenshtein_build_masks_cuda_(sz_levenshtein_engine_t *eng
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cuda_(sz_levenshtein_engine_t *engine,
                                                                 sz_sequence_t const *queries,
                                                                 sz_levenshtein_symbol_t symbol,
-                                                                sz_allocator_t *allocator, void *stream) {
+                                                                sz_allocator_t *allocator, sz_stream_t stream) {
     sz_allocator_t unified;
     if (!sz_device_multiprocessors_cuda_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
@@ -347,7 +347,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cuda_(sz_levenshtein_e
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_cuda_(sz_levenshtein_engine_t *engine,
                                                                        sz_sequence_t const *queries,
                                                                        sz_levenshtein_symbol_t symbol,
-                                                                       sz_allocator_t *allocator, void *stream) {
+                                                                       sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -359,7 +359,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_cuda_(sz_levens
 /** Launches whichever rung's entry point the caller chose, over a grid of candidate tiles
  *  by prepared queries. */
 static sz_status_t sz_levenshtein_launch_cuda_(void const *entry_point, sz_size_t blocks, sz_size_t queries,
-                                               sz_size_t per_block, void *stream, sz_levenshtein_engine_t engine,
+                                               sz_size_t per_block, sz_stream_t stream, sz_levenshtein_engine_t engine,
                                                sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
                                                sz_size_t distances_stride) {
     dim3 grid, block;
@@ -375,7 +375,7 @@ static sz_status_t sz_levenshtein_launch_cuda_(void const *entry_point, sz_size_
  *  @ref sz_levenshtein_distances_scoped_cuda_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_cuda_(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *candidates, sz_size_t *distances,
-                                                              sz_size_t distances_stride, void *stream) {
+                                                              sz_size_t distances_stride, sz_stream_t stream) {
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     if (candidates->count == 0) return sz_success_k;
 
@@ -431,7 +431,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_cuda_(sz_levenshtein_eng
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_cuda_(sz_levenshtein_engine_t *engine,
                                                                      sz_sequence_t const *candidates,
                                                                      sz_size_t *distances, sz_size_t distances_stride,
-                                                                     void *stream) {
+                                                                     sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -479,7 +479,7 @@ enum { sz_levenshtein_tiled_rows_min_cuda_k = 3 };
  */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_cuda_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                    sz_size_t b_length, void *scratch,
-                                                                   sz_size_t *distance, void *stream) {
+                                                                   sz_size_t *distance, sz_stream_t stream) {
     if (a_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32) ||
         b_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32))
         return sz_unexpected_dimensions_k;
@@ -541,7 +541,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_cuda_(sz_cptr_t a, 
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_scoped_cuda_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                           sz_size_t b_length, void *scratch,
-                                                                          sz_size_t *distance, void *stream) {
+                                                                          sz_size_t *distance, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -555,19 +555,19 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_scoped_cuda_(sz_cpt
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                            void *stream) {
+                                                            sz_stream_t stream) {
     return sz_levenshtein_engine_init_scoped_cuda_(engine, queries, symbol, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
-                                                          sz_size_t distances_stride, void *stream) {
+                                                          sz_size_t distances_stride, sz_stream_t stream) {
     return sz_levenshtein_distances_scoped_cuda_(engine, candidates, distances, distances_stride, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               void *stream) {
+                                                               sz_stream_t stream) {
     return sz_levenshtein_distance_tiled_scoped_cuda_(a, a_length, b, b_length, scratch, distance, stream);
 }
 

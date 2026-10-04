@@ -45,7 +45,7 @@ extern "C" {
  *      @c sz_device_memory_mismatch_k for a stream the runtime cannot place, in which case the
  *      caller's device stays current.
  */
-STRINGZILLA_INLINE sz_status_t sz_device_enter_cuda_(void *stream, int *caller) {
+STRINGZILLA_INLINE sz_status_t sz_device_enter_cuda_(sz_stream_t stream, int *caller) {
     int device = 0;
     if (cudaGetDevice(caller) != cudaSuccess) return sz_missing_gpu_k;
     if (!stream) return sz_success_k;
@@ -69,7 +69,7 @@ STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_cuda_(void const *pointer) {
 
 /*  Each allocator below is stateless, ignoring @c handle, and works on the device of its stream. */
 
-STRINGZILLA_INLINE void *sz_memory_allocate_unified_cuda_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_unified_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -79,7 +79,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_cuda_(sz_size_t bytes, void 
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_device_cuda_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_device_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -89,7 +89,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_device_cuda_(sz_size_t bytes, void *
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_pinned_cuda_(sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void *sz_memory_allocate_pinned_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -100,7 +100,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_pinned_cuda_(sz_size_t bytes, void *
 }
 
 /** Frees unified and device blocks alike, once the device is done with everything queued before. */
-STRINGZILLA_INLINE void sz_memory_free_device_cuda_(void *pointer, sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_device_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_cuda_(stream, &caller) != sz_success_k) return;
@@ -108,7 +108,7 @@ STRINGZILLA_INLINE void sz_memory_free_device_cuda_(void *pointer, sz_size_t byt
     sz_device_leave_cuda_(caller);
 }
 
-STRINGZILLA_INLINE void sz_memory_free_pinned_cuda_(void *pointer, sz_size_t bytes, void *handle, void *stream) {
+STRINGZILLA_INLINE void sz_memory_free_pinned_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_cuda_(stream, &caller) != sz_success_k) return;
@@ -198,7 +198,7 @@ STRINGZILLA_INLINE sz_size_t sz_block_size_cuda_(void const *kernel, sz_size_t s
 /** Launches @p kernel over @p grid blocks of @p block threads on @p stream, its arguments passed by
  *  address. The runtime's own error stays readable through @c cudaGetLastError. */
 STRINGZILLA_INLINE sz_status_t sz_launch_cuda_(void const *kernel, dim3 grid, dim3 block, void **arguments,
-                                               sz_size_t shared_bytes, void *stream) {
+                                               sz_size_t shared_bytes, sz_stream_t stream) {
     return cudaLaunchKernel(kernel, grid, block, arguments, shared_bytes, (cudaStream_t)stream) == cudaSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
@@ -240,7 +240,7 @@ STRINGZILLA_INLINE sz_size_t sz_resident_clusters_cuda_(void const *kernel, sz_s
  *  when above one. */
 STRINGZILLA_INLINE sz_status_t sz_launch_clustered_cuda_(void const *kernel, dim3 grid, dim3 block, void **arguments,
                                                          sz_size_t shared_bytes, sz_size_t cluster_blocks,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     cudaLaunchConfig_t config;
     cudaLaunchAttribute attribute;
     if (cluster_blocks <= 1) return sz_launch_cuda_(kernel, grid, block, arguments, shared_bytes, stream);
@@ -255,14 +255,14 @@ STRINGZILLA_INLINE sz_status_t sz_launch_clustered_cuda_(void const *kernel, dim
 
 /** Sets @p length bytes at device-reachable @p target to @p value, in order on @p stream, in the
  *  argument order of @ref sz_fill_serial. */
-STRINGZILLA_INLINE sz_status_t sz_fill_cuda_(void *target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_fill_cuda_(void *target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     return cudaMemsetAsync(target, value, length, (cudaStream_t)stream) == cudaSuccess ? sz_success_k
                                                                                        : sz_device_code_mismatch_k;
 }
 
 /** Copies @p length bytes of @p source into @p target, each in host or device memory, in order on
  *  @p stream, in the argument order of @ref sz_copy_serial. */
-STRINGZILLA_INLINE sz_status_t sz_copy_cuda_(void *target, void const *source, sz_size_t length, void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_copy_cuda_(void *target, void const *source, sz_size_t length, sz_stream_t stream) {
     return cudaMemcpyAsync(target, source, length, cudaMemcpyDefault, (cudaStream_t)stream) == cudaSuccess
                ? sz_success_k
                : sz_device_code_mismatch_k;
@@ -271,7 +271,7 @@ STRINGZILLA_INLINE sz_status_t sz_copy_cuda_(void *target, void const *source, s
 /** Copies @p bytes of host @p source into the @c __device__ variable at @p symbol, in order on
  *  @p stream; from pageable memory the runtime stages the copy before returning. */
 STRINGZILLA_INLINE sz_status_t sz_copy_to_symbol_cuda_(void const *symbol, void const *source, sz_size_t bytes,
-                                                       void *stream) {
+                                                       sz_stream_t stream) {
     return cudaMemcpyToSymbolAsync(symbol, source, bytes, 0, cudaMemcpyHostToDevice, (cudaStream_t)stream) ==
                    cudaSuccess
                ? sz_success_k
@@ -279,12 +279,12 @@ STRINGZILLA_INLINE sz_status_t sz_copy_to_symbol_cuda_(void const *symbol, void 
 }
 
 /** Waits for everything enqueued on @p stream; only an engine's init may. */
-STRINGZILLA_INLINE sz_status_t sz_synchronize_cuda_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_synchronize_cuda_(sz_stream_t stream) {
     return cudaStreamSynchronize((cudaStream_t)stream) == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
 }
 
 /** Waits for @p stream on its own device, leaving the caller's current device as it found it. */
-STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_cuda_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_cuda_(sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -294,7 +294,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_cuda_(void *stream) {
 }
 
 /** Creates a stream on @p device, leaving the caller's current device as it was. */
-STRINGZILLA_INLINE sz_status_t sz_stream_create_cuda_(int device, void **stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_create_cuda_(int device, sz_stream_t *stream) {
     int caller = 0;
     sz_status_t status = sz_success_k;
     cudaStream_t created = STRINGZILLA_NULL;
@@ -306,20 +306,20 @@ STRINGZILLA_INLINE sz_status_t sz_stream_create_cuda_(int device, void **stream)
 }
 
 /** Destroys @p stream once the work queued on it completes; a null stream is the default one. */
-STRINGZILLA_INLINE sz_status_t sz_stream_destroy_cuda_(void *stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_free_cuda_(sz_stream_t stream) {
     if (!stream) return sz_success_k;
     return cudaStreamDestroy((cudaStream_t)stream) == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
 }
 
 /** Whether @p stream still has work queued or running; a failed query answers that it has none. */
-STRINGZILLA_INLINE sz_bool_t sz_stream_query_cuda_(void *stream) {
+STRINGZILLA_INLINE sz_bool_t sz_stream_query_cuda_(sz_stream_t stream) {
     return cudaStreamQuery((cudaStream_t)stream) == cudaErrorNotReady ? sz_true_k : sz_false_k;
 }
 
 /** Migrates managed @p pointer to the current device on @p stream, so a kernel reading what the
  *  host just filled takes one bulk move rather than a fault per page. Memory the driver does not
  *  manage reports as much, which is not an error. */
-STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, void *stream) {
+STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, sz_stream_t stream) {
     int device = 0;
     cudaMemLocation where;
     if (cudaGetDevice(&device) != cudaSuccess) return;
@@ -335,7 +335,7 @@ STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, 
 /** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_realloc_best. */
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_cuda_(sz_sequence_t *target, sz_sequence_t const *source,
                                                          sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_sequence_member_start_t get_start = STRINGZILLA_NULL;
     sz_sequence_member_length_t get_length = STRINGZILLA_NULL;
     int caller = 0;
@@ -363,16 +363,16 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_cuda_(sz_sequence_t *target, 
 #pragma region Devices
 
 /** How many CUDA devices the runtime sees, or zero. */
-STRINGZILLA_INLINE sz_size_t sz_cuda_count_devices_(void) {
+STRINGZILLA_INLINE sz_size_t sz_device_count_cuda_(void) {
     int count = 0;
     return cudaGetDeviceCount(&count) == cudaSuccess ? (sz_size_t)count : 0;
 }
 
 /** The capabilities CUDA device @p ordinal runs, by the runtime's own numbering. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_capabilities_detected_(sz_size_t ordinal, sz_capability_t *capabilities) {
+STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_cuda_(sz_size_t ordinal, sz_capability_t *capabilities) {
     int multiprocessors = 0;
     *capabilities = 0;
-    if (ordinal >= sz_cuda_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
     if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, (int)ordinal) != cudaSuccess)
         return sz_device_code_mismatch_k;
     if (multiprocessors > 0) *capabilities = sz_cap_cuda_k;
@@ -380,9 +380,9 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_capabilities_detected_(sz_size_t ordinal,
 }
 
 /** Creates a stream on CUDA device @p ordinal, leaving the caller's current device as it was. */
-STRINGZILLA_INLINE sz_status_t sz_cuda_stream_init_(sz_size_t ordinal, void **stream) {
+STRINGZILLA_INLINE sz_status_t sz_stream_init_cuda_(sz_size_t ordinal, sz_stream_t *stream) {
     *stream = STRINGZILLA_NULL;
-    if (ordinal >= sz_cuda_count_devices_()) return sz_missing_gpu_k;
+    if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
     return sz_stream_create_cuda_((int)ordinal, stream);
 }
 
@@ -391,20 +391,20 @@ STRINGZILLA_INLINE sz_status_t sz_cuda_stream_init_(sz_size_t ordinal, void **st
 /*  The library defines these once, in `c/target/cuda.cu`; header-only builds define them here. */
 #if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_CUDA
 
-STRINGZILLA_API sz_status_t sz_cuda_count_devices(sz_size_t *count) {
-    *count = sz_cuda_count_devices_();
+STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
+    *count = sz_device_count_cuda_();
     return *count ? sz_success_k : sz_missing_gpu_k;
 }
 
-STRINGZILLA_API sz_status_t sz_cuda_capabilities_detected(sz_size_t ordinal, sz_capability_t *capabilities) {
-    return sz_cuda_capabilities_detected_(ordinal, capabilities);
+STRINGZILLA_API sz_status_t sz_capabilities_detected_cuda(sz_size_t ordinal, sz_capability_t *capabilities) {
+    return sz_capabilities_detected_cuda_(ordinal, capabilities);
 }
 
-STRINGZILLA_API sz_status_t sz_cuda_stream_init(sz_size_t ordinal, void **stream) {
-    return sz_cuda_stream_init_(ordinal, stream);
+STRINGZILLA_API sz_status_t sz_stream_init_cuda(sz_size_t ordinal, sz_stream_t *stream) {
+    return sz_stream_init_cuda_(ordinal, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_cuda_stream_free(void *stream) { return sz_stream_destroy_cuda_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream) { return sz_stream_free_cuda_(stream); }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator) {
     sz_allocator_init_unified_cuda_(allocator);
@@ -427,11 +427,13 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     void *stream) {
+                                                     sz_stream_t stream) {
     return sz_sequence_realloc_cuda_(target, source, allocator, allocated_bytes, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(void *stream) { return sz_stream_synchronize_cuda_(stream); }
+STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
+    return sz_stream_synchronize_cuda_(stream);
+}
 
 #endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_CUDA
 

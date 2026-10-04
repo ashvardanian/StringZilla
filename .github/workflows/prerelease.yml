@@ -1101,7 +1101,7 @@ jobs:
               sz_find_serial(haystack, 11, "world", 5, &match, NULL);
           #else
               sz_capability_t capabilities = 0;
-              sz_cpu_capabilities_enabled(&capabilities);
+              sz_capabilities_enabled_cpu(&capabilities);
               sz_find_best(haystack, 11, "world", 5, &match, capabilities, NULL);
           #endif
               printf("%d\n", (int)(match - haystack));

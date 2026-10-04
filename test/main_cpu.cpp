@@ -195,7 +195,7 @@ void test_find_kernel_unit() {
     sz_status_t const missing = STRINGZILLA_HEADER_ONLY ? sz_missing_library_k : sz_missing_kernel_k;
     sz_kernel_punned_t const poison = reinterpret_cast<sz_kernel_punned_t>(&test_find_kernel_unit);
     sz_capability_t enabled = 0;
-    sz_cpu_capabilities_enabled(&enabled);
+    sz_capabilities_enabled_cpu(&enabled);
     for (int kind = sz_kernel_unknown_k; kind <= sz_kernel_substrings_bm25_scores_k; ++kind) {
         sz_kernel_punned_t expected_kernel = poison;
         sz_capability_t expected_capability = sz_cap_serial_k;

@@ -323,7 +323,7 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_skylake_(
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_size_t top_count,
                                                         sz_bool_t reverse, sz_allocator_t *allocator,
-                                                        sz_sorted_idx_t *order, void *stream) {
+                                                        sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // First, initialize the `order` with `std::iota`-like behavior.
@@ -364,7 +364,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     sz_size_t const count = sequence->count;

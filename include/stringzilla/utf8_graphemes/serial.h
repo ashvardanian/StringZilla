@@ -646,7 +646,7 @@ STRINGZILLA_INLINE sz_u64_t sz_grapheme_window_boundaries_(sz_grapheme_window_ma
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_utf8_graphemes_serial(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                     sz_size_t capacity, sz_size_t *count, void *stream) {
+                                                     sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_graphemes_serial_(text, length, lengths, capacity);
     sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));

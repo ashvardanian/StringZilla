@@ -722,7 +722,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_haswell_( //
 /** Forward UAX-14 line-break-opportunity kernel for Haswell AVX2. Bit-exact with
  *  @c sz_utf8_linebreaks_serial and @c sz_utf8_linebreaks_icelake. */
 STRINGZILLA_API sz_status_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *lengths,
-                                                       sz_size_t capacity, sz_size_t *count, void *stream) {
+                                                       sz_size_t capacity, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_linebreaks_haswell_(text, length, lengths, capacity);
     sz_assert_(sz_utf8_segments_consistent_(length, capacity, *count, lengths));

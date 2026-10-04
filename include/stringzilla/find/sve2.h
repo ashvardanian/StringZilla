@@ -157,14 +157,14 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byteset_sve2_(sz_cptr_t haystack, sz_size_
 #if STRINGZILLA_TARGET_SVE2
 
 STRINGZILLA_API sz_status_t sz_find_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length, sz_byteset_t const *set,
-                                                 sz_cptr_t *match, void *stream) {
+                                                 sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_byteset_sve2_(haystack, haystack_length, set);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_rfind_byteset_sve2(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                  sz_byteset_t const *set, sz_cptr_t *match, void *stream) {
+                                                  sz_byteset_t const *set, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_rfind_byteset_sve2_(haystack, haystack_length, set);
     return sz_success_k;

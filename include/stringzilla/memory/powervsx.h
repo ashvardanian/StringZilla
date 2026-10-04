@@ -30,7 +30,7 @@ STRINGZILLA_INLINE void sz_copy_powervsx_(sz_ptr_t target, sz_cptr_t source, sz_
     if (length) sz_copy_serial_(target, source, length);
 }
 
-STRINGZILLA_API sz_status_t sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_copy_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_copy_powervsx_(target, source, length);
     return sz_success_k;
@@ -55,7 +55,7 @@ STRINGZILLA_INLINE void sz_move_powervsx_(sz_ptr_t target, sz_cptr_t source, sz_
     }
 }
 
-STRINGZILLA_API sz_status_t sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, void *stream) {
+STRINGZILLA_API sz_status_t sz_move_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_move_powervsx_(target, source, length);
     return sz_success_k;
@@ -67,7 +67,7 @@ STRINGZILLA_INLINE void sz_fill_powervsx_(sz_ptr_t target, sz_size_t length, sz_
     if (length) sz_fill_serial_(target, length, value);
 }
 
-STRINGZILLA_API sz_status_t sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_powervsx(sz_ptr_t target, sz_size_t length, sz_u8_t value, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_powervsx_(target, length, value);
     return sz_success_k;
@@ -135,7 +135,7 @@ STRINGZILLA_INLINE void sz_lookup_powervsx_(sz_ptr_t target, sz_cptr_t source, s
 }
 
 STRINGZILLA_API sz_status_t sz_lookup_powervsx(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                               char const lut[sz_at_least_(256)], void *stream) {
+                                               char const lut[sz_at_least_(256)], sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_lookup_powervsx_(target, source, length, lut);
     return sz_success_k;

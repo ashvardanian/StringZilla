@@ -539,7 +539,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_icelake_(sz_cptr_t text, sz_size_t le
     return char_count;
 }
 
-STRINGZILLA_API sz_status_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *count, void *stream) {
+STRINGZILLA_API sz_status_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *count,
+                                                  sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_count_icelake_(text, length);
     return sz_success_k;
@@ -577,7 +578,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_icelake_(sz_cptr_t text, sz_size_t len
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                                 void *stream) {
+                                                 sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *position = sz_utf8_seek_icelake_(text, length, n);
     return sz_success_k;
@@ -836,7 +837,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_icelake_( //
 STRINGZILLA_API sz_status_t sz_utf8_decode_icelake( //
     sz_cptr_t text, sz_size_t length,               //
     sz_rune_t *runes, sz_size_t runes_capacity,     //
-    sz_size_t *runes_count, sz_size_t *bytes_consumed, void *stream) {
+    sz_size_t *runes_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *bytes_consumed = (sz_size_t)(sz_utf8_decode_icelake_(text, length, runes, runes_capacity, runes_count) - text);
     return sz_success_k;

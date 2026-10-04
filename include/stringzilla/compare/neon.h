@@ -54,13 +54,14 @@ STRINGZILLA_INLINE sz_bool_t sz_equal_neon_(sz_cptr_t a, sz_cptr_t b, sz_size_t 
 #if STRINGZILLA_TARGET_NEON
 
 STRINGZILLA_API sz_status_t sz_order_neon(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length,
-                                          sz_ordering_t *ordering, void *stream) {
+                                          sz_ordering_t *ordering, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *ordering = sz_order_neon_(a, a_length, b, b_length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal, void *stream) {
+STRINGZILLA_API sz_status_t sz_equal_neon(sz_cptr_t a, sz_cptr_t b, sz_size_t length, sz_bool_t *equal,
+                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *equal = sz_equal_neon_(a, b, length);
     return sz_success_k;

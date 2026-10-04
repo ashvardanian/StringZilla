@@ -735,9 +735,9 @@ public readonly unsafe record struct Device {
         nuint count = 1;
         switch (kind) {
             case DeviceKind.Cpu: break;
-            case DeviceKind.Cuda: Sz.Check("sz_cuda_count_devices", Native.sz_cuda_count_devices(&count)); break;
-            case DeviceKind.Rocm: Sz.Check("sz_rocm_count_devices", Native.sz_rocm_count_devices(&count)); break;
-            case DeviceKind.Metal: Sz.Check("sz_metal_count_devices", Native.sz_metal_count_devices(&count)); break;
+            case DeviceKind.Cuda: Sz.Check("sz_device_count_cuda", Native.sz_device_count_cuda(&count)); break;
+            case DeviceKind.Rocm: Sz.Check("sz_device_count_rocm", Native.sz_device_count_rocm(&count)); break;
+            case DeviceKind.Metal: Sz.Check("sz_device_count_metal", Native.sz_device_count_metal(&count)); break;
             default: throw new ArgumentOutOfRangeException(nameof(kind));
         }
         return count;
@@ -750,10 +750,10 @@ public readonly unsafe record struct Device {
             ulong mask = 0;
             nuint device = (nuint)Ordinal;
             switch (Kind) {
-                case DeviceKind.Cpu: Sz.Check("sz_cpu_capabilities_detected", Native.sz_cpu_capabilities_detected(&mask)); break;
-                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_detected", Native.sz_cuda_capabilities_detected(device, &mask)); break;
-                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_detected", Native.sz_rocm_capabilities_detected(device, &mask)); break;
-                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_detected", Native.sz_metal_capabilities_detected(device, &mask)); break;
+                case DeviceKind.Cpu: Sz.Check("sz_capabilities_detected_cpu", Native.sz_capabilities_detected_cpu(&mask)); break;
+                case DeviceKind.Cuda: Sz.Check("sz_capabilities_detected_cuda", Native.sz_capabilities_detected_cuda(device, &mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_capabilities_detected_rocm", Native.sz_capabilities_detected_rocm(device, &mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_capabilities_detected_metal", Native.sz_capabilities_detected_metal(device, &mask)); break;
             }
             return mask;
         }
@@ -764,10 +764,10 @@ public readonly unsafe record struct Device {
         get {
             ulong mask = 0;
             switch (Kind) {
-                case DeviceKind.Cpu: Sz.Check("sz_cpu_capabilities_compiled", Native.sz_cpu_capabilities_compiled(&mask)); break;
-                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_compiled", Native.sz_cuda_capabilities_compiled(&mask)); break;
-                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_compiled", Native.sz_rocm_capabilities_compiled(&mask)); break;
-                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_compiled", Native.sz_metal_capabilities_compiled(&mask)); break;
+                case DeviceKind.Cpu: Sz.Check("sz_capabilities_compiled_cpu", Native.sz_capabilities_compiled_cpu(&mask)); break;
+                case DeviceKind.Cuda: Sz.Check("sz_capabilities_compiled_cuda", Native.sz_capabilities_compiled_cuda(&mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_capabilities_compiled_rocm", Native.sz_capabilities_compiled_rocm(&mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_capabilities_compiled_metal", Native.sz_capabilities_compiled_metal(&mask)); break;
             }
             return mask;
         }
@@ -781,10 +781,10 @@ public readonly unsafe record struct Device {
             ulong mask = 0;
             nuint device = (nuint)Ordinal;
             switch (Kind) {
-                case DeviceKind.Cpu: Sz.Check("sz_cpu_capabilities_enabled", Native.sz_cpu_capabilities_enabled(&mask)); break;
-                case DeviceKind.Cuda: Sz.Check("sz_cuda_capabilities_enabled", Native.sz_cuda_capabilities_enabled(device, &mask)); break;
-                case DeviceKind.Rocm: Sz.Check("sz_rocm_capabilities_enabled", Native.sz_rocm_capabilities_enabled(device, &mask)); break;
-                case DeviceKind.Metal: Sz.Check("sz_metal_capabilities_enabled", Native.sz_metal_capabilities_enabled(device, &mask)); break;
+                case DeviceKind.Cpu: Sz.Check("sz_capabilities_enabled_cpu", Native.sz_capabilities_enabled_cpu(&mask)); break;
+                case DeviceKind.Cuda: Sz.Check("sz_capabilities_enabled_cuda", Native.sz_capabilities_enabled_cuda(device, &mask)); break;
+                case DeviceKind.Rocm: Sz.Check("sz_capabilities_enabled_rocm", Native.sz_capabilities_enabled_rocm(device, &mask)); break;
+                case DeviceKind.Metal: Sz.Check("sz_capabilities_enabled_metal", Native.sz_capabilities_enabled_metal(device, &mask)); break;
             }
             return mask;
         }
@@ -795,7 +795,7 @@ public readonly unsafe record struct Device {
     /// <exception cref="StatusException">On a GPU, which has no thread state to configure.</exception>
     public void ConfigureThread(ulong capabilities) {
         if (Kind != DeviceKind.Cpu) throw new StatusException($"ConfigureThread on {this}", MissingKernel);
-        Sz.Check("sz_cpu_configure_thread", Native.sz_cpu_configure_thread(capabilities));
+        Sz.Check("sz_thread_configure_cpu", Native.sz_thread_configure_cpu(capabilities));
     }
 }
 
@@ -1458,22 +1458,22 @@ internal static unsafe partial class Native {
     #endregion
 
     #region Capabilities and Metadata
-    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_detected(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_compiled(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cpu_capabilities_enabled(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cpu_configure_thread(ulong capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cuda_count_devices(nuint* count);
-    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_detected(nuint ordinal, ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_compiled(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_cuda_capabilities_enabled(nuint ordinal, ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_rocm_count_devices(nuint* count);
-    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_detected(nuint ordinal, ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_compiled(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_rocm_capabilities_enabled(nuint ordinal, ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_metal_count_devices(nuint* count);
-    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_detected(nuint ordinal, ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_compiled(ulong* capabilities);
-    [LibraryImport(Lib)] internal static partial int sz_metal_capabilities_enabled(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_detected_cpu(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_compiled_cpu(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_enabled_cpu(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_thread_configure_cpu(ulong capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_device_count_cuda(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_detected_cuda(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_compiled_cuda(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_enabled_cuda(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_device_count_rocm(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_detected_rocm(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_compiled_rocm(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_enabled_rocm(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_device_count_metal(nuint* count);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_detected_metal(nuint ordinal, ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_compiled_metal(ulong* capabilities);
+    [LibraryImport(Lib)] internal static partial int sz_capabilities_enabled_metal(nuint ordinal, ulong* capabilities);
     [LibraryImport(Lib)] internal static partial nuint sz_capabilities_name(ulong capabilities, byte* buffer, nuint capacity);
     [LibraryImport(Lib)] internal static partial int sz_version_major();
     [LibraryImport(Lib)] internal static partial int sz_version_minor();

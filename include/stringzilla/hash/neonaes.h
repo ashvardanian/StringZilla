@@ -520,20 +520,21 @@ STRINGZILLA_INLINE void sz_fill_random_neonaes_(sz_ptr_t text, sz_size_t length,
 
 #if STRINGZILLA_TARGET_NEONAES
 
-STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_init_neonaes_(state, seed);
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_hash_state_update_neonaes(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
-                                                         void *stream) {
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_hash_state_update_neonaes_(packed, text, length);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *packed, sz_u64_t *hash, void *stream) {
+STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *packed, sz_u64_t *hash,
+                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_state_digest_neonaes_(packed);
     return sz_success_k;
@@ -541,7 +542,7 @@ STRINGZILLA_API sz_status_t sz_hash_state_digest_neonaes(sz_hash_state_t const *
 
 STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_neonaes(sz_cptr_t text, sz_size_t length,
                                                                             sz_u64_t seed, sz_u64_t *hash,
-                                                                            void *stream) {
+                                                                            sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_neonaes_(text, length, seed);
     return sz_success_k;
@@ -549,7 +550,7 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_neonaes(sz_c
 
 STRINGZILLA_API sz_status_t sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t length,             //
                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
-                                                      sz_u64_t *hashes, void *stream) {
+                                                      sz_u64_t *hashes, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Trivial counts gain nothing from a shared normalization pass and take the one-shot path.
     if (seeds_count == 0) return sz_success_k;
@@ -590,7 +591,8 @@ STRINGZILLA_API sz_status_t sz_hash_multiseed_neonaes(sz_cptr_t text, sz_size_t 
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, void *stream) {
+STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t length, sz_u64_t nonce,
+                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_fill_random_neonaes_(target, length, nonce);
     return sz_success_k;

@@ -606,7 +606,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_rune_classes_(sz_cptr_t text, sz_s
  *  then prepared into. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t const *queries,
                                                               sz_levenshtein_symbol_t symbol,
-                                                              sz_allocator_t const *allocator, void *stream,
+                                                              sz_allocator_t const *allocator, sz_stream_t stream,
                                                               sz_levenshtein_engine_shape_t *shapes) {
     if (queries->count == 0) return sz_success_k;
     if (symbol == sz_levenshtein_bytes_k) {
@@ -716,7 +716,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
  *  the planes unwritten. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_size_t head_bytes,
-                                                            sz_allocator_t const *allocator, void *stream,
+                                                            sz_allocator_t const *allocator, sz_stream_t stream,
                                                             sz_levenshtein_engine_t *engine) {
     sz_size_t const count = queries->count;
     sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
@@ -756,7 +756,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_en
                                                                sz_sequence_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
                                                                sz_capability_t capability, sz_allocator_t *allocator,
-                                                               void *stream) {
+                                                               sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_allocator_t host;
     if (allocator) host = *allocator;
@@ -770,7 +770,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_en
 
 /** Returns both of @p engine 's blocks to the allocator they were built with, once the work queued
  *  on @p stream is done with them, and leaves it empty. */
-STRINGZILLA_INLINE void sz_levenshtein_engine_free_(sz_levenshtein_engine_t *engine, void *stream) {
+STRINGZILLA_INLINE void sz_levenshtein_engine_free_(sz_levenshtein_engine_t *engine, sz_stream_t stream) {
     if (engine->memory) engine->allocator.free(engine->memory, engine->memory_bytes, engine->allocator.handle, stream);
     if (engine->scratch)
         engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
@@ -965,13 +965,13 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_qu
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
                                                               sz_sequence_t const *queries,
                                                               sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                              void *stream) {
+                                                              sz_stream_t stream) {
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_serial_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *candidates, sz_size_t *distances,
-                                                            sz_size_t distances_stride, void *stream) {
+                                                            sz_size_t distances_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");

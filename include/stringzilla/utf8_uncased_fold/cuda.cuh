@@ -32,7 +32,7 @@ enum { sz_utf8_uncased_fold_thread_bytes_cuda_k = 64 };
  *  @note Enqueues and returns, allocating nothing and joining nothing.
  */
 STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_cuda_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                          sz_size_t *target_length, void *stream) {
+                                                          sz_size_t *target_length, sz_stream_t stream) {
     sz_u8_t const *launch_source = (sz_u8_t const *)source;
     sz_u8_t *launch_target = (sz_u8_t *)target;
     sz_size_t *launch_target_length = target_length;
@@ -60,7 +60,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_cuda_(sz_cptr_t source, sz_s
 
 STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_scoped_cuda_(sz_cptr_t source, sz_size_t source_length,
                                                                  sz_ptr_t target, sz_size_t *target_length,
-                                                                 void *stream) {
+                                                                 sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -70,7 +70,7 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_uncased_fold_scoped_cuda_(sz_cptr_t sourc
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_cuda(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target,
-                                                      sz_size_t *target_length, void *stream) {
+                                                      sz_size_t *target_length, sz_stream_t stream) {
     return sz_utf8_uncased_fold_scoped_cuda_(source, source_length, target, target_length, stream);
 }
 

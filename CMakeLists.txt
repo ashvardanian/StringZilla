@@ -397,7 +397,7 @@ function (define_stringzilla_library target public_name library_type)
     # Set the baseline architecture; the dispatch points pick each SIMD capability by the mask each call passes.
     set_baseline_architecture_flags(${target})
 
-    # Enable every capability the toolchain can compile; `sz_cpu_capabilities_enabled` masks what the CPU lacks.
+    # Enable every capability the toolchain can compile; `sz_capabilities_enabled_cpu` masks what the CPU lacks.
     set_architecture_simd_definitions(${target})
 
 endfunction ()

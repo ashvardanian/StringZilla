@@ -199,7 +199,7 @@ STRINGZILLA_INLINE void sz_sha256_process_block_neon_(
     vst1q_u32(&hash[4], state1);
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *state, void *stream) {
+STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *state, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Vectorize the load/store of 8x u32s using 2x 128-bit NEON loads
     sz_u32_t const *initial_hash = sz_sha256_initial_hash_();
@@ -210,7 +210,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_init_neonsha(sz_sha256_state_t *stat
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_update_neonsha(sz_sha256_state_t *state, sz_cptr_t text, sz_size_t length,
-                                                           void *stream) {
+                                                           sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_u8_t const *input_cursor = (sz_u8_t const *)text;
     sz_size_t const current_block_index = state->block_length / STRINGZILLA_SHA256_BLOCK_LENGTH;
@@ -264,7 +264,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_neonsha(sz_sha256_state_t *st
 }
 
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], void *stream) {
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
+    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     // Create a copy of the state for padding
     sz_sha256_state_t local_state = *state;

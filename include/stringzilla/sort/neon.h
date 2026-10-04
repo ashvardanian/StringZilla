@@ -413,14 +413,14 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_uncased_neon_( //
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_size_t top_count,
                                                      sz_bool_t reverse, sz_allocator_t *allocator,
-                                                     sz_sorted_idx_t *order, void *stream) {
+                                                     sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_sequence_argsort_neon_(sequence, allocator, order, top_count, reverse);
 }
 
 STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_neon(              //
     sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_allocator_t *allocator, sz_sorted_idx_t *order, void *stream) {
+    sz_allocator_t *allocator, sz_sorted_idx_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_sequence_argsort_uncased_neon_(sequence, allocator, order, top_count, reverse);
 }

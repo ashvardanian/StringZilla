@@ -145,14 +145,14 @@ static sz_capability_kernels_t const *sz_utf8_decode_capabilities(void) {
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length, sz_size_t *count,
-                                               sz_capability_t capabilities, void *stream) {
+                                               sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_count_t const kernel = (sz_kernel_utf8_count_t)sz_kernel_pick_(capabilities,
                                                                                   sz_utf8_count_capabilities());
     return kernel ? kernel(text, length, count, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
-                                              sz_capability_t capabilities, void *stream) {
+                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_seek_t const kernel = (sz_kernel_utf8_seek_t)sz_kernel_pick_(capabilities,
                                                                                 sz_utf8_seek_capabilities());
     return kernel ? kernel(text, length, n, position, stream) : sz_missing_kernel_k;
@@ -162,7 +162,7 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_best(       //
     sz_cptr_t text, sz_size_t length,                  //
     sz_rune_t *runes, sz_size_t runes_capacity,        //
     sz_size_t *runes_count, sz_size_t *bytes_consumed, //
-    sz_capability_t capabilities, void *stream) {
+    sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_decode_t const kernel = (sz_kernel_utf8_decode_t)sz_kernel_pick_(capabilities,
                                                                                     sz_utf8_decode_capabilities());
     return kernel ? kernel(text, length, runes, runes_capacity, runes_count, bytes_consumed, stream)

@@ -25,7 +25,7 @@
 #define STRINGZILLA_TYPES_HPP_
 
 #include "stringzilla/types.h"
-#include "stringzilla/capabilities.h" // `sz_cpu_capabilities_enabled`, `sz_cuda_capabilities_enabled`
+#include "stringzilla/capabilities.h" // `sz_capabilities_enabled_cpu`, `sz_capabilities_enabled_cuda`
 #include "stringzilla/memory.h"       // `sz_allocator_init_unified_best`
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
@@ -249,9 +249,9 @@ class device_t {
         sz_status_t status = sz_success_k;
         switch (kind) {
         case device_kind_t::cpu_k: break;
-        case device_kind_t::cuda_k: status = sz_cuda_count_devices(&count); break;
-        case device_kind_t::rocm_k: status = sz_rocm_count_devices(&count); break;
-        case device_kind_t::metal_k: status = sz_metal_count_devices(&count); break;
+        case device_kind_t::cuda_k: status = sz_device_count_cuda(&count); break;
+        case device_kind_t::rocm_k: status = sz_device_count_rocm(&count); break;
+        case device_kind_t::metal_k: status = sz_device_count_metal(&count); break;
         }
         return {static_cast<std::size_t>(count), static_cast<status_t>(status)};
     }
@@ -271,10 +271,10 @@ class device_t {
         sz_capability_t capabilities = 0;
         sz_status_t status = sz_success_k;
         switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_cpu_capabilities_detected(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_cuda_capabilities_detected(ordinal_, &capabilities); break;
-        case device_kind_t::rocm_k: status = sz_rocm_capabilities_detected(ordinal_, &capabilities); break;
-        case device_kind_t::metal_k: status = sz_metal_capabilities_detected(ordinal_, &capabilities); break;
+        case device_kind_t::cpu_k: status = sz_capabilities_detected_cpu(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_capabilities_detected_cuda(ordinal_, &capabilities); break;
+        case device_kind_t::rocm_k: status = sz_capabilities_detected_rocm(ordinal_, &capabilities); break;
+        case device_kind_t::metal_k: status = sz_capabilities_detected_metal(ordinal_, &capabilities); break;
         }
         return {capabilities, static_cast<status_t>(status)};
     }
@@ -284,10 +284,10 @@ class device_t {
         sz_capability_t capabilities = 0;
         [[maybe_unused]] sz_status_t status = sz_success_k; // Never fails: the mask is fixed at build time
         switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_cpu_capabilities_compiled(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_cuda_capabilities_compiled(&capabilities); break;
-        case device_kind_t::rocm_k: status = sz_rocm_capabilities_compiled(&capabilities); break;
-        case device_kind_t::metal_k: status = sz_metal_capabilities_compiled(&capabilities); break;
+        case device_kind_t::cpu_k: status = sz_capabilities_compiled_cpu(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_capabilities_compiled_cuda(&capabilities); break;
+        case device_kind_t::rocm_k: status = sz_capabilities_compiled_rocm(&capabilities); break;
+        case device_kind_t::metal_k: status = sz_capabilities_compiled_metal(&capabilities); break;
         }
         return capabilities;
     }
@@ -297,10 +297,10 @@ class device_t {
         sz_capability_t capabilities = 0;
         sz_status_t status = sz_success_k;
         switch (kind_) {
-        case device_kind_t::cpu_k: status = sz_cpu_capabilities_enabled(&capabilities); break;
-        case device_kind_t::cuda_k: status = sz_cuda_capabilities_enabled(ordinal_, &capabilities); break;
-        case device_kind_t::rocm_k: status = sz_rocm_capabilities_enabled(ordinal_, &capabilities); break;
-        case device_kind_t::metal_k: status = sz_metal_capabilities_enabled(ordinal_, &capabilities); break;
+        case device_kind_t::cpu_k: status = sz_capabilities_enabled_cpu(&capabilities); break;
+        case device_kind_t::cuda_k: status = sz_capabilities_enabled_cuda(ordinal_, &capabilities); break;
+        case device_kind_t::rocm_k: status = sz_capabilities_enabled_rocm(ordinal_, &capabilities); break;
+        case device_kind_t::metal_k: status = sz_capabilities_enabled_metal(ordinal_, &capabilities); break;
         }
         return {capabilities, static_cast<status_t>(status)};
     }
@@ -309,7 +309,7 @@ class device_t {
      *  kernels, so they report @c missing_kernel_k. */
     status_t configure_thread(sz_capability_t capabilities) const noexcept {
         if (kind_ != device_kind_t::cpu_k) return status_t::missing_kernel_k;
-        return static_cast<status_t>(sz_cpu_configure_thread(capabilities));
+        return static_cast<status_t>(sz_thread_configure_cpu(capabilities));
     }
 };
 
@@ -321,7 +321,7 @@ inline sz_capability_t default_capabilities() noexcept {
     return 0;
 #else
     sz_capability_t capabilities = 0;
-    return sz_cpu_capabilities_enabled(&capabilities) == sz_success_k ? capabilities : sz_cap_serial_k;
+    return sz_capabilities_enabled_cpu(&capabilities) == sz_success_k ? capabilities : sz_cap_serial_k;
 #endif
 }
 
@@ -1261,7 +1261,7 @@ struct unified_alloc {
     using propagate_on_container_copy_assignment = std::false_type;
     using is_always_equal = std::false_type;
 
-    void *stream = nullptr;
+    sz_stream_t stream = nullptr;
 
     template <typename other_value_type_>
     struct rebind {
@@ -1269,7 +1269,7 @@ struct unified_alloc {
     };
 
     constexpr unified_alloc() noexcept = default;
-    explicit constexpr unified_alloc(void *stream) noexcept : stream(stream) {}
+    explicit constexpr unified_alloc(sz_stream_t stream) noexcept : stream(stream) {}
     template <typename other_value_type_>
     constexpr unified_alloc(unified_alloc<other_value_type_, capabilities_> const &other) noexcept
         : stream(other.stream) {}

@@ -75,11 +75,11 @@ func CountDevices(kind DeviceKind) (int, error) {
 	switch kind {
 	case DeviceCPU:
 	case DeviceCUDA:
-		status = C.sz_cuda_count_devices(&count)
+		status = C.sz_device_count_cuda(&count)
 	case DeviceROCm:
-		status = C.sz_rocm_count_devices(&count)
+		status = C.sz_device_count_rocm(&count)
 	case DeviceMetal:
-		status = C.sz_metal_count_devices(&count)
+		status = C.sz_device_count_metal(&count)
 	default:
 		count, status = 0, C.sz_missing_gpu_k
 	}
@@ -102,13 +102,13 @@ func (d Device) CapabilitiesDetected() (Capability, error) {
 	var status C.sz_status_t
 	switch d.Kind {
 	case DeviceCPU:
-		status = C.sz_cpu_capabilities_detected(&capabilities)
+		status = C.sz_capabilities_detected_cpu(&capabilities)
 	case DeviceCUDA:
-		status = C.sz_cuda_capabilities_detected(ordinal, &capabilities)
+		status = C.sz_capabilities_detected_cuda(ordinal, &capabilities)
 	case DeviceROCm:
-		status = C.sz_rocm_capabilities_detected(ordinal, &capabilities)
+		status = C.sz_capabilities_detected_rocm(ordinal, &capabilities)
 	case DeviceMetal:
-		status = C.sz_metal_capabilities_detected(ordinal, &capabilities)
+		status = C.sz_capabilities_detected_metal(ordinal, &capabilities)
 	default:
 		status = C.sz_missing_gpu_k
 	}
@@ -121,13 +121,13 @@ func (d Device) CapabilitiesCompiled() Capability {
 	var capabilities C.sz_capability_t
 	switch d.Kind {
 	case DeviceCPU:
-		C.sz_cpu_capabilities_compiled(&capabilities)
+		C.sz_capabilities_compiled_cpu(&capabilities)
 	case DeviceCUDA:
-		C.sz_cuda_capabilities_compiled(&capabilities)
+		C.sz_capabilities_compiled_cuda(&capabilities)
 	case DeviceROCm:
-		C.sz_rocm_capabilities_compiled(&capabilities)
+		C.sz_capabilities_compiled_rocm(&capabilities)
 	case DeviceMetal:
-		C.sz_metal_capabilities_compiled(&capabilities)
+		C.sz_capabilities_compiled_metal(&capabilities)
 	}
 	return Capability(capabilities)
 }
@@ -140,13 +140,13 @@ func (d Device) CapabilitiesEnabled() (Capability, error) {
 	var status C.sz_status_t
 	switch d.Kind {
 	case DeviceCPU:
-		status = C.sz_cpu_capabilities_enabled(&capabilities)
+		status = C.sz_capabilities_enabled_cpu(&capabilities)
 	case DeviceCUDA:
-		status = C.sz_cuda_capabilities_enabled(ordinal, &capabilities)
+		status = C.sz_capabilities_enabled_cuda(ordinal, &capabilities)
 	case DeviceROCm:
-		status = C.sz_rocm_capabilities_enabled(ordinal, &capabilities)
+		status = C.sz_capabilities_enabled_rocm(ordinal, &capabilities)
 	case DeviceMetal:
-		status = C.sz_metal_capabilities_enabled(ordinal, &capabilities)
+		status = C.sz_capabilities_enabled_metal(ordinal, &capabilities)
 	default:
 		status = C.sz_missing_gpu_k
 	}
@@ -161,7 +161,7 @@ func (d Device) ConfigureThread(capabilities Capability) (func(), error) {
 		return func() {}, statusError(C.sz_missing_kernel_k)
 	}
 	runtime.LockOSThread()
-	return runtime.UnlockOSThread, statusError(C.sz_cpu_configure_thread(C.sz_capability_t(capabilities)))
+	return runtime.UnlockOSThread, statusError(C.sz_thread_configure_cpu(C.sz_capability_t(capabilities)))
 }
 
 // statusError names a failed call's status, or returns nil on success.

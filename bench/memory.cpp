@@ -45,7 +45,7 @@ namespace ashvardanian::stringzilla::bench {
 
 #pragma region MemCpy
 
-sz_status_t memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, void *) {
+sz_status_t memcpy_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, sz_stream_t) {
     std::memcpy(output, input, length);
     return sz_success_k;
 }
@@ -80,7 +80,7 @@ void bench_copy(environment_t const &env, corpus_t const &corpus) {
 
 #pragma region MemMove
 
-sz_status_t memmove_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, void *) {
+sz_status_t memmove_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, sz_stream_t) {
     std::memmove(output, input, length);
     return sz_success_k;
 }
@@ -114,7 +114,7 @@ void bench_move(environment_t const &env, corpus_t const &corpus) {
 
 #pragma region Broadcasting Constants with MemSet
 
-sz_status_t memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value, void *) {
+sz_status_t memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value, sz_stream_t) {
     std::memset(output, value, length);
     return sz_success_k;
 }
@@ -126,7 +126,7 @@ sz_status_t memset_like_sz(sz_ptr_t output, sz_size_t length, sz_u8_t value, voi
  *  @c std::minstd_rand from it, whose one word of state keeps the reseed out of the measurement
  *  where a Mersenne-Twister state fill would not.
  */
-sz_status_t generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce, void *) {
+sz_status_t generate_like_sz(sz_ptr_t output, sz_size_t length, sz_u64_t nonce, sz_stream_t) {
     std::minstd_rand generator(static_cast<std::minstd_rand::result_type>(nonce));
     std::uniform_int_distribution<std::uint32_t> distribution(1, 255);
     std::generate(output, output + length, [&]() -> char { return static_cast<char>(distribution(generator)); });
@@ -161,7 +161,7 @@ void bench_fill(environment_t const &env, corpus_t const &corpus) {
 
 #pragma region Lookup Transformations
 
-sz_status_t transform_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, sz_cptr_t lookup_table, void *) {
+sz_status_t transform_like_sz(sz_ptr_t output, sz_cptr_t input, sz_size_t length, sz_cptr_t lookup_table, sz_stream_t) {
     std::transform(input, input + length, output, [=](char c) { return (char)lookup_table[(unsigned char)c]; });
     return sz_success_k;
 }

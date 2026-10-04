@@ -1454,12 +1454,12 @@ void test_string_reserve_unit() {
     {
         // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
         sz_allocator_t allocator;
-        allocator.allocate = +[](sz_size_t length, void *, void *) -> void * {
+        allocator.allocate = +[](sz_size_t length, void *, sz_stream_t) -> void * {
             void *const block = std::malloc(length);
             if (block) std::memset(block, '#', length);
             return block;
         };
-        allocator.free = +[](void *block, sz_size_t, void *, void *) { std::free(block); };
+        allocator.free = +[](void *block, sz_size_t, void *, sz_stream_t) { std::free(block); };
         allocator.handle = nullptr;
 
         sz_string_t str;

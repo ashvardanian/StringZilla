@@ -488,7 +488,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x16_btree_probe_skylake(sz_overlap_bt
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
                                                            sz_size_t const *window_widths,
                                                            sz_size_t window_widths_count, sz_size_t candidates_budget,
-                                                           sz_allocator_t *allocator, void *stream) {
+                                                           sz_allocator_t *allocator, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_unused_(candidates_budget);
     sz_size_t const step = sz_overlap_f64x8_positions_per_step_skylake_k;
@@ -555,7 +555,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
                                                       sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, void *stream) {
+                                                      sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                               scores_candidate_stride);

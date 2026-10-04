@@ -77,7 +77,7 @@
 #define STRINGZILLA_H_
 
 #include "stringzilla/types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`, `STRINGZILLA_H_VERSION_MAJOR`
-#include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_cpu_capabilities_enabled`, `sz_capabilities_name`
+#include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_capabilities_enabled_cpu`, `sz_capabilities_name`
 #include "stringzilla/compare.h"      // `sz_equal_best`, `sz_order_best`
 #include "stringzilla/memory.h"       // `sz_copy_best`, `sz_move_best`, `sz_fill_best`
 #include "stringzilla/hash.h"         // `sz_bytesum_best`, `sz_hash_best`, `sz_hash_state_init_best`
