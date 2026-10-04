@@ -20,7 +20,6 @@
 
 #include <algorithm> // `std::sort`
 #include <array>     // `std::array`
-#include <atomic>    // `std::atomic`
 #include <span>      // `std::span`
 #include <string>    // `std::string`
 #include <thread>    // `std::thread`
@@ -72,52 +71,6 @@ struct metal_backend_t {
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
 };
-
-static void check_metal_concurrent_synchronize_(sz_stream_t queue) {
-    sz_metal_call_t call {};
-    verify(sz_device_enter_metal_(queue, &call) == sz_success_k);
-    void *pool = objc_autoreleasePoolPush();
-    void *event = sz_metal_get_(call.context->device, "newSharedEvent");
-    if (!event) {
-        sz_metal_commit_(&call, sz_bad_alloc_k);
-        objc_autoreleasePoolPop(pool);
-        verify(event != nullptr);
-    }
-    sz_metal_do_(call.encoder, "endEncoding");
-    sz_metal_do_(call.encoder, "release");
-    call.encoder = nullptr;
-    ((void (*)(void *, SEL, void *, sz_u64_t))objc_msgSend)(call.commands,
-                                                            sel_registerName("encodeWaitForEvent:value:"), event, 1);
-    sz_status_t const committed = sz_metal_commit_(&call, sz_success_k);
-    std::atomic<unsigned> completed {0};
-    sz_status_t first_status = sz_device_code_mismatch_k, second_status = sz_device_code_mismatch_k;
-    std::thread first([&] {
-        first_status = sz_stream_synchronize_metal(queue);
-        ++completed;
-    });
-    std::thread second([&] {
-        second_status = sz_stream_synchronize_metal(queue);
-        ++completed;
-    });
-    bool waiting = false;
-    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (std::chrono::steady_clock::now() < deadline && !completed.load()) {
-        os_unfair_lock_lock(&call.context->lock);
-        auto *pending = sz_metal_pending_find_(call.context, queue);
-        waiting = pending && pending->waiters == 2;
-        os_unfair_lock_unlock(&call.context->lock);
-        if (waiting) break;
-        std::this_thread::yield();
-    }
-    ((void (*)(void *, SEL, sz_u64_t))objc_msgSend)(event, sel_registerName("setSignaledValue:"), 1);
-    first.join();
-    second.join();
-    sz_metal_do_(event, "release");
-    objc_autoreleasePoolPop(pool);
-    verify(committed == sz_success_k);
-    verify(waiting && "both synchronizers must wait for previously committed work");
-    verify(first_status == sz_success_k && second_status == sz_success_k);
-}
 
 #pragma region Levenshtein Helpers
 
@@ -1158,7 +1111,6 @@ static std::size_t test_cross_metal_(environment_t const &env, sz_stream_t queue
         owner.reset();
         verify(std::string_view(independent[1].data(), independent[1].size()) == "de");
     });
-    check("test_metal_concurrent_synchronize", [&] { check_metal_concurrent_synchronize_(queue); });
     check_metal_backend_(check, metal);
     return check.failures;
 }

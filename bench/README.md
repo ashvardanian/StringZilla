@@ -35,7 +35,7 @@ The kernels are timed by name, each stress-tested against the serial kernel of t
 - `cross_wasm.cpp` — V128 and V128 Relaxed.
 
 `stringzilla_cpu_header_bench` compiles `main.cpp` and the cross files header-only, with the kernels inline.
-It has no dispatch points to time, but it reaches the private helpers only the tier headers define, like the SIMD sorts of pgrams and the Levenshtein and overlap steps.
+It times the same public capability kernels inline, without the linked dispatch points.
 
 ## GPU
 

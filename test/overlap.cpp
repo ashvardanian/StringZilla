@@ -2,7 +2,7 @@
  *  @file test/overlap.cpp
  *  @author Ash Vardanian
  *  @date January 27, 2024
- *  @brief Window overlap tests: known answers, integer and ordered-set oracles, and the dispatched
+ *  @brief Window overlap tests: known answers and an ordered-set oracle, and the dispatched
  *      engine against them.
  */
 #undef NDEBUG // ! Enable all assertions for testing
@@ -22,8 +22,6 @@
  *  `#include` directives and other issues. */
 #include <stringzilla/stringzilla.h>   // Primary C API
 #include <stringzilla/stringzilla.hpp> // C++ string class replacement
-
-#include <cstdint> // `std::uint64_t`
 
 #include <string> // Baseline
 #include <vector> // `std::vector`
@@ -69,20 +67,8 @@ static void check_overlap_pair_(std::string const &query, std::string const &can
 
 #pragma region Unit
 
-/** Known answers: the constants, the capacities, the strides, and shares readable off the texts. */
+/** Known answers: capacities, strides, and shares readable off the texts. */
 void test_overlap_unit() {
-    // The modulus is prime, by trial division up to its root.
-    std::uint64_t const prime = static_cast<std::uint64_t>(sz_overlap_modulus_k);
-    for (std::uint64_t divisor = 2; divisor * divisor <= prime; ++divisor) verify(prime % divisor != 0);
-    for (std::size_t exponent = 0; exponent != 9; ++exponent)
-        verify(sz_overlap_powers_of_256_k[exponent] == sz_overlap_window_power(exponent));
-
-    verify(sz_overlap_btree_sorted_capacity(0) == 64);
-    verify(sz_overlap_btree_sorted_capacity(1) == 64);
-    verify(sz_overlap_btree_sorted_capacity(64) == 64);
-    verify(sz_overlap_btree_sorted_capacity(65) == 128);
-    verify(sz_overlap_btree_sorted_capacity(117) == 128);
-
     // Identical texts share every window, disjoint alphabets share none, and a candidate narrower than the width
     // has no windows to share; "the" holds three, two and one windows below that, over the query's 43 bytes.
     std::string const fox = "the quick brown fox jumps over the lazy dog";

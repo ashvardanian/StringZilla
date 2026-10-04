@@ -51,19 +51,12 @@ void bench_cross_serial(environment_t &env) {
         env, "serial");
     bench_map_kernels<sz_order_serial>(env, "serial");
     bench_unordered_map_kernels<sz_hash_serial, sz_equal_serial>(env, "serial", "serial");
-    bench_pgrams_sort_kernels<sz_pgrams_sort_serial_>(env, "serial");
     bench_sequence_argsort_kernels<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial>(env, "serial");
     bench_sequence_intersect_kernels<sz_sequence_intersect_serial>(env, "serial");
     bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>(
         env, "serial", sz_levenshtein_bytes_k);
     bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>(
         env, "serial", sz_levenshtein_runes_k);
-    bench_levenshtein_query_prepare(env);
-    bench_levenshtein_step_kernels<levenshtein_step_from_serial>(env, "sz_levenshtein_u64x1_step_serial");
-    bench_overlap_step_kernels<sz_overlap_f64x1_positions_per_step_serial_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                               sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
-                               sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
-                               sz_overlap_u32x1_btree_probe_serial>(env, "serial");
     bench_overlap_scores_kernels<sz_overlap_engine_init_serial, sz_overlap_scores_serial>(env, "serial");
     bench_substrings_kernels<sz_substrings_engine_init_serial, sz_substrings_counts_serial, sz_substrings_find_serial,
                              sz_substrings_replace_serial, sz_substrings_bm25_scores_serial>(env, "serial");

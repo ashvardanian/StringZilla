@@ -13,7 +13,7 @@
  *  it reads the whole file by default.
  *
  *  Benchmarks include:
- *  - String sequence sorting algorithms - @b argsort and @b pgrams_sort.
+ *  - String sequence sorting algorithms - @b argsort.
  *  - String sequences intersections - @b intersect.
  *
  *  For sorting, the number of operations per second are reported as the worst-case time complexity
@@ -212,41 +212,6 @@ void bench_sequencing_strings_uncased(environment_t const &env, corpus_t const &
 
 #pragma endregion
 
-#pragma region P-grams Sorting Benchmarks
-
-struct sort_pgrams_via_std_t {
-    pgrams_t const &input;
-    permute_t &output;
-
-    sort_pgrams_via_std_t(pgrams_t const &input, permute_t &output) : input(input), output(output) {}
-
-    call_result_t operator()() const {
-        std::iota(output.begin(), output.end(), 0);
-        std::sort(output.begin(), output.end(),
-                  [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return input[i] < input[j]; });
-
-        // Prepare stats and hash the permutation to compare with the reference.
-        std::size_t ops_performed = input.size() * std::log2(input.size());
-        check_value_t checksum = is_sorting_permutation(input, output);
-        std::size_t bytes_passed = input.size() * sizeof(sz_pgram_t);
-        return {bytes_passed, checksum, ops_performed};
-    }
-};
-
-/**
- *  @brief Sort the tokens' leading bytes, which are integers, before the strings themselves.
- *
- *  The pgram sorts have no dispatch point, so the STL stands alone here, and the sorts themselves
- *  are timed by the cross files.
- */
-void bench_sequencing_pgrams(environment_t const &env, corpus_t const &corpus) {
-    permute_t permute_buffer(corpus.tokens.size());
-    pgrams_t const pgrams_buffer = pgrams_from_tokens(corpus);
-    print(bench_nullary(env, corpus, "pgrams_sort<std::sort>", sort_pgrams_via_std_t {pgrams_buffer, permute_buffer}));
-}
-
-#pragma endregion
-
 #pragma region Intersections Benchmarks
 
 /** Uses the STL's @c std::unordered_map to find the intersections between two string sequences. */
@@ -308,7 +273,6 @@ void bench_intersections(environment_t const &env, corpus_t const &corpus) {
 void bench_sequence(environment_t &env) {
     corpus_t const &corpus = env.corpora.words();
     fmt::println("Starting sequence benchmarks...");
-    bench_sequencing_pgrams(env, corpus);
     bench_sequencing_strings(env, corpus);
     bench_sequencing_strings_uncased(env, corpus);
     bench_intersections(env, corpus);

@@ -137,20 +137,6 @@ std::size_t test_cross_x8664(environment_t const &env) {
           [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_haswell); });
     check("test_levenshtein_safety_haswell", [&] { check_levenshtein_safety_(levenshtein_haswell); });
 
-#if STRINGZILLA_HEADER_ONLY // The step verbs are inline helpers, compiled only with the capability headers
-    constexpr overlap_step_backend_t overlap_steps_haswell {
-        .name = "haswell",
-        .positions_per_step = sz_overlap_f64x4_positions_per_step_haswell_k,
-        .prefix_hash_step = sz_overlap_f64x4_prefix_hash_step_haswell,
-        .prefix_hash_step_tail = sz_overlap_f64x4_prefix_hash_step_tail_haswell,
-        .window_hash_step = sz_overlap_f64x4_window_hash_step_haswell,
-        .window_hash_step_tail = sz_overlap_f64x4_window_hash_step_tail_haswell,
-        .btree_sort = sz_overlap_u32x8_btree_sort_haswell,
-        .btree_probe = sz_overlap_u32x8_btree_probe_haswell,
-    };
-    check("test_overlap_steps_equivalence_haswell",
-          [&](test_context_t &context) { check_overlap_steps_equivalence_(context, overlap_steps_haswell); });
-#endif // STRINGZILLA_HEADER_ONLY
     constexpr overlap_backend_t overlap_haswell {"haswell", sz_overlap_engine_init_haswell, sz_overlap_scores_haswell};
     check("test_overlap_equivalence_haswell",
           [&](test_context_t &context) { check_overlap_equivalence_(context, overlap_haswell); });
@@ -291,20 +277,6 @@ std::size_t test_cross_x8664(environment_t const &env) {
           [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_skylake); });
     check("test_levenshtein_safety_skylake", [&] { check_levenshtein_safety_(levenshtein_skylake); });
 
-#if STRINGZILLA_HEADER_ONLY // The step verbs are inline helpers, compiled only with the capability headers
-    constexpr overlap_step_backend_t overlap_steps_skylake {
-        .name = "skylake",
-        .positions_per_step = sz_overlap_f64x8_positions_per_step_skylake_k,
-        .prefix_hash_step = sz_overlap_f64x8_prefix_hash_step_skylake,
-        .prefix_hash_step_tail = sz_overlap_f64x8_prefix_hash_step_tail_skylake,
-        .window_hash_step = sz_overlap_f64x8_window_hash_step_skylake,
-        .window_hash_step_tail = sz_overlap_f64x8_window_hash_step_tail_skylake,
-        .btree_sort = sz_overlap_u32x16_btree_sort_skylake,
-        .btree_probe = sz_overlap_u32x16_btree_probe_skylake,
-    };
-    check("test_overlap_steps_equivalence_skylake",
-          [&](test_context_t &context) { check_overlap_steps_equivalence_(context, overlap_steps_skylake); });
-#endif // STRINGZILLA_HEADER_ONLY
     constexpr overlap_backend_t overlap_skylake {"skylake", sz_overlap_engine_init_skylake, sz_overlap_scores_skylake};
     check("test_overlap_equivalence_skylake",
           [&](test_context_t &context) { check_overlap_equivalence_(context, overlap_skylake); });

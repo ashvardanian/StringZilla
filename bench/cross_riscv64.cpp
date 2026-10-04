@@ -8,27 +8,6 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-#if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_RVV
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("arch=+v")
-#endif
-
-/** The pgram sort is always inlined under RVV, so it reaches the portable driver as a plain call,
- *  which a driver without RVV can make. */
-sz_status_t pgrams_sort_rvv_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator, sz_sorted_idx_t *order) {
-    return sz_pgrams_sort_rvv_(pgrams, count, allocator, order);
-}
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
-#endif
-#endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_RVV
-
 void bench_cross_riscv64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_RVV
     if (section(env, "Cross RVV", sz_cap_rvv_k)) {
@@ -60,9 +39,6 @@ void bench_cross_riscv64([[maybe_unused]] environment_t &env) {
         bench_fill_random_kernels<sz_fill_random_rvv>(env, "rvv");
         bench_lookup_kernels<sz_lookup_rvv>(env, "rvv");
         bench_sequence_argsort_kernels<sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv>(env, "rvv");
-#if STRINGZILLA_HEADER_ONLY
-        bench_pgrams_sort_kernels<pgrams_sort_rvv_>(env, "rvv");
-#endif
     }
 #endif // STRINGZILLA_TARGET_RVV
 #if STRINGZILLA_TARGET_RVVCRYPTO

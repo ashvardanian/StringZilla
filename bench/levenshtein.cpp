@@ -5,27 +5,22 @@
  *  @brief Benchmarks for Levenshtein edit distances under unit costs.
  *
  *  Times the engine's verbs over the multilingual lines, which pick their kernel from the CPU's
- *  capabilities. Every capability's kernels, and the word-steps only the tier headers define, are
- *  timed against the serial ones by the `cross_<arch>.cpp` files.
+ *  capabilities. The cross files compare public capability kernels with the serial baseline.
  *
  *  Compute-bound: Myers' algorithm costs one word-step per query word per candidate byte, so a 64
  *  MB slice exercises every path while each call samples only what it needs.
  *
- *  Three shapes are measured, byte-level and rune-level alike, every candidate at its own length:
+ *  Two shapes are measured, byte-level and rune-level alike, every candidate at its own length:
  *  - @c sz_levenshtein_engine_init plus one round over a single pair, which is what a caller
  *    scoring one pair pays: a batch of one, prepared and released around the round;
  *  - @c sz_levenshtein_distances from a prepared batch of queries against the next
  *    @c STRINGWARS_BATCH_PER_CORE tokens - by default as many median tokens as fill a 32 KB L1 - at
  *    two query lengths, the slice's median and the 1024 bytes whose match masks fill that L1, on
  *    every compiled backend. The batch is prepared once per arm, so what the arm times is the sweep
- *    and not the preparation the engine exists to hoist;
- *  - the exported building blocks one at a time, so the query's preparation, the staging of
- *    candidate bytes into class ids, and the word-steps over those ids each get a number.
+ *    and not the preparation the engine exists to hoist.
  *
  *  Every arm's name carries its query length, as `:q117`. Throughput is reported as Cell Updates
- *  Per Second @b (CUPS): the query's length times the candidates' lengths. The building blocks
- *  count what each of them does instead: query bytes prepared, class ids staged, word-steps taken -
- *  so the ops/s column of one arm is read beside the next rather than against a shared denominator.
+ *  Per Second @b (CUPS): the query's length times the candidates' lengths.
  *
  *  Here are a few build & run commands:
  *

@@ -634,7 +634,6 @@ void bench_order_kernels(environment_t &env, std::string_view kit) {
 
 using strings_t = std::vector<std::string_view>;
 using permute_t = std::vector<sz_sorted_idx_t>;
-using pgrams_t = std::vector<sz_pgram_t>;
 
 /** Helper function to distill a large @b permute_t object down to one comparable hash integer. */
 template <typename entries_type_>
@@ -743,43 +742,6 @@ struct argsort_ci_strings_via_sz {
     }
 };
 
-/** The leading bytes of every token as one integer, to sort prefixes before the strings. */
-inline pgrams_t pgrams_from_tokens(corpus_t const &corpus) {
-    pgrams_t pgrams(corpus.tokens.size());
-    std::transform(corpus.tokens.begin(), corpus.tokens.end(), pgrams.begin(), [](std::string_view const &str) {
-        sz_pgram_t pgram = 0;
-        std::memcpy(&pgram, str.data(), (std::min)(sizeof(pgram), str.size()));
-        return pgram;
-    });
-    return pgrams;
-}
-
-template <sz_pgrams_sort_t_ func_>
-struct sort_pgrams_via_sz {
-    pgrams_t const &input;
-    pgrams_t &output_sorted;
-    permute_t &output_permutation;
-
-    sort_pgrams_via_sz(pgrams_t const &input, pgrams_t &output_sorted, permute_t &output_permutation)
-        : input(input), output_sorted(output_sorted), output_permutation(output_permutation) {}
-    call_result_t operator()() const {
-        std::copy(input.begin(), input.end(), output_sorted.begin());
-        std::iota(output_permutation.begin(), output_permutation.end(), 0);
-
-        sz_allocator_t allocator;
-        if (sz_allocator_init_heap(&allocator) != sz_success_k)
-            throw std::runtime_error("The heap allocator could not be initialized.");
-        if (func_(output_sorted.data(), output_sorted.size(), &allocator, output_permutation.data()) != sz_success_k)
-            throw std::runtime_error("The pgram sort failed.");
-
-        // Prepare stats and hash the permutation to compare with the reference.
-        std::size_t ops_performed = input.size() * std::log2(input.size());
-        check_value_t checksum = is_sorting_permutation(input, output_permutation);
-        std::size_t bytes_passed = input.size() * sizeof(sz_pgram_t);
-        return {bytes_passed, checksum, ops_performed};
-    }
-};
-
 /** Two sets to intersect: every distinct token, and a seeded sample of half as many tokens. */
 struct intersect_inputs_t {
     strings_t tokens_a, tokens_b;
@@ -847,18 +809,6 @@ void bench_sequence_argsort_kernels(environment_t &env, std::string_view kit) {
                          "sz_sequence_argsort_uncased_serial",
                          argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_serial> {corpus.tokens, folded, permute},
                          argsort_ci_strings_via_sz<argsort_uncased_> {corpus.tokens, folded, permute});
-}
-
-/** Times one capability's pgram sort over the leading bytes of the corpus words. */
-template <sz_pgrams_sort_t_ sort_>
-void bench_pgrams_sort_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.words();
-    pgrams_t const pgrams = pgrams_from_tokens(corpus);
-    pgrams_t sorted(pgrams.size());
-    permute_t permute(pgrams.size());
-    bench_kernel_nullary(env, corpus, fmt::format("sz_pgrams_sort_{}", kit), "sz_pgrams_sort_serial",
-                         sort_pgrams_via_sz<sz_pgrams_sort_serial_> {pgrams, sorted, permute},
-                         sort_pgrams_via_sz<sort_> {pgrams, sorted, permute});
 }
 
 /** Times one capability's intersection of every distinct corpus word with a sample of them. */
@@ -1358,38 +1308,10 @@ void bench_unordered_map_kernels(environment_t &env, std::string_view hash_kit, 
 
 #pragma region Levenshtein
 
-/** Candidates a step arm advances at once, so all tiers answer the same eight scores in order. */
-inline constexpr std::size_t levenshtein_step_lanes_k = (std::size_t)sz_levenshtein_u64x1_candidates_per_step_serial_k *
-                                                        sz_levenshtein_u64x1_registers_per_position_serial_k;
-
-/** Positions one step arm walks per call, the transpose width the sweeps feed it from. */
-inline constexpr std::size_t levenshtein_step_positions_k = sz_levenshtein_positions_per_transpose_k;
-
 /** The query lengths every sweep runs: the slice's median token, and the 1024 bytes whose match
  *  masks fill a 32 KB L1, where the multi-word regime starts. */
 inline std::array<std::size_t, 2> levenshtein_query_lengths(corpus_t const &corpus) {
     return {median_token_bytes(corpus), 1024};
-}
-
-/** The first token that fills a @p query_bytes query, clamped to it, or else the first token. */
-inline std::string_view levenshtein_query_token(corpus_t const &corpus, std::size_t query_bytes) {
-    for (token_view_t const token : corpus.tokens)
-        if (token.size() >= query_bytes) return std::string_view(token.data(), query_bytes);
-    token_view_t const shortest = corpus.tokens[0];
-    return std::string_view(shortest.data(), shortest.size());
-}
-
-/** Stages @p positions bytes of @p lanes tokens as transposed class ids, zero past token ends. */
-inline std::vector<sz_u8_t> levenshtein_staged_classes(corpus_t const &corpus, sz_u8_t const *byte_to_class,
-                                                       std::size_t lanes, std::size_t positions) {
-    std::vector<sz_u8_t> classes(positions * lanes, 0);
-    for (std::size_t lane = 0; lane != lanes; ++lane) {
-        token_view_t const token = corpus.tokens[lane % corpus.tokens.size()];
-        std::size_t const filled = positions < token.size() ? positions : token.size();
-        for (std::size_t position = 0; position != filled; ++position)
-            classes[position * lanes + lane] = byte_to_class[(sz_u8_t)token[position]];
-    }
-    return classes;
 }
 
 inline check_value_t levenshtein_check_value(std::span<sz_size_t const> answers) {
@@ -1510,98 +1432,6 @@ struct levenshtein_distances_from_sz {
     }
 };
 
-/** One query prepared per call, clamped to @c query_bytes: a sweep's fixed cost per query. */
-struct levenshtein_prepare_from_sz {
-
-    /** The tokens the query is drawn from. */
-    corpus_t const &corpus;
-
-    /** Bytes the query is clamped to. */
-    std::size_t query_bytes;
-
-    /** Match masks the preparation fills. */
-    std::vector<sz_u64_t> masks;
-
-    /** @b [256] mask row each byte value reads. */
-    std::vector<sz_u8_t> byte_to_class;
-
-    /** @b [words] one step's Myers deltas. */
-    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
-
-    levenshtein_prepare_from_sz(corpus_t const &corpus, std::size_t query_bytes)
-        : corpus(corpus), query_bytes(query_bytes), masks(sz_levenshtein_query_mask_entries(query_bytes)),
-          byte_to_class(sz_levenshtein_byte_classes_k), verticals(sz_levenshtein_query_words(query_bytes)) {}
-
-    call_result_t operator()(std::size_t token_index) {
-        std::string_view const query = std::string_view(corpus.tokens[token_index]).substr(0, query_bytes);
-        sz_levenshtein_query_t prepared {};
-        if (sz_levenshtein_query_prepare(query.data(), query.size(), masks.data(), byte_to_class.data(), &prepared) !=
-            sz_success_k)
-            throw std::runtime_error("The query preparation failed.");
-        // One step over the fresh table, so its stores are never dead and the layout stays private.
-        std::size_t const words = sz_levenshtein_query_words(query.size());
-        sz_levenshtein_u64x1_state_serial_t state;
-        sz_levenshtein_u64x1_init_serial(&state, verticals.data(), words, &prepared);
-        sz_levenshtein_u64x1_step_serial(&state, verticals.data(), words, &prepared, byte_to_class[0]);
-        return call_result_t(query.size(), sz_levenshtein_u64x1_score_serial(&state, 0), query.size());
-    }
-};
-
-/**
- *  @brief One transpose of staged class ids stepped per call, eight candidates deep, staging done.
- *
- *  The word count is a run-time value here, as it is for every query past two words, and the
- *  classes and the query are fixed across calls, so the recurrence alone is timed.
- */
-struct levenshtein_step_from_serial {
-
-    /** Query words every step walks. */
-    std::size_t words = 0;
-
-    /** Match masks the query points at. */
-    std::vector<sz_u64_t> masks;
-
-    /** @b [256] mask row each byte reads. */
-    std::vector<sz_u8_t> byte_to_class;
-
-    /** The query every lane is scored against. */
-    sz_levenshtein_query_t query {};
-
-    /** @b [positions,lanes] staged class ids. */
-    std::vector<sz_u8_t> classes;
-
-    /** @b [lanes,words] Myers deltas. */
-    std::vector<sz_levenshtein_u64x1_vertical_serial_t> verticals;
-
-    levenshtein_step_from_serial(corpus_t const &corpus, std::size_t query_bytes)
-        : masks(sz_levenshtein_query_mask_entries(query_bytes)), byte_to_class(sz_levenshtein_byte_classes_k) {
-        std::string_view const text = levenshtein_query_token(corpus, query_bytes);
-        if (sz_levenshtein_query_prepare(text.data(), text.size(), masks.data(), byte_to_class.data(), &query) !=
-            sz_success_k)
-            throw std::runtime_error("The query preparation failed.");
-        words = sz_levenshtein_query_words(text.size());
-        classes = levenshtein_staged_classes(corpus, byte_to_class.data(), levenshtein_step_lanes_k,
-                                             levenshtein_step_positions_k);
-        verticals.resize(levenshtein_step_lanes_k * words);
-    }
-
-    call_result_t operator()(std::size_t token_index) {
-        sz_unused_(token_index);
-        sz_levenshtein_u64x1_state_serial_t states[levenshtein_step_lanes_k];
-        for (std::size_t lane = 0; lane != levenshtein_step_lanes_k; ++lane)
-            sz_levenshtein_u64x1_init_serial(&states[lane], verticals.data() + lane * words, words, &query);
-        for (std::size_t position = 0; position != levenshtein_step_positions_k; ++position)
-            for (std::size_t lane = 0; lane != levenshtein_step_lanes_k; ++lane)
-                sz_levenshtein_u64x1_step_serial(&states[lane], verticals.data() + lane * words, words, &query,
-                                                 classes[position * levenshtein_step_lanes_k + lane]);
-        check_value_t mixed = 0;
-        for (std::size_t lane = 0; lane != levenshtein_step_lanes_k; ++lane)
-            mixed = mixed * 31u + sz_levenshtein_u64x1_score_serial(&states[lane], 0);
-        return call_result_t(levenshtein_step_positions_k * levenshtein_step_lanes_k, mixed,
-                             levenshtein_step_positions_k * levenshtein_step_lanes_k * words);
-    }
-};
-
 /** Times one capability's cross-product sweep at every query length, over bytes or over runes, with
  *  each batch prepared by that capability's own init kernel. */
 template <sz_kernel_levenshtein_engine_init_t init_, sz_kernel_levenshtein_distances_t distances_>
@@ -1619,78 +1449,9 @@ void bench_levenshtein_distances_kernels(environment_t &env, std::string_view ki
     }
 }
 
-/** Times the query preparation at every query length, the one building block the family exports. */
-inline void bench_levenshtein_query_prepare(environment_t &env) {
-    corpus_t const &corpus = env.corpora.multilingual_lines();
-    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus))
-        print(bench_unary(env, corpus, "sz_levenshtein_query_prepare:q" + std::to_string(query_bytes),
-                          levenshtein_prepare_from_sz {corpus, query_bytes}));
-}
-
-/**
- *  @brief Times one capability's word-step @p name at every query length, over the serial step's
- *      eight lanes and stress-tested against it.
- *  @param[in] max_query_bytes Longest query the step takes, like the eight symbols of a byte lane.
- */
-template <typename step_type_>
-void bench_levenshtein_step_kernels(environment_t &env, std::string const &name,
-                                    std::size_t max_query_bytes = std::numeric_limits<std::size_t>::max()) {
-    corpus_t const &corpus = env.corpora.multilingual_lines();
-    for (std::size_t const query_bytes : levenshtein_query_lengths(corpus)) {
-        if (query_bytes > max_query_bytes) continue;
-        std::string const suffix = ":q" + std::to_string(query_bytes);
-        bench_kernel_unary(env, corpus, name + suffix, "sz_levenshtein_u64x1_step_serial" + suffix,
-                           levenshtein_step_from_serial {corpus, query_bytes}, step_type_ {corpus, query_bytes});
-    }
-}
-
 #pragma endregion Levenshtein
 
 #pragma region Overlap
-
-using overlap_prefix_hash_step_t = sz_f64_t (*)(sz_f64_t, sz_cptr_t, sz_f64_t *);
-using overlap_prefix_hash_step_tail_t = sz_f64_t (*)(sz_f64_t, sz_cptr_t, sz_size_t, sz_f64_t *);
-using overlap_window_hash_step_t = void (*)(sz_f64_t const *, sz_f64_t const *, sz_f64_t, sz_u32_t *);
-using overlap_window_hash_step_tail_t = void (*)(sz_f64_t const *, sz_f64_t const *, sz_f64_t, sz_size_t, sz_u32_t *);
-using overlap_btree_sort_t = sz_size_t (*)(sz_u32_t *, sz_size_t);
-using overlap_btree_probe_t = sz_size_t (*)(sz_overlap_btree_t const *, sz_u32_t const *, sz_size_t);
-
-/** The chain over @p text, one prefix hash per byte after the empty one at @p prefix_hashes[0]. */
-template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
-          overlap_prefix_hash_step_tail_t prefix_hash_step_tail_>
-void overlap_prefix_hashes_(std::string_view text, sz_f64_t *prefix_hashes) {
-    prefix_hashes[0] = 0.0;
-    sz_f64_t prior = 0.0;
-    std::size_t position = 0;
-    for (; position + positions_per_step_ <= text.size(); position += positions_per_step_)
-        prior = prefix_hash_step_(prior, text.data() + position, prefix_hashes + position + 1);
-    if (position != text.size())
-        prefix_hash_step_tail_(prior, text.data() + position, text.size() - position, prefix_hashes + position + 1);
-}
-
-/** Prefix differences at @p width over a chain of @p bytes positions; returns the window count. */
-template <sz_size_t positions_per_step_, overlap_window_hash_step_t window_hash_step_,
-          overlap_window_hash_step_tail_t window_hash_step_tail_>
-std::size_t overlap_window_hashes_(sz_f64_t const *prefix_hashes, std::size_t bytes, std::size_t width,
-                                   sz_u32_t *window_hashes) {
-    if (width > bytes) return 0;
-    std::size_t const windows = bytes - width + 1;
-    sz_f64_t const power = sz_overlap_window_power(width);
-    std::size_t window = 0;
-    for (; window + positions_per_step_ <= windows; window += positions_per_step_)
-        window_hash_step_(prefix_hashes + window, prefix_hashes + window + width, power, window_hashes + window);
-    if (window != windows)
-        window_hash_step_tail_(prefix_hashes + window, prefix_hashes + window + width, power, windows - window,
-                               window_hashes + window);
-    return windows;
-}
-
-/** The longest token in the slice, so every per-candidate arm sizes its scratch once. */
-inline std::size_t overlap_longest_token_(corpus_t const &corpus) {
-    std::size_t longest = 0;
-    for (std::string_view const token : corpus.tokens) longest = std::max(longest, token.size());
-    return longest;
-}
 
 /**
  *  @brief The window width at which a random query window and a random candidate window collide
@@ -1715,8 +1476,7 @@ inline std::size_t overlap_width_(corpus_t const &corpus, std::size_t query_byte
     return width > 1.0 ? static_cast<std::size_t>(width) : 1;
 }
 
-/** One query length's fixed input: the leading tokens concatenated, and their raw window hashes at
- *  the given @c width. */
+/** A query assembled from leading tokens at the width derived from the corpus. */
 struct overlap_query_t {
 
     /** The window width every arm extracts and scores at. */
@@ -1725,120 +1485,11 @@ struct overlap_query_t {
     /** The dataset's leading tokens, concatenated up to the requested byte count. */
     std::string text;
 
-    /** The raw window hashes of @c text, what every sort and tree layout starts from. */
-    std::vector<sz_u32_t> window_hashes;
-
     overlap_query_t(corpus_t const &corpus, std::size_t query_bytes) : width(overlap_width_(corpus, query_bytes)) {
         for (std::string_view const token : corpus.tokens) {
             if (text.size() >= query_bytes) break;
             text.append(token);
         }
-        std::vector<sz_f64_t> prefix_hashes(text.size() + 1);
-        overlap_prefix_hashes_<sz_overlap_f64x1_positions_per_step_serial_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                               sz_overlap_f64x1_prefix_hash_step_tail_serial>(text, prefix_hashes.data());
-        window_hashes.resize(text.size());
-        window_hashes.resize(overlap_window_hashes_<sz_overlap_f64x1_positions_per_step_serial_k,
-                                                    sz_overlap_f64x1_window_hash_step_serial,
-                                                    sz_overlap_f64x1_window_hash_step_tail_serial>(
-            prefix_hashes.data(), text.size(), width, window_hashes.data()));
-    }
-};
-
-/** The prefix hashes alone over one token, one per byte however many widths follow them. */
-template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
-          overlap_prefix_hash_step_tail_t prefix_hash_step_tail_>
-struct prefix_hashes_from_sz {
-    corpus_t const &corpus;
-    std::vector<sz_f64_t> prefix_hashes;
-
-    explicit prefix_hashes_from_sz(corpus_t const &corpus)
-        : corpus(corpus), prefix_hashes(overlap_longest_token_(corpus) + 1) {}
-
-    call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = corpus.tokens[token_index];
-        overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
-                                                                                               prefix_hashes.data());
-        return call_result_t(text.size(), static_cast<check_value_t>(prefix_hashes[text.size()]), text.size());
-    }
-};
-
-/** The chain, then the window hashing over it at the query's width. */
-template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
-          overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
-          overlap_window_hash_step_tail_t window_hash_step_tail_>
-struct window_hashes_from_sz {
-    corpus_t const &corpus;
-    std::size_t width;
-    std::vector<sz_f64_t> prefix_hashes;
-    std::vector<sz_u32_t> window_hashes;
-
-    window_hashes_from_sz(corpus_t const &corpus, overlap_query_t const &query)
-        : corpus(corpus), width(query.width), prefix_hashes(overlap_longest_token_(corpus) + 1),
-          window_hashes(prefix_hashes.size()) {}
-
-    call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = corpus.tokens[token_index];
-        overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
-                                                                                               prefix_hashes.data());
-        std::size_t const windows =
-            overlap_window_hashes_<positions_per_step_, window_hash_step_, window_hash_step_tail_>(
-                prefix_hashes.data(), text.size(), width, window_hashes.data());
-        // Multiplied rather than summed, so two windows swapping hashes cannot cancel out.
-        check_value_t mixed = 0;
-        for (std::size_t window = 0; window != windows; ++window) mixed = mixed * 31u + window_hashes[window];
-        return call_result_t(text.size(), mixed, windows);
-    }
-};
-
-/** The chain, the window hashes, then the membership test of every one against the query's tree. */
-template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
-          overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
-          overlap_window_hash_step_tail_t window_hash_step_tail_, overlap_btree_sort_t btree_sort_,
-          overlap_btree_probe_t btree_probe_>
-struct window_lookups_from_sz {
-    corpus_t const &corpus;
-    std::size_t width;
-    std::vector<sz_f64_t> prefix_hashes;
-    std::vector<sz_u32_t> window_hashes;
-    std::vector<sz_u32_t> nodes;
-    sz_overlap_btree_t btree {};
-
-    window_lookups_from_sz(corpus_t const &corpus, overlap_query_t const &query)
-        : corpus(corpus), width(query.width), prefix_hashes(overlap_longest_token_(corpus) + 1),
-          window_hashes(prefix_hashes.size()), nodes(sz_overlap_btree_entries(query.window_hashes.size())) {
-        std::copy(query.window_hashes.begin(), query.window_hashes.end(), nodes.begin());
-        std::size_t const distinct = btree_sort_(nodes.data(), query.window_hashes.size());
-        if (sz_overlap_btree_prepare(nodes.data(), distinct, &btree) != sz_success_k)
-            throw std::runtime_error("The query B-tree could not be laid out.");
-    }
-
-    call_result_t operator()(std::size_t token_index) noexcept {
-        std::string_view const text = corpus.tokens[token_index];
-        overlap_prefix_hashes_<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_>(text,
-                                                                                               prefix_hashes.data());
-        std::size_t const windows =
-            overlap_window_hashes_<positions_per_step_, window_hash_step_, window_hash_step_tail_>(
-                prefix_hashes.data(), text.size(), width, window_hashes.data());
-        return call_result_t(text.size(), btree_probe_(&btree, window_hashes.data(), windows), windows);
-    }
-};
-
-/** The query's sort and tree layout alone, once per call from its raw window hashes. */
-template <overlap_btree_sort_t btree_sort_>
-struct query_preparation_from_sz {
-    overlap_query_t const &query;
-    std::vector<sz_u32_t> nodes;
-    sz_overlap_btree_t btree {};
-
-    explicit query_preparation_from_sz(overlap_query_t const &query)
-        : query(query), nodes(sz_overlap_btree_entries(query.window_hashes.size())) {}
-
-    call_result_t operator()(std::size_t) {
-        std::copy(query.window_hashes.begin(), query.window_hashes.end(), nodes.begin());
-        std::size_t const distinct = btree_sort_(nodes.data(), query.window_hashes.size());
-        if (sz_overlap_btree_prepare(nodes.data(), distinct, &btree) != sz_success_k)
-            throw std::runtime_error("The query B-tree could not be laid out.");
-        return call_result_t(query.window_hashes.size() * sizeof(sz_u32_t), distinct, query.window_hashes.size());
     }
 };
 
@@ -1961,47 +1612,6 @@ struct scores_from_sz {
     }
 };
 
-/** Times one capability's steps at the median query, each nesting the one before: the prefix
- *  hashes, the window hashes over them, and the B-tree walk over those; then the query's own sort
- *  and tree layout. A stage's own cost is the difference between neighbouring rows. */
-template <sz_size_t positions_per_step_, overlap_prefix_hash_step_t prefix_hash_step_,
-          overlap_prefix_hash_step_tail_t prefix_hash_step_tail_, overlap_window_hash_step_t window_hash_step_,
-          overlap_window_hash_step_tail_t window_hash_step_tail_, overlap_btree_sort_t btree_sort_,
-          overlap_btree_probe_t btree_probe_>
-void bench_overlap_step_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.multilingual_lines();
-    overlap_query_t const query(corpus, median_token_bytes(corpus));
-    std::string const suffix = ":w" + std::to_string(query.width);
-    auto const name = [&](char const *arm, std::string_view of) {
-        return fmt::format("sz_overlap_{}_{}{}", arm, of, suffix);
-    };
-    constexpr sz_size_t serial_positions_k = sz_overlap_f64x1_positions_per_step_serial_k;
-    bench_kernel_unary(env, corpus, name("prefix_hashes", kit), name("prefix_hashes", "serial"),
-                       prefix_hashes_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                                             sz_overlap_f64x1_prefix_hash_step_tail_serial> {corpus},
-                       prefix_hashes_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_> {corpus});
-    bench_kernel_unary(
-        env, corpus, name("window_hashes", kit), name("window_hashes", "serial"),
-        window_hashes_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                              sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
-                              sz_overlap_f64x1_window_hash_step_tail_serial> {corpus, query},
-        window_hashes_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_, window_hash_step_,
-                              window_hash_step_tail_> {corpus, query});
-    bench_kernel_unary(
-        env, corpus, name("window_lookups", kit), name("window_lookups", "serial"),
-        window_lookups_from_sz<serial_positions_k, sz_overlap_f64x1_prefix_hash_step_serial,
-                               sz_overlap_f64x1_prefix_hash_step_tail_serial, sz_overlap_f64x1_window_hash_step_serial,
-                               sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
-                               sz_overlap_u32x1_btree_probe_serial> {corpus, query},
-        window_lookups_from_sz<positions_per_step_, prefix_hash_step_, prefix_hash_step_tail_, window_hash_step_,
-                               window_hash_step_tail_, btree_sort_, btree_probe_> {corpus, query});
-    bench_kernel_unary(env, corpus, name("query_preparation", kit), name("query_preparation", "serial"),
-                       query_preparation_from_sz<sz_overlap_u32x1_btree_sort_serial> {query},
-                       query_preparation_from_sz<btree_sort_> {query});
-}
-
-/** Times one capability's engine round at the median query, its forest prepared by that
- *  capability's own init kernel. */
 template <sz_kernel_overlap_engine_init_t init_, sz_kernel_overlap_scores_t scores_>
 void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.multilingual_lines();

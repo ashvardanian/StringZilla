@@ -8,27 +8,6 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-#if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_SVE
-#if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
-#elif defined(__GNUC__)
-#pragma GCC push_options
-#pragma GCC target("+sve")
-#endif
-
-/** The pgram sort is always inlined under SVE, so it reaches the portable driver as a plain call,
- *  which a driver without SVE can make. */
-sz_status_t pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator, sz_sorted_idx_t *order) {
-    return sz_pgrams_sort_sve_(pgrams, count, allocator, order);
-}
-
-#if defined(__clang__)
-#pragma clang attribute pop
-#elif defined(__GNUC__)
-#pragma GCC pop_options
-#endif
-#endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_SVE
-
 void bench_cross_arm64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_NEON
     if (section(env, "Cross NEON", sz_cap_neon_k)) {
@@ -65,9 +44,6 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_overlap_scores_kernels<sz_overlap_engine_init_neon, sz_overlap_scores_neon>(env, "neon");
         bench_substrings_kernels<sz_substrings_engine_init_neon, sz_substrings_counts_neon, sz_substrings_find_neon,
                                  sz_substrings_replace_neon, sz_substrings_bm25_scores_neon>(env, "neon");
-#if STRINGZILLA_HEADER_ONLY
-        bench_pgrams_sort_kernels<sz_pgrams_sort_neon_>(env, "neon");
-#endif
     }
 #endif // STRINGZILLA_TARGET_NEON
 #if STRINGZILLA_TARGET_NEONAES
@@ -106,9 +82,6 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_fill_kernels<sz_fill_sve>(env, "sve");
         bench_lookup_kernels<sz_lookup_sve>(env, "sve");
         bench_sequence_argsort_kernels<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve>(env, "sve");
-#if STRINGZILLA_HEADER_ONLY
-        bench_pgrams_sort_kernels<pgrams_sort_sve_>(env, "sve");
-#endif
     }
 #endif // STRINGZILLA_TARGET_SVE
 #if STRINGZILLA_TARGET_SVE2

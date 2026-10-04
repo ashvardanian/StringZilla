@@ -4,8 +4,7 @@
  *  @date September 29, 2026
  *  @brief Runs every family over its dispatch points, then every capability's kernels by name.
  *
- *  The header-only build has no dispatch points to time, so it runs the kernels alone, including
- *  the private helpers only the tier headers define, like the SIMD sorts of pgrams.
+ *  The header-only build runs public capability kernels inline, without dispatch points.
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release

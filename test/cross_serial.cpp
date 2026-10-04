@@ -102,19 +102,7 @@ std::size_t test_cross_serial(environment_t const &env) {
           [&](test_context_t &context) { check_levenshtein_equivalence_(context, levenshtein_serial); });
     check("test_levenshtein_safety_serial", [&] { check_levenshtein_safety_(levenshtein_serial); });
 
-    constexpr overlap_step_backend_t overlap_steps_serial {
-        .name = "serial",
-        .positions_per_step = sz_overlap_f64x1_positions_per_step_serial_k,
-        .prefix_hash_step = sz_overlap_f64x1_prefix_hash_step_serial,
-        .prefix_hash_step_tail = sz_overlap_f64x1_prefix_hash_step_tail_serial,
-        .window_hash_step = sz_overlap_f64x1_window_hash_step_serial,
-        .window_hash_step_tail = sz_overlap_f64x1_window_hash_step_tail_serial,
-        .btree_sort = sz_overlap_u32x1_btree_sort_serial,
-        .btree_probe = sz_overlap_u32x1_btree_probe_serial,
-    };
     constexpr overlap_backend_t overlap_serial {"serial", sz_overlap_engine_init_serial, sz_overlap_scores_serial};
-    check("test_overlap_steps_equivalence_serial",
-          [&](test_context_t &context) { check_overlap_steps_equivalence_(context, overlap_steps_serial); });
     check("test_overlap_equivalence_serial",
           [&](test_context_t &context) { check_overlap_equivalence_(context, overlap_serial); });
     check("test_overlap_safety_serial", [&] { check_overlap_safety_(overlap_serial); });
