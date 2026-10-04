@@ -251,7 +251,8 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_neon_(sz_pgram_t *pgrams, sz_size_
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -321,7 +322,8 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_neon_(sz_sequence_t const *se
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -389,7 +391,8 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_argsort_uncased_neon_( //
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 

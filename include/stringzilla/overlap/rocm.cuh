@@ -78,7 +78,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count,
                                                        sizeof(sz_overlap_geometry_rocm_t), &unified, stream, engine);
     if (opened != sz_success_k) return opened;
-    if (!sz_memory_reaches_rocm_(engine->memory)) {
+    if (!sz_memory_accessible_rocm_(engine->memory)) {
         sz_overlap_engine_close_(engine, stream);
         return sz_device_memory_mismatch_k;
     }
@@ -87,7 +87,11 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
     for (sz_size_t index = 0; index != engine->count; ++index)
         if (engine->lengths[index] > longest_query) longest_query = engine->lengths[index];
     sz_allocator_t host;
-    sz_allocator_init_default(&host);
+    sz_status_t const status = sz_allocator_init_heap(&host);
+    if (status != sz_success_k) {
+        sz_overlap_engine_close_(engine, stream);
+        return status;
+    }
     sz_size_t const chain_bytes = (longest_query + 1) * sizeof(sz_f64_t);
     sz_f64_t *const chain = (sz_f64_t *)host.allocate(chain_bytes, host.handle, stream);
     if (!chain) {
@@ -190,11 +194,11 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
                                                               scores_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
     if (!candidates->count || !engine->count) return sz_success_k;
-    // The handle is checked, never the accessors: those are the device's to call, so the host must not, and a
-    // pointer is all this side can inspect. That the texts they answer are device-reachable is the caller's word.
-    if (!sz_memory_reaches_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_rocm_(scores)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_rocm_(candidates->handle)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_rocm_(scores)) return sz_device_memory_mismatch_k;
+    if (candidates->get_start != sz_sequence_tape_start || candidates->get_length != sz_sequence_tape_length ||
+        !sz_memory_accessible_rocm_(candidates->handle))
+        return sz_device_memory_mismatch_k;
 
     sz_overlap_geometry_rocm_t const *const geometry = (sz_overlap_geometry_rocm_t const *)sz_overlap_engine_head_(
         engine);
@@ -213,8 +217,8 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
     launched_engine.allocator.handle = STRINGZILLA_NULL;
     launched_engine.memory = STRINGZILLA_NULL, launched_engine.memory_bytes = 0;
     launched_engine.scratch = STRINGZILLA_NULL, launched_engine.scratch_bytes = 0;
-    sz_sequence_t launched_candidates = *candidates;
 
+    sz_sequence_t launched_candidates = *candidates;
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)rows, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;

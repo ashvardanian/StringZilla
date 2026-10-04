@@ -131,7 +131,7 @@ jobs:
         working-directory: golang
         run: go test -v -tags no_sha256 # Skip SHA tests for GCC
       - name: Test on Real World Data
-        run: build_release/stringzilla_cpu_bench
+        run: build_release/stringzilla_bench
         env:
           STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -243,7 +243,7 @@ jobs:
         working-directory: golang
         run: go test -v
       - name: Test on Real World Data
-        run: build_release/stringzilla_cpu_bench
+        run: build_release/stringzilla_bench
         env:
           STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -374,7 +374,7 @@ jobs:
             exit 1
           }
       - name: Test C++
-        run: ctest --preset cuda -R '^stringzilla_cpu_test$'
+        run: ctest --preset cuda -R '^stringzilla_test$'
 
   # Compile-only in practice: no hosted runner has an AMD GPU, and the test exits zero without one.
   test_ubuntu_rocm:
@@ -628,8 +628,8 @@ jobs:
       - name: Verify ${{ matrix.target_arch }} binaries
         run: |
           test -e build_release/libstringzilla_shared.so
-          test -e build_release/stringzilla_cpu_test
-          file build_release/stringzilla_cpu_test | grep -q "${{ matrix.file_id }}"
+          test -e build_release/stringzilla_test
+          file build_release/stringzilla_test | grep -q "${{ matrix.file_id }}"
           echo "✓ ${{ matrix.target_arch }} binaries built successfully"
 
       - name: Upload ${{ matrix.target_arch }} test binaries
@@ -784,7 +784,7 @@ jobs:
         run: |
           wasmtime -W relaxed-simd=${{ matrix.relaxed_simd }} -W exceptions=y \
             -S inherit-env=y --dir . \
-            build_wasm32_wasi/stringzilla_cpu_test
+            build_wasm32_wasi/stringzilla_test
 
   test_macos:
     name: MacOS
@@ -813,7 +813,7 @@ jobs:
       - name: Test C++
         run: ctest --preset release
       - name: Test on Real World Data
-        run: build_release/stringzilla_cpu_bench
+        run: build_release/stringzilla_bench
         env:
           STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.
@@ -993,7 +993,7 @@ jobs:
       - name: Test C++
         run: ctest --preset release
       - name: Test on Real World Data
-        run: .\build_release\stringzilla_cpu_bench.exe
+        run: .\build_release\stringzilla_bench.exe
         env:
           STRINGWARS_DATASET: ./README.md
         # Don't overload GitHub with our benchmarks.

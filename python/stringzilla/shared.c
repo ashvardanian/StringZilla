@@ -60,13 +60,19 @@ Strs *Strs_alloc_(void) {
  *  @return A new empty @c Strs, or @c NULL with a Python exception set on allocation failure.
  */
 Strs *strs_make_empty_fragmented_(void) {
+    sz_allocator_t allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return NULL;
+    }
     Strs *result = Strs_alloc_();
     if (result == NULL) return (Strs *)PyErr_NoMemory();
     result->layout = STRS_FRAGMENTED;
     result->data.fragmented.count = 0;
     result->data.fragmented.spans = NULL;
     result->data.fragmented.parent = NULL;
-    sz_allocator_init_default(&result->data.fragmented.allocator);
+    result->data.fragmented.allocator = allocator;
     return result;
 }
 

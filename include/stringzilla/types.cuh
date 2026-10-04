@@ -415,12 +415,6 @@ static __device__ sz_size_t sz_sequence_tape_length_simt_(void const *handle, sz
     return (sz_size_t)(offsets[index + 1] - offsets[index]);
 }
 
-/*  A device function's address is a link-time value, so the host cannot take it with `&` - it has
- *  to read it out of a device variable that already holds it, as each vendor's sequence copy does.
- *  One pair per translation unit, which is what @c static buys. */
-static __device__ sz_sequence_member_start_t sz_sequence_tape_start_symbol_simt_ = &sz_sequence_tape_start_simt_;
-static __device__ sz_sequence_member_length_t sz_sequence_tape_length_symbol_simt_ = &sz_sequence_tape_length_simt_;
-
 #pragma endregion Device Sequences
 
 #endif // (STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)) || (STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__) && ...

@@ -215,10 +215,12 @@ sz_byteset_invert(&set);               // complement the set
 
 ```c
 sz_allocator_t allocator;
-sz_allocator_init_default(&allocator);          // libc malloc/free
+sz_status_t status = sz_allocator_init_heap(&allocator); // libc malloc/free
+if (status != sz_success_k) return status;
 // or a fixed arena with no dynamic allocation:
 char arena[4096];
-sz_allocator_init_fixed(&allocator, arena, sizeof(arena));
+status = sz_allocator_init_arena(&allocator, arena, sizeof(arena), 64);
+if (status != sz_success_k) return status;
 ```
 
 `sz_sequence_t` is the read-only adapter over an arbitrary collection of strings used by the sort and intersect families.
@@ -849,7 +851,7 @@ void sz_string_free(sz_string_t *string, sz_allocator_t *allocator);
 
 int main(void) {
     sz_allocator_t allocator;
-    sz_allocator_init_default(&allocator);
+    if (sz_allocator_init_heap(&allocator) != sz_success_k) return 1;
 
     sz_string_t s;
     sz_string_init(&s);

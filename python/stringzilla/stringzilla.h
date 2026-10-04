@@ -80,7 +80,7 @@ extern sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *da
 extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
                                                  sz_size_t *count);
 
-/** Helper function to replace the memory allocator in a @c Strs object. */
+/** Helper function to replace the allocator in a @c Strs object. */
 extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allocator);
 
 /* `shared.c` */

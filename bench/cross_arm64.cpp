@@ -58,10 +58,9 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_lookup_kernels<sz_lookup_neon>(env, "neon");
         bench_map_kernels<sz_order_neon>(env, "neon");
         bench_sequence_argsort_kernels<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon>(env, "neon");
-#if !STRINGZILLA_HEADER_ONLY
-        bench_substrings_kernels<sz_substrings_counts_neon, sz_substrings_find_neon, sz_substrings_replace_neon,
-                                 sz_substrings_bm25_scores_neon>(env, "neon");
-#else
+        bench_substrings_kernels<sz_substrings_engine_init_neon, sz_substrings_counts_neon, sz_substrings_find_neon,
+                                 sz_substrings_replace_neon, sz_substrings_bm25_scores_neon>(env, "neon");
+#if STRINGZILLA_HEADER_ONLY
         bench_pgrams_sort_kernels<sz_pgrams_sort_neon_>(env, "neon");
 #endif
     }

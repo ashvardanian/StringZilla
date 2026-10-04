@@ -15,6 +15,13 @@
 /*  `build.rs` compiles every `.c` under `c/`, so without Metal this unit defines nothing. */
 #if STRINGZILLA_WITH_METAL
 
+STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock) {
+    static sz_metal_context_t contexts[sz_metal_contexts_max_k];
+    static os_unfair_lock lock;
+    *contexts_lock = &lock;
+    return contexts;
+}
+
 STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {
     *count = sz_device_count_metal_();
     return *count ? sz_success_k : sz_missing_gpu_k;

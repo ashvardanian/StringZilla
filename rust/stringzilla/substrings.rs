@@ -195,7 +195,7 @@ pub struct SubstringsEngine {
     report: *mut SubstringsReport,
     capability: Capabilities,
     copy: *const c_void,
-    allocator: _SzMemoryAllocator,
+    allocator: sz_allocator_t,
     memory: *mut c_void,
     memory_bytes: usize,
     scratch: *mut c_void,

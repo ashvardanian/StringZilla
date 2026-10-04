@@ -191,7 +191,8 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_si
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -342,7 +343,8 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
     // Default the allocator, as higher-level libraries may find wrapping custom ones troublesome.
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -374,7 +376,8 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 

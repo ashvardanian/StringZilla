@@ -365,10 +365,10 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_haswell, sz_levenshtein_distances_haswell>(
             env, "haswell", sz_levenshtein_runes_k);
         bench_overlap_scores_kernels<sz_overlap_engine_init_haswell, sz_overlap_scores_haswell>(env, "haswell");
-#if !STRINGZILLA_HEADER_ONLY
-        bench_substrings_kernels<sz_substrings_counts_haswell, sz_substrings_find_haswell,
-                                 sz_substrings_replace_haswell, sz_substrings_bm25_scores_haswell>(env, "haswell");
-#else
+        bench_substrings_kernels<sz_substrings_engine_init_haswell, sz_substrings_counts_haswell,
+                                 sz_substrings_find_haswell, sz_substrings_replace_haswell,
+                                 sz_substrings_bm25_scores_haswell>(env, "haswell");
+#if STRINGZILLA_HEADER_ONLY
         bench_pgrams_sort_kernels<pgrams_sort_haswell_>(env, "haswell");
         bench_levenshtein_step_kernels<levenshtein_step_from_haswell>(env, "sz_levenshtein_u64x4_step_haswell");
         bench_overlap_step_kernels<sz_overlap_f64x4_positions_per_step_haswell_k, overlap_prefix_hash_step_haswell_,
@@ -448,10 +448,10 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_sequence_intersect_kernels<sz_sequence_intersect_icelake>(env, "icelake");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_icelake, sz_levenshtein_distances_icelake>(
             env, "icelake", sz_levenshtein_bytes_k);
-#if !STRINGZILLA_HEADER_ONLY
-        bench_substrings_kernels<sz_substrings_counts_icelake, sz_substrings_find_icelake,
-                                 sz_substrings_replace_icelake, sz_substrings_bm25_scores_icelake>(env, "icelake");
-#else
+        bench_substrings_kernels<sz_substrings_engine_init_icelake, sz_substrings_counts_icelake,
+                                 sz_substrings_find_icelake, sz_substrings_replace_icelake,
+                                 sz_substrings_bm25_scores_icelake>(env, "icelake");
+#if STRINGZILLA_HEADER_ONLY
         bench_levenshtein_step_kernels<levenshtein_step_from_icelake_narrow>(env, "sz_levenshtein_u8x64_step_icelake",
                                                                              8);
 #endif

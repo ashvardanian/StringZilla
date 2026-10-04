@@ -50,6 +50,7 @@
  */
 #pragma once
 #include <cctype>  // `std::isalnum`
+#include <climits> // `INT_MAX`
 #include <clocale> // `std::setlocale`
 #include <csignal> // `std::signal`, `std::raise`, `SIGSEGV`, `SIGABRT`
 #include <cstdio>  // `std::fopen`, `std::fclose`, `std::FILE`
@@ -63,7 +64,6 @@
 #include <charconv>     // `std::from_chars`
 #include <chrono>       // `std::chrono::steady_clock`, `std::chrono::milliseconds`
 #include <concepts>     // `std::predicate`
-#include <exception>    // `std::invalid_argument`
 #include <filesystem>   // `std::filesystem::create_directories`
 #include <functional>   // `std::equal_to`
 #include <limits>       // `std::numeric_limits`
@@ -74,6 +74,7 @@
 #include <random>       // `std::random_device`, `std::mt19937`
 #include <regex>        // `std::regex`, `std::regex_search`
 #include <span>         // `std::span`, `std::as_bytes`
+#include <stdexcept>    // `std::runtime_error`
 #include <string>       // `std::hash`
 #include <string_view>  // `std::string_view`
 #include <system_error> // `std::errc`
@@ -102,9 +103,6 @@
 #include "stringzilla/metal.h" // The Metal layer the Metal benchmarks drive
 #include "stringzilla/stringzilla.h"
 #include "stringzilla/types.hpp"
-#if !STRINGZILLA_HEADER_ONLY
-#include "stringzilla/stringzilla.hpp" // `sz::string_view_t::split`, which `tokenize` scans with
-#endif
 
 namespace sz = ashvardanian::stringzilla;
 
@@ -245,28 +243,33 @@ template <auto best_>
 inline constexpr auto cpu_best =
     [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
 
-/*  The one place a benchmark picks a GPU vendor's runtime, by its compiler: the baseline and the
- *  helpers the rows reach past the library. */
-#if STRINGZILLA_ARCH_ROCM_
-inline constexpr sz_capability_t gpu_baseline_k = sz_cap_rocm_k;
-inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
-inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
-inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_rocm_;
-inline constexpr auto gpu_copy = &sz_copy_rocm_;
-#elif STRINGZILLA_ARCH_CUDA_
-inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
-inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
-inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
-inline constexpr auto gpu_free_bytes = &sz_device_free_bytes_cuda_;
-inline constexpr auto gpu_copy = &sz_copy_cuda_;
-#endif
+struct device_backend_t {
+    sz::device_t selected = sz::device_t::cpu();
+    sz_capability_t capabilities = 0;
+    sz_stream_t stream = nullptr;
+    sz_allocator_t unified {}, device {}, pinned {};
+    std::optional<std::size_t> multiprocessors, threads_per_multiprocessor;
+    sz_status_t (*copy)(void *, void const *, sz_size_t, sz_stream_t) = nullptr;
+    sz_size_t (*free_bytes)(sz_stream_t) = nullptr;
+};
 
-#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
+struct stream_t {
+    sz_stream_t handle = nullptr;
+    sz_status_t (*release)(sz_stream_t);
+
+    stream_t(sz_size_t ordinal, sz_status_t (*init)(sz_size_t, sz_stream_t *), sz_status_t (*release)(sz_stream_t))
+        : release(release) {
+        if (init(ordinal, &handle) != sz_success_k)
+            throw std::runtime_error("The device stream could not be initialized.");
+    }
+    stream_t(stream_t const &) = delete;
+    stream_t &operator=(stream_t const &) = delete;
+    ~stream_t() noexcept { release(handle); }
+};
+
+using tape_t = tape<char, sz_u64_t, unified_alloc<char>, tape_termination_t::packed_k>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
-#else
-template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_baseline_k>>;
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 
 /**
  *  @brief Allocator over plain @b device memory, which no host code may dereference.
@@ -284,6 +287,7 @@ struct device_alloc {
     using difference_type = std::ptrdiff_t;
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
+    using is_always_equal = std::false_type;
 
     /** Plain device memory: a container must not move elements through it on the host to grow. */
     static constexpr bool host_accessible_k = false;
@@ -293,32 +297,36 @@ struct device_alloc {
         using other = device_alloc<other_value_type_>;
     };
 
+    sz_allocator_t allocator {};
+    sz_stream_t stream = nullptr;
+
     constexpr device_alloc() noexcept = default;
+    constexpr device_alloc(sz_allocator_t const &allocator, sz_stream_t stream = nullptr) noexcept
+        : allocator(allocator), stream(stream) {}
     template <typename other_value_type_>
-    constexpr device_alloc(device_alloc<other_value_type_> const &) noexcept {}
+    constexpr device_alloc(device_alloc<other_value_type_> const &other) noexcept
+        : allocator(other.allocator), stream(other.stream) {}
 
     value_type *allocate(size_type count) const noexcept {
         if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) return nullptr;
-        sz_allocator_t allocator;
-        if (sz_allocator_init_device_best(&allocator, gpu_baseline_k) != sz_success_k) return nullptr;
-        pointer result = static_cast<pointer>(
-            allocator.allocate(count * sizeof(value_type), allocator.handle, nullptr));
+        if (!allocator.allocate) return nullptr;
+        pointer result = static_cast<pointer>(allocator.allocate(count * sizeof(value_type), allocator.handle, stream));
         if (!result || reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
-        allocator.free(result, count * sizeof(value_type), allocator.handle, nullptr);
+        allocator.free(result, count * sizeof(value_type), allocator.handle, stream);
         return nullptr;
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_allocator_t allocator;
-        if (sz_allocator_init_device_best(&allocator, gpu_baseline_k) != sz_success_k) return;
-        allocator.free(start, count * sizeof(value_type), allocator.handle, nullptr);
+        if (!start) return;
+        allocator.free(start, count * sizeof(value_type), allocator.handle, stream);
     }
     template <typename other_type_>
-    bool operator==(device_alloc<other_type_> const &) const noexcept {
-        return true;
+    bool operator==(device_alloc<other_type_> const &other) const noexcept {
+        return allocator.allocate == other.allocator.allocate && allocator.free == other.allocator.free &&
+               allocator.handle == other.allocator.handle && stream == other.stream;
     }
     template <typename other_type_>
-    bool operator!=(device_alloc<other_type_> const &) const noexcept {
-        return false;
+    bool operator!=(device_alloc<other_type_> const &other) const noexcept {
+        return !(*this == other);
     }
 };
 
@@ -331,41 +339,47 @@ struct pinned_alloc {
     using difference_type = std::ptrdiff_t;
     using propagate_on_container_move_assignment = std::true_type;
     using propagate_on_container_copy_assignment = std::false_type;
+    using is_always_equal = std::false_type;
 
     template <typename other_value_type_>
     struct rebind {
         using other = pinned_alloc<other_value_type_>;
     };
 
+    sz_allocator_t allocator {};
+    sz_stream_t stream = nullptr;
+
     constexpr pinned_alloc() noexcept = default;
+    constexpr pinned_alloc(sz_allocator_t const &allocator, sz_stream_t stream = nullptr) noexcept
+        : allocator(allocator), stream(stream) {}
     template <typename other_value_type_>
-    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &) noexcept {}
+    constexpr pinned_alloc(pinned_alloc<other_value_type_> const &other) noexcept
+        : allocator(other.allocator), stream(other.stream) {}
 
     value_type *allocate(size_type count) const {
-        sz_allocator_t allocator;
         pointer result = nullptr;
         count = count ? count : 1;
         if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) goto failed;
-        if (sz_allocator_init_pinned_best(&allocator, gpu_baseline_k) != sz_success_k) goto failed;
-        result = static_cast<pointer>(allocator.allocate(count * sizeof(value_type), allocator.handle, nullptr));
+        if (!allocator.allocate) goto failed;
+        result = static_cast<pointer>(allocator.allocate(count * sizeof(value_type), allocator.handle, stream));
         if (!result) goto failed;
         if (reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
-        allocator.free(result, count * sizeof(value_type), allocator.handle, nullptr);
+        allocator.free(result, count * sizeof(value_type), allocator.handle, stream);
     failed:
         throw std::bad_alloc();
     }
     void deallocate(pointer start, size_type count) const noexcept {
-        sz_allocator_t allocator;
-        if (sz_allocator_init_pinned_best(&allocator, gpu_baseline_k) != sz_success_k) return;
-        allocator.free(start, (count ? count : 1) * sizeof(value_type), allocator.handle, nullptr);
+        if (!start) return;
+        allocator.free(start, (count ? count : 1) * sizeof(value_type), allocator.handle, stream);
     }
     template <typename other_type_>
-    bool operator==(pinned_alloc<other_type_> const &) const noexcept {
-        return true;
+    bool operator==(pinned_alloc<other_type_> const &other) const noexcept {
+        return allocator.allocate == other.allocator.allocate && allocator.free == other.allocator.free &&
+               allocator.handle == other.allocator.handle && stream == other.stream;
     }
     template <typename other_type_>
-    bool operator!=(pinned_alloc<other_type_> const &) const noexcept {
-        return false;
+    bool operator!=(pinned_alloc<other_type_> const &other) const noexcept {
+        return !(*this == other);
     }
 };
 
@@ -388,12 +402,12 @@ using device_vector = vector<value_type_, device_alloc<value_type_>>;
  *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
 template <typename value_type_>
-inline sz_status_t copy_device_to_host(device_vector<value_type_> const &source, std::span<value_type_> destination) {
+inline sz_status_t copy_device_to_host(device_vector<value_type_> const &source, std::span<value_type_> destination,
+                                       device_backend_t const &backend) {
     if (source.size() == 0) return sz_success_k;
     if (destination.size() < source.size()) return sz_unexpected_dimensions_k;
-    return gpu_copy(destination.data(), source.data(), source.size() * sizeof(value_type_), nullptr);
+    return backend.copy(destination.data(), source.data(), source.size() * sizeof(value_type_), backend.stream);
 }
-#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 /** Reads a file into a string via LibC @c <cstdio>. A @p read_limit stops the read after that many
  *  bytes, so the file tail is never touched. */
@@ -627,15 +641,9 @@ class loop_t {
  *  multilingual corpus. Memory-bound benches ignore it and read the whole file. */
 inline constexpr bytes_t compute_bound_slice_k {64ull << 20};
 
-#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
 using dataset_t = std::string;
 using token_view_t = std::string_view;
 using tokens_t = std::vector<token_view_t>;
-#else
-using dataset_t = std::basic_string<char, std::char_traits<char>, unified_alloc<char, gpu_baseline_k>>;
-using token_view_t = std::string_view;
-using tokens_t = std::vector<token_view_t, unified_alloc<token_view_t, gpu_baseline_k>>;
-#endif
 
 /**
  *  @brief Tokenizes a string with the given separator predicate.
@@ -663,25 +671,9 @@ tokens_t tokenize(std::string_view str, is_separator_callback_type_ &&is_separat
     return tokens;
 }
 
-/**
- *  @brief Tokenizes a string around any of the @p separators bytes in one lazy SIMD pass.
- *
- *  Each step of the underlying @c split issues one @c sz_find_byteset_best scan. The whole corpus
- *  is already bounded by the dataset read, so the walk runs to the end without a cap of its own.
- *  Header-only builds have no dispatch point to split with, so they test every byte instead.
- */
+/** Splits a string around any separator byte, dropping empty tokens. */
 inline tokens_t tokenize(std::string_view str, std::string_view separators) {
-#if STRINGZILLA_HEADER_ONLY
     return tokenize(str, [&](char c) { return separators.find(c) != std::string_view::npos; });
-#else
-    tokens_t tokens;
-    sz::byteset_t const separators_set(separators.data(), separators.size());
-    for (auto token : sz::string_view_t {str.data(), str.size()}.split(separators_set)) {
-        if (token.size() == 0) continue; // ? Runs of separators yield empty segments
-        tokens.push_back({token.data(), token.size()});
-    }
-    return tokens;
-#endif
 }
 
 /** Splits a string into words around newlines, tabs, and other ASCII whitespaces. */
@@ -774,9 +766,50 @@ inline std::optional<stress_t> parse_stress(std::string_view text) noexcept {
     return std::nullopt;
 }
 
+/** A requested GPU, before checking whether its runtime and ordinal are available. */
+struct device_selection_t {
+    sz::device_kind_t backend;
+    std::size_t ordinal;
+};
+
+inline std::string_view device_name(sz::device_kind_t kind) noexcept {
+    switch (kind) {
+    case sz::device_kind_t::cpu_k: return "cpu";
+    case sz::device_kind_t::cuda_k: return "cuda";
+    case sz::device_kind_t::rocm_k: return "rocm";
+    case sz::device_kind_t::metal_k: return "metal";
+    }
+    return "unrecognized";
+}
+
+inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_view text) {
+    std::vector<device_selection_t> devices;
+    do {
+        std::size_t const comma = text.find(',');
+        std::string_view const entry = text.substr(0, comma);
+        std::size_t const colon = entry.find(':');
+        if (colon == std::string_view::npos) return std::nullopt;
+        std::string_view const vendor = entry.substr(0, colon);
+        sz::device_kind_t backend;
+        if (vendor == "cuda") backend = sz::device_kind_t::cuda_k;
+        else if (vendor == "rocm") backend = sz::device_kind_t::rocm_k;
+        else if (vendor == "metal") backend = sz::device_kind_t::metal_k;
+        else return std::nullopt;
+        std::string_view const number = entry.substr(colon + 1);
+        std::size_t ordinal = 0;
+        auto const [end, error] = std::from_chars(number.data(), number.data() + number.size(), ordinal);
+        if (error != std::errc {} || end != number.data() + number.size()) return std::nullopt;
+        devices.push_back({backend, ordinal});
+        if (comma == std::string_view::npos) return devices;
+        text.remove_prefix(comma + 1);
+    } while (!text.empty());
+    return std::nullopt;
+}
+
 /** Every benchmark setting, its default as the initializer, filled once by @c read_settings. An
  *  unset optional leaves the choice to each corpus or backend. */
 struct settings_t {
+    std::optional<std::vector<device_selection_t>> devices;
 
     /** Corpus file, instead of each corpus' own. */
     std::optional<std::string_view> dataset;
@@ -832,6 +865,9 @@ struct settings_t {
 /** Reads every @c settings_t variable; a stress time limit left unset follows the time limit. */
 inline settings_t read_settings() noexcept {
     settings_t settings;
+    if (env_text("STRINGWARS_DEVICES"))
+        settings.devices = env_parsed("STRINGWARS_DEVICES", std::vector<device_selection_t> {}, parse_devices,
+                                      "comma-separated devices such as cuda:0,rocm:1");
     auto const parse_tokens = [&](std::string_view text) noexcept -> std::optional<tokenization_t> {
         if (std::optional<std::size_t> const length = parse_count(text))
             return settings.ngram_bytes = *length, tokenization_t::ngrams_k;
@@ -870,6 +906,11 @@ inline settings_t read_settings() noexcept {
 
 /** Prints each setting as "- Name: value", in the grammar it parses from. */
 inline void print(settings_t const &settings) {
+    if (settings.devices) {
+        for (device_selection_t const &device : *settings.devices)
+            fmt::println("- Device: {}:{}", device_name(device.backend), device.ordinal);
+    }
+    else fmt::println("- Devices: auto");
     fmt::println("- Seed: {}", settings.seed.value);
     fmt::println("- Filter: {}", settings.filter.empty() ? std::string_view("none") : settings.filter);
     fmt::println("- Warm-up: {}", spell_duration(settings.warmup));
@@ -890,52 +931,26 @@ inline void print(settings_t const &settings) {
 }
 
 /** The facts this binary and this machine report: the library version, the capabilities compiled
- *  in and detected, the cache geometry that cache-resident benchmark shapes are sized from, and in
- *  GPU builds the first visible device. */
+ *  in and detected, and the cache geometry that cache-resident benchmark shapes are sized from. */
 struct machine_t {
     std::array<unsigned, 3> version {STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
                                      STRINGZILLA_H_VERSION_PATCH};
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
+    sz_capability_t enabled = 0;
     sz::cpu_specs_t specs;
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
-
-    /** The first visible device, with the architecture CUDA and ROCm name, like @c sm_90 or
-     *  @c gfx942, or empty. */
-    std::string device_name;
-#endif
 };
 
 /** Probes the capabilities @c machine_t reports. */
 inline machine_t probe_machine() noexcept {
     machine_t machine;
     sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
-#if STRINGZILLA_ARCH_ROCM_
-    int device_count = 0;
-    hipDeviceProp_t properties;
-    if (hipGetDeviceCount(&device_count) == hipSuccess && device_count != 0 &&
-        hipGetDeviceProperties(&properties, 0) == hipSuccess)
-        machine.device_name = fmt::format("{} {}", properties.name, properties.gcnArchName);
-#elif STRINGZILLA_ARCH_CUDA_
-    int device_count = 0;
-    cudaDeviceProp properties;
-    if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count != 0 &&
-        cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
-        machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
-#elif STRINGZILLA_WITH_METAL
-    sz_stream_t queue = nullptr;
-    if (sz_stream_init_metal(0, &queue) == sz_success_k) {
-        void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
-        void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
-        machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
-        sz_stream_free_metal(queue);
-    }
-#endif
+    sz_capabilities_enabled_cpu(&machine.enabled);
     return machine;
 }
 
 /** Prints the version line, then "- Compiled for:", "- This machine:", "- Caches:", and in GPU
- *  builds "- CUDA:", "- ROCm:" or "- Metal:". */
+ *  builds report device facts separately. */
 inline void print(machine_t const &machine) {
     char compiled[STRINGZILLA_CAPABILITIES_NAME_CAPACITY], detected[STRINGZILLA_CAPABILITIES_NAME_CAPACITY];
     sz_capabilities_name(machine.compiled, compiled, sizeof(compiled));
@@ -945,10 +960,6 @@ inline void print(machine_t const &machine) {
     fmt::println("- This machine: {}", detected);
     fmt::println("- Caches: {} first-level, assumed, and {} confined to a compute domain",
                  spell_size({machine.specs.l1_bytes}), spell_size({machine.specs.l3_bytes}));
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
-    fmt::println("- {}: {}", STRINGZILLA_WITH_METAL ? "Metal" : (STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA"),
-                 machine.device_name.empty() ? std::string_view("no device") : machine.device_name);
-#endif
 }
 
 /** Loads one corpus: @p default_dataset split by @p default_tokenization and cut at
@@ -1093,17 +1104,14 @@ inline std::size_t candidates_per_call(environment_t const &env, corpus_t const 
     return std::max<std::size_t>(1, env.machine.specs.l1_bytes / median_token_bytes(corpus));
 }
 
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-
-/** Candidates one device call scores: @c STRINGWARS_BATCH_PER_CORE per multiprocessor if set, else
- *  one per resident thread of the bound device. */
-inline std::size_t resident_candidates_per_call(environment_t const &env) {
-    std::size_t const multiprocessors = gpu_multiprocessors();
-    if (multiprocessors == 0) throw std::runtime_error("The device would not report its geometry.");
-    std::size_t const per_core = env.settings.candidates_per_core.value_or(gpu_threads_per_multiprocessor());
+/** Candidates per device call, using reported geometry or one group of 2048 when unavailable. */
+inline std::size_t resident_candidates_per_call(environment_t const &env, device_backend_t const &runtime) {
+    std::size_t const multiprocessors = runtime.multiprocessors.value_or(1);
+    std::size_t const per_core = env.settings.candidates_per_core.value_or(
+        runtime.threads_per_multiprocessor.value_or(2048));
+    if (!multiprocessors || !per_core) throw std::runtime_error("The device reported empty geometry.");
     return per_core * multiprocessors;
 }
-#endif
 
 /** Uses C-style file IO to save information about the most recent stress test failure. Files are
  *  written to @c STRINGZILLA_STRESS_DIR as `failed_<time>_<name>.txt`. */
@@ -1305,5 +1313,8 @@ void bench_cross_riscv64(environment_t &env);
 void bench_cross_loongarch64(environment_t &env);
 void bench_cross_ppc64(environment_t &env);
 void bench_cross_wasm(environment_t &env);
+int bench_cross_cuda(environment_t &env, std::size_t ordinal);
+int bench_cross_rocm(environment_t &env, std::size_t ordinal);
+int bench_cross_metal(environment_t &env, std::size_t ordinal);
 
 } // namespace ashvardanian::stringzilla::bench

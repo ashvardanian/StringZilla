@@ -1623,7 +1623,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
     sz_ptr_t block;
 
     if (requested_allocator) resolved = *requested_allocator;
-    else sz_allocator_init_default(&resolved);
+    else if ((status = sz_allocator_init_heap(&resolved)) != sz_success_k) return status;
     builder.nodes = STRINGZILLA_NULL, builder.nodes_capacity = 0, builder.nodes_count = 0;
     builder.needle_next = STRINGZILLA_NULL, builder.needle_folded_bytes = STRINGZILLA_NULL;
     builder.fold_scratch = STRINGZILLA_NULL, builder.fold_scratch_bytes = 0;

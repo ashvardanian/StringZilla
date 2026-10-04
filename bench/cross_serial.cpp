@@ -65,10 +65,8 @@ void bench_cross_serial(environment_t &env) {
                                sz_overlap_f64x1_window_hash_step_tail_serial, sz_overlap_u32x1_btree_sort_serial,
                                sz_overlap_u32x1_btree_probe_serial>(env, "serial");
     bench_overlap_scores_kernels<sz_overlap_engine_init_serial, sz_overlap_scores_serial>(env, "serial");
-#if !STRINGZILLA_HEADER_ONLY
-    bench_substrings_kernels<sz_substrings_counts_serial, sz_substrings_find_serial, sz_substrings_replace_serial,
-                             sz_substrings_bm25_scores_serial>(env, "serial");
-#endif
+    bench_substrings_kernels<sz_substrings_engine_init_serial, sz_substrings_counts_serial, sz_substrings_find_serial,
+                             sz_substrings_replace_serial, sz_substrings_bm25_scores_serial>(env, "serial");
 }
 
 } // namespace ashvardanian::stringzilla::bench

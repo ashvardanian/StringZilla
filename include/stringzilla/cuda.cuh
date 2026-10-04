@@ -58,7 +58,7 @@ STRINGZILLA_INLINE void sz_device_leave_cuda_(int caller) { sz_unused_(cudaSetDe
 
 /** Accepts managed memory or the current device's own allocation.
  *  Host mappings require a device address and are unsupported by this check. */
-STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_cuda_(void const *pointer) {
+STRINGZILLA_INLINE sz_bool_t sz_memory_accessible_cuda_(void const *pointer) {
     int device = 0;
     cudaPointerAttributes attributes;
     if (cudaPointerGetAttributes(&attributes, pointer) != cudaSuccess || cudaGetDevice(&device) != cudaSuccess)
@@ -69,7 +69,7 @@ STRINGZILLA_INLINE sz_bool_t sz_memory_reaches_cuda_(void const *pointer) {
 
 /*  Each allocator below is stateless, ignoring @c handle, and works on the device of its stream. */
 
-STRINGZILLA_INLINE void *sz_memory_allocate_unified_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void *sz_allocate_unified_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -79,7 +79,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_cuda_(sz_size_t bytes, void 
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_device_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void *sz_allocate_device_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -89,7 +89,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_device_cuda_(sz_size_t bytes, void *
     return pointer;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_pinned_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void *sz_allocate_pinned_cuda_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     void *pointer = STRINGZILLA_NULL;
     int caller = 0;
     sz_unused_(handle);
@@ -100,7 +100,7 @@ STRINGZILLA_INLINE void *sz_memory_allocate_pinned_cuda_(sz_size_t bytes, void *
 }
 
 /** Frees unified and device blocks alike, once the device is done with everything queued before. */
-STRINGZILLA_INLINE void sz_memory_free_device_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void sz_free_device_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_cuda_(stream, &caller) != sz_success_k) return;
@@ -108,7 +108,7 @@ STRINGZILLA_INLINE void sz_memory_free_device_cuda_(void *pointer, sz_size_t byt
     sz_device_leave_cuda_(caller);
 }
 
-STRINGZILLA_INLINE void sz_memory_free_pinned_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void sz_free_pinned_cuda_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     int caller = 0;
     sz_unused_(bytes), sz_unused_(handle);
     if (!pointer || sz_device_enter_cuda_(stream, &caller) != sz_success_k) return;
@@ -124,11 +124,11 @@ STRINGZILLA_INLINE void sz_memory_free_pinned_cuda_(void *pointer, sz_size_t byt
  *  caller's arguments into.
  *
  *  @param[out] allocator The stateless allocator to initialize, each call on its stream's device.
- *  @sa sz_allocator_init_default
+ *  @sa sz_allocator_init_heap
  */
 STRINGZILLA_INLINE void sz_allocator_init_unified_cuda_(sz_allocator_t *allocator) {
-    allocator->allocate = &sz_memory_allocate_unified_cuda_;
-    allocator->free = &sz_memory_free_device_cuda_;
+    allocator->allocate = &sz_allocate_unified_cuda_;
+    allocator->free = &sz_free_device_cuda_;
     allocator->handle = STRINGZILLA_NULL;
 }
 
@@ -278,30 +278,13 @@ STRINGZILLA_INLINE sz_status_t sz_copy_to_symbol_cuda_(void const *symbol, void 
                : sz_device_code_mismatch_k;
 }
 
-/** Waits for everything enqueued on @p stream; only an engine's init may. */
-STRINGZILLA_INLINE sz_status_t sz_synchronize_cuda_(sz_stream_t stream) {
-    return cudaStreamSynchronize((cudaStream_t)stream) == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
-}
-
 /** Waits for @p stream on its own device, leaving the caller's current device as it found it. */
 STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_cuda_(sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_synchronize_cuda_(stream);
+    status = cudaStreamSynchronize((cudaStream_t)stream) == cudaSuccess ? sz_success_k : sz_device_code_mismatch_k;
     sz_device_leave_cuda_(caller);
-    return status;
-}
-
-/** Creates a stream on @p device, leaving the caller's current device as it was. */
-STRINGZILLA_INLINE sz_status_t sz_stream_create_cuda_(int device, sz_stream_t *stream) {
-    int caller = 0;
-    sz_status_t status = sz_success_k;
-    cudaStream_t created = STRINGZILLA_NULL;
-    if (cudaGetDevice(&caller) != cudaSuccess || cudaSetDevice(device) != cudaSuccess) return sz_missing_gpu_k;
-    if (cudaStreamCreate(&created) != cudaSuccess) status = sz_bad_alloc_k;
-    sz_device_leave_cuda_(caller);
-    *stream = (void *)created;
     return status;
 }
 
@@ -332,28 +315,27 @@ STRINGZILLA_INLINE void sz_prefetch_cuda_(void const *pointer, sz_size_t bytes, 
 
 #pragma region Device Sequences
 
-/** Copies @p source into a tape @p stream 's device reads, behind @ref sz_sequence_realloc_best. */
+/** Prepares a host-readable tape on the stream's device without changing its accessor kind. */
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_cuda_(sz_sequence_t *target, sz_sequence_t const *source,
                                                          sz_allocator_t *allocator, sz_size_t *allocated_bytes,
                                                          sz_stream_t stream) {
-    sz_sequence_member_start_t get_start = STRINGZILLA_NULL;
-    sz_sequence_member_length_t get_length = STRINGZILLA_NULL;
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
-    if (cudaMemcpyFromSymbol(&get_start, (void const *)&sz_sequence_tape_start_symbol_simt_, sizeof(get_start), 0,
-                             cudaMemcpyDeviceToHost) != cudaSuccess ||
-        cudaMemcpyFromSymbol(&get_length, (void const *)&sz_sequence_tape_length_symbol_simt_, sizeof(get_length), 0,
-                             cudaMemcpyDeviceToHost) != cudaSuccess)
-        status = sz_device_code_mismatch_k;
-    sz_bool_t const tape = source->get_start == get_start || source->get_start == sz_sequence_tape_start ? sz_true_k
-                                                                                                         : sz_false_k;
-    if (status == sz_success_k && tape && sz_memory_reaches_cuda_(source->handle))
-        target->handle = source->handle, target->count = source->count, *allocated_bytes = 0;
-    else if (status == sz_success_k &&
-             (status = sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream)) == sz_success_k)
-        sz_prefetch_cuda_(target->handle, *allocated_bytes, stream);
-    if (status == sz_success_k) target->get_start = get_start, target->get_length = get_length;
+    sz_sequence_t next = *source;
+    sz_size_t bytes = 0;
+    if (source->get_start != sz_sequence_tape_start || source->get_length != sz_sequence_tape_length ||
+        !sz_memory_accessible_cuda_(source->handle))
+        status = sz_sequence_realloc_serial_(&next, source, allocator, &bytes, stream);
+    if (status == sz_success_k && !sz_memory_accessible_cuda_(next.handle)) {
+        if (bytes) allocator->free((void *)next.handle, bytes, allocator->handle, stream);
+        status = sz_device_memory_mismatch_k;
+    }
+    if (status == sz_success_k) {
+        sz_u64_t const *offsets = (sz_u64_t const *)next.handle;
+        sz_prefetch_cuda_(next.handle, (sz_size_t)offsets[next.count], stream);
+        *target = next, *allocated_bytes = bytes;
+    }
     sz_device_leave_cuda_(caller);
     return status;
 }
@@ -381,9 +363,16 @@ STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_cuda_(sz_size_t ordinal,
 
 /** Creates a stream on CUDA device @p ordinal, leaving the caller's current device as it was. */
 STRINGZILLA_INLINE sz_status_t sz_stream_init_cuda_(sz_size_t ordinal, sz_stream_t *stream) {
+    int caller = 0;
+    sz_status_t status = sz_success_k;
+    cudaStream_t created = STRINGZILLA_NULL;
     *stream = STRINGZILLA_NULL;
     if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
-    return sz_stream_create_cuda_((int)ordinal, stream);
+    if (cudaGetDevice(&caller) != cudaSuccess || cudaSetDevice((int)ordinal) != cudaSuccess) return sz_missing_gpu_k;
+    if (cudaStreamCreate(&created) != cudaSuccess) status = sz_bad_alloc_k;
+    sz_device_leave_cuda_(caller);
+    *stream = (void *)created;
+    return status;
 }
 
 #pragma endregion Devices
@@ -412,15 +401,15 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *alloc
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator) {
-    allocator->allocate = sz_memory_allocate_device_cuda_;
-    allocator->free = sz_memory_free_device_cuda_;
+    allocator->allocate = sz_allocate_device_cuda_;
+    allocator->free = sz_free_device_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator) {
-    allocator->allocate = sz_memory_allocate_pinned_cuda_;
-    allocator->free = sz_memory_free_pinned_cuda_;
+    allocator->allocate = sz_allocate_pinned_cuda_;
+    allocator->free = sz_free_pinned_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }

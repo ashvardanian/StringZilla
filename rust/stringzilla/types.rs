@@ -826,25 +826,25 @@ unsafe impl<Text: AsRef<[u8]>, const COUNT: usize> Strings for [Text; COUNT] {
 /// assert_eq!(distances, [3, 0]);
 /// # Ok::<(), stringzilla::sz::Status>(())
 /// ```
-pub struct Sequence {
+pub struct Sequence<'stream> {
+    stream: &'stream Stream,
     sequence: _SzSequence,
-    capabilities: Capabilities,
-    allocator: _SzMemoryAllocator,
+    allocator: sz_allocator_t,
     allocated_bytes: usize,
 }
 
-impl Sequence {
-    /// Copies `texts` on the host into one tape from `allocator`, pointed at with the accessors
-    /// engines of the group of `stream` read it through, and queues only its migration there.
+impl<'stream> Sequence<'stream> {
+    /// Copies `texts` into a host-readable tape from `allocator` and queues its device migration.
     ///
-    /// An `allocator` of another group than `stream` is refused with
+    /// An `allocator` bound to a different stream handle or capability group is refused with
     /// [`Status::DeviceMemoryMismatch`].
     pub fn copy<Text: AsRef<[u8]>>(
         texts: &[Text],
         allocator: &UnifiedAllocator,
-        stream: &Stream,
+        stream: &'stream Stream,
     ) -> Result<Self, Status> {
-        if allocator.capabilities().vendor() != stream.capabilities.vendor() {
+        if allocator.capabilities().vendor() != stream.capabilities.vendor() || allocator.stream.handle != stream.handle
+        {
             return Err(Status::DeviceMemoryMismatch);
         }
         let mut allocator = allocator.c_allocator()?;
@@ -862,8 +862,8 @@ impl Sequence {
         })
         .check()?;
         Ok(Sequence {
+            stream,
             sequence: unsafe { sequence.assume_init() },
-            capabilities: stream.capabilities,
             allocator,
             allocated_bytes,
         })
@@ -880,27 +880,19 @@ impl Sequence {
     }
 }
 
-unsafe impl Strings for Sequence {
+unsafe impl Strings for Sequence<'_> {
     fn with_sequence<Return>(
         &self,
         stream: &Stream,
         call: impl FnOnce(&_SzSequence) -> Return,
     ) -> Result<Return, Status> {
-        // The host reads a tape of any group in place, while a GPU's own accessors run only there.
+        if self.stream.handle != stream.handle || self.stream.capabilities.vendor() != stream.capabilities.vendor() {
+            self.stream.synchronize()?;
+        }
         if stream.capabilities.vendor().is_none() {
-            let host = _SzSequence {
-                handle: self.sequence.handle,
-                count: self.sequence.count,
-                get_start: Some(tape_start),
-                get_length: Some(tape_length),
-            };
-            return Ok(call(&host));
+            return Ok(call(&self.sequence));
         }
-        // A tape of another group may hold another device's accessors, which no host may call.
-        if self.capabilities.vendor() != stream.capabilities.vendor() {
-            return Err(Status::DeviceMemoryMismatch);
-        }
-        let mut allocator = self.allocator;
+        let mut allocator = UnifiedAllocator::new(stream).c_allocator()?;
         let mut sequence = MaybeUninit::<_SzSequence>::uninit();
         let mut allocated_bytes = 0;
         unsafe {
@@ -914,41 +906,30 @@ unsafe impl Strings for Sequence {
             )
         }
         .check()?;
-        let sequence = unsafe { sequence.assume_init() };
-        // A tape the device reaches is only re-pointed, so one it would have to copy is refused.
+        let prepared = Sequence {
+            stream,
+            sequence: unsafe { sequence.assume_init() },
+            allocator,
+            allocated_bytes,
+        };
+        let result = call(&prepared.sequence);
         if allocated_bytes != 0 {
-            if let Some(free) = allocator.free {
-                let tape = sequence.handle as *mut c_void;
-                unsafe { free(tape, allocated_bytes, allocator.handle, stream.handle) };
-            }
-            return Err(Status::DeviceMemoryMismatch);
+            stream.synchronize()?;
         }
-        Ok(call(&sequence))
+        Ok(result)
     }
 }
 
-impl Drop for Sequence {
+impl Drop for Sequence<'_> {
     fn drop(&mut self) {
         if self.allocated_bytes == 0 {
             return;
         }
         if let Some(free) = self.allocator.free {
             let tape = self.sequence.handle as *mut c_void;
-            unsafe { free(tape, self.allocated_bytes, self.allocator.handle, core::ptr::null_mut()) };
+            unsafe { free(tape, self.allocated_bytes, self.allocator.handle, self.stream.handle) };
         }
     }
-}
-
-/// String `index` of a tape, whose `count + 1` offsets count from the block's own start.
-unsafe extern "C" fn tape_start(handle: *const c_void, index: usize) -> *const c_void {
-    let offsets = handle as *const u64;
-    handle.cast::<u8>().add(*offsets.add(index) as usize).cast()
-}
-
-/// Bytes of string `index` of a tape.
-unsafe extern "C" fn tape_length(handle: *const c_void, index: usize) -> usize {
-    let offsets = handle as *const u64;
-    (*offsets.add(index + 1) - *offsets.add(index)) as usize
 }
 
 /// Memory the host and the devices of one capability group both address, for the tapes and the
@@ -991,8 +972,8 @@ impl<'stream> UnifiedAllocator<'stream> {
         self.stream.capabilities
     }
 
-    fn c_allocator(&self) -> Result<_SzMemoryAllocator, Status> {
-        let mut allocator = _SzMemoryAllocator {
+    fn c_allocator(&self) -> Result<sz_allocator_t, Status> {
+        let mut allocator = sz_allocator_t {
             allocate: None,
             free: None,
             handle: core::ptr::null_mut(),
@@ -1015,11 +996,10 @@ unsafe impl core::alloc::Allocator for UnifiedAllocator<'_> {
         let (allocate, free) = allocator.allocate.zip(allocator.free).ok_or(core::alloc::AllocError)?;
         let block = unsafe { allocate(layout.size(), allocator.handle, self.stream.handle) } as *mut u8;
         let block = NonNull::new(block).ok_or(core::alloc::AllocError)?;
-        // Each group's runtime promises its own alignment, so a stricter layout is checked here.
         if block.as_ptr().addr() % layout.align() != 0 {
             unsafe {
                 free(
-                    block.as_ptr() as *mut c_void,
+                    block.as_ptr().cast(),
                     layout.size(),
                     allocator.handle,
                     self.stream.handle,
@@ -1038,7 +1018,7 @@ unsafe impl core::alloc::Allocator for UnifiedAllocator<'_> {
             if let Some(free) = allocator.free {
                 unsafe {
                     free(
-                        block.as_ptr() as *mut c_void,
+                        block.as_ptr().cast(),
                         layout.size(),
                         allocator.handle,
                         self.stream.handle,
@@ -1290,6 +1270,17 @@ mod tests {
         let mut order = [0; 3];
         sz::argsort(&fruits, &mut order, TOP_TWO_DESCENDING).expect("argsort failed");
         assert_eq!(fruits[order[0]], "cherry");
+    }
+
+    /// A zero-sized allocation still satisfies the requested alignment.
+    #[test]
+    fn unified_allocator_empty_layout() {
+        use core::alloc::{Allocator, Layout};
+
+        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let unified = UnifiedAllocator::new(&cpu);
+        let empty = unified.allocate(Layout::from_size_align(0, 256).unwrap()).unwrap();
+        assert_eq!(empty.as_ptr().cast::<u8>().addr() % 256, 0);
     }
 
     /// A tape copied for the CPU reads like the slice it came from, its outputs in the same memory.

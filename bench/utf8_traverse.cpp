@@ -19,9 +19,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_FILTER='utf8_(count|seek|decode)' \
- *      build_release/stringzilla_cpu_bench
+ *      build_release/stringzilla_bench
  *  @endcode
  *
  *  This file is the sibling of `utf8_scan.cpp`, `utf8_segment.cpp`, and `utf8_uncased.cpp`.

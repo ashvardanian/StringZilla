@@ -1353,6 +1353,67 @@ stage_edited_fixture include/numkong/probe.h 's/^#pragma once$/#pragma once\n#de
 run_precommit
 expect_acceptance "string lines apart in the file, split only by an unchanged line"
 
+assert_rejects "unnamed namespace at file scope" "opens an unnamed namespace" include/probe.cpp <<'FIXTURE'
+namespace {
+int probe();
+}
+FIXTURE
+
+assert_rejects "unnamed namespace nested in the harness" "opens an unnamed namespace" bench/probe.hpp <<FIXTURE
+namespace ${project_namespace}::bench {
+namespace {
+int probe();
+}
+}
+FIXTURE
+
+assert_accepts "namespace spelling in a string and a comment" include/probe.cpp <<'FIXTURE'
+/* An unnamed namespace { has no owner. */
+char const *const text = "namespace {";
+FIXTURE
+
+assert_rejects "class template suffix on the template line" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe_t;
+FIXTURE
+
+assert_rejects "class template suffix after a multiline header" "suffixes a class template" include/probe.hpp <<'FIXTURE'
+template <
+    typename first_type_,
+    typename second_type_>
+struct probe2_t;
+FIXTURE
+
+assert_accepts "function template with ordinary local type on the same line" include/probe.hpp <<'FIXTURE'
+template <typename value_type_> value_type_ probe() { struct local_t {}; return {}; }
+FIXTURE
+
+assert_accepts "bare class template and materialized alias" include/probe.hpp <<'FIXTURE'
+template <typename type_> struct probe;
+using probe_t = probe<int>;
+FIXTURE
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/struct probe;/struct probe_t;/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed class name with unchanged template header" "suffixes a class template"
+
+stage_fixture_with_header include/probe.hpp <<'FIXTURE'
+template <typename type_>
+struct probe_t;
+FIXTURE
+git -C "$fixture_directory" commit --quiet -m "Chore: Seed the fixture"
+sed 's/typename type_/typename value_type_/' "$fixture_directory/include/probe.hpp" > "$fixture_directory/edited"
+mv "$fixture_directory/edited" "$fixture_directory/include/probe.hpp"
+git -C "$fixture_directory" add -- include/probe.hpp
+run_precommit
+expect_rejection "changed template header with unchanged class name" "suffixes a class template"
+
 assert_rejects "harness namespace missing" "does not open" bench/probe.hpp <<FIXTURE
 namespace other {}
 FIXTURE
@@ -2381,7 +2442,7 @@ STRINGZILLA_API void sz_probe_haswell(void);
 FIXTURE
 
 assert_rejects "C++ in a CUDA tier" "adds C++, but" include/stringzilla/probe.cuh <<'FIXTURE'
-template <typename type_> struct probe_t;
+template <typename type_> struct probe;
 FIXTURE
 
 assert_accepts "C in a CUDA tier, and prose naming templates" include/stringzilla/probe.cuh <<'FIXTURE'
@@ -2415,6 +2476,32 @@ FIXTURE
 assert_accepts "vendor spelling in a shared kernel" include/stringzilla/probe/simt.cuh <<'FIXTURE'
 #if defined(__HIP__)
 void probe(void) { __builtin_amdgcn_s_barrier(); }
+#endif
+FIXTURE
+
+assert_rejects "raw CUDA compiler guard in a benchmark" "tests the GPU compiler in harness code" bench/probe.cpp <<'FIXTURE'
+#if defined(__CUDACC__)
+int probe();
+#endif
+FIXTURE
+
+assert_rejects "raw HIP compiler guard in a test" "tests the GPU compiler in harness code" test/probe.cpp <<'FIXTURE'
+#if defined(__HIPCC__) || defined(__HIP__)
+int probe();
+#endif
+FIXTURE
+
+assert_rejects "harness vendor filename grants no guard exception" "tests the GPU compiler in harness code" bench/cuda.cuh <<FIXTURE
+namespace ${project_namespace}::bench {
+#if defined(__CUDACC__)
+int probe();
+#endif
+}
+FIXTURE
+
+assert_accepts "architecture guard in a harness" bench/probe.cpp <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+int probe();
 #endif
 FIXTURE
 

@@ -43,22 +43,23 @@
  *
  *  @code{.sh}
  *  # Draw a fresh seed instead of the default 42
- *  STRINGZILLA_SEED=random ./build_release/stringzilla_cpu_test
+ *  STRINGZILLA_SEED=random ./build_release/stringzilla_test
  *
  *  # Quick smoke test (10% of normal iterations)
- *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_cpu_test
+ *  STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test
  *
  *  # Fast inner loop: only the UTF-8 tests, at 10% iterations
- *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_cpu_test
+ *  STRINGZILLA_FILTER=utf8 STRINGZILLA_SCALE=0.1 ./build_release/stringzilla_test
  *
  *  # Thorough CI stress test (10x normal iterations)
- *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_cpu_test
+ *  STRINGZILLA_SCALE=10 ./build_release/stringzilla_test
  *
  *  # Combine both for CI fuzzing
- *  STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 ./build_release/stringzilla_cpu_test
+ *  STRINGZILLA_SEED=12345 STRINGZILLA_SCALE=5 ./build_release/stringzilla_test
  *  @endcode
  */
 #pragma once
+#include <climits> // `INT_MAX`
 #include <cmath>   // `std::isfinite`
 #include <csignal> // `std::signal`, `SIGSEGV`, `SIGABRT`
 #include <cstddef> // `std::ptrdiff_t`
@@ -240,14 +241,13 @@ left_operand<left_type_> operator<=>(assertion_t &assertion, left_type_ const &v
  *  so a passing call - or one that throws something else - is the defect it reports. */
 #define throws_verify(expression, exception_type) \
     do {                                          \
-        bool threw = false;                       \
         try {                                     \
             sz_unused_(expression);               \
         }                                         \
         catch (exception_type const &) {          \
-            threw = true;                         \
+            break;                                \
         }                                         \
-        verify(threw);                            \
+        verify(false);                            \
     } while (0)
 
 #pragma endregion Assertion Helpers
@@ -304,61 +304,35 @@ result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... argum
 
 using tape_view_t = tape_view<char, sz_size_t>;
 
-/*  The one place a test picks a GPU vendor, by its compiler: the baseline, the producers, and the
- *  vendor's runtime helpers the checks reach past the library. */
-#if STRINGZILLA_ARCH_ROCM_
-inline constexpr sz_capability_t gpu_baseline_k = sz_cap_rocm_k;
-inline constexpr auto gpu_capabilities_enabled = &sz_capabilities_enabled_rocm;
-inline constexpr auto gpu_stream_init = &sz_stream_init_rocm;
-inline constexpr auto gpu_stream_free = &sz_stream_free_rocm;
-inline constexpr auto gpu_stream_query = &sz_stream_query_rocm_;
-inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_rocm_;
-inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_rocm_;
-inline constexpr auto gpu_memory_reaches = &sz_memory_reaches_rocm_;
-inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_rocm_;
-inline constexpr auto gpu_free_device = &sz_memory_free_device_rocm_;
-inline constexpr auto gpu_fill = &sz_fill_rocm_;
-#elif STRINGZILLA_ARCH_CUDA_
-inline constexpr sz_capability_t gpu_baseline_k = sz_cap_cuda_k;
-inline constexpr auto gpu_capabilities_enabled = &sz_capabilities_enabled_cuda;
-inline constexpr auto gpu_stream_init = &sz_stream_init_cuda;
-inline constexpr auto gpu_stream_free = &sz_stream_free_cuda;
-inline constexpr auto gpu_stream_query = &sz_stream_query_cuda_;
-inline constexpr auto gpu_multiprocessors = &sz_device_multiprocessors_cuda_;
-inline constexpr auto gpu_threads_per_multiprocessor = &sz_device_threads_per_multiprocessor_cuda_;
-inline constexpr auto gpu_memory_reaches = &sz_memory_reaches_cuda_;
-inline constexpr auto gpu_allocate_device = &sz_memory_allocate_device_cuda_;
-inline constexpr auto gpu_free_device = &sz_memory_free_device_cuda_;
-inline constexpr auto gpu_fill = &sz_fill_cuda_;
-#endif
+struct device_backend_t {
+    sz::device_t selected = sz::device_t::cpu();
+    sz_capability_t capabilities = 0;
+    sz_stream_t stream = nullptr;
+    sz_allocator_t unified {}, device {};
+    std::optional<std::size_t> multiprocessors, threads_per_multiprocessor;
+    sz_bool_t (*query)(sz_stream_t) = nullptr;
+    sz_bool_t (*reachable)(void const *) = nullptr;
+    sz_status_t (*fill)(void *, sz_size_t, sz_u8_t, sz_stream_t) = nullptr;
+    sz_status_t (*init)(sz_size_t, sz_stream_t *) = nullptr;
+    sz_status_t (*free)(sz_stream_t) = nullptr;
+};
 
-#if !STRINGZILLA_ARCH_CUDA_ && !STRINGZILLA_ARCH_ROCM_
-using tape_t = tape<char, sz_size_t, std::allocator<char>>;
+using tape_t = tape<char, sz_u64_t, unified_alloc<char>, tape_termination_t::packed_k>;
 template <typename value_type_>
-using unified_vector = std::vector<value_type_, std::allocator<value_type_>>;
-#else
-using tape_t = tape<char, sz_size_t, unified_alloc<char, gpu_baseline_k>>;
-template <typename value_type_>
-using unified_vector = std::vector<value_type_, unified_alloc<value_type_, gpu_baseline_k>>;
-#endif
+using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 
-/**
- *  @brief Copies @p texts into unified memory a CUDA kernel can reach, as one span per string.
- *
- *  Owns the bytes the spans point into, so it has to outlive every call that reads @c view().
- */
-struct unified_texts_t {
-    std::vector<unified_vector<char>> storage;
-    unified_vector<std::span<char const>> spans;
+/** Owns one native stream, released after its dependent allocations and engines. */
+struct stream_t {
+    sz_stream_t handle = nullptr;
+    sz_status_t (*release)(sz_stream_t);
 
-    explicit unified_texts_t(std::vector<std::string> const &texts) : storage(texts.size()), spans(texts.size()) {
-        for (std::size_t index = 0; index != texts.size(); ++index) {
-            storage[index].assign(texts[index].begin(), texts[index].end());
-            spans[index] = {storage[index].data(), storage[index].size()};
-        }
+    stream_t(sz_size_t ordinal, sz_status_t (*init)(sz_size_t, sz_stream_t *), sz_status_t (*release)(sz_stream_t))
+        : release(release) {
+        verify(init(ordinal, &handle) == sz_success_k);
     }
-
-    std::span<std::span<char const> const> view() const noexcept { return {spans.data(), spans.size()}; }
+    stream_t(stream_t const &) = delete;
+    stream_t &operator=(stream_t const &) = delete;
+    ~stream_t() noexcept { release(handle); }
 };
 
 /** A 32-bit generator seed, kept apart from counts so neither passes for the other. */
@@ -399,8 +373,49 @@ inline seed_t env_seed(char const *name, seed_t fallback) noexcept {
     return env_parsed(name, fallback, parse_seed, "an unsigned integer or random");
 }
 
+/** A requested GPU, before checking whether its runtime and ordinal are available. */
+struct device_selection_t {
+    sz::device_kind_t backend;
+    std::size_t ordinal;
+};
+
+inline std::string_view device_name(sz::device_kind_t kind) noexcept {
+    switch (kind) {
+    case sz::device_kind_t::cpu_k: return "cpu";
+    case sz::device_kind_t::cuda_k: return "cuda";
+    case sz::device_kind_t::rocm_k: return "rocm";
+    case sz::device_kind_t::metal_k: return "metal";
+    }
+    return "unrecognized";
+}
+
+inline std::optional<std::vector<device_selection_t>> parse_devices(std::string_view text) {
+    std::vector<device_selection_t> devices;
+    do {
+        std::size_t const comma = text.find(',');
+        std::string_view const entry = text.substr(0, comma);
+        std::size_t const colon = entry.find(':');
+        if (colon == std::string_view::npos) return std::nullopt;
+        std::string_view const vendor = entry.substr(0, colon);
+        sz::device_kind_t backend;
+        if (vendor == "cuda") backend = sz::device_kind_t::cuda_k;
+        else if (vendor == "rocm") backend = sz::device_kind_t::rocm_k;
+        else if (vendor == "metal") backend = sz::device_kind_t::metal_k;
+        else return std::nullopt;
+        std::string_view const number = entry.substr(colon + 1);
+        std::size_t ordinal = 0;
+        auto const [end, error] = std::from_chars(number.data(), number.data() + number.size(), ordinal);
+        if (error != std::errc {} || end != number.data() + number.size()) return std::nullopt;
+        devices.push_back({backend, ordinal});
+        if (comma == std::string_view::npos) return devices;
+        text.remove_prefix(comma + 1);
+    } while (!text.empty());
+    return std::nullopt;
+}
+
 /** Every test setting, with its default as the initializer, filled once by @c read_settings. */
 struct settings_t {
+    std::optional<std::vector<device_selection_t>> devices;
 
     /** Seed every test's generator is mixed from. */
     seed_t seed {42};
@@ -426,6 +441,9 @@ struct settings_t {
 /** Reads every @c settings_t variable for the binary named @p program. */
 inline settings_t read_settings(char const *program) noexcept {
     settings_t settings;
+    if (env_text("STRINGZILLA_DEVICES"))
+        settings.devices = env_parsed("STRINGZILLA_DEVICES", std::vector<device_selection_t> {}, parse_devices,
+                                      "comma-separated devices such as cuda:0,rocm:1");
     settings.program = program;
     auto const parse_scale = [](std::string_view text) -> std::optional<double> {
         std::string const terminated(text);
@@ -683,23 +701,25 @@ inline std::string random_string(std::mt19937 &generator, std::size_t length,
     return result;
 }
 
-/** Reads a member string start, for @c sz_sequence_t views over a `std::vector<std::string>`. */
-inline sz_cptr_t sequence_get_start_(void const *handle, sz_sorted_idx_t index) {
-    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].data();
+inline sz_sequence_t sequence_from_(std::span<sz_string_view_t const> views) {
+    sz_sequence_t sequence;
+    sz_sequence_from_string_views(views.data(), views.size(), &sequence);
+    return sequence;
 }
 
-/** Reads a member string length, for @c sz_sequence_t views over a `std::vector<std::string>`. */
-inline sz_size_t sequence_get_length_(void const *handle, sz_sorted_idx_t index) {
-    return (*reinterpret_cast<std::vector<std::string> const *>(handle))[index].size();
-}
-
-/** Fills an @c sz_sequence_t view over a `std::vector<std::string>` via the shared accessors. */
+/** Borrows a sequence view of the supplied strings. */
 inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
     sz_sequence_t sequence;
     sequence.handle = &strings;
     sequence.count = (sz_size_t)strings.size();
-    sequence.get_start = sequence_get_start_;
-    sequence.get_length = sequence_get_length_;
+    sequence.get_start = [](void const *handle, sz_size_t index) -> sz_cptr_t {
+        auto const &strings = *static_cast<std::vector<std::string> const *>(handle);
+        return strings[index].data();
+    };
+    sequence.get_length = [](void const *handle, sz_size_t index) -> sz_size_t {
+        auto const &strings = *static_cast<std::vector<std::string> const *>(handle);
+        return strings[index].size();
+    };
     return sequence;
 }
 
@@ -745,8 +765,17 @@ inline char const *status_name(status_t s) noexcept {
     }
 }
 
+inline void print(sz::device_t const &device) {
+    fmt::println("Device: {}:{}", device_name(device.kind()), device.ordinal());
+}
+
 /** Prints each setting as "- Name: value", in the grammar it parses from, then a rerun template. */
 inline void print(settings_t const &settings) {
+    if (settings.devices) {
+        for (device_selection_t const &device : *settings.devices)
+            fmt::println("- Device: {}:{}", device_name(device.backend), device.ordinal);
+    }
+    else fmt::println("- Devices: auto");
     fmt::println("- Seed: {}", settings.seed.value);
     fmt::println("- Filter: {}", settings.filter.empty() ? std::string_view("none") : settings.filter);
     fmt::println("- Scale: {}", settings.iterations_scale);
@@ -755,45 +784,18 @@ inline void print(settings_t const &settings) {
 }
 
 /** The facts this binary and this machine report: the library version, the capabilities compiled
- *  in and detected, and in GPU builds the first visible device. */
+ *  in and detected. */
 struct machine_t {
     std::array<unsigned, 3> version {STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
                                      STRINGZILLA_H_VERSION_PATCH};
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
-
-    /** The first visible device, with the architecture CUDA and ROCm name, like @c sm_90 or
-     *  @c gfx942, or empty. */
-    std::string device_name;
-#endif
 };
 
 /** Probes the capabilities @c machine_t reports. */
 inline machine_t probe_machine() noexcept {
     machine_t machine;
     sz_capabilities_compiled_cpu(&machine.compiled), sz_capabilities_detected_cpu(&machine.detected);
-#if STRINGZILLA_ARCH_ROCM_
-    int device_count = 0;
-    hipDeviceProp_t properties;
-    if (hipGetDeviceCount(&device_count) == hipSuccess && device_count != 0 &&
-        hipGetDeviceProperties(&properties, 0) == hipSuccess)
-        machine.device_name = fmt::format("{} {}", properties.name, properties.gcnArchName);
-#elif STRINGZILLA_ARCH_CUDA_
-    int device_count = 0;
-    cudaDeviceProp properties;
-    if (cudaGetDeviceCount(&device_count) == cudaSuccess && device_count != 0 &&
-        cudaGetDeviceProperties(&properties, 0) == cudaSuccess)
-        machine.device_name = fmt::format("{} sm_{}{}", properties.name, properties.major, properties.minor);
-#elif STRINGZILLA_WITH_METAL
-    sz_stream_t queue = nullptr;
-    if (sz_stream_init_metal(0, &queue) == sz_success_k) {
-        void *(*const message)(void *, SEL) = reinterpret_cast<void *(*)(void *, SEL)>(objc_msgSend);
-        void *const name = message(message(queue, sel_registerName("device")), sel_registerName("name"));
-        machine.device_name = static_cast<char const *>(message(name, sel_registerName("UTF8String")));
-        sz_stream_free_metal(queue);
-    }
-#endif
     return machine;
 }
 
@@ -806,10 +808,6 @@ inline void print(machine_t const &machine) {
     fmt::println("StringZilla {}.{}.{}", machine.version[0], machine.version[1], machine.version[2]);
     fmt::println("- Compiled for: {}", compiled);
     fmt::println("- This machine: {}", detected);
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_ || STRINGZILLA_WITH_METAL
-    fmt::println("- {}: {}", STRINGZILLA_WITH_METAL ? "Metal" : (STRINGZILLA_ARCH_ROCM_ ? "ROCm" : "CUDA"),
-                 machine.device_name.empty() ? std::string_view("no device") : machine.device_name);
-#endif
 }
 
 /** Everything a test reads, built once in @c main and passed down by reference. */
@@ -817,47 +815,6 @@ struct environment_t {
     settings_t settings;
     machine_t machine;
 };
-
-#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
-
-/** The capabilities device 0 of this translation unit's GPU vendor runs, or zero without one. */
-inline sz_capability_t gpu_capabilities() {
-    sz_capability_t capabilities = 0;
-    gpu_capabilities_enabled(0, &capabilities);
-    return capabilities;
-}
-
-/** A stream on device 0 of this translation unit's GPU vendor, opened and freed by the library. */
-struct gpu_stream_t {
-    sz_stream_t handle = nullptr;
-
-    gpu_stream_t() { verify(gpu_stream_init(0, &handle) == sz_success_k); }
-    gpu_stream_t(gpu_stream_t const &) = delete;
-    gpu_stream_t &operator=(gpu_stream_t const &) = delete;
-    ~gpu_stream_t() noexcept { gpu_stream_free(handle); }
-};
-
-/** A sequence tape from @ref sz_sequence_realloc_best, returned to its allocator when owned. */
-struct gpu_tape_t {
-    sz_allocator_t unified {};
-    sz_sequence_t sequence {};
-    sz_size_t bytes = 0;
-
-    gpu_tape_t() = default;
-    gpu_tape_t(gpu_tape_t const &) = delete;
-    gpu_tape_t &operator=(gpu_tape_t const &) = delete;
-    ~gpu_tape_t() noexcept {
-        if (bytes) unified.free((void *)sequence.handle, bytes, unified.handle, nullptr);
-    }
-
-    /** Copies @p source in, once; the tape owns its bytes, so @p source may go right after. */
-    void copy(sz_sequence_t const &source) {
-        verify(sz_allocator_init_unified_best(&unified, gpu_capabilities()) == sz_success_k);
-        verify(sz_sequence_realloc_best(&sequence, &source, &unified, &bytes, gpu_capabilities(), nullptr) ==
-               sz_success_k);
-    }
-};
-#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 #pragma region Test Runner
 
@@ -967,6 +924,9 @@ std::size_t test_cross_riscv64(environment_t const &env);
 std::size_t test_cross_loongarch64(environment_t const &env);
 std::size_t test_cross_ppc64(environment_t const &env);
 std::size_t test_cross_wasm(environment_t const &env);
+std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal);
+std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal);
+std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal);
 
 #pragma endregion Kernel Cross Checks
 

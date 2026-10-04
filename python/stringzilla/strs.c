@@ -375,7 +375,7 @@ static sz_bool_t sz_py_replace_fragmented_allocator(Strs *strs, sz_allocator_t *
 }
 
 /**
- *  @brief Helper function to replace the memory allocator in a @c Strs object. This reallocates
+ *  @brief Helper function to replace the allocator in a @c Strs object. This reallocates
  *      existing string data using the new allocator.
  *
  *  This may change the layout of the @c Strs layout:
@@ -393,6 +393,11 @@ sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allo
 
     // Get the current allocator based on layout
     sz_allocator_t old_allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&old_allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return sz_false_k;
+    }
     switch (strs->layout) {
     case STRS_U32_TAPE: old_allocator = strs->data.u32_tape.allocator; break;
     case STRS_U64_TAPE: old_allocator = strs->data.u64_tape.allocator; break;
@@ -413,10 +418,9 @@ sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allo
             if (up && up->layout == STRS_U32_TAPE) { old_allocator = up->data.u32_tape.allocator; }
             else if (up && up->layout == STRS_U64_TAPE) { old_allocator = up->data.u64_tape.allocator; }
             else if (up && up->layout == STRS_FRAGMENTED) { old_allocator = up->data.fragmented.allocator; }
-            else { sz_allocator_init_default(&old_allocator); } // Final fallback
         }
         break;
-    default: sz_allocator_init_default(&old_allocator); break;
+    default: break;
     }
 
     // Check if the allocators are the same - no need to reallocate
@@ -504,9 +508,13 @@ static get_string_at_offset_t str_at_offset_getter(Strs *strs) {
 static int Strs_ensure_tape_layout(Strs *self) {
     if (self->layout != STRS_FRAGMENTED) return 1; // Already in tape layout
 
-    // Get the default allocator
+    // Convert with the host heap allocator.
     sz_allocator_t allocator;
-    sz_allocator_init_default(&allocator);
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return 0;
+    }
 
     // Convert fragmented to tape
     if (!sz_py_replace_fragmented_allocator(self, &self->data.fragmented.allocator, &allocator)) {
@@ -705,18 +713,9 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
     Py_ssize_t result_count = PySlice_AdjustIndices(count, &start, &stop, step);
     if (result_count < 0) return NULL;
 
-    // Create a new `Strs` object
-    Strs *result = Strs_alloc_();
-    if (result == NULL) return PyErr_NoMemory();
-
-    if (result_count == 0) {
-        result->layout = STRS_FRAGMENTED;
-        result->data.fragmented.count = 0;
-        result->data.fragmented.spans = NULL;
-        result->data.fragmented.parent = NULL;
-        sz_allocator_init_default(&result->data.fragmented.allocator);
-        return (PyObject *)result;
-    }
+    Strs *result = strs_make_empty_fragmented_();
+    if (result == NULL) return NULL;
+    if (result_count == 0) return (PyObject *)result;
 
     // If a step is requested, we have to create a new `FRAGMENTED` instance of `Strs`,
     // even if the original one was a tape layout.
@@ -733,7 +732,6 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         result->data.fragmented.count = result_count;
         result->data.fragmented.spans = new_spans;
         result->data.fragmented.parent = NULL;
-        sz_allocator_init_default(&result->data.fragmented.allocator);
 
         // Populate the new fragmented array using `get_string_at_offset`
         sz_size_t j = 0;
@@ -804,7 +802,6 @@ static PyObject *Strs_subscript(Strs *self, PyObject *key) {
         result->data.fragmented.count = result_count;
         result->data.fragmented.parent = self->data.fragmented.parent;
         Py_XINCREF(result->data.fragmented.parent);
-        sz_allocator_init_default(&result->data.fragmented.allocator);
 
         result->data.fragmented.spans = malloc(sizeof(sz_string_view_t) * result_count);
         if (result->data.fragmented.spans == NULL) {
@@ -1102,6 +1099,11 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
     get_string_at_offset_t substring_getter = NULL;
     PyObject *parent_to_increment = NULL;
     sz_allocator_t allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return NULL;
+    }
 
     switch (self->layout) {
     case STRS_U32_TAPE:
@@ -1114,7 +1116,6 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
         substring_getter = str_at_offset_u32_tape_view;
         substrings_count = self->data.u32_tape_view.count;
         parent_to_increment = self->data.u32_tape_view.parent;
-        sz_allocator_init_default(&allocator);
         break;
     case STRS_U64_TAPE:
         substring_getter = str_at_offset_u64_tape;
@@ -1126,7 +1127,6 @@ static PyObject *Strs_shuffled(Strs *self, PyObject *const *args, Py_ssize_t pos
         substring_getter = str_at_offset_u64_tape_view;
         substrings_count = self->data.u64_tape_view.count;
         parent_to_increment = self->data.u64_tape_view.parent;
-        sz_allocator_init_default(&allocator);
         break;
     case STRS_FRAGMENTED:
         substring_getter = str_at_offset_fragmented;
@@ -1271,6 +1271,11 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
     get_string_at_offset_t substring_getter = NULL;
     PyObject *parent_to_increment = NULL;
     sz_allocator_t allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return NULL;
+    }
 
     switch (self->layout) {
     case STRS_U32_TAPE:
@@ -1283,7 +1288,6 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         substring_getter = str_at_offset_u32_tape_view;
         substrings_count = self->data.u32_tape_view.count;
         parent_to_increment = (PyObject *)self;
-        sz_allocator_init_default(&allocator);
         break;
     case STRS_U64_TAPE:
         substring_getter = str_at_offset_u64_tape;
@@ -1295,7 +1299,6 @@ static PyObject *Strs_sorted(Strs *self, PyObject *const *args, Py_ssize_t posit
         substring_getter = str_at_offset_u64_tape_view;
         substrings_count = self->data.u64_tape_view.count;
         parent_to_increment = (PyObject *)self;
-        sz_allocator_init_default(&allocator);
         break;
     case STRS_FRAGMENTED:
         substring_getter = str_at_offset_fragmented;
@@ -1816,6 +1819,12 @@ static PyGetSetDef Strs_getsetters[] = {
 
 /** The efficient @c Strs_init path initializing from PyArrow array capsules. */
 static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) {
+    sz_allocator_t allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return -1;
+    }
     // Handle Arrow array
     PyObject *const method_name = PyUnicode_FromString("__arrow_c_array__");
     PyObject *capsules = method_name ? PyObject_CallMethodNoArgs(sequence_obj, method_name) : NULL;
@@ -1888,10 +1897,6 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
     }
     // Copy mode for Arrow arrays
     else {
-        // Copy mode for Arrow arrays - use allocator for memory management
-        sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
-
         if (use_64bit) {
             sz_i64_t const *offsets_64 = (sz_i64_t const *)buffers[1];
             sz_size_t total_bytes = offsets_64[length] - offsets_64[0];
@@ -1986,6 +1991,12 @@ static int Strs_init_from_pyarrow(Strs *self, PyObject *sequence_obj, int view) 
 
 /** The less efficient @c Strs_init path initializing from a Pythonic tuple of strings. */
 static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
+    sz_allocator_t allocator;
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return -1;
+    }
     Py_ssize_t count = PyTuple_GET_SIZE(sequence_obj);
 
     // Empty tuple, create empty Strs
@@ -1994,16 +2005,12 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
         self->data.fragmented.parent = NULL;
-        sz_allocator_init_default(&self->data.fragmented.allocator);
+        self->data.fragmented.allocator = allocator;
         return 0;
     }
 
     // Zero-copy mode for Python sequences - use reordered layout for memory-scattered strings
     if (view) {
-        // Initialize allocator for memory management
-        sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
-
         sz_string_view_t *parts = (sz_string_view_t *)allocator.allocate(count * sizeof(sz_string_view_t),
                                                                          allocator.handle, NULL);
         if (!parts) {
@@ -2048,10 +2055,6 @@ static int Strs_init_from_tuple(Strs *self, PyObject *sequence_obj, int view) {
         }
 
         int use_64bit = (total_bytes >= UINT32_MAX);
-
-        // Initialize allocator for memory management
-        sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
 
         // Allocate data buffer using allocator
         sz_ptr_t data_buffer = total_bytes ? (sz_ptr_t)allocator.allocate(total_bytes, allocator.handle, NULL)
@@ -2178,7 +2181,11 @@ static int Strs_init_from_iterable(Strs *self, PyObject *sequence_obj, int view)
 
     // Initialize allocator for memory management
     sz_allocator_t allocator;
-    sz_allocator_init_default(&allocator);
+    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+    if (allocator_status != sz_success_k) {
+        sz_py_raise_status(allocator_status, "heap allocator initialization");
+        return -1;
+    }
 
     // Incrementally allocate a new tape to fit all of the items
     sz_size_t data_capacity = 4096;
@@ -2405,10 +2412,16 @@ static int Strs_init(Strs *self, PyObject *args, PyObject *kwargs) {
     PyObject *arrow_method = sequence_obj ? PyObject_GetAttrString(sequence_obj, "__arrow_c_array__") : NULL;
     PyErr_Clear(); // Clear the attribute error from checking for `__arrow_c_array__`
     if (!sequence_obj) {
+        sz_allocator_t allocator;
+        sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
+        if (allocator_status != sz_success_k) {
+            sz_py_raise_status(allocator_status, "heap allocator initialization");
+            return -1;
+        }
         self->layout = STRS_FRAGMENTED;
         self->data.fragmented.count = 0;
         self->data.fragmented.spans = NULL;
-        sz_allocator_init_default(&self->data.fragmented.allocator);
+        self->data.fragmented.allocator = allocator;
         self->data.fragmented.parent = NULL;
     }
     else if (arrow_method) {

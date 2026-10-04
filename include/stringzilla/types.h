@@ -1079,8 +1079,8 @@ STRINGZILLA_CONSTEXPR void sz_byteset_invert(sz_byteset_t *s) {
  *  or synchronous execution on the CPU. The caller owns the handle. */
 typedef void *sz_stream_t;
 
-typedef void *(*sz_memory_allocate_t)(sz_size_t bytes, void *handle, sz_stream_t stream);
-typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream);
+typedef void *(*sz_allocate_t)(sz_size_t bytes, void *handle, sz_stream_t stream);
+typedef void (*sz_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream);
 
 /**
  *  @brief Some complex pattern matching algorithms may require memory allocations. This structure
@@ -1089,36 +1089,39 @@ typedef void (*sz_memory_free_t)(void *pointer, sz_size_t bytes, void *handle, s
  *  Both functions take the caller's stream, which on a GPU names the device a block is made on and
  *  the work a release waits behind; host allocators ignore it, and on the CPU it is null.
  *
- *  @sa sz_allocator_init_fixed, sz_allocator_init_unified_best
+ *  @sa sz_allocator_init_arena, sz_allocator_init_unified_best
  */
 typedef struct sz_allocator_t {
-    sz_memory_allocate_t allocate;
-    sz_memory_free_t free;
+    sz_allocate_t allocate;
+    sz_free_t free;
     void *handle;
 } sz_allocator_t;
 
 /**
  *  @brief Initializes a memory allocator to use the system default @c malloc and @c free.
  *  @param[out] allocator Memory allocator to initialize.
- *  @warning The function is not available if the library was compiled with
- *      @c STRINGZILLA_WITH_LIBC=0.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k without libc.
+ *      Failure preserves the allocator.
  *  @note Unlike the C standard library, `malloc(0)` is guaranteed to return a null pointer.
  *  @see malloc: https://en.cppreference.com/w/c/memory/malloc
  */
-STRINGZILLA_INLINE void sz_allocator_init_default(sz_allocator_t *allocator);
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_heap(sz_allocator_t *allocator);
 
 /**
  *  @brief Initializes a memory allocator that serves every request from a static-capacity buffer,
  *      @b without any dynamic allocations.
  *  @param[out] allocator Memory allocator to initialize.
  *  @param[in] buffer Buffer to use for allocations.
- *  @param[in] length Length of the buffer. @b Must be greater than 16, at least 4KB (one RAM
- *      page) is recommended.
+ *  @param[in] bytes Buffer size, including metadata and alignment padding.
+ *  @param[in] alignment Nonzero power-of-two alignment guaranteed for every returned block.
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for invalid alignment, @c sz_bad_alloc_k
+ *      for missing storage, or @c sz_overflow_risk_k for an overflowing address range. Failure
+ *      leaves both the allocator and buffer unchanged.
  *
- *  The @p buffer itself will be prepended with the capacity and the consumed size. Those values
- *  shouldn't be modified.
+ *  Three aligned @c sz_size_t values store capacity, consumption and alignment inside the buffer.
  */
-STRINGZILLA_INLINE void sz_allocator_init_fixed(sz_allocator_t *allocator, void *buffer, sz_size_t length);
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_arena(sz_allocator_t *allocator, void *buffer, sz_size_t bytes,
+                                                       sz_size_t alignment);
 
 /**
  *  @brief Checks if two memory allocators are equivalent.
@@ -1938,30 +1941,24 @@ STRINGZILLA_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 #endif
 }
 
-/** Bytes a fixed buffer rounds each block up to, so an odd length can't misalign the next block. */
-enum { sz_memory_alignment_k = 64 };
+typedef struct STRINGZILLA_MAY_ALIAS_ sz_arena_t_ {
+    sz_size_t capacity, consumed, alignment;
+} sz_arena_t_;
 
-/**
- *  @brief Helper function, using the supplied fixed-capacity buffer to allocate memory.
- *
- *  Offsets are rounded to @ref sz_memory_alignment_k, so a block is aligned as far as the caller's
- *  own buffer is: pass one aligned to 64 and every block is, and a malloc'd buffer still carries
- *  its own guarantee.
- */
-STRINGZILLA_CONSTEXPR sz_ptr_t sz_memory_allocate_fixed_(sz_size_t length, void *handle, sz_stream_t stream) {
+/** Allocates an aligned block from the arena, leaving its consumption unchanged on failure. */
+STRINGZILLA_CONSTEXPR void *sz_allocate_arena_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     sz_unused_(stream);
-    sz_size_t const capacity = *(sz_size_t *)handle;
-    sz_size_t const consumed_capacity = *((sz_size_t *)handle + 1);
-    sz_size_t const aligned_capacity = (consumed_capacity + sz_memory_alignment_k - 1) &
-                                       ~(sz_size_t)(sz_memory_alignment_k - 1);
-    if (aligned_capacity + length > capacity) return STRINGZILLA_NULL_CHAR;
-    // Increase the consumed capacity.
-    *((sz_size_t *)handle + 1) = aligned_capacity + length;
-    return (sz_ptr_t)handle + aligned_capacity;
+    sz_arena_t_ *metadata = (sz_arena_t_ *)handle;
+    sz_size_t const capacity = metadata->capacity, consumed = metadata->consumed, alignment = metadata->alignment;
+    if (consumed > capacity) return STRINGZILLA_NULL;
+    sz_size_t const padding = (-((sz_size_t)handle + consumed)) & (alignment - 1);
+    if (padding > capacity - consumed || bytes > capacity - consumed - padding) return STRINGZILLA_NULL;
+    metadata->consumed = consumed + padding + bytes;
+    return (sz_ptr_t)handle + consumed + padding;
 }
 
 /** Helper "no-op" function, simulating memory deallocation when we use a "static" memory buffer. */
-STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t length, void *handle, sz_stream_t stream) {
+STRINGZILLA_CONSTEXPR void sz_free_arena_(void *start, sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(start && length && handle && stream);
 }
 
@@ -1976,39 +1973,45 @@ STRINGZILLA_CONSTEXPR void sz_memory_free_fixed_(sz_ptr_t start, sz_size_t lengt
 #include <stdio.h>  // `fprintf`
 #include <stdlib.h> // `malloc`, `EXIT_FAILURE`
 
-STRINGZILLA_INLINE void *sz_memory_allocate_default_(sz_size_t length, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void *sz_allocate_heap_(sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(handle && stream);
     if (length == 0) return STRINGZILLA_NULL;
     return malloc(length);
 }
-STRINGZILLA_INLINE void sz_memory_free_default_(sz_ptr_t start, sz_size_t length, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void sz_free_heap_(void *start, sz_size_t length, void *handle, sz_stream_t stream) {
     sz_unused_(handle && length && stream);
     free(start);
 }
 
 #endif
 
-STRINGZILLA_INLINE void sz_allocator_init_default(sz_allocator_t *allocator) {
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_heap(sz_allocator_t *allocator) {
 #if STRINGZILLA_WITH_LIBC
-    allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_default_;
-    allocator->free = (sz_memory_free_t)sz_memory_free_default_;
-#else
-    allocator->allocate = (sz_memory_allocate_t)STRINGZILLA_NULL;
-    allocator->free = (sz_memory_free_t)STRINGZILLA_NULL;
-#endif
+    allocator->allocate = sz_allocate_heap_;
+    allocator->free = sz_free_heap_;
     allocator->handle = STRINGZILLA_NULL;
+    return sz_success_k;
+#else
+    sz_unused_(allocator);
+    return sz_missing_kernel_k;
+#endif
 }
 
-STRINGZILLA_INLINE void sz_allocator_init_fixed(sz_allocator_t *allocator, void *buffer, sz_size_t length) {
-    // The logic here is simple - put the buffer capacity in the first slots of the buffer.
-    // The second slot is used to store the current consumed capacity.
-    // The rest of the buffer is used for the actual data.
-    allocator->allocate = (sz_memory_allocate_t)sz_memory_allocate_fixed_;
-    allocator->free = (sz_memory_free_t)sz_memory_free_fixed_;
-    allocator->handle = buffer;
-    sz_size_t *pointer = (sz_size_t *)buffer;
-    pointer[0] = length;
-    pointer[1] = sizeof(sz_size_t) * 2; // The capacity and consumption so far
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_arena(sz_allocator_t *allocator, void *buffer, sz_size_t bytes,
+                                                       sz_size_t alignment) {
+    if (!alignment || (alignment & (alignment - 1))) return sz_unexpected_dimensions_k;
+    if (!buffer) return sz_bad_alloc_k;
+    if (bytes > STRINGZILLA_SIZE_MAX - (sz_size_t)buffer) return sz_overflow_risk_k;
+    sz_size_t const padding = (-(sz_size_t)buffer) & (sizeof(sz_size_t) - 1);
+    if (padding > bytes || bytes - padding < sizeof(sz_arena_t_)) return sz_bad_alloc_k;
+    sz_arena_t_ *metadata = (sz_arena_t_ *)((sz_ptr_t)buffer + padding);
+    metadata->capacity = bytes - padding;
+    metadata->consumed = sizeof(sz_arena_t_);
+    metadata->alignment = alignment;
+    allocator->allocate = sz_allocate_arena_;
+    allocator->free = sz_free_arena_;
+    allocator->handle = metadata;
+    return sz_success_k;
 }
 
 STRINGZILLA_CONSTEXPR sz_bool_t sz_allocator_equal(sz_allocator_t const *a, sz_allocator_t const *b) {

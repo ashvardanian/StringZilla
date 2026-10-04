@@ -39,7 +39,7 @@ extern "C" {
 
 /** The MSL source of the Levenshtein kernels, compiled once per device behind the shared prelude. */
 static char const sz_levenshtein_source_metal_[] = {
-#embed "metal.metal"
+#embed "stringzilla/levenshtein/metal.metal"
     , 0};
 #pragma clang diagnostic pop
 
@@ -166,8 +166,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
                                                              sz_stream_t stream) {
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
-    if (status != sz_success_k) return status;
-    if (queries->count == 0) return sz_unexpected_dimensions_k;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (queries->count == 0) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     // Every query seeds its score from its own last word, so an empty one has no word to read it
     // off, and the ceiling is checked twice: on the bytes here, which bound the runes, and on the
@@ -175,11 +175,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     sz_size_t longest = 0;
     for (sz_size_t index = 0; index != queries->count; ++index) {
         sz_size_t const bytes = queries->get_length(queries->handle, index);
-        if (bytes == 0) return sz_unexpected_dimensions_k;
+        if (bytes == 0) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
         longest = sz_max_of_two(longest, bytes);
     }
     if (symbol == sz_levenshtein_bytes_k && longest > sz_levenshtein_gpu_words_max_k * 64)
-        return sz_unexpected_dimensions_k;
+        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     sz_allocator_t unified;
     if (allocator) unified = *allocator;
@@ -187,20 +187,20 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     sz_size_t const buckets_bound = sz_levenshtein_query_words(longest);
     status = sz_levenshtein_engine_build_(
         queries, symbol, sz_levenshtein_head_bytes_metal_(queries->count, buckets_bound), &unified, stream, engine);
-    if (status != sz_success_k) return status;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
     sz_metal_bound_t memory;
-    if (!sz_metal_resolve_(call.context, engine->memory, engine->memory_bytes, &memory))
+    if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &memory))
         status = sz_device_memory_mismatch_k;
     else if (sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k)
         status = sz_unexpected_dimensions_k;
     else status = sz_levenshtein_bind_head_metal_(engine, call.context, buckets_bound);
     if (status != sz_success_k) {
         sz_levenshtein_engine_free_(engine, stream);
-        return status;
+        return sz_metal_commit_(&call, status);
     }
     sz_levenshtein_engine_fill_(engine, queries);
     engine->capability = sz_cap_metal_k;
-    return sz_success_k;
+    return sz_metal_commit_(&call, sz_success_k);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
@@ -213,13 +213,13 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     sz_metal_bound_t buffers[3];
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
-    if (status != sz_success_k) return status;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
     sz_size_t const distances_count = (engine->count - 1) * distances_stride + candidates->count;
-    if (!sz_metal_resolve_(call.context, engine->memory, engine->memory_bytes, &buffers[0]) ||
-        !sz_metal_resolve_(call.context, distances, distances_count * sizeof(sz_size_t), &buffers[2]))
-        return sz_device_memory_mismatch_k;
-    status = sz_metal_tape_(call.context, candidates, &buffers[1]);
-    if (status != sz_success_k) return status;
+    if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
+        !sz_metal_resolve_call_(&call, distances, distances_count * sizeof(sz_size_t), &buffers[2]))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    status = sz_metal_tape_call_(&call, candidates, &buffers[1]);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
 
     char const *const block = (char const *)engine->memory;
     sz_levenshtein_head_metal_t const *const head = (sz_levenshtein_head_metal_t const *)block;

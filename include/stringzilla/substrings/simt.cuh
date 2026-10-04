@@ -302,7 +302,7 @@ static __global__ void sz_substrings_total_bytes_simt_kernel_(sz_sequence_t hays
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t mine = 0, block_total = 0;
-    for (; index < haystacks.count; index += stride) mine += haystacks.get_length(haystacks.handle, index);
+    for (; index < haystacks.count; index += stride) mine += sz_sequence_tape_length_simt_(haystacks.handle, index);
     sz_block_scan_simt_(mine, shared, &block_total);
     if (threadIdx.x == 0) atomicAdd((unsigned long long *)total, (unsigned long long)block_total);
 }
@@ -335,7 +335,7 @@ static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_sequence_t hay
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     for (; index < haystacks.count; index += stride)
-        chunk_offsets[index] = sz_substrings_chunks_for_simt_(haystacks.get_length(haystacks.handle, index),
+        chunk_offsets[index] = sz_substrings_chunks_for_simt_(sz_sequence_tape_length_simt_(haystacks.handle, index),
                                                               *chunk_bytes);
 }
 
@@ -537,8 +537,8 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
 
     for (; chunk_index < chunk_count; chunk_index += stride) {
         sz_size_t const haystack_index = sz_substrings_haystack_of_simt_(chunk_offsets, haystacks.count, chunk_index);
-        sz_cptr_t const haystack = haystacks.get_start(haystacks.handle, haystack_index);
-        sz_size_t const length = haystacks.get_length(haystacks.handle, haystack_index);
+        sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
+        sz_size_t const length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
         sz_size_t const local_index = chunk_index - chunk_offsets[haystack_index];
         sz_size_t const chunk_begin = local_index * chunk_bytes;
         sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
@@ -711,8 +711,8 @@ static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t en
     staged.accepts_words = staged_accepts_words ? staged_accepts : engine.accepts_words;
 
     for (haystack_index = blockIdx.x / cluster_blocks; haystack_index < haystacks.count; haystack_index += clusters) {
-        sz_cptr_t const haystack = haystacks.get_start(haystacks.handle, haystack_index);
-        sz_size_t const length = haystacks.get_length(haystacks.handle, haystack_index);
+        sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
+        sz_size_t const length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
         sz_f64_t const norm = sz_substrings_bm25_norm(
             &parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
         // The cluster's first tally is clear before its blocks count into it, and every count lands
@@ -967,7 +967,8 @@ static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_sequence_t 
                 sz_size_t const needle = matches[match_index].needle_index;
                 // Shrinking matches make this wrap, which is exactly right: only the prefix sums are ever
                 // read, every one of them names a real offset, and modular arithmetic reproduces each.
-                drift_here = replacements.get_length(replacements.handle, needle) - matches[match_index].byte_length;
+                drift_here = sz_sequence_tape_length_simt_(replacements.handle, needle) -
+                             matches[match_index].byte_length;
                 previous_end = match_index == first
                                    ? 0
                                    : matches[match_index - 1].byte_offset + matches[match_index - 1].byte_length;
@@ -981,7 +982,8 @@ static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_sequence_t 
 
         // The scan's own aggregate is the haystack's total drift, so no second pass reduces what it knows.
         if (threadIdx.x == 0)
-            output_sizes[haystack_index] = haystacks.get_length(haystacks.handle, haystack_index) + drift_carry;
+            output_sizes[haystack_index] = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index) +
+                                           drift_carry;
         __syncthreads(); // ! The next haystack resets the carry this one is still reading.
     }
 }
@@ -1027,8 +1029,8 @@ static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_sequence_t hay
         sz_size_t haystack_index = sz_substrings_last_not_above_simt_(output_offsets, haystacks.count + 1, tile_begin);
 
         for (; haystack_index < haystacks.count && output_offsets[haystack_index] < tile_end; ++haystack_index) {
-            sz_cptr_t const haystack = haystacks.get_start(haystacks.handle, haystack_index);
-            sz_size_t const haystack_length = haystacks.get_length(haystacks.handle, haystack_index);
+            sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
+            sz_size_t const haystack_length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
             sz_size_t const base = output_offsets[haystack_index];
             sz_size_t const first = haystack_offsets[haystack_index], last = haystack_offsets[haystack_index + 1];
             // Every match contributes a gap and a replacement; one more stretch closes the haystack.
@@ -1058,8 +1060,8 @@ static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_sequence_t hay
                 needle = matches[match_index].needle_index;
                 sz_substrings_copy_clipped_simt_(output, tile_begin, tile_end,
                                                  gap_begin + (gap_source_end - previous_end),
-                                                 replacements.get_start(replacements.handle, needle),
-                                                 replacements.get_length(replacements.handle, needle), lane);
+                                                 sz_sequence_tape_start_simt_(replacements.handle, needle),
+                                                 sz_sequence_tape_length_simt_(replacements.handle, needle), lane);
             }
         }
     }

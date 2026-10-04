@@ -760,7 +760,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_en
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_allocator_t host;
     if (allocator) host = *allocator;
-    else sz_allocator_init_default(&host);
+    else {
+        sz_status_t const status = sz_allocator_init_heap(&host);
+        if (status != sz_success_k) return status;
+    }
     sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, stream, engine);
     if (built != sz_success_k) return built;
     sz_levenshtein_engine_fill_(engine, queries);

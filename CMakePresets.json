@@ -152,14 +152,14 @@
     { "name": "swift", "configurePreset": "swift", "configuration": "Release" },
     { "name": "cuda", "configurePreset": "cuda" },
     { "name": "cuda_clang", "configurePreset": "cuda_clang" },
-    { "name": "rocm", "configurePreset": "rocm", "targets": ["stringzilla_rocm_test"] },
-    { "name": "metal", "configurePreset": "metal", "targets": ["stringzilla_metal_test", "stringzilla_shared"] },
+    { "name": "rocm", "configurePreset": "rocm", "targets": ["stringzilla_test"] },
+    { "name": "metal", "configurePreset": "metal", "targets": ["stringzilla_test", "stringzilla_shared"] },
     { "name": "linux_arm64", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "configurePreset": "linux_riscv64" },
     { "name": "linux_loongarch64", "configurePreset": "linux_loongarch64" },
     { "name": "linux_ppc64le", "configurePreset": "linux_ppc64le" },
-    { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_cpu_test"] },
-    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_cpu_test"] }
+    { "name": "wasm32_wasi", "configurePreset": "wasm32_wasi", "targets": ["stringzilla_test"] },
+    { "name": "wasm32_wasi_threads", "configurePreset": "wasm32_wasi_threads", "targets": ["stringzilla_test"] }
   ],
   "testPresets": [
     {
@@ -184,13 +184,13 @@
       "name": "rocm",
       "inherits": "base",
       "configurePreset": "rocm",
-      "filter": { "include": { "name": "^stringzilla_rocm_test$" } }
+      "filter": { "include": { "name": "^stringzilla_test$" } }
     },
     {
       "name": "metal",
       "inherits": "base",
       "configurePreset": "metal",
-      "filter": { "include": { "name": "^stringzilla_metal_test$" } }
+      "filter": { "include": { "name": "^stringzilla_test$" } }
     },
     { "name": "linux_arm64", "inherits": "emulated", "configurePreset": "linux_arm64" },
     { "name": "linux_riscv64", "inherits": "emulated", "configurePreset": "linux_riscv64" },
@@ -200,14 +200,14 @@
       "name": "wasm32_wasi",
       "inherits": "emulated",
       "configurePreset": "wasm32_wasi",
-      "filter": { "include": { "name": "^stringzilla_cpu_test$" } },
+      "filter": { "include": { "name": "^stringzilla_test$" } },
       "environment": { "STRINGZILLA_FILTER": "utf8" }
     },
     {
       "name": "wasm32_wasi_threads",
       "inherits": "emulated",
       "configurePreset": "wasm32_wasi_threads",
-      "filter": { "include": { "name": "^stringzilla_cpu_test$" } },
+      "filter": { "include": { "name": "^stringzilla_test$" } },
       "environment": { "STRINGZILLA_FILTER": "utf8" }
     }
   ],

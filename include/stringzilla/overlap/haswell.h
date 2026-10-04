@@ -464,7 +464,10 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_haswell(sz_overlap_engine_t *
     sz_size_t const step = sz_overlap_f64x4_positions_per_step_haswell_k;
     sz_allocator_t host;
     if (allocator) host = *allocator;
-    else sz_allocator_init_default(&host);
+    else {
+        sz_status_t const status = sz_allocator_init_heap(&host);
+        if (status != sz_success_k) return status;
+    }
     sz_status_t const opened = sz_overlap_engine_open_(queries, window_widths, window_widths_count, 0, &host, stream,
                                                        engine);
     if (opened != sz_success_k) return opened;

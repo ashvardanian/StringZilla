@@ -14,8 +14,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_FILTER=aes256 build_release/stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_FILTER=aes256 build_release/stringzilla_bench
  *  @endcode
  */
 #include <string> // `std::string`

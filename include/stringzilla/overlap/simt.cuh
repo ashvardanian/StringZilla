@@ -100,8 +100,8 @@ STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine
                                                sz_sequence_t const *candidates, sz_size_t candidate,
                                                sz_size_t chunk_begin, sz_size_t chunk_bytes, sz_size_t warm_up,
                                                sz_u32_t *counts) {
-    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
-    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
+    sz_cptr_t const text = sz_sequence_tape_start_simt_(candidates->handle, candidate);
+    sz_size_t const length = sz_sequence_tape_length_simt_(candidates->handle, candidate);
     sz_size_t const walk_begin = chunk_begin > warm_up ? chunk_begin - warm_up : 0;
     sz_size_t const walk_bytes = sz_min_of_two(chunk_begin + chunk_bytes, length) - walk_begin;
     sz_size_t const warm_bytes = chunk_begin - walk_begin;
@@ -162,7 +162,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_tile_chunks_simt_(sz_sequence_t const *c
     if (threadIdx.x == 0) *tile_bytes = 0;
     __syncthreads();
     for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x)
-        mine += candidates->get_length(candidates->handle, tile_first + candidate);
+        mine += sz_sequence_tape_length_simt_(candidates->handle, tile_first + candidate);
     if (mine) atomicAdd(tile_bytes, (unsigned long long)mine);
     __syncthreads();
 
@@ -171,7 +171,7 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_tile_chunks_simt_(sz_sequence_t const *c
                                                 4 * sz_max_of_two(warm_up, (sz_size_t)1));
     for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x)
         chunk_offsets[candidate] = (sz_u32_t)sz_size_divide_round_up(
-            candidates->get_length(candidates->handle, tile_first + candidate), chunk_bytes);
+            sz_sequence_tape_length_simt_(candidates->handle, tile_first + candidate), chunk_bytes);
     __syncthreads();
 
     // One warp scans the tile's chunk counts, each lane a run of them, so the scan is two passes
@@ -259,7 +259,7 @@ static __global__ void sz_overlap_scores_simt_kernel_(sz_overlap_engine_t engine
             __syncthreads();
 
             for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x) {
-                sz_size_t const length = candidates.get_length(candidates.handle, tile_first + candidate);
+                sz_size_t const length = sz_sequence_tape_length_simt_(candidates.handle, tile_first + candidate);
                 sz_f32_t *const candidate_scores = scores + query * scores_query_stride +
                                                    (tile_first + candidate) * scores_candidate_stride;
                 for (slot = 0; slot != widths_count; ++slot) {

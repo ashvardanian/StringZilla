@@ -50,7 +50,7 @@ pub struct OverlapEngine {
     count: usize,
     widths_count: usize,
     capability: Capabilities,
-    allocator: _SzMemoryAllocator,
+    allocator: sz_allocator_t,
     memory: *mut c_void,
     memory_bytes: usize,
     scratch: *mut c_void,

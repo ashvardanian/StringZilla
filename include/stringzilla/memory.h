@@ -379,30 +379,30 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
 
 /**
  *  @brief Reallocates @p source as a tape from @p allocator when the selected device cannot use
- *      its storage, and points @p target at it through that device's accessors.
+ *      its storage, and points @p target at it through the canonical tape accessors.
  *
  *  A tape is count + 1 @c sz_u64_t offsets from the block's own start, then every string's bytes
- *  back to back, so it holds no pointer and whatever addresses the block reads all of it. On CUDA
- *  and ROCm its accessors are device functions the host must not call; on the CPU and Metal they
- *  are host functions.
+ *  back to back. Its accessors always remain host-callable, including CUDA and ROCm tapes.
+ *  Device kernels read the tape directly. A source tape can therefore be repacked for another
+ *  vendor or device after its producer stream has completed.
  *
  *  @param[out] target The tape, untouched unless the call succeeds; it may be @p source itself.
  *      Neither the source allocation nor any previous target allocation is freed. Save their
  *      ownership information before replacing a descriptor in place.
  *  @param[in] source The strings, through host-callable accessors over host-readable texts, or a
- *      tape of the same group already.
+ *      host-readable tape from any group. Complete prior device writes before this call.
  *  @param[in] allocator Where the block comes from, host-writable, like the one
  *      @ref sz_allocator_init_unified_best initializes.
  *  @param[out] allocated_bytes Bytes of the block, which the caller frees by passing
  *      `target->handle`, these bytes, `allocator->handle` and @p stream to `allocator->free`, or
  *      zero when the source tape is borrowed; its owner must keep it alive until work completes.
- *  @param[in] capabilities One device's capabilities; its group picks the accessors.
+ *  @param[in] capabilities One device's capabilities; its group selects the backend.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
  *  @return @c sz_success_k; @c sz_bad_alloc_k when the block cannot be taken; or on a device
  *      @c sz_device_memory_mismatch_k for a @p stream it cannot use, @c sz_device_code_mismatch_k
- *      when the accessors' addresses cannot be read off it, and @c sz_missing_gpu_k for a vendor
- *      this library was built without or a device that doesn't answer.
+ *      for a runtime failure, and @c sz_missing_gpu_k for a vendor this library was built without
+ *      or a device that does not answer.
  *  @note Never joins: the host writes the block, and a device migration is queued on @p stream.
  */
 STRINGZILLA_API sz_status_t sz_sequence_realloc_best(sz_sequence_t *target, sz_sequence_t const *source,

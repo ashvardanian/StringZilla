@@ -16,22 +16,16 @@
 #
 # Tests:
 #
-# * stringzilla_cpu_test: The dispatch points, the C++ interface, and every kernel the static library defines.
-# * stringzilla_cpu_shared_test: The dispatch points alone, through the shared library.
+# * stringzilla_test: The dispatch points, the C++ interface, and every kernel the static library defines.
+# * stringzilla_shared_test: The dispatch points and GPU kernels, through the shared library.
 # * stringzilla_cpu_header_test: The kernels compiled inline, header-only, and the dispatch-point stubs.
-# * stringzilla_cuda_test: The CUDA kernels and the dispatch points over them, against the serial answers.
-# * stringzilla_rocm_test: The same checks over the ROCm kernels.
-# * stringzilla_metal_test: The same checks over the Metal kernels.
 #
 # Benchmarks:
 #
-# * stringzilla_cpu_bench: The dispatch points against the standard baselines, and every kernel the static library
+# * stringzilla_bench: The dispatch points against the standard baselines, and every kernel the static library
 #   defines against its serial twin.
 # * stringzilla_cpu_header_bench: The kernels compiled inline, header-only, with the private helpers only the tier
 #   headers define.
-# * stringzilla_cuda_bench: The CUDA kernels of the engine families against the CPU tiers this build carries.
-# * stringzilla_rocm_bench: The same over the ROCm kernels.
-# * stringzilla_metal_bench: The Metal kernels of the window-overlap family against the serial one.
 #
 # Python, Node, and Swift build their artifacts through this file, while Rust's `build.rs` and Go's cgo link
 # `stringzilla_static`; Java and C# load `stringzilla_shared`.
@@ -195,8 +189,8 @@ option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehavior
 
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
 # build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
-# build_cov --target stringzilla_cpu_test -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_cpu_test
-# llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_cpu_test
+# build_cov --target stringzilla_test -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test
+# llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test
 # -instr-profile=/tmp/sz.profdata include/stringzilla/ `-march=native` compiles out the non-native backends, so a
 # faithful picture needs `llvm-profdata merge` across per-ISA builds (native x86 + qemu-aarch64 for NEON/SVE + the RVV
 # qemu toolchain).
@@ -298,22 +292,21 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
     FetchContent_MakeAvailable(fmt)
 endif ()
 
-# One GPU test or benchmark over the static library, whose vendor unit holds the kernels it names: compiled as
-# `language`, which its sources' extension spells, for the architectures the library's vendor unit carries.
-function (define_gpu_launcher exec_name language)
-    add_executable(${exec_name} ${ARGN})
-    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
+# Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
+function (define_gpu_suite target language source)
+    add_library(${target} OBJECT ${source})
+    set_compiler_flags(${target} 20 "${STRINGZILLA_TARGET_ARCH}")
     set_target_properties(
-        ${exec_name}
+        ${target}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
                    HIP_STANDARD 20
     )
-    # NVCC's front end cannot honour MSVC's `/utf-8`, without which {fmt} refuses to build its Unicode support.
+    target_compile_definitions(${target} PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_})
     if (MSVC AND language STREQUAL "CUDA")
-        target_compile_definitions(${exec_name} PRIVATE FMT_UNICODE=0)
+        target_compile_definitions(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
     endif ()
-    target_link_libraries(${exec_name} PRIVATE stringzilla_static fmt::fmt)
+    target_link_libraries(${target} PRIVATE stringzilla_static fmt::fmt)
 endfunction ()
 
 # One CPU test or benchmark linking `library`, whose capability `verdicts` declare every kernel the
@@ -332,8 +325,7 @@ function (define_cpu_launcher exec_name library verdicts)
     target_link_libraries(${exec_name} PRIVATE ${library} fmt::fmt)
 endfunction ()
 
-# Tests and benchmarks are defined after the libraries (below), so the GPU launchers can link the precompiled static
-# archive instead of recompiling the engines header-only.
+# Tests and benchmarks link the precompiled libraries below.
 
 # Define our libraries, first the header-only version.
 #
@@ -343,10 +335,26 @@ add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
-    stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}> $<INSTALL_INTERFACE:include>
+    stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
+                                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
+if (APPLE)
+    set(STRINGZILLA_EMBED_COMPILER_
+        "$<AND:$<PLATFORM_ID:Darwin>,$<OR:$<COMPILE_LANG_AND_ID:C,Clang,AppleClang>,$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>>>"
+    )
+    if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
+        set(STRINGZILLA_EMBED_INSTALL_DIR_ "${CMAKE_INSTALL_INCLUDEDIR}")
+    else ()
+        set(STRINGZILLA_EMBED_INSTALL_DIR_ "$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}")
+    endif ()
+    set(STRINGZILLA_EMBED_OPTIONS_
+        "$<${STRINGZILLA_EMBED_COMPILER_}:$<BUILD_INTERFACE:--embed-dir=${STRINGZILLA_INCLUDE_BUILD_DIR}>>"
+        "$<${STRINGZILLA_EMBED_COMPILER_}:$<INSTALL_INTERFACE:--embed-dir=${STRINGZILLA_EMBED_INSTALL_DIR_}>>"
+    )
+    target_compile_options(stringzilla_header INTERFACE ${STRINGZILLA_EMBED_OPTIONS_})
+endif ()
 
 # The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
 # `c/target/<capability>.c` defines that capability's kernels once, and each `c/dispatch/<family>.c` holds its family's
@@ -483,6 +491,10 @@ if (STRINGZILLA_BUILD_ROCM)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
     sz_add_gpu_unit_(c/target/metal.c "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
+    target_compile_options(stringzilla_metal_ PRIVATE ${STRINGZILLA_EMBED_OPTIONS_})
+    foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
+        target_compile_options(${library_} PUBLIC ${STRINGZILLA_EMBED_OPTIONS_})
+    endforeach ()
 endif ()
 
 # The `stringzilla` extension module, which scikit-build-core builds and packages from `pyproject.toml`, installed at the
@@ -660,23 +672,13 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/utf8_uncased.cpp
         ${STRINGZILLA_CROSS_BENCH_SOURCES_}
     )
-    define_cpu_launcher(stringzilla_cpu_bench stringzilla_static COMPILE ${STRINGZILLA_CPU_BENCH_SOURCES_})
+    define_cpu_launcher(stringzilla_bench stringzilla_static COMPILE ${STRINGZILLA_CPU_BENCH_SOURCES_})
     # Header-only builds have no dispatch points to time, but their kernels compile inline, which also reaches the
     # private helpers the library keeps to itself, like the SIMD sorts of pgrams.
     define_cpu_launcher(
         stringzilla_cpu_header_bench stringzilla_header COMPILE bench/main.cpp ${STRINGZILLA_CROSS_BENCH_SOURCES_}
     )
 
-    if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzilla_cuda_bench CUDA bench/cross_cuda.cu)
-    endif ()
-    if (STRINGZILLA_BUILD_ROCM)
-        define_gpu_launcher(stringzilla_rocm_bench HIP bench/cross_rocm.hip)
-    endif ()
-    if (STRINGZILLA_BUILD_METAL)
-        define_gpu_launcher(stringzilla_metal_bench CXX bench/cross_metal.cpp)
-        target_compile_definitions(stringzilla_metal_bench PRIVATE STRINGZILLA_WITH_METAL=1)
-    endif ()
 endif ()
 
 if (STRINGZILLA_BUILD_TEST)
@@ -712,12 +714,12 @@ if (STRINGZILLA_BUILD_TEST)
         ${STRINGZILLA_CROSS_TEST_SOURCES_}
     )
 
-    define_cpu_launcher(stringzilla_cpu_test stringzilla_static COMPILE ${STRINGZILLA_CPU_TEST_SOURCES_})
-    add_test(NAME stringzilla_cpu_test COMMAND stringzilla_cpu_test)
+    define_cpu_launcher(stringzilla_test stringzilla_static COMPILE ${STRINGZILLA_CPU_TEST_SOURCES_})
+    add_test(NAME stringzilla_test COMMAND stringzilla_test)
     # Cross builds link their executables statically, to run them under an emulator without the target's loader.
     if (TARGET stringzilla_shared AND NOT CMAKE_CROSSCOMPILING)
-        define_cpu_launcher(stringzilla_cpu_shared_test stringzilla_shared SERIAL ${STRINGZILLA_CPU_TEST_SOURCES_})
-        add_test(NAME stringzilla_cpu_shared_test COMMAND stringzilla_cpu_shared_test)
+        define_cpu_launcher(stringzilla_shared_test stringzilla_shared SERIAL ${STRINGZILLA_CPU_TEST_SOURCES_})
+        add_test(NAME stringzilla_shared_test COMMAND stringzilla_shared_test)
     endif ()
     # The family files drive `stringzilla.hpp`, which always goes through the library, so the header-only test keeps
     # the kernel cross-checks and the dispatch-point stubs.
@@ -726,23 +728,43 @@ if (STRINGZILLA_BUILD_TEST)
     )
     add_test(NAME stringzilla_cpu_header_test COMMAND stringzilla_cpu_header_test)
 
-    # One GPU test per vendor, each checking that vendor's kernels by name and the dispatch points over them.
-    if (STRINGZILLA_BUILD_CUDA)
-        define_gpu_launcher(stringzilla_cuda_test CUDA test/main_cuda.cu test/cross_cuda.cu)
-        add_test(NAME stringzilla_cuda_test COMMAND stringzilla_cuda_test)
-    endif ()
-    if (STRINGZILLA_BUILD_ROCM)
-        define_gpu_launcher(stringzilla_rocm_test HIP test/main_rocm.hip test/cross_rocm.hip)
-        add_test(NAME stringzilla_rocm_test COMMAND stringzilla_rocm_test)
-    endif ()
-    if (STRINGZILLA_BUILD_METAL)
-        # The kernels travel as embedded `.metal` source and compile on the device at first use, so the test only
-        # needs to see the Metal declarations the library defines.
-        define_gpu_launcher(stringzilla_metal_test CXX test/main_metal.cpp test/cross_metal.cpp)
-        target_compile_definitions(stringzilla_metal_test PRIVATE STRINGZILLA_WITH_METAL=1)
-        add_test(NAME stringzilla_metal_test COMMAND stringzilla_metal_test)
-    endif ()
 endif ()
+
+foreach (suite bench test)
+    string(TOUPPER "${suite}" suite_upper_)
+    if (NOT STRINGZILLA_BUILD_${suite_upper_})
+        continue()
+    endif ()
+    foreach (vendor cuda rocm metal)
+        set(language_ CXX)
+        if (vendor STREQUAL "cuda")
+            set(source_ "${suite}/cross_cuda.cu")
+            if (STRINGZILLA_BUILD_CUDA)
+                set(language_ CUDA)
+            else ()
+                set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
+            endif ()
+        elseif (vendor STREQUAL "rocm")
+            set(source_ "${suite}/cross_rocm.hip")
+            if (STRINGZILLA_BUILD_ROCM)
+                set(language_ HIP)
+            else ()
+                set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
+            endif ()
+        else ()
+            set(source_ "${suite}/cross_metal.cpp")
+        endif ()
+        set(unit_ "stringzilla_${vendor}_${suite}_")
+        define_gpu_suite(${unit_} ${language_} ${source_})
+        if (vendor STREQUAL "metal" AND STRINGZILLA_BUILD_METAL)
+            target_compile_definitions(${unit_} PRIVATE STRINGZILLA_WITH_METAL=1)
+        endif ()
+        target_sources(stringzilla_${suite} PRIVATE $<TARGET_OBJECTS:${unit_}>)
+        if (suite STREQUAL "test" AND TARGET stringzilla_shared_test)
+            target_sources(stringzilla_shared_test PRIVATE $<TARGET_OBJECTS:${unit_}>)
+        endif ()
+    endforeach ()
+endforeach ()
 
 if (STRINGZILLA_INSTALL)
     include(CMakePackageConfigHelpers)

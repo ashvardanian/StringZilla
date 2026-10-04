@@ -380,7 +380,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_cuda_(sz_substrings_e
     sz_allocator_t *const allocator = &engine->allocator;
     void *const block = allocator->allocate(arena.total, allocator->handle, stream);
     if (!block) return sz_bad_alloc_k;
-    if (!sz_memory_reaches_cuda_(block)) {
+    if (!sz_memory_accessible_cuda_(block)) {
         allocator->free(block, arena.total, allocator->handle, stream);
         return sz_device_memory_mismatch_k;
     }
@@ -531,11 +531,11 @@ STRINGZILLA_INLINE sz_bool_t sz_substrings_resident_cuda_(sz_substrings_engine_t
                                                           sz_sequence_t const *haystacks) {
     // An array the kernel dereferences, rather than the owning handle it never touches, so a caller
     // holding a borrowed view of a resident engine is not refused for a null owner.
-    if (!sz_memory_reaches_cuda_(engine->base)) return sz_false_k;
-    // The handle is checked, never the accessors: those are the device's to call, so the host must not,
-    // and a pointer is all this side can inspect. That the texts they answer are device-reachable is the
-    // caller's word, which the init makes easy to keep by handing back a unified allocator.
-    return sz_memory_reaches_cuda_(haystacks->handle);
+    if (!sz_memory_accessible_cuda_(engine->base)) return sz_false_k;
+    return haystacks->get_start == sz_sequence_tape_start && haystacks->get_length == sz_sequence_tape_length &&
+                   sz_memory_accessible_cuda_(haystacks->handle)
+               ? sz_true_k
+               : sz_false_k;
 }
 
 #pragma endregion Host Plumbing
@@ -563,7 +563,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
                                            sz_cap_cuda_k, allocator, stream, engine);
     if (status != sz_success_k) return status;
     // The host builder writes the block in place, so a device-only allocation cannot serve as the vocabulary.
-    if (!sz_memory_reaches_cuda_(engine->memory)) {
+    if (!sz_memory_accessible_cuda_(engine->memory)) {
         sz_substrings_engine_free_(engine, stream);
         return sz_device_memory_mismatch_k;
     }
@@ -602,7 +602,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_cuda_(sz_substrings_engine_t
     if (!counts_stride) return sz_unexpected_dimensions_k;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(counts)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(counts)) return sz_device_memory_mismatch_k;
 
     status = sz_substrings_walk_cuda_(engine, haystacks, sz_substrings_matches_unneeded_cuda_k, STRINGZILLA_NULL,
                                       &round, stream);
@@ -623,8 +623,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_cuda_(sz_substrings_engine_t *
     sz_status_t status;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(matches_offsets)) return sz_device_memory_mismatch_k;
-    if (matches_capacity && !sz_memory_reaches_cuda_(matches)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(matches_offsets)) return sz_device_memory_mismatch_k;
+    if (matches_capacity && !sz_memory_accessible_cuda_(matches)) return sz_device_memory_mismatch_k;
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
     // The offsets kernel retires when the matches did not fit, so the caller's array is zeroed rather than
     // left holding whatever it held before.
@@ -664,9 +664,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_cuda_(sz_substrings_engine_
     if (replacements->count != engine->needles_count) return sz_unexpected_dimensions_k;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(replacements->handle)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(offsets)) return sz_device_memory_mismatch_k;
-    if (target_capacity && !sz_memory_reaches_cuda_(target)) return sz_device_memory_mismatch_k;
+    if (replacements->get_start != sz_sequence_tape_start || replacements->get_length != sz_sequence_tape_length ||
+        !sz_memory_accessible_cuda_(replacements->handle))
+        return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(offsets)) return sz_device_memory_mismatch_k;
+    if (target_capacity && !sz_memory_accessible_cuda_(target)) return sz_device_memory_mismatch_k;
 
     status = sz_substrings_walk_cuda_(engine, haystacks, sz_substrings_matches_needed_cuda_k, STRINGZILLA_NULL, &round,
                                       stream);
@@ -732,9 +734,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(sz_substrings_eng
     if (!scores_stride) return sz_unexpected_dimensions_k;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(scores)) return sz_device_memory_mismatch_k;
-    if (needles_count && !sz_memory_reaches_cuda_(needle_weights)) return sz_device_memory_mismatch_k;
-    if (document_lengths && !sz_memory_reaches_cuda_(document_lengths)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(scores)) return sz_device_memory_mismatch_k;
+    if (needles_count && !sz_memory_accessible_cuda_(needle_weights)) return sz_device_memory_mismatch_k;
+    if (document_lengths && !sz_memory_accessible_cuda_(document_lengths)) return sz_device_memory_mismatch_k;
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
     engine_copy = *engine;
 

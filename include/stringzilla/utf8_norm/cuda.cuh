@@ -77,8 +77,8 @@ STRINGZILLA_INLINE sz_status_t sz_utf8_norm_cuda_(sz_cptr_t source, sz_size_t so
     sz_status_t status;
     if ((sz_u64_t)source_length > ((sz_u64_t)1 << sz_chain_chained_shift_k) / sz_utf8_norm_decomp_max_k)
         return sz_unexpected_dimensions_k;
-    if (!sz_memory_reaches_cuda_(target_length)) return sz_device_memory_mismatch_k;
-    if (source_length && (!sz_memory_reaches_cuda_(source) || !sz_memory_reaches_cuda_(target)))
+    if (!sz_memory_accessible_cuda_(target_length)) return sz_device_memory_mismatch_k;
+    if (source_length && (!sz_memory_accessible_cuda_(source) || !sz_memory_accessible_cuda_(target)))
         return sz_device_memory_mismatch_k;
     status = sz_fill_cuda_(target_length, sizeof(sz_size_t), 0, stream);
     if (status != sz_success_k || !source_length) return status;

@@ -293,7 +293,7 @@ static sz_status_t sz_levenshtein_build_masks_cuda_(sz_levenshtein_engine_t *eng
         status = sz_launch_cuda_((void const *)sz_levenshtein_masks_simt_kernel_, grid, block, arguments, 0, stream);
     }
     // The staging is the host's, so it outlives the builder only as long as the join below takes.
-    if (status == sz_success_k) status = sz_synchronize_cuda_(stream);
+    if (status == sz_success_k) status = sz_stream_synchronize_cuda_(stream);
     engine->allocator.free(staged, staged_bytes, engine->allocator.handle, stream);
     return status;
 }
@@ -379,11 +379,11 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_cuda_(sz_levenshtein_eng
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     if (candidates->count == 0) return sz_success_k;
 
-    // The handle is checked, never the accessors: those are the device's to call, so the host must not, and a
-    // pointer is all this side can inspect. That the texts they answer are device-reachable is the caller's word.
-    if (!sz_memory_reaches_cuda_(engine->memory)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(distances)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_reaches_cuda_(candidates->handle)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(engine->memory)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(distances)) return sz_device_memory_mismatch_k;
+    if (candidates->get_start != sz_sequence_tape_start || candidates->get_length != sz_sequence_tape_length ||
+        !sz_memory_accessible_cuda_(candidates->handle))
+        return sz_device_memory_mismatch_k;
 
     sz_levenshtein_head_cuda_t const *const head = (sz_levenshtein_head_cuda_t const *)engine->memory;
     for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) {
@@ -483,7 +483,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_cuda_(sz_cptr_t a, 
     if (a_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32) ||
         b_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32))
         return sz_unexpected_dimensions_k;
-    if (!sz_memory_reaches_cuda_(distance)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_cuda_(distance)) return sz_device_memory_mismatch_k;
 
     // The recurrence is symmetric, and putting the shorter text on the row axis keeps the frontier small and
     // makes the parallel axis the long one.
@@ -501,8 +501,8 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_cuda_(sz_cptr_t a, 
         arguments[0] = &launch_distance, arguments[1] = &launch_value;
         return sz_launch_cuda_((void const *)sz_levenshtein_store_simt_kernel_, one, one, arguments, 0, stream);
     }
-    if (!sz_memory_reaches_cuda_(shorter_text) || !sz_memory_reaches_cuda_(longer_text) ||
-        !sz_memory_reaches_cuda_(scratch))
+    if (!sz_memory_accessible_cuda_(shorter_text) || !sz_memory_accessible_cuda_(longer_text) ||
+        !sz_memory_accessible_cuda_(scratch))
         return sz_device_memory_mismatch_k;
 
     sz_size_t const tile_grid_columns = sz_size_divide_round_up(longer_length, sz_levenshtein_tile_side_simt_k);

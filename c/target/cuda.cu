@@ -8,14 +8,14 @@
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
-#include "stringzilla/utf8_norm.h"
 #include "stringzilla/utf8_uncased_fold.h"
+#include "stringzilla/utf8_norm.h"
 
 #include "stringzilla/levenshtein/cuda.cuh"
 #include "stringzilla/overlap/cuda.cuh"
 #include "stringzilla/substrings/cuda.cuh"
-#include "stringzilla/utf8_norm/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/cuda.cuh"
+#include "stringzilla/utf8_norm/cuda.cuh"
 
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
     *count = sz_device_count_cuda_();
@@ -38,15 +38,15 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *alloc
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator) {
-    allocator->allocate = sz_memory_allocate_device_cuda_;
-    allocator->free = sz_memory_free_device_cuda_;
+    allocator->allocate = sz_allocate_device_cuda_;
+    allocator->free = sz_free_device_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator) {
-    allocator->allocate = sz_memory_allocate_pinned_cuda_;
-    allocator->free = sz_memory_free_pinned_cuda_;
+    allocator->allocate = sz_allocate_pinned_cuda_;
+    allocator->free = sz_free_pinned_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }

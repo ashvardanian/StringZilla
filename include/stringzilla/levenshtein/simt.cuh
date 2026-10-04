@@ -89,8 +89,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(sz_levenshtein_engine_t engin
     // round. A text's eight bytes span two aligned words, and the second is read only once it holds
     // a byte of the text: an aligned word that holds one lies in a page the device may read all
     // eight bytes of.
-    sz_cptr_t text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t left = candidates.get_length(candidates.handle, candidate);
+    sz_cptr_t text = sz_sequence_tape_start_simt_(candidates.handle, candidate);
+    sz_size_t left = sz_sequence_tape_length_simt_(candidates.handle, candidate);
     sz_size_t *slot_out = row + candidate;
     sz_u32_t shift = (sz_u32_t)((sz_size_t)text & 7) * 8;
     sz_u64_t const *cursor = (sz_u64_t const *)(text - shift / 8);
@@ -104,8 +104,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(sz_levenshtein_engine_t engin
                 query = sz_levenshtein_engine_row_(&engine, query_index);
                 row = distances + query_index * distances_stride;
             }
-            text = candidates.get_start(candidates.handle, candidate);
-            left = candidates.get_length(candidates.handle, candidate);
+            text = sz_sequence_tape_start_simt_(candidates.handle, candidate);
+            left = sz_sequence_tape_length_simt_(candidates.handle, candidate);
             slot_out = row + candidate;
             shift = (sz_u32_t)((sz_size_t)text & 7) * 8;
             cursor = (sz_u64_t const *)(text - shift / 8);
@@ -259,8 +259,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_candidate_simt_(sz_levenshtein_query
                                                             sz_size_t *row, sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
     sz_levenshtein_query_t const query = *query_pointer;
-    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
-    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
+    sz_cptr_t const text = sz_sequence_tape_start_simt_(candidates->handle, candidate);
+    sz_size_t const length = sz_sequence_tape_length_simt_(candidates->handle, candidate);
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const live_lanes = sz_size_divide_round_up(words, words_per_lane);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
@@ -536,12 +536,12 @@ STRINGZILLA_DEVICE void sz_levenshtein_lanes_sweep_simt_(sz_levenshtein_engine_t
                 for (;;) {
                     sz_size_t const candidate = tile_first + atomicAdd(&taken, 1u);
                     if (candidate >= tile_end) break;
-                    sz_size_t const length = candidates.get_length(candidates.handle, candidate);
+                    sz_size_t const length = sz_sequence_tape_length_simt_(candidates.handle, candidate);
                     if (!length) {
                         row[candidate] = query.length;
                         continue;
                     }
-                    sz_cptr_t const text = candidates.get_start(candidates.handle, candidate);
+                    sz_cptr_t const text = sz_sequence_tape_start_simt_(candidates.handle, candidate);
                     sz_size_t const head = (sz_size_t)text & 7;
                     cursors[lane] = (sz_u64_t const *)(text - head), shifts[lane] = (sz_u32_t)(head * 8);
                     words[lane] = cursors[lane][0], lefts[lane] = length;
@@ -584,7 +584,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_lanes_sweep_simt_(sz_levenshtein_engine_t
                 if ((unread & ((sz_u32_t)1 << lane)) == 0 || lefts[lane] != slot + 1) continue;
                 sz_size_t const candidate = tile_first + held[lane];
                 row[candidate] = sz_levenshtein_lane_distance_simt_(
-                    positive, negative, lane * lane_bits, live, candidates.get_length(candidates.handle, candidate));
+                    positive, negative, lane * lane_bits, live,
+                    sz_sequence_tape_length_simt_(candidates.handle, candidate));
                 unread &= ~((sz_u32_t)1 << lane), refill |= (sz_u32_t)1 << lane;
             }
         }
@@ -638,8 +639,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(sz_levenshtein_engine_t 
     sz_levenshtein_u64x1_state_serial_t state;
     sz_levenshtein_u64x1_vertical_serial_t verticals[sz_levenshtein_thread_words_max_simt_k];
     sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
-    sz_cptr_t text = candidates.get_start(candidates.handle, candidate);
-    sz_size_t length = candidates.get_length(candidates.handle, candidate);
+    sz_cptr_t text = sz_sequence_tape_start_simt_(candidates.handle, candidate);
+    sz_size_t length = sz_sequence_tape_length_simt_(candidates.handle, candidate);
     sz_size_t position = 0;
     for (;;) {
         if (position < length) {
@@ -654,8 +655,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(sz_levenshtein_engine_t 
             query = sz_levenshtein_engine_row_(&engine, query_index);
             row = distances + query_index * distances_stride;
         }
-        text = candidates.get_start(candidates.handle, candidate);
-        length = candidates.get_length(candidates.handle, candidate);
+        text = sz_sequence_tape_start_simt_(candidates.handle, candidate);
+        length = sz_sequence_tape_length_simt_(candidates.handle, candidate);
         position = 0;
         sz_levenshtein_u64x1_init_serial(&state, verticals, words, &query);
     }
@@ -786,8 +787,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_candidate_utf8_simt_(sz_levenshtein_
                                                                  sz_size_t *row, sz_size_t words_per_lane) {
     unsigned const lane = threadIdx.x & 31u;
     sz_levenshtein_query_t const query = *query_pointer;
-    sz_cptr_t const text = candidates->get_start(candidates->handle, candidate);
-    sz_size_t const length = candidates->get_length(candidates->handle, candidate);
+    sz_cptr_t const text = sz_sequence_tape_start_simt_(candidates->handle, candidate);
+    sz_size_t const length = sz_sequence_tape_length_simt_(candidates->handle, candidate);
     sz_size_t const words = sz_levenshtein_query_words(query.length);
     sz_size_t const live_lanes = sz_size_divide_round_up(words, words_per_lane);
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;

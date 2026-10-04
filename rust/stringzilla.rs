@@ -89,13 +89,13 @@ extern "C" {
     pub(crate) fn sz_stream_free_metal(stream: sz_stream_t) -> sz_status_t;
 
     pub(crate) fn sz_allocator_init_unified_best(
-        allocator: *mut _SzMemoryAllocator,
+        allocator: *mut sz_allocator_t,
         capabilities: sz_capability_t,
     ) -> sz_status_t;
     pub(crate) fn sz_sequence_realloc_best(
         target: *mut _SzSequence,
         source: *const _SzSequence,
-        allocator: *mut _SzMemoryAllocator,
+        allocator: *mut sz_allocator_t,
         allocated_bytes: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
@@ -636,17 +636,20 @@ extern "C" {
 
 }
 
-/// Mirror of `sz_allocator_t`, carried by value inside every engine so a release cannot be handed
-/// the wrong allocator. The engines pass a null allocator and take the unified one of their
-/// capabilities; `UnifiedAllocator` fills one to hand its blocks out, and `Sequence` to free its
-/// tape.
+#[allow(non_camel_case_types)]
+pub(crate) type sz_allocate_t =
+    unsafe extern "C" fn(bytes: sz_size_t, handle: *mut c_void, stream: sz_stream_t) -> *mut c_void;
+#[allow(non_camel_case_types)]
+pub(crate) type sz_free_t =
+    unsafe extern "C" fn(pointer: *mut c_void, bytes: sz_size_t, handle: *mut c_void, stream: sz_stream_t);
+
+/// Mirror of `sz_allocator_t`; C selects the allocation policy and each block keeps its allocator.
+#[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub(crate) struct _SzMemoryAllocator {
-    pub(crate) allocate:
-        Option<unsafe extern "C" fn(bytes: usize, handle: *mut c_void, stream: sz_stream_t) -> *mut c_void>,
-    pub(crate) free:
-        Option<unsafe extern "C" fn(pointer: *mut c_void, bytes: usize, handle: *mut c_void, stream: sz_stream_t)>,
+pub(crate) struct sz_allocator_t {
+    pub(crate) allocate: Option<sz_allocate_t>,
+    pub(crate) free: Option<sz_free_t>,
     pub(crate) handle: *mut c_void,
 }
 

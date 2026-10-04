@@ -9,7 +9,7 @@
       "type": "cppdbg",
       "request": "launch",
       "preLaunchTask": "Build Test: Debug C++",
-      "program": "${workspaceFolder}/build_debug/stringzilla_cpu_test",
+      "program": "${workspaceFolder}/build_debug/stringzilla_test",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -32,7 +32,7 @@
         "MIMode": "lldb"
       },
       "windows": {
-        "program": "${workspaceFolder}\\build_debug\\stringzilla_cpu_test.exe",
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_test.exe",
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }
@@ -41,7 +41,7 @@
       "name": "Current C++ Benchmark",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/build_debug/stringzilla_cpu_bench",
+      "program": "${workspaceFolder}/build_debug/stringzilla_bench",
       "cwd": "${workspaceFolder}",
       "environment": [
         {
@@ -73,7 +73,7 @@
         "MIMode": "lldb"
       },
       "windows": {
-        "program": "${workspaceFolder}\\build_debug\\stringzilla_cpu_bench.exe",
+        "program": "${workspaceFolder}\\build_debug\\stringzilla_bench.exe",
         "MIMode": "gdb",
         "miDebuggerPath": "C:\\MinGw\\bin\\gdb.exe"
       }

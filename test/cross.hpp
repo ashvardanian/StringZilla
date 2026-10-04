@@ -1738,11 +1738,7 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
 
         for (strs_t const &dataset : datasets) {
             std::size_t const count = dataset.size();
-            sz_sequence_t sequence;
-            sequence.handle = &dataset;
-            sequence.count = count;
-            sequence.get_start = sequence_get_start_;
-            sequence.get_length = sequence_get_length_;
+            sz_sequence_t const sequence = sequence_from_(dataset);
 
             std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
             sz_size_t const top_modes[] = {0, 1, (sz_size_t)(count / 3), (sz_size_t)count};

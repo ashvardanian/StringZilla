@@ -236,16 +236,14 @@ void test_sequence_unit() {
         sz_sequence_t sequence;
         sequence.handle = &strings;
         sequence.count = strings.size();
-        sequence.get_start = reinterpret_cast<sz_sequence_member_start_t>(
-            +[](void *handle, sz_size_t index) noexcept -> sz_cptr_t {
-                auto const &strings = *static_cast<strings_vector_t *>(handle);
-                return strings[index].c_str();
-            });
-        sequence.get_length = reinterpret_cast<sz_sequence_member_length_t>(
-            +[](void *handle, sz_size_t index) noexcept -> sz_size_t {
-                auto const &strings = *static_cast<strings_vector_t *>(handle);
-                return strings[index].size();
-            });
+        sequence.get_start = [](void const *handle, sz_size_t index) -> sz_cptr_t {
+            auto const &strings = *static_cast<strings_vector_t const *>(handle);
+            return strings[index].data();
+        };
+        sequence.get_length = [](void const *handle, sz_size_t index) -> sz_size_t {
+            auto const &strings = *static_cast<strings_vector_t const *>(handle);
+            return strings[index].size();
+        };
 
         verify(sequence.count == 3);
         verify("banana"_sv == sequence.get_start(sequence.handle, 0));
@@ -267,12 +265,56 @@ void test_tape_assign_unit() {
     verify(sz::string_view_t(tape[2].data(), tape[2].size()) == "gamma"_sv);
     verify(tape.append(tape[0]) == sz::status_t::success_k);
     verify(sz::string_view_t(tape[3].data(), tape[3].size()) == "alpha"_sv);
+    verify(tape.assign(tape.begin(), tape.end()) == sz::status_t::success_k);
+    verify(tape.size() == 4 && sz::string_view_t(tape[3].data(), tape[3].size()) == "alpha"_sv);
+    auto const terminated_bytes = tape.buffer();
+    verify(terminated_bytes[tape[0].size()] == '\0');
+    auto moved = std::move(tape);
+    verify(tape.size() == 0 && moved.size() == 4);
+    verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
+    tape = std::move(moved);
+    auto &same = tape;
+    tape = std::move(same);
+    verify(tape.size() == 4);
     verify(tape.assign(strings.end(), strings.end()) == sz::status_t::success_k);
     verify(tape.view().size() == 0);
 
     std::uint32_t const offsets[] = {0, 5, 5};
     sz::packed_tape_view<char, std::uint32_t> const packed({"alpha", 5}, offsets);
     verify(packed[1].empty());
+
+    tape_t owned, independent;
+    verify(owned.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
+    verify(owned.size() == 3 && owned[1].empty());
+    std::array<sz_string_view_t, 3> views {{{"a\0b", 3}, {"", 0}, {"de", 2}}};
+    verify(owned.assign(views) == sz::status_t::success_k);
+    verify(owned.allocation_bytes() == 4 * sizeof(sz_u64_t) + 5);
+    verify(owned.view().tape_total_bytes() == 5);
+    verify(owned.assign(owned.sequence()) == sz::status_t::success_k);
+    verify(independent.assign(owned.sequence()) == sz::status_t::success_k);
+    owned.reset();
+    verify(independent.size() == 3 && independent[1].empty());
+    verify(sz::string_view_t(independent[0].data(), independent[0].size()) == "a\0b"_sv);
+    verify(independent.append(independent[0]) == sz::status_t::success_k);
+    verify(independent.size() == 4 && independent[3].size() == 3);
+    verify(independent.sequence().get_start == sz_sequence_tape_start);
+    auto const descriptor = independent.sequence();
+    owned = std::move(independent);
+    verify(independent.size() == 0 && owned.sequence().handle == descriptor.handle);
+    sz_sequence_t oversized = owned.sequence();
+    oversized.count = STRINGZILLA_SIZE_MAX;
+    verify(owned.assign(oversized) == sz::status_t::bad_alloc_k);
+    verify(owned.size() == 4);
+    verify(owned.assign(std::span<sz_string_view_t const> {}) == sz::status_t::success_k);
+    verify(owned.size() == 0);
+
+    sz::tape<char16_t, std::uint32_t, std::allocator<char16_t>> wide;
+    std::array<std::u16string_view, 2> const units {u"alpha", u""};
+    verify(wide.assign(units.begin(), units.end()) == sz::status_t::success_k);
+    verify(wide.append(wide[0]) == sz::status_t::success_k);
+    verify(std::u16string_view(wide[2].data(), wide[2].size()) == units[0]);
+    auto const terminated_units = wide.buffer();
+    verify(terminated_units[units[0].size()] == u'\0');
 }
 
 /** Validates that @c tape refuses to grow past the range of its offset type. */
@@ -301,8 +343,43 @@ void test_tape_overflow_unit() {
         verify(tape.append(std::span<char const>(stored_string)) == sz::status_t::success_k);
         std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
         verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
-        // A rejected assignment releases the old contents, so the tape must not keep reporting them.
-        verify(tape.size() == 0);
+        verify(tape.size() == 1 && tape[0].size() == stored_string.size());
+    }
+    {
+        struct allocation_state_t {
+            sz_allocator_t heap {};
+            std::size_t calls = 0, fail_at = 0, live_bytes = 0;
+        } state;
+        verify(sz_allocator_init_heap(&state.heap) == sz_success_k);
+        sz_allocator_t allocator {};
+        allocator.handle = &state;
+        allocator.allocate = [](sz_size_t bytes, void *handle, sz_stream_t stream) -> void * {
+            auto &state = *static_cast<allocation_state_t *>(handle);
+            if (++state.calls == state.fail_at) return nullptr;
+            void *block = state.heap.allocate(bytes, state.heap.handle, stream);
+            if (block) state.live_bytes += bytes;
+            return block;
+        };
+        allocator.free = [](void *block, sz_size_t bytes, void *handle, sz_stream_t stream) {
+            auto &state = *static_cast<allocation_state_t *>(handle);
+            verify(bytes <= state.live_bytes);
+            state.live_bytes -= bytes;
+            state.heap.free(block, bytes, state.heap.handle, stream);
+        };
+        using allocated_tape_t = sz::tape<char, std::uint32_t, sz::unified_alloc<char>>;
+        {
+            allocated_tape_t tape {sz::unified_alloc<char>(allocator)};
+            std::array<std::string_view, 1> const texts {"kept"};
+            verify(tape.assign(texts.begin(), texts.end()) == sz::status_t::success_k);
+            std::size_t const live_bytes = state.live_bytes;
+            for (std::size_t fail_after : {1u, 2u}) {
+                state.fail_at = state.calls + fail_after;
+                verify(tape.assign(texts.begin(), texts.end()) == sz::status_t::bad_alloc_k);
+                verify(tape.size() == 1 && sz::string_view_t(tape[0].data(), tape[0].size()) == "kept"_sv);
+                verify(state.live_bytes == live_bytes);
+            }
+        }
+        verify(state.live_bytes == 0);
     }
 }
 
@@ -316,36 +393,59 @@ void test_allocator_unit() {
     // while the standard is implementation-defined.
     {
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        verify(sz_allocator_init_heap(&allocator) == sz_success_k);
         verify(allocator.allocate(0, allocator.handle, nullptr) == nullptr);
     }
 
     // Non-NULL allocation
     {
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        verify(sz_allocator_init_heap(&allocator) == sz_success_k);
         void *byte = allocator.allocate(1, allocator.handle, nullptr);
         verify(byte != nullptr && "Default allocator returned NULL for a non-zero-length allocation");
         allocator.free(byte, 1, allocator.handle, nullptr);
     }
 
-    // Use a fixed buffer
     {
-        char buffer[1024];
+        alignas(sz_size_t) char buffer[1025];
         sz_allocator_t allocator;
-        sz_allocator_init_fixed(&allocator, buffer, sizeof(buffer));
+        verify(sz_allocator_init_arena(&allocator, buffer + 1, sizeof(buffer) - 1, 64) == sz_success_k);
+        verify(allocator.allocate(STRINGZILLA_SIZE_MAX, allocator.handle, nullptr) == nullptr);
         void *byte = allocator.allocate(1, allocator.handle, nullptr);
-        verify(byte != nullptr && "Fixed-buffer allocator returned NULL for an allocation that should fit");
+        verify(byte != nullptr && reinterpret_cast<sz_size_t>(byte) % 64 == 0);
+        void *next = allocator.allocate(1, allocator.handle, nullptr);
+        verify(next != nullptr && reinterpret_cast<sz_size_t>(next) % 64 == 0 && next != byte);
         allocator.free(byte, 1, allocator.handle, nullptr);
+        sz_allocator_t const original = allocator;
+        sz_arena_t_ const *metadata = static_cast<sz_arena_t_ const *>(allocator.handle);
+        sz_size_t const consumed = metadata->consumed;
+        verify(sz_allocator_init_arena(&allocator, buffer + 1, sizeof(buffer) - 1, 0) == sz_unexpected_dimensions_k);
+        verify(sz_allocator_init_arena(&allocator, buffer + 1, sizeof(buffer) - 1, 3) == sz_unexpected_dimensions_k);
+        verify(sz_allocator_init_arena(&allocator, buffer + 1, sizeof(sz_size_t), 64) == sz_bad_alloc_k);
+        verify(sz_allocator_init_arena(&allocator, nullptr, sizeof(buffer), 64) == sz_bad_alloc_k);
+        verify(sz_allocator_init_arena(&allocator, buffer, STRINGZILLA_SIZE_MAX, 64) == sz_overflow_risk_k);
+        verify(allocator.allocate == original.allocate && allocator.free == original.free &&
+               allocator.handle == original.handle);
+        verify(metadata->consumed == consumed);
+        verify(sz_allocator_init_arena(&allocator, buffer + 1, sizeof(buffer) - 1, 1) == sz_success_k);
+        verify(allocator.allocate(1, allocator.handle, nullptr) != nullptr);
     }
     {
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        verify(sz_allocator_init_heap(&allocator) == sz_success_k);
         sz_allocator_t const original = allocator;
         verify(sz_allocator_init_device_best(&allocator, sz_cap_serial_k) == sz_missing_kernel_k);
         verify(sz_allocator_init_pinned_best(&allocator, sz_cap_serial_k) == sz_missing_kernel_k);
         verify(allocator.allocate == original.allocate && allocator.free == original.free &&
                allocator.handle == original.handle);
+    }
+    {
+        sz::unified_alloc<char, sz_cap_serial_k> allocator;
+        char *empty = allocator.allocate(0);
+        verify(empty != nullptr);
+        allocator.deallocate(empty, 0);
+        sz::unified_alloc<sz_size_t, sz_cap_serial_k> words;
+        throws_verify(words.allocate(STRINGZILLA_SIZE_MAX), std::bad_alloc);
     }
 }
 

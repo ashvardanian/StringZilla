@@ -30,8 +30,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
- *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_FILTER=overlap build_release/stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
+ *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_FILTER=overlap build_release/stringzilla_bench
  *  @endcode
  */
 #include <string> // `std::string`
@@ -56,7 +56,7 @@ void bench_overlap(environment_t &env) {
     overlap_query_t const query(corpus, median_token_bytes(corpus));
     fmt::println("Starting window overlap benchmarks...");
     print(bench_unary(env, corpus, "sz_overlap_scores:w" + std::to_string(query.width),
-                      scores_from_sz<overlap_engine_init_cpu_, sz_overlap_scores> {corpus, query, candidates}));
+                      scores_from_sz {overlap_engine_init_cpu_, sz_overlap_scores, corpus, query, candidates}));
 }
 
 } // namespace ashvardanian::stringzilla::bench

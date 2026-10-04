@@ -2006,11 +2006,38 @@ check_type_suffixes() {
     concepts=$(printf '%s\n' "$staged_added_text" | grep -E '^\+[[:space:]]*concept[[:space:]]+[A-Za-z_]+_t\b' || true)
     [ -z "$concepts" ] || reject_with_reason "$concepts" \
         "$staged_path suffixes a concept with '_t' - a concept names a requirement, not a type, so it takes no suffix:"
-    templates=$(printf '%s\n' "$staged_added_text" | awk '
-        /^\+[[:space:]]*template[[:space:]]*</ { pending = 1; next }
-        pending && /^\+[[:space:]]*(struct|class)[[:space:]]+[A-Za-z_]+_t[[:space:]:{]/ { print; pending = 0; next }
-        pending && /^\+[[:space:]]*(typename|class |std::|requires|[A-Za-z_]+ [A-Za-z_]+_|>)/ { next }
-        { pending = 0 }')
+    templates=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        /^[[:space:]]*#/ { next }
+        {
+            code = $0
+            gsub(/"([^"\\]|\\.)*"/, "", code)
+            if (!pending && match(code, /(^|[^A-Za-z0-9_])template[[:space:]]*</)) {
+                code = substr(code, RSTART + RLENGTH - 1)
+                pending = 1; angles = 0; changed = 0; declaration = ""
+            }
+            if (!pending) next
+            if (angles || substr(code, 1, 1) == "<") {
+                changed = changed || (NR in added)
+                for (position = 1; position <= length(code); ++position) {
+                    character = substr(code, position, 1)
+                    if (character == "<") ++angles
+                    else if (character == ">" && --angles == 0) break
+                }
+                if (angles) next
+                code = substr(code, position + 1)
+            }
+            declaration = declaration " " code
+            changed = changed || (NR in added)
+            header = declaration
+            sub(/[;{].*$/, "", header)
+            if (header ~ /(^|[^A-Za-z0-9_])(struct|class)[[:space:]]+[A-Za-z_][A-Za-z0-9_:]*_t([[:space:]]|$|[<:])/) {
+                if (changed) printf "line %d: %s\n", NR, declaration
+                pending = 0
+            }
+            else if (declaration ~ /[;{}]/ || declaration ~ /^[[:space:]]*(using|typedef|inline|static|void|auto)[[:space:]]/) pending = 0
+        }' || true)
     [ -z "$templates" ] || reject_with_reason "$templates" \
         "$staged_path suffixes a class template with '_t' - the template stays bare and the alias that materializes it carries the suffix:"
 }
@@ -2080,6 +2107,25 @@ check_cmake_rpath_derived() {
         "            link the library by its full path and let CMake derive the RPATH:"
 }
 
+# An unnamed namespace hides ownership; even a nested helper belongs in the named project namespace.
+check_namespaces_named() {
+    local unnamed
+    unnamed=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        {
+            code = $0
+            gsub(/"([^"\\]|\\.)*"/, "", code)
+            if (((NR in added) && code ~ /(^|[^A-Za-z0-9_])namespace[[:space:]]*\{/) ||
+                (pending && code ~ /^[[:space:]]*\{/ && (changed || (NR in added))))
+                printf "line %d: %s\n", NR, $0
+            if (code ~ /(^|[^A-Za-z0-9_])namespace[[:space:]]*$/) { pending = 1; changed = (NR in added) }
+            else if (code !~ /^[[:space:]]*$/) pending = 0
+        }' || true)
+    [ -z "$unnamed" ] || reject_with_reason "$unnamed" \
+        "$staged_path opens an unnamed namespace; put the declarations in the named project namespace:"
+}
+
 # Rejects a test/ or bench/ header opening any file-scope namespace but the one its directory names, because
 # `bench/*.hpp` opens `<project_namespace>::bench` and nothing else. A `.h` counts once it holds C++, and an
 # enclosing project namespace or `std` may reopen to specialize a template that lives there.
@@ -2113,7 +2159,7 @@ check_harness_namespace_matches_directory() {
                 sub(/[[:space:]]*\{$/, "", name)
                 ++opened
                 is_specialization_home = (name == "std" || index(expected, name "::") == 1)
-                if (name != expected && !is_specialization_home) printf "line %d: namespace %s\n", NR, (name == "" ? "<anonymous>" : name)
+                if (name != "" && name != expected && !is_specialization_home) printf "line %d: namespace %s\n", NR, (name == "" ? "<anonymous>" : name)
             }
             depth += gsub(/\{/, "{", code) - gsub(/\}/, "}", code)
         }
@@ -2566,6 +2612,7 @@ run_shared_checks() {
         check_void_discards
         check_thread_local
         check_type_suffixes
+        check_namespaces_named
         check_header_date
         check_retval
         check_deprecations
@@ -2829,13 +2876,19 @@ check_launches_report_status() {
 check_vendor_tested_only_in_kernels() {
     local tests
     tests=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
-        grep -nE '__CUDACC__|__HIP__|__HIP_DEVICE_COMPILE__' |
-        added_list="$staged_added_line_numbers_list" guarded="${staged_path##*/}" awk -F: '
+        grep -nE '__CUDACC__|__HIPCC__|__HIP__|__HIP_DEVICE_COMPILE__' |
+        added_list="$staged_added_line_numbers_list" guarded="$staged_path" awk -F: '
             BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-            !guard_seen && ENVIRON["guarded"] ~ /^(cuda|rocm)\.cuh$/ && $2 ~ /^#if / { guard_seen = 1; next }
+            !guard_seen && ENVIRON["guarded"] ~ /^include\/stringzilla\/(.*\/)?(cuda|rocm)\.cuh$/ && $2 ~ /^#if / { guard_seen = 1; next }
             ($1 + 0) in added' || true)
-    [ -z "$tests" ] || reject_with_reason "$tests" \
-        "$staged_path tests the GPU compiler in host code; put the body in the vendor's cuda.cuh or rocm.cuh:"
+    if [ -n "$tests" ]; then
+        case "$staged_path" in
+        test/* | bench/*)
+            reject_with_reason "$tests" "$staged_path tests the GPU compiler in harness code; use STRINGZILLA_ARCH_CUDA_ or STRINGZILLA_ARCH_ROCM_:"
+            ;;
+        *) reject_with_reason "$tests" "$staged_path tests the GPU compiler in host code; put the body in the vendor's cuda.cuh or rocm.cuh:" ;;
+        esac
+    fi
 }
 
 # Rejects an export macro on a binding definition, because the binding declares its helpers plain `extern`
@@ -3039,7 +3092,9 @@ run_project_checks() {
     case "$staged_path" in
     include/stringzilla/types.h | include/stringzilla/types.cuh | include/stringzilla/*/simt.cuh) ;;
     include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/cuda.cuh | include/stringzilla/rocm.cuh | \
-        include/stringzilla/*/cuda.cuh | include/stringzilla/*/rocm.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip)
+        include/stringzilla/*/cuda.cuh | include/stringzilla/*/rocm.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip | \
+        test/*.h | test/*.hpp | test/*.cpp | test/*.cu | test/*.cuh | test/*.hip | \
+        bench/*.h | bench/*.hpp | bench/*.cpp | bench/*.cu | bench/*.cuh | bench/*.hip)
         check_vendor_tested_only_in_kernels
         ;;
     esac

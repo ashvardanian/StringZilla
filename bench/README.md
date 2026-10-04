@@ -5,7 +5,7 @@ This is the internal, cross-backend counterpart to [StringWars](https://github.c
 
 ## CPU
 
-`stringzilla_cpu_bench` is one executable over every family and every capability, linking the static library.
+`stringzilla_bench` is one executable over every family and every capability, linking the static library.
 The family files time the dispatch points against the standard baselines, like `sz_find_best` against `strstr` and `std::boyer_moore_searcher`:
 
 - `find.cpp` — bidirectional substring, byte, and byteset search.
@@ -39,12 +39,15 @@ It has no dispatch points to time, but it reaches the private helpers only the t
 
 ## GPU
 
-Each device gets its own executable, timing the engines' device-resident rounds against the widest CPU tier the build carries:
+The same `stringzilla_bench` runs CPU rows once, then each selected device's resident rounds against the CPU baseline:
 
 - `cross_simt.cuh` — the edit-distance, window-overlap, and multi-pattern search rows CUDA and ROCm share.
-- `cross_cuda.cu` and `cross_rocm.hip` — `stringzilla_cuda_bench` and `stringzilla_rocm_bench` over those rows.
-- `cross_metal.cpp` — `stringzilla_metal_bench`, window-overlap scoring on Apple GPUs.
+- `cross_cuda.cu` and `cross_rocm.hip` — vendor entry points over those shared rows.
+- `cross_metal.cpp` — Metal engine rows on Apple GPUs.
 - `substrings.cuh` — the vocabulary, corpus, and arms the CPU and GPU multi-pattern benchmarks share.
+
+`STRINGWARS_DEVICES=cuda:0,rocm:1` selects vendor-qualified ordinals in the same build.
+Unset, the runner visits device zero of each available compiled vendor; an explicit unavailable device is an error.
 
 ## Other Bindings
 
@@ -58,6 +61,6 @@ The environment variables are listed with their defaults in the header of `harne
 
 ```sh
 cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
-cmake --build build_release --config Release --target stringzilla_cpu_bench
-STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_FILTER='find' build_release/stringzilla_cpu_bench
+cmake --build build_release --config Release --target stringzilla_bench
+STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_FILTER='find' build_release/stringzilla_bench
 ```

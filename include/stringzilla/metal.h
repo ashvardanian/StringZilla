@@ -30,7 +30,8 @@
 #define STRINGZILLA_METAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/serial.h" // `sz_move_serial_`
+#include "stringzilla/memory/serial.h"  // `sz_move_serial_`
+#include "stringzilla/compare/serial.h" // `sz_equal_serial_`
 
 #if STRINGZILLA_WITH_METAL
 #include <TargetConditionals.h> // `TARGET_OS_OSX`
@@ -114,19 +115,19 @@ STRINGZILLA_INLINE void *sz_metal_device_(sz_size_t ordinal) {
 
 /** The MSL prelude every family library is compiled behind, ahead of the family's own source. */
 static char const sz_metal_prelude_source_[] = {
-#embed "types.metal"
+#embed "stringzilla/types.metal"
     , 0};
 #pragma clang diagnostic pop
 
-/** One compiled kernel, keyed by its function name. */
 typedef struct {
     char const *name;
-    void *pipeline;
+    void *library, *pipeline;
 } sz_metal_pipeline_t;
 
-/** Pipelines one device keeps: one per kernel of every family, and one per
- *  rung Levenshtein reaches. */
-enum { sz_metal_pipelines_max_k = 128 };
+typedef struct {
+    char const *source;
+    void *library;
+} sz_metal_library_t;
 
 /** Devices the library keeps state for, more than any Mac carries. */
 enum { sz_metal_contexts_max_k = 8 };
@@ -143,8 +144,6 @@ typedef struct sz_metal_block_t {
     /** Bytes the allocation asked for. */
     sz_size_t bytes;
 
-    /** The queue whose committed work its free waits for, or null while it is live. */
-    void *freed_behind;
 } sz_metal_block_t;
 
 /** One stream with committed work. */
@@ -153,11 +152,11 @@ typedef struct sz_metal_pending_t {
     /** The @c id<MTLCommandQueue>, retained while pending. */
     sz_stream_t queue;
 
-    /** Command buffers committed since a synchronization last took them, in order. */
+    /** Committed command buffers not yet removed after completion, in order. */
     void **commands;
     sz_size_t commands_count, commands_capacity;
 
-    /** Synchronizations still waiting on command buffers they took, which keep frees deferred. */
+    /** Synchronizations still waiting on their retained command snapshot. */
     sz_size_t waiters;
 } sz_metal_pending_t;
 
@@ -173,7 +172,7 @@ typedef struct sz_metal_context_t {
     /** Guards every member below. */
     os_unfair_lock lock;
 
-    /** Every live or deferred block, sorted by host address. */
+    /** Every live block, sorted by host address. */
     sz_metal_block_t *blocks;
     sz_size_t blocks_count, blocks_capacity;
 
@@ -182,12 +181,12 @@ typedef struct sz_metal_context_t {
     sz_size_t pending_count, pending_capacity;
 
     /** The @c id<MTLLibrary> per family source, keyed by the source text. */
-    void *libraries[8];
-    char const *library_sources[8];
+    sz_metal_library_t *libraries;
+    sz_size_t libraries_count, libraries_capacity;
 
     /** Every pipeline built so far. */
-    sz_metal_pipeline_t pipelines[sz_metal_pipelines_max_k];
-    sz_size_t pipelines_count;
+    sz_metal_pipeline_t *pipelines;
+    sz_size_t pipelines_count, pipelines_capacity;
 } sz_metal_context_t;
 
 /** Where a host pointer lies for a kernel: the buffer holding it and its offset there. */
@@ -205,19 +204,23 @@ typedef struct sz_metal_call_t {
     /** The @c id<MTLCommandQueue> the call encodes into. */
     sz_stream_t queue;
 
-    /** The command buffer and compute encoder, both null until the first dispatch opens them. */
+    /** The retained command buffer and compute encoder. */
     void *commands, *encoder;
 } sz_metal_call_t;
 
 /** Every device's context, the live ones first, each kept for the process once built, and the lock
  *  in @p contexts_lock that guards which of them are live. */
-STRINGZILLA_INLINE sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock) {
+STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock);
+
+#if STRINGZILLA_HEADER_ONLY
+STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock) {
     // Zero is `OS_UNFAIR_LOCK_INIT`, so the static storage starts unlocked.
     static sz_metal_context_t contexts[sz_metal_contexts_max_k];
     static os_unfair_lock lock;
     *contexts_lock = &lock;
     return contexts;
 }
+#endif
 
 /**
  *  @brief The library's state for the device of @p stream, or of the system default device for a
@@ -256,14 +259,24 @@ STRINGZILLA_INLINE sz_stream_t sz_metal_queue_(sz_metal_context_t const *context
 }
 
 /**
- *  @brief Opens one call on @p stream 's device, its encoder left for the first dispatch to open.
+ *  @brief Opens one call and compute encoder on @p stream 's device.
  *  @return @c sz_success_k, or @c sz_missing_gpu_k without a device.
  */
 STRINGZILLA_INLINE sz_status_t sz_device_enter_metal_(sz_stream_t stream, sz_metal_call_t *call) {
+    call->queue = STRINGZILLA_NULL, call->commands = STRINGZILLA_NULL, call->encoder = STRINGZILLA_NULL;
     call->context = sz_metal_context_(stream);
     if (!call->context) return sz_missing_gpu_k;
-    call->queue = sz_metal_queue_(call->context, stream);
-    call->commands = STRINGZILLA_NULL, call->encoder = STRINGZILLA_NULL;
+    call->queue = sz_metal_get_(stream ? stream : call->context->queue, "retain");
+    void *const pool = objc_autoreleasePoolPush();
+    call->commands = sz_metal_get_(sz_metal_get_(call->queue, "commandBuffer"), "retain");
+    if (call->commands) call->encoder = sz_metal_get_(sz_metal_get_(call->commands, "computeCommandEncoder"), "retain");
+    objc_autoreleasePoolPop(pool);
+    if (!call->encoder) {
+        if (call->commands) sz_metal_do_(call->commands, "release");
+        sz_metal_do_(call->queue, "release");
+        call->queue = STRINGZILLA_NULL, call->commands = STRINGZILLA_NULL;
+        return sz_device_code_mismatch_k;
+    }
     return sz_success_k;
 }
 
@@ -273,7 +286,7 @@ STRINGZILLA_INLINE sz_size_t sz_metal_blocks_upto_(sz_metal_context_t const *con
     sz_size_t low = 0, high = context->blocks_count;
     while (low < high) {
         sz_size_t const middle = low + (high - low) / 2;
-        if (context->blocks[middle].host <= address) low = middle + 1;
+        if ((sz_size_t)context->blocks[middle].host <= (sz_size_t)address) low = middle + 1;
         else high = middle;
     }
     return low;
@@ -291,9 +304,37 @@ STRINGZILLA_INLINE sz_bool_t sz_metal_resolve_(sz_metal_context_t *context, void
     sz_size_t const upto = sz_metal_blocks_upto_(context, address);
     if (upto) {
         sz_metal_block_t const *const block = context->blocks + upto - 1;
-        sz_size_t const offset = (sz_size_t)(address - block->host);
-        if (offset < block->bytes && bytes <= block->bytes - offset)
+        sz_size_t const offset = (sz_size_t)address - (sz_size_t)block->host;
+        if (offset <= block->bytes && bytes <= block->bytes - offset)
             bound->buffer = block->buffer, bound->offset = offset, found = sz_true_k;
+    }
+    os_unfair_lock_unlock(&context->lock);
+    return found;
+}
+
+STRINGZILLA_INLINE void *sz_metal_reserve_(void *items, sz_size_t count, sz_size_t *capacity, sz_size_t size) {
+    if (count < *capacity) return items;
+    if (*capacity > ((sz_size_t)-1) / 2) return STRINGZILLA_NULL;
+    sz_size_t const grown_capacity = *capacity ? *capacity * 2 : 16;
+    if (!size || grown_capacity > ((sz_size_t)-1) / size) return STRINGZILLA_NULL;
+    void *const grown = realloc(items, grown_capacity * size);
+    if (grown) *capacity = grown_capacity;
+    return grown;
+}
+
+STRINGZILLA_INLINE sz_bool_t sz_metal_resolve_call_(sz_metal_call_t *call, void const *pointer, sz_size_t bytes,
+                                                    sz_metal_bound_t *bound) {
+    sz_metal_context_t *const context = call->context;
+    sz_bool_t found = sz_false_k;
+    os_unfair_lock_lock(&context->lock);
+    sz_size_t const upto = sz_metal_blocks_upto_(context, (char const *)pointer);
+    sz_metal_block_t const *const block = upto ? context->blocks + upto - 1 : STRINGZILLA_NULL;
+    sz_size_t const offset = block ? (sz_size_t)pointer - (sz_size_t)block->host : 0;
+    if (block && offset <= block->bytes && bytes <= block->bytes - offset) {
+        // The command buffer retains the resource before the registry lock is released.
+        ((void (*)(void *, SEL, void *, sz_size_t))objc_msgSend)(call->encoder, sel_registerName("useResource:usage:"),
+                                                                 block->buffer, 3);
+        bound->buffer = block->buffer, bound->offset = offset, found = sz_true_k;
     }
     os_unfair_lock_unlock(&context->lock);
     return found;
@@ -311,28 +352,23 @@ STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_find_(sz_metal_context_t
 STRINGZILLA_INLINE sz_metal_pending_t *sz_metal_pending_reserve_(sz_metal_context_t *context, sz_stream_t queue) {
     sz_metal_pending_t *pending = sz_metal_pending_find_(context, queue);
     if (!pending) {
-        if (context->pending_count == context->pending_capacity) {
-            sz_size_t const capacity = context->pending_capacity ? context->pending_capacity * 2 : 8;
-            sz_metal_pending_t *const grown = (sz_metal_pending_t *)realloc(context->pending,
-                                                                            capacity * sizeof(sz_metal_pending_t));
-            if (!grown) return STRINGZILLA_NULL;
-            context->pending = grown, context->pending_capacity = capacity;
-        }
+        sz_metal_pending_t *const grown = (sz_metal_pending_t *)sz_metal_reserve_(
+            context->pending, context->pending_count, &context->pending_capacity, sizeof(sz_metal_pending_t));
+        if (!grown) return STRINGZILLA_NULL;
+        context->pending = grown;
         pending = context->pending + context->pending_count++;
         pending->queue = sz_metal_get_(queue, "retain");
         pending->commands = STRINGZILLA_NULL, pending->commands_count = 0, pending->commands_capacity = 0;
         pending->waiters = 0;
     }
-    if (pending->commands_count == pending->commands_capacity) {
-        sz_size_t const capacity = pending->commands_capacity ? pending->commands_capacity * 2 : 16;
-        void **const grown = (void **)realloc(pending->commands, capacity * sizeof(void *));
-        if (!grown) return STRINGZILLA_NULL;
-        pending->commands = grown, pending->commands_capacity = capacity;
-    }
+    void **const grown = (void **)sz_metal_reserve_(pending->commands, pending->commands_count,
+                                                    &pending->commands_capacity, sizeof(void *));
+    if (!grown) return STRINGZILLA_NULL;
+    pending->commands = grown;
     return pending;
 }
 
-STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void *handle, sz_stream_t stream) {
+STRINGZILLA_INLINE void *sz_allocate_unified_metal_(sz_size_t bytes, void *handle, sz_stream_t stream) {
     sz_metal_context_t *const context = sz_metal_context_(stream);
     sz_unused_(handle);
     if (!context) return STRINGZILLA_NULL;
@@ -346,19 +382,16 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void
 
     sz_bool_t registered = sz_true_k;
     os_unfair_lock_lock(&context->lock);
-    if (context->blocks_count == context->blocks_capacity) {
-        sz_size_t const capacity = context->blocks_capacity ? context->blocks_capacity * 2 : 64;
-        sz_metal_block_t *const grown = (sz_metal_block_t *)realloc(context->blocks,
-                                                                    capacity * sizeof(sz_metal_block_t));
-        if (grown) context->blocks = grown, context->blocks_capacity = capacity;
-        else registered = sz_false_k;
-    }
+    sz_metal_block_t *const grown = (sz_metal_block_t *)sz_metal_reserve_(
+        context->blocks, context->blocks_count, &context->blocks_capacity, sizeof(sz_metal_block_t));
+    if (grown) context->blocks = grown;
+    else registered = sz_false_k;
     if (registered) {
         sz_size_t const position = sz_metal_blocks_upto_(context, host);
         sz_move_serial_((char *)(context->blocks + position + 1), (char const *)(context->blocks + position),
                         (context->blocks_count - position) * sizeof(sz_metal_block_t));
         sz_metal_block_t *const block = context->blocks + position;
-        block->buffer = buffer, block->host = host, block->bytes = bytes, block->freed_behind = STRINGZILLA_NULL;
+        block->buffer = buffer, block->host = host, block->bytes = bytes;
         ++context->blocks_count;
     }
     os_unfair_lock_unlock(&context->lock);
@@ -367,40 +400,33 @@ STRINGZILLA_INLINE void *sz_memory_allocate_unified_metal_(sz_size_t bytes, void
 }
 
 /**
- *  @brief Frees the block starting at @p pointer if @p context holds it, deferred behind the queue
- *      @p stream names there while that queue has committed work.
+ *  @brief Unregisters and releases the block starting at @p pointer if @p context holds it.
  *  @return Whether @p context holds it.
  */
-STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void *pointer, sz_stream_t stream) {
-    sz_stream_t const queue = sz_metal_queue_(context, stream);
+STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void *pointer) {
     void *released = STRINGZILLA_NULL;
     os_unfair_lock_lock(&context->lock);
     sz_size_t const upto = sz_metal_blocks_upto_(context, (char const *)pointer);
     sz_metal_block_t *const block = upto ? context->blocks + upto - 1 : STRINGZILLA_NULL;
     sz_bool_t const held = block && block->host == pointer ? sz_true_k : sz_false_k;
     if (held) {
-        if (sz_metal_pending_find_(context, queue)) block->freed_behind = queue;
-        else {
-            released = block->buffer;
-            sz_move_serial_((char *)block, (char const *)(block + 1),
-                            (context->blocks_count - upto) * sizeof(sz_metal_block_t));
-            --context->blocks_count;
-        }
+        released = block->buffer;
+        sz_move_serial_((char *)block, (char const *)(block + 1),
+                        (context->blocks_count - upto) * sizeof(sz_metal_block_t));
+        --context->blocks_count;
     }
     os_unfair_lock_unlock(&context->lock);
     if (released) sz_metal_do_(released, "release");
     return held;
 }
 
-STRINGZILLA_INLINE void sz_memory_free_unified_metal_(void *pointer, sz_size_t bytes, void *handle,
-                                                      sz_stream_t stream) {
+STRINGZILLA_INLINE void sz_free_unified_metal_(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream) {
     sz_unused_(bytes && handle);
     if (!pointer) return;
     sz_metal_context_t *const context = sz_metal_context_(stream);
-    if (context && sz_metal_free_in_(context, pointer, stream)) return;
+    if (context && sz_metal_free_in_(context, pointer)) return;
 
-    // A null stream names the default device, which the block may not live on, so every other live
-    // device is searched, a null stream then deferring behind that device's own default queue.
+    // A null stream may name a different device from the allocation.
     os_unfair_lock_t contexts_lock;
     sz_metal_context_t *const contexts = sz_metal_contexts_(&contexts_lock);
     sz_size_t live = 0;
@@ -408,12 +434,12 @@ STRINGZILLA_INLINE void sz_memory_free_unified_metal_(void *pointer, sz_size_t b
     while (live != sz_metal_contexts_max_k && contexts[live].device) ++live;
     os_unfair_lock_unlock(contexts_lock);
     for (sz_size_t index = 0; index != live; ++index)
-        if (contexts + index != context && sz_metal_free_in_(contexts + index, pointer, stream)) return;
+        if (contexts + index != context && sz_metal_free_in_(contexts + index, pointer)) return;
 }
 
 STRINGZILLA_INLINE sz_status_t sz_allocator_init_unified_metal_(sz_allocator_t *allocator) {
-    allocator->allocate = sz_memory_allocate_unified_metal_;
-    allocator->free = sz_memory_free_unified_metal_;
+    allocator->allocate = sz_allocate_unified_metal_;
+    allocator->free = sz_free_unified_metal_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
 }
@@ -424,15 +450,21 @@ STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_metal_(sz_sequence_t *target,
     sz_metal_context_t *const context = sz_metal_context_(stream);
     if (!context) return sz_missing_gpu_k;
     sz_metal_bound_t bound;
-    if (source->get_start != sz_sequence_tape_start)
-        return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
-    sz_u64_t const *const offsets = (sz_u64_t const *)source->handle;
-    sz_size_t const bytes = (sz_size_t)offsets[source->count];
-    if (!sz_metal_resolve_(context, source->handle, bytes, &bound))
-        return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
-    *target = *source;
-    *allocated_bytes = 0;
-    return sz_success_k;
+    sz_sequence_t next = *source;
+    sz_u64_t const *const source_offsets = (sz_u64_t const *)source->handle;
+    sz_size_t bytes = 0;
+    sz_status_t status = sz_success_k;
+    if (source->get_start != sz_sequence_tape_start || source->get_length != sz_sequence_tape_length ||
+        !sz_metal_resolve_(context, source->handle, (sz_size_t)source_offsets[source->count], &bound))
+        status = sz_sequence_realloc_serial_(&next, source, allocator, &bytes, stream);
+    sz_u64_t const *const next_offsets = (sz_u64_t const *)next.handle;
+    if (status == sz_success_k &&
+        !sz_metal_resolve_(context, next.handle, (sz_size_t)next_offsets[next.count], &bound)) {
+        if (bytes) allocator->free((void *)next.handle, bytes, allocator->handle, stream);
+        status = sz_device_memory_mismatch_k;
+    }
+    if (status == sz_success_k) *target = next, *allocated_bytes = bytes;
+    return status;
 }
 
 STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) {
@@ -444,83 +476,116 @@ STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) 
     os_unfair_lock_lock(&context->lock);
     sz_metal_pending_t *pending = sz_metal_pending_find_(context, queue);
     if (pending) {
-        commands = pending->commands, commands_count = pending->commands_count;
-        pending->commands = STRINGZILLA_NULL, pending->commands_count = 0, pending->commands_capacity = 0;
+        commands_count = pending->commands_count;
+        if (commands_count) commands = (void **)malloc(commands_count * sizeof(void *));
+        if (commands_count && !commands) {
+            os_unfair_lock_unlock(&context->lock);
+            return sz_bad_alloc_k;
+        }
+        for (sz_size_t index = 0; index != commands_count; ++index)
+            commands[index] = sz_metal_get_(pending->commands[index], "retain");
         ++pending->waiters;
     }
     os_unfair_lock_unlock(&context->lock);
     if (!pending) return sz_success_k;
 
     sz_status_t status = sz_success_k;
-    sz_size_t const completed = 4; // `MTLCommandBufferStatusCompleted`
     for (sz_size_t index = 0; index != commands_count; ++index) {
         sz_metal_do_(commands[index], "waitUntilCompleted");
-        if (sz_metal_count_(commands[index], "status") != completed) status = sz_device_code_mismatch_k;
+        if (sz_metal_count_(commands[index], "status") != 4) status = sz_device_code_mismatch_k;
         sz_metal_do_(commands[index], "release");
     }
     free(commands);
 
-    // The entry may have moved while the lock was released, and it drains only once no other
-    // synchronization waits and nothing new was committed.
     void *drained = STRINGZILLA_NULL;
     os_unfair_lock_lock(&context->lock);
     pending = sz_metal_pending_find_(context, queue);
+    sz_size_t completed = 0;
+    while (completed != pending->commands_count && sz_metal_count_(pending->commands[completed], "status") >= 4)
+        sz_metal_do_(pending->commands[completed++], "release");
+    if (completed) {
+        pending->commands_count -= completed;
+        sz_move_serial_((char *)pending->commands, (char const *)(pending->commands + completed),
+                        pending->commands_count * sizeof(void *));
+    }
     if (--pending->waiters == 0 && pending->commands_count == 0) {
         drained = pending->queue;
         free(pending->commands);
         *pending = context->pending[--context->pending_count];
-        sz_size_t kept = 0;
-        for (sz_size_t index = 0; index != context->blocks_count; ++index) {
-            if (context->blocks[index].freed_behind == queue) sz_metal_do_(context->blocks[index].buffer, "release");
-            else context->blocks[kept++] = context->blocks[index];
-        }
-        context->blocks_count = kept;
     }
     os_unfair_lock_unlock(&context->lock);
+
     if (drained) sz_metal_do_(drained, "release");
     return status;
-}
-
-/** Whether two NUL-terminated names match; each translation unit embeds its own source copy. */
-STRINGZILLA_INLINE sz_bool_t sz_metal_same_text_(char const *first, char const *second) {
-    while (*first && *first == *second) ++first, ++second;
-    return *first == *second ? sz_true_k : sz_false_k;
 }
 
 /** Kernel @p name's pipeline from the library built out of @p source, built on first use under the
  *  lock. @return The pipeline, or null when it fails to build. */
 STRINGZILLA_INLINE void *sz_metal_pipeline_(sz_metal_context_t *context, char const *source, char const *name) {
+    sz_size_t const language_version = (3u << 16) | 2u;
     void *pipeline = STRINGZILLA_NULL;
     os_unfair_lock_lock(&context->lock);
-    for (sz_size_t index = 0; index != context->pipelines_count && !pipeline; ++index)
-        if (sz_metal_same_text_(context->pipelines[index].name, name)) pipeline = context->pipelines[index].pipeline;
-    sz_size_t const slots = sizeof(context->libraries) / sizeof(context->libraries[0]);
+    sz_size_t source_length = 0, name_length = 0;
+    while (source[source_length]) ++source_length;
+    while (name[name_length]) ++name_length;
     sz_size_t slot = 0;
-    while (!pipeline && slot != slots && context->library_sources[slot] &&
-           !sz_metal_same_text_(context->library_sources[slot], source))
-        ++slot;
-    if (pipeline || slot == slots || context->pipelines_count == sz_metal_pipelines_max_k) {
+    for (; slot != context->libraries_count; ++slot) {
+        char const *const cached_source = context->libraries[slot].source;
+        if (cached_source == source) break;
+        sz_size_t cached_length = 0;
+        while (cached_source[cached_length]) ++cached_length;
+        if (cached_length == source_length && sz_equal_serial_(cached_source, source, source_length)) break;
+    }
+    void *const cached_library = slot < context->libraries_count ? context->libraries[slot].library : STRINGZILLA_NULL;
+    for (sz_size_t index = 0; index != context->pipelines_count; ++index) {
+        sz_metal_pipeline_t const *const entry = context->pipelines + index;
+        if (entry->library != cached_library) continue;
+        sz_size_t cached_length = 0;
+        while (entry->name[cached_length]) ++cached_length;
+        if (cached_length == name_length && sz_equal_serial_(entry->name, name, name_length)) {
+            pipeline = entry->pipeline;
+            break;
+        }
+    }
+    if (pipeline) {
         os_unfair_lock_unlock(&context->lock);
         return pipeline;
     }
-
-    void *const pool = objc_autoreleasePoolPush();
-    if (!context->libraries[slot]) {
-        void *const options = sz_metal_get_(sz_metal_get_((void *)objc_getClass("MTLCompileOptions"), "alloc"), "init");
-        sz_size_t const metal_3_2 = (3u << 16) | 2u; // `MTLLanguageVersion3_2`
-        ((void (*)(void *, SEL, sz_size_t))objc_msgSend)(options, sel_registerName("setLanguageVersion:"), metal_3_2);
-        void *const text = ((void *(*)(void *, SEL, void *))objc_msgSend)(sz_metal_string_(sz_metal_prelude_source_),
-                                                                          sel_registerName("stringByAppendingString:"),
-                                                                          sz_metal_string_(source));
-        void *error = STRINGZILLA_NULL;
-        context->libraries[slot] = ((void *(*)(void *, SEL, void *, void *, void **))objc_msgSend)(
-            context->device, sel_registerName("newLibraryWithSource:options:error:"), text, options, &error);
-        sz_metal_do_(options, "release");
-        if (context->libraries[slot]) context->library_sources[slot] = source;
+    sz_metal_pipeline_t *const pipelines = (sz_metal_pipeline_t *)sz_metal_reserve_(
+        context->pipelines, context->pipelines_count, &context->pipelines_capacity, sizeof(sz_metal_pipeline_t));
+    if (!pipelines) {
+        os_unfair_lock_unlock(&context->lock);
+        return STRINGZILLA_NULL;
     }
-    if (context->libraries[slot]) {
+    context->pipelines = pipelines;
+    void *const pool = objc_autoreleasePoolPush();
+    if (slot == context->libraries_count) {
+        sz_metal_library_t *const libraries = (sz_metal_library_t *)sz_metal_reserve_(
+            context->libraries, context->libraries_count, &context->libraries_capacity, sizeof(sz_metal_library_t));
+        if (libraries) {
+            context->libraries = libraries;
+            void *const options = sz_metal_get_(sz_metal_get_((void *)objc_getClass("MTLCompileOptions"), "alloc"),
+                                                "init");
+            ((void (*)(void *, SEL, sz_size_t))objc_msgSend)(options, sel_registerName("setLanguageVersion:"),
+                                                             language_version);
+            void *error = STRINGZILLA_NULL;
+            void *const library = ((void *(*)(void *, SEL, void *, void *, void **))objc_msgSend)(
+                context->device, sel_registerName("newLibraryWithSource:options:error:"),
+                ((void *(*)(void *, SEL, void *))objc_msgSend)(sz_metal_string_(sz_metal_prelude_source_),
+                                                               sel_registerName("stringByAppendingString:"),
+                                                               sz_metal_string_(source)),
+                options, &error);
+            sz_metal_do_(options, "release");
+            if (library) {
+                libraries[slot].source = source;
+                libraries[slot].library = library;
+                ++context->libraries_count;
+            }
+        }
+    }
+    if (slot < context->libraries_count) {
         void *const function = ((void *(*)(void *, SEL, void *))objc_msgSend)(
-            context->libraries[slot], sel_registerName("newFunctionWithName:"), sz_metal_string_(name));
+            context->libraries[slot].library, sel_registerName("newFunctionWithName:"), sz_metal_string_(name));
         void *error = STRINGZILLA_NULL;
         if (function) {
             pipeline = ((void *(*)(void *, SEL, void *, void **))objc_msgSend)(
@@ -530,23 +595,11 @@ STRINGZILLA_INLINE void *sz_metal_pipeline_(sz_metal_context_t *context, char co
     }
     objc_autoreleasePoolPop(pool);
     if (pipeline) {
-        context->pipelines[context->pipelines_count].name = name;
-        context->pipelines[context->pipelines_count].pipeline = pipeline;
-        ++context->pipelines_count;
+        sz_metal_pipeline_t *const entry = context->pipelines + context->pipelines_count++;
+        entry->name = name, entry->library = context->libraries[slot].library, entry->pipeline = pipeline;
     }
     os_unfair_lock_unlock(&context->lock);
     return pipeline;
-}
-
-/** The compute encoder of @p call, opening its command buffer on first use; null when it cannot. */
-STRINGZILLA_INLINE void *sz_metal_encoder_(sz_metal_call_t *call) {
-    if (call->encoder) return call->encoder;
-    void *const pool = objc_autoreleasePoolPush();
-    call->commands = sz_metal_get_(sz_metal_get_(call->queue, "commandBuffer"), "retain");
-    if (call->commands) call->encoder = sz_metal_get_(sz_metal_get_(call->commands, "computeCommandEncoder"), "retain");
-    objc_autoreleasePoolPop(pool);
-    if (call->commands && !call->encoder) sz_metal_do_(call->commands, "release"), call->commands = STRINGZILLA_NULL;
-    return call->encoder;
 }
 
 /** Gives each threadgroup @p encoder dispatches next @p bytes of threadgroup memory at @p index. */
@@ -586,7 +639,7 @@ STRINGZILLA_INLINE sz_status_t sz_metal_encode_(sz_metal_call_t *call, char cons
                                                 void const *arguments, sz_size_t arguments_bytes,
                                                 sz_metal_size_t groups, sz_metal_size_t threads) {
     void *const pipeline = sz_metal_pipeline_(call->context, source, name);
-    void *const encoder = pipeline ? sz_metal_encoder_(call) : STRINGZILLA_NULL;
+    void *const encoder = pipeline ? call->encoder : STRINGZILLA_NULL;
     if (!encoder) return sz_device_code_mismatch_k;
     sz_metal_enqueue_(encoder, pipeline, buffers, buffers_count, arguments, arguments_bytes, groups, threads);
     return sz_success_k;
@@ -598,21 +651,22 @@ STRINGZILLA_INLINE sz_status_t sz_metal_encode_(sz_metal_call_t *call, char cons
  *  @return @p status, or @c sz_bad_alloc_k when the commit cannot be tracked for a synchronization.
  */
 STRINGZILLA_INLINE sz_status_t sz_metal_commit_(sz_metal_call_t *call, sz_status_t status) {
-    if (!call->commands) return status;
-    sz_metal_do_(call->encoder, "endEncoding");
-    sz_metal_do_(call->encoder, "release");
-    sz_metal_context_t *const context = call->context;
-    sz_metal_pending_t *pending = STRINGZILLA_NULL;
-    os_unfair_lock_lock(&context->lock);
-    if (status == sz_success_k) pending = sz_metal_pending_reserve_(context, call->queue);
-    if (pending) {
-        sz_metal_do_(call->commands, "commit");
-        pending->commands[pending->commands_count++] = call->commands;
+    if (call->encoder) sz_metal_do_(call->encoder, "endEncoding"), sz_metal_do_(call->encoder, "release");
+    if (call->commands) {
+        sz_metal_context_t *const context = call->context;
+        sz_metal_pending_t *pending = STRINGZILLA_NULL;
+        os_unfair_lock_lock(&context->lock);
+        if (status == sz_success_k) pending = sz_metal_pending_reserve_(context, call->queue);
+        if (pending) {
+            sz_metal_do_(call->commands, "commit");
+            pending->commands[pending->commands_count++] = call->commands;
+        }
+        os_unfair_lock_unlock(&context->lock);
+        if (!pending) sz_metal_do_(call->commands, "release");
+        if (!pending && status == sz_success_k) status = sz_bad_alloc_k;
     }
-    os_unfair_lock_unlock(&context->lock);
-    if (!pending) sz_metal_do_(call->commands, "release");
-    if (!pending && status == sz_success_k) status = sz_bad_alloc_k;
-    call->commands = STRINGZILLA_NULL, call->encoder = STRINGZILLA_NULL;
+    if (call->queue) sz_metal_do_(call->queue, "release");
+    call->queue = STRINGZILLA_NULL, call->commands = STRINGZILLA_NULL, call->encoder = STRINGZILLA_NULL;
     return status;
 }
 
@@ -623,17 +677,21 @@ STRINGZILLA_INLINE sz_status_t sz_metal_commit_(sz_metal_call_t *call, sz_status
  *      @c sz_device_code_mismatch_k for accessors answering anything but the tape they sit on.
  *  @pre @p sequence is not empty.
  */
-STRINGZILLA_INLINE sz_status_t sz_metal_tape_(sz_metal_context_t *context, sz_sequence_t const *sequence,
-                                              sz_metal_bound_t *bound) {
+STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_sequence_t const *sequence,
+                                                   sz_metal_bound_t *bound) {
+    if (!sequence->count || sequence->count > ((sz_size_t)-1) / sizeof(sz_u64_t) - 1)
+        return sz_device_memory_mismatch_k;
     sz_u64_t const *const offsets = (sz_u64_t const *)sequence->handle;
     sz_cptr_t const tape = (sz_cptr_t)sequence->handle;
     sz_size_t const last = sequence->count - 1;
-    // The offsets are read only once the registry vouches for them, and the bytes they span after.
-    if (!sz_metal_resolve_(context, offsets, (sequence->count + 1) * sizeof(sz_u64_t), bound) ||
-        !sz_metal_resolve_(context, offsets, offsets[sequence->count], bound))
+    // Retain the allocation before reading its offsets.
+    if (!sz_metal_resolve_call_(call, offsets, (sequence->count + 1) * sizeof(sz_u64_t), bound) ||
+        !sz_metal_resolve_call_(call, offsets, offsets[sequence->count], bound))
         return sz_device_memory_mismatch_k;
-    // Known by what the accessors answer rather than by their address, since in a header-only build
-    // every translation unit carries its own copy of the tape accessors.
+    if (!sequence->get_start || !sequence->get_length || offsets[0] < (sequence->count + 1) * sizeof(sz_u64_t) ||
+        offsets[0] > offsets[1] || offsets[1] > offsets[sequence->count] || offsets[last] > offsets[sequence->count])
+        return sz_device_memory_mismatch_k;
+    // Accessor addresses differ between translation units in header-only builds.
     if (sequence->get_start(tape, 0) != tape + offsets[0] || sequence->get_length(tape, 0) != offsets[1] - offsets[0] ||
         sequence->get_start(tape, last) != tape + offsets[last] ||
         sequence->get_length(tape, last) != offsets[last + 1] - offsets[last])
@@ -646,8 +704,8 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_(sz_metal_context_t *context, sz_se
 #pragma region Public API
 
 /** Initializes @p allocator to hand back shared buffers on the device of each call's stream, which
- *  both the host and that device's kernels address. A free waits for the work its stream committed
- *  before it. Stateless, so its handle is null. @return @c sz_success_k. */
+ *  both the host and device address. Encoded work retains buffers until completion. The allocator
+ *  is stateless, so its handle is null. @return @c sz_success_k. */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
 
 /** @copydoc sz_sequence_realloc_best */
@@ -656,7 +714,7 @@ STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_
                                                       sz_stream_t stream);
 
 /**
- *  @brief Waits for every call committed to @p stream, then returns the frees deferred behind them.
+ *  @brief Waits for every call committed to @p stream before the synchronization begins.
  *  @return The first failure: @c sz_device_code_mismatch_k when a command buffer finished in error,
  *      or @c sz_missing_gpu_k without a device.
  */

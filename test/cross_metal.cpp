@@ -11,66 +11,35 @@
  *  queues, and a free deferred behind a running round.
  */
 #undef NDEBUG // ! Enable all assertions for testing
+#include "harness.hpp"
+
+#if STRINGZILLA_WITH_METAL
 
 #include <cmath>   // `std::fabs`
 #include <cstddef> // `std::size_t`
 
-#include <algorithm>   // `std::sort`
-#include <array>       // `std::array`
-#include <span>        // `std::span`
-#include <string>      // `std::string`
-#include <thread>      // `std::thread`
-#include <vector>      // `std::vector`
+#include <algorithm> // `std::sort`
+#include <array>     // `std::array`
+#include <atomic>    // `std::atomic`
+#include <span>      // `std::span`
+#include <string>    // `std::string`
+#include <thread>    // `std::thread`
+#include <vector>    // `std::vector`
 
 #include <fmt/format.h>
 
 #include <stringzilla/stringzilla.h> // Primary C API
 
-#include "harness.hpp" // `cross_section_t`, `handle_checked_heap_t`, `verify`
+#endif
 
 namespace ashvardanian::stringzilla::test {
-
-/** What Metal device 0 enables, the device whose queue @c main opens, verified to exist. */
-static sz_capability_t metal_capabilities_() {
-    sz_capability_t capabilities = 0;
-    verify(sz_capabilities_enabled_metal(0, &capabilities) == sz_success_k);
-    return capabilities;
-}
+#if STRINGZILLA_WITH_METAL
 
 template <typename value_type_>
 using metal_unified_alloc = unified_alloc<value_type_, sz_cap_metal_k>;
 
 template <typename value_type_>
 using metal_vector = std::vector<value_type_, metal_unified_alloc<value_type_>>;
-
-/** Host views copied into one tape in unified memory, which a kernel reads and the serial reference
- *  calls through the same accessors. */
-struct metal_tape_t {
-    sz_stream_t queue;
-    sz_sequence_t sequence {};
-    sz_size_t bytes = 0;
-
-    explicit metal_tape_t(sz_stream_t queue) noexcept : queue(queue) {}
-    metal_tape_t(metal_tape_t const &) = delete;
-    metal_tape_t &operator=(metal_tape_t const &) = delete;
-    ~metal_tape_t() noexcept { reset(); }
-
-    void copy(std::vector<sz_string_view_t> const &views) {
-        reset();
-        sz_sequence_t host {};
-        sz_sequence_from_string_views(views.data(), views.size(), &host);
-        sz_allocator_t unified;
-        sz_allocator_init_unified_metal(&unified);
-        verify(sz_sequence_realloc_metal(&sequence, &host, &unified, &bytes, queue) == sz_success_k);
-    }
-    void reset() noexcept {
-        if (!bytes) return;
-        sz_allocator_t unified;
-        sz_allocator_init_unified_metal(&unified);
-        unified.free(const_cast<void *>(sequence.handle), bytes, unified.handle, queue);
-        bytes = 0;
-    }
-};
 
 /** Accessors one byte off the tape they sit on stand for any other layout, which a kernel reading
  *  the tape directly would score wrongly. */
@@ -93,6 +62,8 @@ struct metal_backend_t {
 
     /** The spelling @ref fail_backend_ and the test names carry. */
     char const *name;
+    sz_capability_t capabilities;
+    sz_stream_t stream;
 
     sz_kernel_levenshtein_distances_t levenshtein_distances;
     sz_kernel_overlap_scores_t overlap_scores;
@@ -101,6 +72,52 @@ struct metal_backend_t {
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
 };
+
+static void check_metal_concurrent_synchronize_(sz_stream_t queue) {
+    sz_metal_call_t call {};
+    verify(sz_device_enter_metal_(queue, &call) == sz_success_k);
+    void *pool = objc_autoreleasePoolPush();
+    void *event = sz_metal_get_(call.context->device, "newSharedEvent");
+    if (!event) {
+        sz_metal_commit_(&call, sz_bad_alloc_k);
+        objc_autoreleasePoolPop(pool);
+        verify(event != nullptr);
+    }
+    sz_metal_do_(call.encoder, "endEncoding");
+    sz_metal_do_(call.encoder, "release");
+    call.encoder = nullptr;
+    ((void (*)(void *, SEL, void *, sz_u64_t))objc_msgSend)(call.commands,
+                                                            sel_registerName("encodeWaitForEvent:value:"), event, 1);
+    sz_status_t const committed = sz_metal_commit_(&call, sz_success_k);
+    std::atomic<unsigned> completed {0};
+    sz_status_t first_status = sz_device_code_mismatch_k, second_status = sz_device_code_mismatch_k;
+    std::thread first([&] {
+        first_status = sz_stream_synchronize_metal(queue);
+        ++completed;
+    });
+    std::thread second([&] {
+        second_status = sz_stream_synchronize_metal(queue);
+        ++completed;
+    });
+    bool waiting = false;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline && !completed.load()) {
+        os_unfair_lock_lock(&call.context->lock);
+        auto *pending = sz_metal_pending_find_(call.context, queue);
+        waiting = pending && pending->waiters == 2;
+        os_unfair_lock_unlock(&call.context->lock);
+        if (waiting) break;
+        std::this_thread::yield();
+    }
+    ((void (*)(void *, SEL, sz_u64_t))objc_msgSend)(event, sel_registerName("setSignaledValue:"), 1);
+    first.join();
+    second.join();
+    sz_metal_do_(event, "release");
+    objc_autoreleasePoolPop(pool);
+    verify(committed == sz_success_k);
+    verify(waiting && "both synchronizers must wait for previously committed work");
+    verify(first_status == sz_success_k && second_status == sz_success_k);
+}
 
 #pragma region Levenshtein Helpers
 
@@ -150,17 +167,16 @@ struct levenshtein_metal_corpus_t {
     /** @b [queries, candidates], written by whichever round ran. */
     metal_vector<sz_size_t> distances;
 
-    /** Host accessors over the queries, as an init requires. */
-    sz_sequence_t queries {};
+    sz_sequence_t query_sequence() const { return sequence_from_(query_views); }
 
     /** The candidates' tape, which the device reads directly and the serial reference calls. */
-    metal_tape_t candidates;
+    tape_t candidates;
 
     levenshtein_metal_corpus_t(sz_stream_t queue, std::size_t count, std::size_t query_symbols, std::size_t query_count,
                                levenshtein_metal_alphabet_t alphabet)
         : query_views(query_count), candidate_views(count),
           distances(query_count * count, STRINGZILLA_SIZE_MAX, metal_unified_alloc<sz_size_t>(queue)),
-          candidates(queue) {
+          candidates(metal_unified_alloc<char>(queue)) {
         std::vector<std::string> const symbols = levenshtein_metal_symbols_(alphabet);
         std::vector<std::string> drawn(query_symbols);
         for (std::size_t symbol = 0; symbol != query_symbols; ++symbol)
@@ -203,8 +219,7 @@ struct levenshtein_metal_corpus_t {
         written = 0;
         for (sz_string_view_t &view : candidate_views)
             view.start = candidate_arena.data() + written, written += view.length;
-        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
-        candidates.copy(candidate_views);
+        verify(candidates.assign(candidate_views) == status_t::success_k);
     }
 
     /** Candidates one round scores, which is also the row stride of the matrix it writes. */
@@ -214,12 +229,14 @@ struct levenshtein_metal_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very tape the device reads. */
 static std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_metal_corpus_t const &corpus,
                                                             sz_levenshtein_symbol_t symbol) {
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init_serial(&engine, &corpus.queries, symbol, &heap.allocator, nullptr) ==
+    verify(sz_levenshtein_engine_init_serial(&engine, &query_sequence, symbol, &heap.allocator, nullptr) ==
            sz_success_k);
     std::vector<sz_size_t> expected(corpus.distances.size());
-    verify(sz_levenshtein_distances_serial(&engine, &corpus.candidates.sequence, expected.data(), corpus.count(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    verify(sz_levenshtein_distances_serial(&engine, &corpus_candidates_sequence, expected.data(), corpus.count(),
                                            nullptr) == sz_success_k);
     sz_levenshtein_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -265,13 +282,15 @@ static constexpr std::size_t levenshtein_metal_query_symbols_k[] = {
  *  The corpus alphabet and the engine's symbol are separate, so a byte corpus read as runes feeds
  *  the rune decoder stray continuations, truncated sequences and bytes no rune may start with.
  */
-static void check_levenshtein_metal_equivalence_(sz_stream_t queue, levenshtein_metal_alphabet_t alphabet,
-                                                 sz_levenshtein_symbol_t symbol, metal_backend_t const &backend) {
+static void check_levenshtein_metal_equivalence_(levenshtein_metal_alphabet_t alphabet, sz_levenshtein_symbol_t symbol,
+                                                 metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     for (std::size_t const query_symbols : levenshtein_metal_query_symbols_k)
         for (std::size_t count : {1u, 129u, 2048u}) {
             std::size_t const queries = levenshtein_metal_sweep_queries_k;
             if (count * query_symbols * queries > (std::size_t)levenshtein_metal_sweep_budget_k) continue;
             levenshtein_metal_corpus_t corpus(queue, count, query_symbols, queries, alphabet);
+            sz_sequence_t const query_sequence = corpus.query_sequence();
             std::size_t longest = 0;
             for (sz_string_view_t const &query : corpus.query_views)
                 longest = std::max<std::size_t>(longest, symbol == sz_levenshtein_runes_k
@@ -279,12 +298,13 @@ static void check_levenshtein_metal_equivalence_(sz_stream_t queue, levenshtein_
                                                              : query.length);
 
             sz_levenshtein_engine_t engine {};
-            sz_status_t const prepared = sz_levenshtein_engine_init(&engine, &corpus.queries, symbol,
-                                                                    metal_capabilities_(), STRINGZILLA_NULL, queue);
+            sz_status_t const prepared = sz_levenshtein_engine_init(&engine, &query_sequence, symbol,
+                                                                    backend.capabilities, STRINGZILLA_NULL, queue);
             if (prepared != levenshtein_metal_expected_status_(longest))
                 fail_backend_(backend.name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
-            sz_status_t const produced = backend.levenshtein_distances(&engine, &corpus.candidates.sequence,
+            sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+            sz_status_t const produced = backend.levenshtein_distances(&engine, &corpus_candidates_sequence,
                                                                        corpus.distances.data(), corpus.count(), queue);
             verify(sz_stream_synchronize_metal(queue) == sz_success_k);
             sz_levenshtein_engine_free(&engine, queue);
@@ -298,11 +318,12 @@ static void check_levenshtein_metal_equivalence_(sz_stream_t queue, levenshtein_
 }
 
 /** One backend refusing unregistered memory, and sequences it cannot read, before encoding. */
-static void check_levenshtein_metal_memory_safety_(sz_stream_t queue, std::mt19937 &generator,
-                                                   metal_backend_t const &backend) {
+static void check_levenshtein_metal_memory_safety_(std::mt19937 &generator, metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     levenshtein_metal_corpus_t corpus(queue, 8, 200, 1, levenshtein_metal_alphabet_t::bytes_k);
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init(&engine, &corpus.queries, sz_levenshtein_bytes_k, metal_capabilities_(),
+    verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.capabilities,
                                       STRINGZILLA_NULL, queue) == sz_success_k);
 
     std::string text(64, '\0');
@@ -311,16 +332,17 @@ static void check_levenshtein_metal_memory_safety_(sz_stream_t queue, std::mt199
     sz_sequence_t host_candidates {};
     sz_sequence_from_string_views(host_views.data(), host_views.size(), &host_candidates);
     std::vector<sz_size_t> host_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX);
-    if (backend.levenshtein_distances(&engine, &corpus.candidates.sequence, host_distances.data(), corpus.count(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    if (backend.levenshtein_distances(&engine, &corpus_candidates_sequence, host_distances.data(), corpus.count(),
                                       queue) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host distances were not refused");
     if (backend.levenshtein_distances(&engine, &host_candidates, corpus.distances.data(), corpus.count(), queue) !=
         sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "a host-resident view array was not refused");
-    if (backend.levenshtein_distances(&engine, &corpus.candidates.sequence, corpus.distances.data(), corpus.count() - 1,
+    if (backend.levenshtein_distances(&engine, &corpus_candidates_sequence, corpus.distances.data(), corpus.count() - 1,
                                       queue) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "a stride under the candidates was not refused");
-    sz_sequence_t const foreign = foreign_tape_(corpus.candidates.sequence);
+    sz_sequence_t const foreign = foreign_tape_(corpus.candidates.sequence());
     if (backend.levenshtein_distances(&engine, &foreign, corpus.distances.data(), corpus.count(), queue) !=
         sz_device_code_mismatch_k)
         fail_backend_(backend.name, "a sequence with foreign accessors was not refused");
@@ -334,14 +356,16 @@ static void check_levenshtein_metal_memory_safety_(sz_stream_t queue, std::mt199
 
 /** The builder refusing a query past what the widest rung holds, in bytes and again in runes, and
  *  a batch holding an empty query, which has no last word to read a score off. */
-static void check_levenshtein_metal_query_safety_(sz_stream_t queue) {
+static void check_levenshtein_metal_query_safety_(metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     enum { symbols_k = sz_levenshtein_gpu_words_max_k * 64 + 1 };
     for (levenshtein_metal_alphabet_t const alphabet :
          {levenshtein_metal_alphabet_t::bytes_k, levenshtein_metal_alphabet_t::runes_k}) {
         levenshtein_metal_corpus_t corpus(queue, 1, symbols_k, 1, alphabet);
+        sz_sequence_t const query_sequence = corpus.query_sequence();
         sz_levenshtein_engine_t engine {};
-        if (sz_levenshtein_engine_init(&engine, &corpus.queries, levenshtein_metal_symbol_(alphabet),
-                                       metal_capabilities_(), STRINGZILLA_NULL, queue) != sz_unexpected_dimensions_k)
+        if (sz_levenshtein_engine_init(&engine, &query_sequence, levenshtein_metal_symbol_(alphabet),
+                                       backend.capabilities, STRINGZILLA_NULL, queue) != sz_unexpected_dimensions_k)
             fail_backend_("dispatched", "a query past the verticals was not refused");
         if (engine.memory != STRINGZILLA_NULL) fail_backend_("dispatched", "a refused build still kept a block");
     }
@@ -350,26 +374,27 @@ static void check_levenshtein_metal_query_safety_(sz_stream_t queue) {
     sz_sequence_t empty {};
     sz_sequence_from_string_views(empty_views.data(), empty_views.size(), &empty);
     sz_levenshtein_engine_t engine {};
-    if (sz_levenshtein_engine_init(&engine, &empty, sz_levenshtein_bytes_k, metal_capabilities_(), STRINGZILLA_NULL,
+    if (sz_levenshtein_engine_init(&engine, &empty, sz_levenshtein_bytes_k, backend.capabilities, STRINGZILLA_NULL,
                                    queue) != sz_unexpected_dimensions_k)
         fail_backend_("dispatched", "an empty query was not refused");
 
-    // The wavefront waits on neighbouring threadgroups, which Apple GPUs never
-    // promise to co-schedule, so Metal lists no kernel for it.
-    if (sz_levenshtein_distance_tiled_best("abc", 3, "abd", 3, STRINGZILLA_NULL, STRINGZILLA_NULL,
-                                           metal_capabilities_(), queue) != sz_missing_kernel_k)
+    if (sz_levenshtein_distance_tiled_best("abc", 3, "abd", 3, STRINGZILLA_NULL, STRINGZILLA_NULL, backend.capabilities,
+                                           queue) != sz_missing_kernel_k)
         fail_backend_("dispatched", "the tiled wavefront did not refuse a Metal device");
 }
 
 /** The scoring verb commits and returns, so a round big enough to outlive the call is still
  *  running after it, and lands once the queue is synchronized. */
-static void check_levenshtein_metal_asynchrony_(sz_stream_t queue) {
+static void check_levenshtein_metal_asynchrony_(metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     levenshtein_metal_corpus_t corpus(queue, 2048, 1024, levenshtein_metal_sweep_queries_k,
                                       levenshtein_metal_alphabet_t::bytes_k);
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init(&engine, &corpus.queries, sz_levenshtein_bytes_k, metal_capabilities_(),
+    verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.capabilities,
                                       STRINGZILLA_NULL, queue) == sz_success_k);
-    verify(sz_levenshtein_distances(&engine, &corpus.candidates.sequence, corpus.distances.data(), corpus.count(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    verify(sz_levenshtein_distances(&engine, &corpus_candidates_sequence, corpus.distances.data(), corpus.count(),
                                     queue) == sz_success_k);
     std::size_t landed_before = 0;
     for (sz_size_t const distance : corpus.distances) landed_before += distance != STRINGZILLA_SIZE_MAX;
@@ -386,16 +411,18 @@ static void check_levenshtein_metal_asynchrony_(sz_stream_t queue) {
 
 /** Two threads scoring on two queues of one device at once, each joining only its own: encoders
  *  live per call, and the device's shared state sits under one lock. */
-static void check_levenshtein_metal_threads_(sz_stream_t queue) {
-    sz_stream_t second = nullptr;
-    verify(sz_stream_init_metal(0, &second) == sz_success_k);
-    auto const round = [](sz_stream_t stream) {
+static void check_levenshtein_metal_threads_(metal_backend_t const &backend, std::size_t ordinal) {
+    sz_stream_t const queue = backend.stream;
+    stream_t const second(ordinal, sz_stream_init_metal, sz_stream_free_metal);
+    auto const round = [&backend](sz_stream_t stream) {
         levenshtein_metal_corpus_t corpus(stream, 2048, 300, levenshtein_metal_sweep_queries_k,
                                           levenshtein_metal_alphabet_t::bytes_k);
+        sz_sequence_t const query_sequence = corpus.query_sequence();
         sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init(&engine, &corpus.queries, sz_levenshtein_bytes_k, metal_capabilities_(),
+        verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.capabilities,
                                           STRINGZILLA_NULL, stream) == sz_success_k);
-        verify(sz_levenshtein_distances(&engine, &corpus.candidates.sequence, corpus.distances.data(), corpus.count(),
+        sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+        verify(sz_levenshtein_distances(&engine, &corpus_candidates_sequence, corpus.distances.data(), corpus.count(),
                                         stream) == sz_success_k);
         verify(sz_stream_synchronize_metal(stream) == sz_success_k);
         sz_levenshtein_engine_free(&engine, stream);
@@ -404,22 +431,23 @@ static void check_levenshtein_metal_threads_(sz_stream_t queue) {
             if (corpus.distances[index] != expected[index])
                 fail_backend_("dispatched", "a round beside another thread's differs from serial");
     };
-    std::thread other(round, second);
+    std::thread other(round, second.handle);
     round(queue);
     other.join();
-    verify(sz_stream_free_metal(second) == sz_success_k);
 }
 
 /** A tape freed while a round still reads it lives until its queue is joined, and is gone from the
  *  registry after, so a later round over it is refused rather than reading freed memory. */
-static void check_levenshtein_metal_deferred_free_(sz_stream_t queue) {
+static void check_levenshtein_metal_deferred_free_(metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     levenshtein_metal_corpus_t corpus(queue, 2048, 1024, levenshtein_metal_sweep_queries_k,
                                       levenshtein_metal_alphabet_t::bytes_k);
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init(&engine, &corpus.queries, sz_levenshtein_bytes_k, metal_capabilities_(),
+    verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.capabilities,
                                       STRINGZILLA_NULL, queue) == sz_success_k);
-    sz_sequence_t const freed = corpus.candidates.sequence;
+    sz_sequence_t const freed = corpus.candidates.sequence();
     verify(sz_levenshtein_distances(&engine, &freed, corpus.distances.data(), corpus.count(), queue) == sz_success_k);
     corpus.candidates.reset();
     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
@@ -446,13 +474,13 @@ struct overlap_metal_corpus_t {
     std::vector<char> texts;
     std::vector<sz_string_view_t> views;
     metal_vector<sz_f32_t> scores;
-    sz_sequence_t query_sequence {};
-    metal_tape_t candidates;
+    sz_sequence_t query_sequence() const { return sequence_from_(queries); }
+    tape_t candidates;
 
     overlap_metal_corpus_t(sz_stream_t queue, std::mt19937 &generator, std::size_t queries_count, std::size_t count,
                            std::size_t query_length, std::size_t widths_count)
         : views(count), scores(queries_count * count * widths_count, -1.0f, metal_unified_alloc<sz_f32_t>(queue)),
-          candidates(queue) {
+          candidates(metal_unified_alloc<char>(queue)) {
         for (std::size_t index = 0; index != queries_count; ++index) {
             std::string text(query_length ? query_length - index % query_length : 0, '\0');
             randomize_string(generator, text);
@@ -468,8 +496,7 @@ struct overlap_metal_corpus_t {
             views[index].start = texts.data() + written, views[index].length = length;
             written += length;
         }
-        query_sequence = sequence_from_(queries);
-        candidates.copy(views);
+        verify(candidates.assign(views) == status_t::success_k);
     }
     std::size_t candidate_stride() const noexcept { return scores.size() / (queries.size() * views.size()); }
     std::size_t query_stride() const noexcept { return views.size() * candidate_stride(); }
@@ -478,11 +505,13 @@ struct overlap_metal_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very tape the device reads. */
 static std::vector<sz_f32_t> overlap_serial_reference_(overlap_metal_corpus_t const &corpus,
                                                        std::span<sz_size_t const> widths) {
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_serial(&engine, &corpus.query_sequence, widths.data(), widths.size(), 0,
-                                         STRINGZILLA_NULL, nullptr) == sz_success_k);
+    verify(sz_overlap_engine_init_serial(&engine, &query_sequence, widths.data(), widths.size(), 0, STRINGZILLA_NULL,
+                                         nullptr) == sz_success_k);
     std::vector<sz_f32_t> expected(corpus.scores.size(), -1.0f);
-    verify(sz_overlap_scores_serial(&engine, &corpus.candidates.sequence, expected.data(), corpus.query_stride(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    verify(sz_overlap_scores_serial(&engine, &corpus_candidates_sequence, expected.data(), corpus.query_stride(),
                                     corpus.candidate_stride(), nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     return expected;
@@ -493,21 +522,23 @@ static std::vector<sz_f32_t> overlap_serial_reference_(overlap_metal_corpus_t co
 #pragma region Overlap Checks
 
 /** One backend's scores against serial's, bit for bit, over widths from narrowest to widest. */
-static void check_overlap_metal_equivalence_(sz_stream_t queue, std::mt19937 &generator,
-                                             metal_backend_t const &backend) {
+static void check_overlap_metal_equivalence_(std::mt19937 &generator, metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     std::array<std::array<sz_size_t, 3>, 2> const width_sets {{{4, 6, 8}, {1, 17, 31}}};
     for (auto const &widths : width_sets)
         for (std::size_t queries_count : {1u, 3u})
             for (std::size_t count : {1u, 129u, 4096u})
                 for (std::size_t query_length : {12u, 777u}) {
                     overlap_metal_corpus_t corpus(queue, generator, queries_count, count, query_length, widths.size());
+                    sz_sequence_t const query_sequence = corpus.query_sequence();
                     std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus,
                                                                                      {widths.data(), widths.size()});
                     sz_overlap_engine_t engine {};
-                    if (sz_overlap_engine_init(&engine, &corpus.query_sequence, widths.data(), widths.size(), count,
-                                               metal_capabilities_(), STRINGZILLA_NULL, queue) != sz_success_k)
+                    if (sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), count,
+                                               backend.capabilities, STRINGZILLA_NULL, queue) != sz_success_k)
                         fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
-                    if (backend.overlap_scores(&engine, &corpus.candidates.sequence, corpus.scores.data(),
+                    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+                    if (backend.overlap_scores(&engine, &corpus_candidates_sequence, corpus.scores.data(),
                                                corpus.query_stride(), corpus.candidate_stride(), queue) != sz_success_k)
                         fail_backend_(backend.name, "a unified-memory batch was refused");
                     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
@@ -519,12 +550,13 @@ static void check_overlap_metal_equivalence_(sz_stream_t queue, std::mt19937 &ge
 }
 
 /** One backend refusing unregistered memory, and sequences it cannot read, before encoding. */
-static void check_overlap_metal_memory_safety_(sz_stream_t queue, std::mt19937 &generator,
-                                               metal_backend_t const &backend) {
+static void check_overlap_metal_memory_safety_(std::mt19937 &generator, metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     std::array<sz_size_t, 2> const widths {4, 6};
     overlap_metal_corpus_t corpus(queue, generator, 1, 8, 333, widths.size());
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &corpus.query_sequence, widths.data(), widths.size(), 0, metal_capabilities_(),
+    if (sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0, backend.capabilities,
                                STRINGZILLA_NULL, queue) != sz_success_k)
         fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
 
@@ -534,13 +566,14 @@ static void check_overlap_metal_memory_safety_(sz_stream_t queue, std::mt19937 &
     sz_sequence_t host_candidates {};
     sz_sequence_from_string_views(host_views.data(), host_views.size(), &host_candidates);
     std::vector<sz_f32_t> host_scores(corpus.scores.size(), -1.0f);
-    if (backend.overlap_scores(&engine, &corpus.candidates.sequence, host_scores.data(), corpus.query_stride(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    if (backend.overlap_scores(&engine, &corpus_candidates_sequence, host_scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), queue) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host scores were not refused");
     if (backend.overlap_scores(&engine, &host_candidates, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), queue) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "a host-resident view array was not refused");
-    sz_sequence_t const foreign = foreign_tape_(corpus.candidates.sequence);
+    sz_sequence_t const foreign = foreign_tape_(corpus.candidates.sequence());
     if (backend.overlap_scores(&engine, &foreign, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), queue) != sz_device_code_mismatch_k)
         fail_backend_(backend.name, "a sequence with foreign accessors was not refused");
@@ -548,10 +581,9 @@ static void check_overlap_metal_memory_safety_(sz_stream_t queue, std::mt19937 &
     // The round block was sized for a candidates budget when the engine was built, so a round past
     // it is refused rather than grown under a queue that may still be reading it.
     sz_overlap_engine_t narrow {};
-    verify(sz_overlap_engine_init(&narrow, &corpus.query_sequence, widths.data(), widths.size(),
-                                  corpus.views.size() - 1, metal_capabilities_(), STRINGZILLA_NULL,
-                                  queue) == sz_success_k);
-    if (backend.overlap_scores(&narrow, &corpus.candidates.sequence, corpus.scores.data(), corpus.query_stride(),
+    verify(sz_overlap_engine_init(&narrow, &query_sequence, widths.data(), widths.size(), corpus.views.size() - 1,
+                                  backend.capabilities, STRINGZILLA_NULL, queue) == sz_success_k);
+    if (backend.overlap_scores(&narrow, &corpus_candidates_sequence, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), queue) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "a round past the candidates budget was not refused");
     sz_overlap_engine_free(&narrow, queue);
@@ -564,8 +596,8 @@ static void check_overlap_metal_memory_safety_(sz_stream_t queue, std::mt19937 &
 }
 
 /** The widest window the per-thread ring holds, and the refusals one step past either bound. */
-static void check_overlap_metal_width_safety_(sz_stream_t queue, std::mt19937 &generator,
-                                              metal_backend_t const &backend) {
+static void check_overlap_metal_width_safety_(std::mt19937 &generator, metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     std::array<sz_size_t, 1> const widest {sz_overlap_gpu_widest_window_k};
     std::array<sz_size_t, 1> const past {sz_overlap_gpu_widest_window_k + 1};
     std::array<sz_size_t, sz_overlap_gpu_widths_max_k + 1> too_many {};
@@ -573,20 +605,22 @@ static void check_overlap_metal_width_safety_(sz_stream_t queue, std::mt19937 &g
 
     // The one candidate is the query's own bytes, so the text scores against itself.
     overlap_metal_corpus_t corpus(queue, generator, 1, 1, 256, widest.size());
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     corpus.texts.assign(corpus.queries.front().begin(), corpus.queries.front().end());
     corpus.views[0].start = corpus.texts.data(), corpus.views[0].length = corpus.texts.size();
-    corpus.candidates.copy(corpus.views);
+    verify(corpus.candidates.assign(corpus.views) == status_t::success_k);
     sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &corpus.query_sequence, past.data(), past.size(), 0, metal_capabilities_(),
+    if (sz_overlap_engine_init(&engine, &query_sequence, past.data(), past.size(), 0, backend.capabilities,
                                STRINGZILLA_NULL, queue) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "a width past the ring was not refused");
-    if (sz_overlap_engine_init(&engine, &corpus.query_sequence, too_many.data(), too_many.size(), 0,
-                               metal_capabilities_(), STRINGZILLA_NULL, queue) != sz_unexpected_dimensions_k)
+    if (sz_overlap_engine_init(&engine, &query_sequence, too_many.data(), too_many.size(), 0, backend.capabilities,
+                               STRINGZILLA_NULL, queue) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "more widths than a thread holds were not refused");
-    if (sz_overlap_engine_init(&engine, &corpus.query_sequence, widest.data(), widest.size(), 0, metal_capabilities_(),
+    if (sz_overlap_engine_init(&engine, &query_sequence, widest.data(), widest.size(), 0, backend.capabilities,
                                STRINGZILLA_NULL, queue) != sz_success_k)
         fail_backend_(backend.name, "the widest window the ring holds was refused");
-    if (backend.overlap_scores(&engine, &corpus.candidates.sequence, corpus.scores.data(), corpus.query_stride(),
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    if (backend.overlap_scores(&engine, &corpus_candidates_sequence, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), queue) != sz_success_k)
         fail_backend_(backend.name, "a unified-memory batch was refused");
     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
@@ -596,14 +630,17 @@ static void check_overlap_metal_width_safety_(sz_stream_t queue, std::mt19937 &g
 
 /** The scoring verb commits and returns, so a round big enough to outlive the call is still
  *  running after it, and lands once the queue is synchronized. */
-static void check_overlap_metal_asynchrony_(sz_stream_t queue, std::mt19937 &generator) {
+static void check_overlap_metal_asynchrony_(metal_backend_t const &backend, std::mt19937 &generator) {
+    sz_stream_t const queue = backend.stream;
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     overlap_metal_corpus_t corpus(queue, generator, 8, 4096, 777, widths.size());
+    sz_sequence_t const query_sequence = corpus.query_sequence();
     std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &corpus.query_sequence, widths.data(), widths.size(), corpus.views.size(),
-                                  metal_capabilities_(), STRINGZILLA_NULL, queue) == sz_success_k);
-    verify(sz_overlap_scores(&engine, &corpus.candidates.sequence, corpus.scores.data(), corpus.query_stride(),
+    verify(sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), corpus.views.size(),
+                                  backend.capabilities, STRINGZILLA_NULL, queue) == sz_success_k);
+    sz_sequence_t const corpus_candidates_sequence = corpus.candidates.sequence();
+    verify(sz_overlap_scores(&engine, &corpus_candidates_sequence, corpus.scores.data(), corpus.query_stride(),
                              corpus.candidate_stride(), queue) == sz_success_k);
     std::size_t landed_before = 0;
     for (sz_f32_t const score : corpus.scores) landed_before += score != -1.0f;
@@ -637,10 +674,10 @@ struct substrings_metal_texts_t {
     std::vector<sz_string_view_t> views;
 
     /** The texts' tape in unified memory. */
-    metal_tape_t tape;
+    tape_t tape;
 
     substrings_metal_texts_t(sz_stream_t queue, std::vector<std::string> const &texts)
-        : views(texts.size()), tape(queue) {
+        : views(texts.size()), tape(metal_unified_alloc<char>(queue)) {
         for (std::size_t index = 0; index != texts.size(); ++index) {
             views[index].length = texts[index].size();
             arena.insert(arena.end(), texts[index].begin(), texts[index].end());
@@ -649,7 +686,7 @@ struct substrings_metal_texts_t {
         // are filled afterwards.
         std::size_t written = 0;
         for (sz_string_view_t &view : views) view.start = arena.data() + written, written += view.length;
-        tape.copy(views);
+        verify(tape.assign(views) == status_t::success_k);
     }
 };
 
@@ -668,15 +705,16 @@ struct substrings_metal_engines_t {
     /** The queue the device engine was built on and is freed on. */
     sz_stream_t queue;
 
-    substrings_metal_engines_t(sz_stream_t queue, sz_sequence_t const &needles, sz_substrings_overlap_policy_t policy)
-        : queue(queue) {
-        verify(sz_substrings_engine_init_serial(&host, &needles, sz_substrings_cased_k, policy,
+    substrings_metal_engines_t(sz_sequence_t const &needles, sz_substrings_overlap_policy_t policy,
+                               metal_backend_t const &backend,
+                               sz_substrings_case_sensitivity_t sensitivity = sz_substrings_cased_k)
+        : queue(backend.stream) {
+        verify(sz_substrings_engine_init_serial(&host, &needles, sensitivity, policy,
                                                 STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, &heap.allocator,
                                                 nullptr) == sz_success_k);
-        verify(sz_substrings_engine_init(&device, &needles, sz_substrings_cased_k, policy,
-                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, substrings_metal_matches_budget_k,
-                                         substrings_metal_haystacks_budget_k, metal_capabilities_(), STRINGZILLA_NULL,
-                                         queue) == sz_success_k);
+        verify(sz_substrings_engine_init(&device, &needles, sensitivity, policy, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO,
+                                         substrings_metal_matches_budget_k, substrings_metal_haystacks_budget_k,
+                                         backend.capabilities, STRINGZILLA_NULL, queue) == sz_success_k);
     }
     substrings_metal_engines_t(substrings_metal_engines_t const &) = delete;
     substrings_metal_engines_t &operator=(substrings_metal_engines_t const &) = delete;
@@ -726,9 +764,10 @@ static std::vector<substrings_metal_case_t> serial_matches_(sz_substrings_engine
 }
 
 /** Every match the device reports, synchronized per call since no verb waits for the caller. */
-static std::vector<substrings_metal_case_t> device_matches_(sz_stream_t queue, metal_backend_t const &backend,
+static std::vector<substrings_metal_case_t> device_matches_(metal_backend_t const &backend,
                                                             sz_substrings_engine_t *engine,
                                                             sz_sequence_t const *haystacks) {
+    sz_stream_t const queue = backend.stream;
     metal_vector<sz_size_t> offsets(haystacks->count + 1, 0, metal_unified_alloc<sz_size_t>(queue));
     verify(backend.substrings_find(engine, haystacks, nullptr, 0, offsets.data(), queue) == sz_success_k);
     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
@@ -774,20 +813,24 @@ static void verify_is_a_cover_(std::vector<substrings_metal_case_t> const &repor
 }
 
 /** The device's matches, counts and rewrite against serial's, over one corpus and policy. */
-static void check_against_serial_(sz_stream_t queue, metal_backend_t const &backend, substrings_metal_texts_t &corpus,
+static void check_against_serial_(metal_backend_t const &backend, substrings_metal_texts_t &corpus,
                                   substrings_metal_texts_t &vocabulary, sz_substrings_overlap_policy_t policy,
-                                  sz_substrings_cover_fidelity_t fidelity) {
+                                  sz_substrings_cover_fidelity_t fidelity,
+                                  sz_substrings_case_sensitivity_t sensitivity = sz_substrings_cased_k) {
+    sz_stream_t const queue = backend.stream;
     std::size_t const haystacks_count = corpus.views.size();
-    sz_sequence_t const *const haystacks = &corpus.tape.sequence;
-    substrings_metal_engines_t engines(queue, vocabulary.tape.sequence, policy);
+    sz_sequence_t const corpus_tape_sequence = corpus.tape.sequence();
+    sz_sequence_t const *const haystacks = &corpus_tape_sequence;
+    substrings_metal_engines_t engines(vocabulary.tape.sequence(), policy, backend, sensitivity);
     std::vector<substrings_metal_case_t> const expected = serial_matches_(&engines.host, haystacks);
-    std::vector<substrings_metal_case_t> const reported = device_matches_(queue, backend, &engines.device, haystacks);
+    std::vector<substrings_metal_case_t> const reported = device_matches_(backend, &engines.device, haystacks);
     if (fidelity == sz_substrings_cover_exact_k) {
         verify(reported.size() == expected.size());
         for (std::size_t index = 0; index != expected.size(); ++index) verify(reported[index] == expected[index]);
     }
     else {
-        substrings_metal_engines_t overlapping(queue, vocabulary.tape.sequence, sz_substrings_overlapping_k);
+        substrings_metal_engines_t overlapping(vocabulary.tape.sequence(), sz_substrings_overlapping_k, backend,
+                                               sensitivity);
         verify_is_a_cover_(reported, serial_matches_(&overlapping.host, haystacks));
     }
 
@@ -814,10 +857,11 @@ static void check_against_serial_(sz_stream_t queue, metal_backend_t const &back
     substrings_metal_texts_t replacements(queue, replacement_texts);
     metal_vector<sz_size_t> device_offsets(haystacks_count + 1, 0, metal_unified_alloc<sz_size_t>(queue));
     std::vector<sz_size_t> serial_offsets(haystacks_count + 1, 0);
-    verify(backend.substrings_replace(&engines.device, haystacks, &replacements.tape.sequence, nullptr, 0,
+    sz_sequence_t const replacements_tape_sequence = replacements.tape.sequence();
+    verify(backend.substrings_replace(&engines.device, haystacks, &replacements_tape_sequence, nullptr, 0,
                                       device_offsets.data(), queue) == sz_success_k);
     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
-    verify(sz_substrings_replace_serial(&engines.host, haystacks, &replacements.tape.sequence, nullptr, 0,
+    verify(sz_substrings_replace_serial(&engines.host, haystacks, &replacements_tape_sequence, nullptr, 0,
                                         serial_offsets.data(), nullptr) == sz_success_k);
     for (std::size_t index = 0; index != haystacks_count + 1; ++index)
         verify(device_offsets[index] == serial_offsets[index]);
@@ -825,22 +869,25 @@ static void check_against_serial_(sz_stream_t queue, metal_backend_t const &back
     sz_size_t const rewritten = serial_offsets[haystacks_count];
     metal_vector<char> device_tape(rewritten + 1, 0, metal_unified_alloc<char>(queue));
     std::vector<char> serial_tape(rewritten + 1, 0);
-    verify(backend.substrings_replace(&engines.device, haystacks, &replacements.tape.sequence, device_tape.data(),
+    verify(backend.substrings_replace(&engines.device, haystacks, &replacements_tape_sequence, device_tape.data(),
                                       rewritten, device_offsets.data(), queue) == sz_success_k);
     verify(sz_stream_synchronize_metal(queue) == sz_success_k);
     verify(engines.device.report->shortfall == 0);
-    verify(sz_substrings_replace_serial(&engines.host, haystacks, &replacements.tape.sequence, serial_tape.data(),
+    verify(sz_substrings_replace_serial(&engines.host, haystacks, &replacements_tape_sequence, serial_tape.data(),
                                         rewritten, serial_offsets.data(), nullptr) == sz_success_k);
     for (std::size_t index = 0; index != rewritten; ++index) verify(device_tape[index] == serial_tape[index]);
 }
 
 /** The device's BM25 against serial's, by byte lengths and by caller-given ones: the device sums in
  *  @c f32 terms and fixed point, so the two agree to rounding rather than bit for bit. */
-static void check_bm25_against_serial_(sz_stream_t queue, metal_backend_t const &backend,
-                                       substrings_metal_texts_t &corpus, substrings_metal_texts_t &vocabulary) {
+static void check_bm25_against_serial_(metal_backend_t const &backend, substrings_metal_texts_t &corpus,
+                                       substrings_metal_texts_t &vocabulary,
+                                       sz_substrings_case_sensitivity_t sensitivity = sz_substrings_cased_k) {
+    sz_stream_t const queue = backend.stream;
     std::size_t const haystacks_count = corpus.views.size();
-    sz_sequence_t const *const haystacks = &corpus.tape.sequence;
-    substrings_metal_engines_t engines(queue, vocabulary.tape.sequence, sz_substrings_overlapping_k);
+    sz_sequence_t const corpus_tape_sequence = corpus.tape.sequence();
+    sz_sequence_t const *const haystacks = &corpus_tape_sequence;
+    substrings_metal_engines_t engines(vocabulary.tape.sequence(), sz_substrings_overlapping_k, backend, sensitivity);
     std::size_t const needles_count = engines.host.needles_count;
     metal_vector<sz_f32_t> weights(needles_count, 0, metal_unified_alloc<sz_f32_t>(queue));
     metal_vector<sz_f32_t> given_lengths(haystacks_count, 0, metal_unified_alloc<sz_f32_t>(queue));
@@ -869,14 +916,17 @@ static void check_bm25_against_serial_(sz_stream_t queue, metal_backend_t const 
 }
 
 /** One vocabulary against one corpus under every policy, and scored. */
-static void check_policies_(sz_stream_t queue, metal_backend_t const &backend,
-                            std::vector<std::string> const &haystacks, std::vector<std::string> const &needles,
-                            sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
+static void check_policies_(metal_backend_t const &backend, std::vector<std::string> const &haystacks,
+                            std::vector<std::string> const &needles,
+                            sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k,
+                            sz_substrings_case_sensitivity_t sensitivity = sz_substrings_cased_k) {
+    sz_stream_t const queue = backend.stream;
     substrings_metal_texts_t corpus(queue, haystacks), vocabulary(queue, needles);
-    check_against_serial_(queue, backend, corpus, vocabulary, sz_substrings_overlapping_k, sz_substrings_cover_exact_k);
-    check_against_serial_(queue, backend, corpus, vocabulary, sz_substrings_leftmost_longest_k, fidelity);
-    check_against_serial_(queue, backend, corpus, vocabulary, sz_substrings_leftmost_first_k, fidelity);
-    check_bm25_against_serial_(queue, backend, corpus, vocabulary);
+    check_against_serial_(backend, corpus, vocabulary, sz_substrings_overlapping_k, sz_substrings_cover_exact_k,
+                          sensitivity);
+    check_against_serial_(backend, corpus, vocabulary, sz_substrings_leftmost_longest_k, fidelity, sensitivity);
+    check_against_serial_(backend, corpus, vocabulary, sz_substrings_leftmost_first_k, fidelity, sensitivity);
+    check_bm25_against_serial_(backend, corpus, vocabulary, sensitivity);
 }
 
 #pragma endregion Substrings Helpers
@@ -885,10 +935,10 @@ static void check_policies_(sz_stream_t queue, metal_backend_t const &backend,
 
 /** The chunk-boundary cases a single-chain host walk cannot express, and random corpora wide
  *  enough that the planner cuts several chunks per haystack, on @p queue. */
-static void test_substrings_metal_equivalence(test_context_t &context, sz_stream_t queue,
-                                              metal_backend_t const &backend) {
+static void test_substrings_metal_equivalence(test_context_t &context, metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     std::mt19937 &generator = context.generator;
-    check_policies_(queue, backend, {"ushers"}, {"he", "she", "his", "hers"});
+    check_policies_(backend, {"ushers"}, {"he", "she", "his", "hers"});
 
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
     std::size_t const rounds = context.iterations(8);
@@ -901,7 +951,7 @@ static void test_substrings_metal_equivalence(test_context_t &context, sz_stream
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 1 + (round * 5) % 9; ++index)
             haystacks.push_back(random_string(generator, 4096 + index * 977, alphabet));
-        check_policies_(queue, backend, haystacks, needles, sz_substrings_cover_approximate_k);
+        check_policies_(backend, haystacks, needles, sz_substrings_cover_approximate_k);
     }
 
     // A vocabulary wider than a threadgroup's tally, so needles hash into its slots and
@@ -924,28 +974,29 @@ static void test_substrings_metal_equivalence(test_context_t &context, sz_stream
         haystacks.insert(haystacks.begin() + 64, every_needle);
         substrings_metal_texts_t corpus(queue, haystacks), vocabulary(queue, needles);
         verify(vocabulary.views.size() > 2048);
-        check_bm25_against_serial_(queue, backend, corpus, vocabulary);
+        check_bm25_against_serial_(backend, corpus, vocabulary);
     }
 
     // One haystack far wider than a chunk, so the boundary case is hit many times over in a
     // single walk. No needle reaches across another's end, so the cover is exact and the rewrite
     // spans many tiles.
-    check_policies_(queue, backend, {random_string(generator, 1 << 20, "the ")}, {"the", "there", "here", "her", "he"});
+    check_policies_(backend, {random_string(generator, 1 << 20, "the ")}, {"the", "there", "here", "her", "he"});
 }
 
 /** What the device verbs refuse, and what the report says when an output cannot hold the answer. */
-static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t const &backend) {
+static void test_substrings_metal_safety(metal_backend_t const &backend) {
+    sz_stream_t const queue = backend.stream;
     substrings_metal_texts_t corpus(queue, {"abcdabcd"}), vocabulary(queue, {"ab", "cd"});
-    substrings_metal_engines_t engines(queue, vocabulary.tape.sequence, sz_substrings_overlapping_k);
-    sz_sequence_t const *const haystacks = &corpus.tape.sequence;
+    substrings_metal_engines_t engines(vocabulary.tape.sequence(), sz_substrings_overlapping_k, backend);
+    sz_sequence_t const corpus_tape_sequence = corpus.tape.sequence();
+    sz_sequence_t const *const haystacks = &corpus_tape_sequence;
 
-    // Folding walks the host tiers' Unicode tables, which have no Metal port, so it is
-    // refused at init.
     {
         sz_substrings_engine_t uncased {};
-        verify(sz_substrings_engine_init(&uncased, &vocabulary.tape.sequence, sz_substrings_uncased_k,
+        sz_sequence_t const vocabulary_tape_sequence = vocabulary.tape.sequence();
+        verify(sz_substrings_engine_init(&uncased, &vocabulary_tape_sequence, sz_substrings_uncased_k,
                                          sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                         metal_capabilities_(), STRINGZILLA_NULL, queue) == sz_device_code_mismatch_k);
+                                         backend.capabilities, STRINGZILLA_NULL, queue) == sz_device_code_mismatch_k);
         verify(uncased.memory == STRINGZILLA_NULL);
     }
 
@@ -979,7 +1030,8 @@ static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t cons
     {
         substrings_metal_texts_t replacements(queue, {"x", "y"});
         metal_vector<sz_size_t> offsets(2, 0, metal_unified_alloc<sz_size_t>(queue));
-        verify(backend.substrings_replace(&engines.device, haystacks, &replacements.tape.sequence, nullptr, 0,
+        sz_sequence_t const replacements_tape_sequence = replacements.tape.sequence();
+        verify(backend.substrings_replace(&engines.device, haystacks, &replacements_tape_sequence, nullptr, 0,
                                           offsets.data(), queue) == sz_status_unknown_k);
     }
 
@@ -988,9 +1040,10 @@ static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t cons
     {
         sz_substrings_engine_t tiny {};
         metal_vector<sz_size_t> offsets(2, STRINGZILLA_SIZE_MAX, metal_unified_alloc<sz_size_t>(queue));
-        verify(sz_substrings_engine_init(&tiny, &vocabulary.tape.sequence, sz_substrings_cased_k,
+        sz_sequence_t const vocabulary_tape_sequence = vocabulary.tape.sequence();
+        verify(sz_substrings_engine_init(&tiny, &vocabulary_tape_sequence, sz_substrings_cased_k,
                                          sz_substrings_leftmost_first_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 1, 0,
-                                         metal_capabilities_(), STRINGZILLA_NULL, queue) == sz_success_k);
+                                         backend.capabilities, STRINGZILLA_NULL, queue) == sz_success_k);
         verify(backend.substrings_find(&tiny, haystacks, nullptr, 0, offsets.data(), queue) == sz_success_k);
         verify(sz_stream_synchronize_metal(queue) == sz_success_k);
         verify(tiny.report->matches_emitted == 4 && tiny.report->shortfall == 3);
@@ -1004,10 +1057,12 @@ static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t cons
         substrings_metal_texts_t pair(queue, {"abcd", "abcd"});
         sz_substrings_engine_t narrow {};
         metal_vector<sz_size_t> offsets(3, STRINGZILLA_SIZE_MAX, metal_unified_alloc<sz_size_t>(queue));
-        verify(sz_substrings_engine_init(&narrow, &vocabulary.tape.sequence, sz_substrings_cased_k,
+        sz_sequence_t const vocabulary_tape_sequence = vocabulary.tape.sequence();
+        verify(sz_substrings_engine_init(&narrow, &vocabulary_tape_sequence, sz_substrings_cased_k,
                                          sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 1,
-                                         metal_capabilities_(), STRINGZILLA_NULL, queue) == sz_success_k);
-        verify(backend.substrings_find(&narrow, &pair.tape.sequence, nullptr, 0, offsets.data(), queue) ==
+                                         backend.capabilities, STRINGZILLA_NULL, queue) == sz_success_k);
+        sz_sequence_t const pair_tape_sequence = pair.tape.sequence();
+        verify(backend.substrings_find(&narrow, &pair_tape_sequence, nullptr, 0, offsets.data(), queue) ==
                sz_unexpected_dimensions_k);
         verify(sz_stream_synchronize_metal(queue) == sz_success_k);
         verify(offsets[0] == STRINGZILLA_SIZE_MAX && "A refused round touched the caller's boundaries");
@@ -1020,32 +1075,33 @@ static void test_substrings_metal_safety(sz_stream_t queue, metal_backend_t cons
 #pragma region Drivers
 
 /** Registers every check of the Metal kernels, or of the dispatch points, in @p check. */
-static void check_metal_backend_(cross_section_t &check, sz_stream_t queue, metal_backend_t const &backend) {
+static void check_metal_backend_(cross_section_t &check, metal_backend_t const &backend) {
     std::string const suffix = backend.name;
     check("test_levenshtein_equivalence_" + suffix, [&] {
-        check_levenshtein_metal_equivalence_(queue, levenshtein_metal_alphabet_t::bytes_k, sz_levenshtein_bytes_k,
-                                             backend);
-        check_levenshtein_metal_equivalence_(queue, levenshtein_metal_alphabet_t::runes_k, sz_levenshtein_runes_k,
-                                             backend);
-        check_levenshtein_metal_equivalence_(queue, levenshtein_metal_alphabet_t::bytes_k, sz_levenshtein_runes_k,
-                                             backend);
+        check_levenshtein_metal_equivalence_(levenshtein_metal_alphabet_t::bytes_k, sz_levenshtein_bytes_k, backend);
+        check_levenshtein_metal_equivalence_(levenshtein_metal_alphabet_t::runes_k, sz_levenshtein_runes_k, backend);
+        check_levenshtein_metal_equivalence_(levenshtein_metal_alphabet_t::bytes_k, sz_levenshtein_runes_k, backend);
     });
     check("test_levenshtein_safety_" + suffix,
-          [&](test_context_t &context) { check_levenshtein_metal_memory_safety_(queue, context.generator, backend); });
+          [&](test_context_t &context) { check_levenshtein_metal_memory_safety_(context.generator, backend); });
     check("test_overlap_equivalence_" + suffix,
-          [&](test_context_t &context) { check_overlap_metal_equivalence_(queue, context.generator, backend); });
+          [&](test_context_t &context) { check_overlap_metal_equivalence_(context.generator, backend); });
     check("test_overlap_safety_" + suffix, [&](test_context_t &context) {
-        check_overlap_metal_memory_safety_(queue, context.generator, backend);
-        check_overlap_metal_width_safety_(queue, context.generator, backend);
+        check_overlap_metal_memory_safety_(context.generator, backend);
+        check_overlap_metal_width_safety_(context.generator, backend);
     });
     check("test_substrings_equivalence_" + suffix,
-          [&](test_context_t &context) { test_substrings_metal_equivalence(context, queue, backend); });
-    check("test_substrings_safety_" + suffix, [&] { test_substrings_metal_safety(queue, backend); });
+          [&](test_context_t &context) { test_substrings_metal_equivalence(context, backend); });
+    check("test_substrings_safety_" + suffix, [&] { test_substrings_metal_safety(backend); });
 }
 
-std::size_t test_cross_metal(environment_t const &env, sz_stream_t queue) {
+static std::size_t test_cross_metal_(environment_t const &env, sz_stream_t queue, std::size_t ordinal) {
+    sz_capability_t capabilities = 0;
+    verify(sz_capabilities_enabled_metal(ordinal, &capabilities) == sz_success_k);
     metal_backend_t const metal {
         "metal",
+        capabilities,
+        queue,
         sz_levenshtein_distances_metal,
         sz_overlap_scores_metal,
         sz_substrings_counts_metal,
@@ -1054,7 +1110,7 @@ std::size_t test_cross_metal(environment_t const &env, sz_stream_t queue) {
         sz_substrings_bm25_scores_metal,
     };
     cross_section_t check(env);
-    check.detected = metal_capabilities_();
+    check.detected = metal.capabilities;
     check.section("Cross Metal", sz_cap_metal_k);
     check("test_allocator_metal", [&] {
         sz_allocator_t unified, device;
@@ -1087,31 +1143,77 @@ std::size_t test_cross_metal(environment_t const &env, sz_stream_t queue) {
         verify(sz_sequence_realloc_metal(&borrowed, &tape, &unified, &borrowed_bytes, queue) == sz_success_k);
         verify(borrowed.handle == tape.handle && !borrowed_bytes);
         unified.free(const_cast<void *>(tape.handle), bytes, unified.handle, queue);
+        std::vector<sz_string_view_t> views {{"abc", 3}, {"de", 2}};
+        tape_t owner(unified_alloc<char>(unified, queue)), independent(unified_alloc<char>(unified, queue));
+        verify(owner.assign(views) == status_t::success_k);
+        verify(owner.sequence().get_start == sz_sequence_tape_start);
+        void const *const original = owner.sequence().handle;
+        for (sz_size_t index = 0; index != views.size(); ++index)
+            views[index] = {owner[index].data(), owner[index].size()};
+        verify(owner.assign(views) == status_t::success_k);
+        verify(owner.sequence().handle != original);
+        for (sz_size_t index = 0; index != views.size(); ++index)
+            views[index] = {owner[index].data(), owner[index].size()};
+        verify(independent.assign(views) == status_t::success_k);
+        owner.reset();
+        verify(std::string_view(independent[1].data(), independent[1].size()) == "de");
     });
-    check_metal_backend_(check, queue, metal);
+    check("test_metal_concurrent_synchronize", [&] { check_metal_concurrent_synchronize_(queue); });
+    check_metal_backend_(check, metal);
     return check.failures;
 }
 
 /** The dispatching entry points on @p queue, and the refusals, asynchrony, threading and deferred
  *  frees only a dispatch point's engine init promises. */
-std::size_t test_cross_dispatch(environment_t const &env, sz_stream_t queue) {
+static std::size_t test_cross_dispatch_metal_(environment_t const &env, sz_stream_t queue, std::size_t ordinal) {
+    sz_capability_t capabilities = 0;
+    verify(sz_capabilities_enabled_metal(ordinal, &capabilities) == sz_success_k);
     metal_backend_t const dispatched {
-        "dispatched",       sz_levenshtein_distances, sz_overlap_scores,         sz_substrings_counts,
-        sz_substrings_find, sz_substrings_replace,    sz_substrings_bm25_scores,
+        "dispatched",
+        capabilities,
+        queue,
+        sz_levenshtein_distances,
+        sz_overlap_scores,
+        sz_substrings_counts,
+        sz_substrings_find,
+        sz_substrings_replace,
+        sz_substrings_bm25_scores,
     };
     cross_section_t check(env);
-    check.detected = metal_capabilities_();
+    check.detected = dispatched.capabilities;
     check.section("Cross Dispatch", sz_cap_metal_k);
-    check_metal_backend_(check, queue, dispatched);
-    check("test_levenshtein_refusals_dispatched", [&] { check_levenshtein_metal_query_safety_(queue); });
-    check("test_levenshtein_asynchrony_dispatched", [&] { check_levenshtein_metal_asynchrony_(queue); });
-    check("test_levenshtein_threads_dispatched", [&] { check_levenshtein_metal_threads_(queue); });
-    check("test_levenshtein_deferred_free_dispatched", [&] { check_levenshtein_metal_deferred_free_(queue); });
+    check_metal_backend_(check, dispatched);
+    check("test_levenshtein_refusals_dispatched", [&] { check_levenshtein_metal_query_safety_(dispatched); });
+    check("test_levenshtein_asynchrony_dispatched", [&] { check_levenshtein_metal_asynchrony_(dispatched); });
+    check("test_levenshtein_threads_dispatched", [&] { check_levenshtein_metal_threads_(dispatched, ordinal); });
+    check("test_levenshtein_deferred_free_dispatched", [&] { check_levenshtein_metal_deferred_free_(dispatched); });
     check("test_overlap_asynchrony_dispatched",
-          [&](test_context_t &context) { check_overlap_metal_asynchrony_(queue, context.generator); });
+          [&](test_context_t &context) { check_overlap_metal_asynchrony_(dispatched, context.generator); });
     return check.failures;
 }
 
 #pragma endregion Drivers
+
+#endif
+
+std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
+#if STRINGZILLA_WITH_METAL
+    stream_t queue(ordinal, sz_stream_init_metal, sz_stream_free_metal);
+    std::size_t failures = run_test(env.settings, "test_metal_capabilities_unit", [&] {
+        sz_size_t devices = 0;
+        sz_capability_t reported = 0;
+        verify(sz_device_count_metal(&devices) == sz_success_k && devices != 0);
+        verify(sz_capabilities_detected_metal(ordinal, &reported) == sz_success_k && reported == sz_cap_metal_k);
+        verify(sz_capabilities_detected_metal(devices, &reported) == sz_missing_gpu_k);
+    });
+    failures += test_cross_metal_(env, queue.handle, ordinal);
+    failures += test_cross_dispatch_metal_(env, queue.handle, ordinal);
+    return failures;
+#else
+    sz_unused_(env);
+    sz_unused_(ordinal);
+    return 0;
+#endif
+}
 
 } // namespace ashvardanian::stringzilla::test

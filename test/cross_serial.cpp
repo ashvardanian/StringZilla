@@ -29,7 +29,7 @@ std::size_t test_cross_serial(environment_t const &env) {
 
     check("test_sequence_realloc_overflow_serial", [] {
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        verify(sz_allocator_init_heap(&allocator) == sz_success_k);
         sz_sequence_t source {}, target {};
         sz_size_t bytes = 17;
         source.count = STRINGZILLA_SIZE_MAX;

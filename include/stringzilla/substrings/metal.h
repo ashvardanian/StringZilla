@@ -39,7 +39,7 @@ extern "C" {
 
 /** The MSL source of the substrings kernels, compiled once per device behind the shared prelude. */
 static char const sz_substrings_source_metal_[] = {
-#embed "metal.metal"
+#embed "stringzilla/substrings/metal.metal"
     , 0};
 #pragma clang diagnostic pop
 
@@ -179,7 +179,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_encode_one_metal_(sz_metal_call_t *
 STRINGZILLA_INLINE sz_status_t sz_substrings_clear_metal_(sz_metal_call_t *call, sz_metal_bound_t *buffers,
                                                           sz_substrings_arguments_metal_t *arguments, void const *begin,
                                                           sz_size_t bytes) {
-    if (!sz_metal_resolve_(call->context, begin, bytes, buffers + sz_substrings_cleared_buffer_metal_k))
+    if (!sz_metal_resolve_call_(call, begin, bytes, buffers + sz_substrings_cleared_buffer_metal_k))
         return sz_device_memory_mismatch_k;
     arguments->clear_words = bytes / 8;
     return sz_substrings_encode_metal_(call, buffers, "sz_substrings_clear_metal_kernel_", arguments,
@@ -196,8 +196,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_scan_metal_(sz_metal_call_t *call, 
     sz_metal_size_t const tile_groups = {tiles, 1, 1}, one = {1, 1, 1};
     sz_status_t status;
     if (!count) return sz_success_k;
-    if (!sz_metal_resolve_(call->context, values, count * sizeof(sz_size_t),
-                           buffers + sz_substrings_scanned_buffer_metal_k))
+    if (!sz_metal_resolve_call_(call, values, count * sizeof(sz_size_t),
+                                buffers + sz_substrings_scanned_buffer_metal_k))
         return sz_device_memory_mismatch_k;
     arguments->scan_count = count, arguments->scan_tiles = tiles;
     arguments->scan_elements_per_tile = sz_size_divide_round_up(count, tiles);
@@ -216,12 +216,12 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_scan_metal_(sz_metal_call_t *call, 
 STRINGZILLA_INLINE sz_status_t sz_substrings_resident_metal_(sz_substrings_engine_t const *engine,
                                                              sz_metal_call_t *call, sz_sequence_t const *haystacks,
                                                              sz_metal_bound_t *buffers) {
-    if (!sz_metal_resolve_(call->context, engine->memory, engine->memory_bytes,
-                           buffers + sz_substrings_memory_buffer_metal_k) ||
-        !sz_metal_resolve_(call->context, engine->scratch, engine->scratch_bytes,
-                           buffers + sz_substrings_scratch_buffer_metal_k))
+    if (!sz_metal_resolve_call_(call, engine->memory, engine->memory_bytes,
+                                buffers + sz_substrings_memory_buffer_metal_k) ||
+        !sz_metal_resolve_call_(call, engine->scratch, engine->scratch_bytes,
+                                buffers + sz_substrings_scratch_buffer_metal_k))
         return sz_device_memory_mismatch_k;
-    return sz_metal_tape_(call->context, haystacks, buffers + sz_substrings_haystacks_buffer_metal_k);
+    return sz_metal_tape_call_(call, haystacks, buffers + sz_substrings_haystacks_buffer_metal_k);
 }
 
 /** Zeroes @p arguments and fills what every dispatch of a round reads: the blocks' host addresses
@@ -266,8 +266,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
     void const *const boundaries_start = haystack_offsets ? (void const *)haystack_offsets
                                                           : (void const *)(block + arena.haystack_offsets);
-    if (!sz_metal_resolve_(call->context, boundaries_start, boundaries * sizeof(sz_size_t),
-                           buffers + sz_substrings_boundaries_buffer_metal_k))
+    if (!sz_metal_resolve_call_(call, boundaries_start, boundaries * sizeof(sz_size_t),
+                                buffers + sz_substrings_boundaries_buffer_metal_k))
         return sz_device_memory_mismatch_k;
 
     arguments->report = (sz_u64_t)(block + arena.report);
@@ -346,15 +346,15 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     sz_metal_bound_t bound;
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
-    if (status != sz_success_k) return status;
-    if (case_sensitivity == sz_substrings_uncased_k) return sz_device_code_mismatch_k;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (case_sensitivity == sz_substrings_uncased_k) return sz_metal_commit_(&call, sz_device_code_mismatch_k);
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
     if (!matches_budget) matches_budget = (sz_size_t)sz_substrings_gpu_matches_budget_default_k;
     if (!haystacks_budget) haystacks_budget = (sz_size_t)sz_substrings_gpu_haystacks_budget_default_k;
     status = sz_substrings_engine_compile_(needles, case_sensitivity, overlap_policy, hot_states, matches_budget,
                                            sz_cap_metal_k, &unified, stream, engine);
-    if (status != sz_success_k) return status;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
     engine->chunk_budget = sz_substrings_chunk_budget_metal_k;
     engine->haystacks_budget = haystacks_budget;
 
@@ -362,8 +362,8 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     engine->scratch = unified.allocate(scratch_bytes, unified.handle, stream);
     engine->scratch_bytes = engine->scratch ? scratch_bytes : 0;
     if (!engine->scratch) status = sz_bad_alloc_k;
-    else if (!sz_metal_resolve_(call.context, engine->memory, engine->memory_bytes, &bound) ||
-             !sz_metal_resolve_(call.context, engine->scratch, engine->scratch_bytes, &bound))
+    else if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &bound) ||
+             !sz_metal_resolve_call_(&call, engine->scratch, engine->scratch_bytes, &bound))
         status = sz_device_memory_mismatch_k;
     // Building every pipeline here keeps the compiles out of the rounds.
     for (sz_size_t index = 0; status == sz_success_k &&
@@ -373,10 +373,10 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
             status = sz_device_code_mismatch_k;
     if (status != sz_success_k) {
         sz_substrings_engine_free_(engine, stream);
-        return status;
+        return sz_metal_commit_(&call, status);
     }
     engine->report = (sz_substrings_report_t *)engine->scratch;
-    return sz_success_k;
+    return sz_metal_commit_(&call, sz_success_k);
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
@@ -389,10 +389,10 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *e
     if (!haystacks->count) return sz_success_k;
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
-    if (status != sz_success_k) return status;
-    if (!sz_metal_resolve_(call.context, counts, ((haystacks->count - 1) * counts_stride + 1) * sizeof(sz_size_t),
-                           buffers + sz_substrings_counts_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (!sz_metal_resolve_call_(&call, counts, ((haystacks->count - 1) * counts_stride + 1) * sizeof(sz_size_t),
+                                buffers + sz_substrings_counts_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
 
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     status = sz_substrings_walk_metal_(engine, &call, buffers, haystacks, sz_false_k, STRINGZILLA_NULL, &arguments);
@@ -414,13 +414,13 @@ STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *eng
     if (!haystacks->count) return sz_success_k;
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
-    if (status != sz_success_k) return status;
-    if (!sz_metal_resolve_(call.context, matches_offsets, (haystacks->count + 1) * sizeof(sz_size_t), &bound))
-        return sz_device_memory_mismatch_k;
-    if (matches_capacity && !sz_metal_resolve_(call.context, matches, matches_capacity * sizeof(sz_substrings_match_t),
-                                               buffers + sz_substrings_matches_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
-    if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (!sz_metal_resolve_call_(&call, matches_offsets, (haystacks->count + 1) * sizeof(sz_size_t), &bound))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    if (matches_capacity && !sz_metal_resolve_call_(&call, matches, matches_capacity * sizeof(sz_substrings_match_t),
+                                                    buffers + sz_substrings_matches_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    if (haystacks->count > engine->haystacks_budget) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     // The boundaries kernel retires when the matches did not fit, so the caller's array
     // is zeroed first.
@@ -456,14 +456,14 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
     if (status == sz_success_k)
-        status = sz_metal_tape_(call.context, replacements, buffers + sz_substrings_replacements_buffer_metal_k);
-    if (status != sz_success_k) return status;
-    if (!sz_metal_resolve_(call.context, offsets, boundaries * sizeof(sz_size_t),
-                           buffers + sz_substrings_offsets_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
+        status = sz_metal_tape_call_(&call, replacements, buffers + sz_substrings_replacements_buffer_metal_k);
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (!sz_metal_resolve_call_(&call, offsets, boundaries * sizeof(sz_size_t),
+                                buffers + sz_substrings_offsets_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     if (target_capacity &&
-        !sz_metal_resolve_(call.context, target, target_capacity, buffers + sz_substrings_target_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
+        !sz_metal_resolve_call_(&call, target, target_capacity, buffers + sz_substrings_target_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
 
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     status = sz_substrings_walk_metal_(engine, &call, buffers, haystacks, sz_true_k, STRINGZILLA_NULL, &arguments);
@@ -511,17 +511,17 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     if (!haystacks->count) return sz_success_k;
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
-    if (status != sz_success_k) return status;
-    if (!sz_metal_resolve_(call.context, scores, ((haystacks->count - 1) * scores_stride + 1) * sizeof(sz_f32_t),
-                           buffers + sz_substrings_scores_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
-    if (!sz_metal_resolve_(call.context, needle_weights, engine->needles_count * sizeof(sz_f32_t),
-                           buffers + sz_substrings_weights_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
-    if (document_lengths && !sz_metal_resolve_(call.context, document_lengths, haystacks->count * sizeof(sz_f32_t),
-                                               buffers + sz_substrings_lengths_buffer_metal_k))
-        return sz_device_memory_mismatch_k;
-    if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
+    if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (!sz_metal_resolve_call_(&call, scores, ((haystacks->count - 1) * scores_stride + 1) * sizeof(sz_f32_t),
+                                buffers + sz_substrings_scores_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    if (!sz_metal_resolve_call_(&call, needle_weights, engine->needles_count * sizeof(sz_f32_t),
+                                buffers + sz_substrings_weights_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    if (document_lengths && !sz_metal_resolve_call_(&call, document_lengths, haystacks->count * sizeof(sz_f32_t),
+                                                    buffers + sz_substrings_lengths_buffer_metal_k))
+        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
+    if (haystacks->count > engine->haystacks_budget) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     arguments.overflow_rows = (sz_u64_t)((char *)engine->scratch + arena.overflow_rows);

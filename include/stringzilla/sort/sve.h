@@ -177,7 +177,8 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_sve_(sz_pgram_t *pgrams, sz_size_t
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -320,7 +321,8 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_sve(sz_sequence_t const *sequenc
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 
@@ -351,7 +353,8 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_sve(               //
 
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 

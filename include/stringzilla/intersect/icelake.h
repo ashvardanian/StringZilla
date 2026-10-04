@@ -94,7 +94,8 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
     // Simplify usage in higher-level libraries, where wrapping custom allocators may be troublesome.
     sz_allocator_t global_alloc;
     if (!allocator) {
-        sz_allocator_init_default(&global_alloc);
+        sz_status_t const status = sz_allocator_init_heap(&global_alloc);
+        if (status != sz_success_k) return status;
         allocator = &global_alloc;
     }
 

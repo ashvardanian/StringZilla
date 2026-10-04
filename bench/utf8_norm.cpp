@@ -26,9 +26,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_UNIQUE=1 \
- *      STRINGWARS_FILTER='utf8_(norm|find_denormalized)' build_release/stringzilla_cpu_bench
+ *      STRINGWARS_FILTER='utf8_(norm|find_denormalized)' build_release/stringzilla_bench
  *  @endcode
  *
  *  This file is the sibling of `utf8_uncased.cpp`, `utf8_traverse.cpp`, `utf8_scan.cpp`,

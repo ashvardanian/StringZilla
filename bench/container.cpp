@@ -16,8 +16,8 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
- *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words STRINGWARS_FILTER=map build_release/stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
+ *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=words STRINGWARS_FILTER=map build_release/stringzilla_bench
  *  @endcode
  *
  *  Alternatively, if you really want to stress-test a very specific function on a certain size
@@ -26,7 +26,7 @@
  *
  *  @code{.sh}
  *  STRINGWARS_DATASET=leipzig1M.txt STRINGWARS_TOKENS=64 STRINGWARS_FILTER=skylake
- *  build_release/stringzilla_cpu_bench
+ *  build_release/stringzilla_bench
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
@@ -36,6 +36,8 @@
 #include <unordered_map> // `std::unordered_map`
 
 #include <fmt/format.h>
+
+#include "stringzilla/stringzilla.hpp"
 
 #include "cross.hpp"
 

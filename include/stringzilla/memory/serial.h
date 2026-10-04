@@ -76,7 +76,7 @@ STRINGZILLA_INLINE void sz_move_serial_(sz_ptr_t target, sz_cptr_t source, sz_si
 }
 
 /** Writes @p source into a fresh tape from @p allocator and points @p target at it through the host
- *  tape accessors, which every group's copy starts from and a device one then replaces. */
+ *  tape accessors, shared by every backend. */
 STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_serial_(sz_sequence_t *target, sz_sequence_t const *source,
                                                            sz_allocator_t *allocator, sz_size_t *allocated_bytes,
                                                            sz_stream_t stream) {
@@ -130,15 +130,14 @@ STRINGZILLA_API sz_status_t sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator) {
-    sz_allocator_init_default(allocator);
-    return sz_success_k;
+    return sz_allocator_init_heap(allocator);
 }
 
 STRINGZILLA_API sz_status_t sz_sequence_realloc_serial(sz_sequence_t *target, sz_sequence_t const *source,
                                                        sz_allocator_t *allocator, sz_size_t *allocated_bytes,
                                                        sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    if (source->get_start != sz_sequence_tape_start)
+    if (source->get_start != sz_sequence_tape_start || source->get_length != sz_sequence_tape_length)
         return sz_sequence_realloc_serial_(target, source, allocator, allocated_bytes, stream);
     *target = *source;
     *allocated_bytes = 0;

@@ -9,13 +9,13 @@
  *  architecture's kernels by name, one section per capability, stress-tested against the serial
  *  kernel of the same operation and logged relative to it, which `cross_serial.cpp` times first.
  *
- *  Nothing here may reach a dispatch point or `stringzilla.hpp`, because the header-only benchmark
- *  runs these kernels without the compiled library, where every dispatch point is a stub.
+ *  CPU paths use direct kernels so header-only benchmarks need no compiled dispatch library.
  */
 #pragma once
 #ifndef STRINGZILLA_BENCH_CROSS_HPP
 #define STRINGZILLA_BENCH_CROSS_HPP
 
+#include <bit>     // `std::bit_cast`
 #include <cstdint> // `std::uintptr_t`
 #include <cstring> // `std::memcpy`
 
@@ -30,14 +30,13 @@
 #include <string_view>   // `std::string_view`
 #include <unordered_map> // `std::unordered_map`
 #include <unordered_set> // `std::unordered_set`
+#include <variant>       // `std::variant`
 #include <vector>        // `std::vector`
 
 #include <fmt/format.h>
 
 #include "harness.hpp"
-#if !STRINGZILLA_HEADER_ONLY
 #include "substrings.cuh" // `substrings_dictionary_t`, `substrings_counts_from_sz`
-#endif
 
 namespace ashvardanian::stringzilla::bench {
 
@@ -650,14 +649,14 @@ inline std::size_t accumulate_lengths(strings_t const &strings) {
                            [](std::size_t sum, std::string_view const &str) { return sum + str.size(); });
 }
 
-/** Trampoline function to access @b sz_cptr_t[] arrays via @c sz_sequence_t::get_start. */
-inline sz_cptr_t get_start(void const *handle, sz_size_t i) {
+/** Reads a string start from a @c strings_t collection. */
+inline sz_cptr_t strings_get_start_(void const *handle, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].data();
 }
 
-/** Trampoline function to access @b sz_cptr_t[] arrays via @c sz_sequence_t::get_length. */
-inline sz_size_t get_length(void const *handle, sz_size_t i) {
+/** Reads a string length from a @c strings_t collection. */
+inline sz_size_t strings_get_length_(void const *handle, sz_size_t i) {
     strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
     return array[i].size();
 }
@@ -675,10 +674,11 @@ struct argsort_strings_via_sz {
         sz_sequence_t array;
         array.count = input.size();
         array.handle = &input;
-        array.get_start = get_start;
-        array.get_length = get_length;
+        array.get_start = strings_get_start_;
+        array.get_length = strings_get_length_;
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
         if (func_(&array, 0, sz_false_k, &allocator, output.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The argsort failed.");
 
@@ -728,10 +728,11 @@ struct argsort_ci_strings_via_sz {
         sz_sequence_t array;
         array.count = input.size();
         array.handle = &input;
-        array.get_start = get_start;
-        array.get_length = get_length;
+        array.get_start = strings_get_start_;
+        array.get_length = strings_get_length_;
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
         if (func_(&array, 0, sz_false_k, &allocator, output.data(), nullptr) != sz_success_k)
             throw std::runtime_error("The uncased argsort failed.");
 
@@ -766,7 +767,8 @@ struct sort_pgrams_via_sz {
         std::iota(output_permutation.begin(), output_permutation.end(), 0);
 
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
         if (func_(output_sorted.data(), output_sorted.size(), &allocator, output_permutation.data()) != sz_success_k)
             throw std::runtime_error("The pgram sort failed.");
 
@@ -810,16 +812,17 @@ struct intersect_strings_via_sz {
         sz_sequence_t array_a, array_b;
         array_a.count = input_a.size();
         array_a.handle = &input_a;
-        array_a.get_start = get_start;
-        array_a.get_length = get_length;
+        array_a.get_start = strings_get_start_;
+        array_a.get_length = strings_get_length_;
         array_b.count = input_b.size();
         array_b.handle = &input_b;
-        array_b.get_start = get_start;
-        array_b.get_length = get_length;
+        array_b.get_start = strings_get_start_;
+        array_b.get_length = strings_get_length_;
 
         sz_size_t intersections = 0;
         sz_allocator_t allocator;
-        sz_allocator_init_default(&allocator);
+        if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
         if (func_(&array_a, &array_b, &allocator, 0, &intersections, output_a.data(), output_b.data(), nullptr) !=
             sz_success_k)
             throw std::runtime_error("The intersection failed.");
@@ -1362,9 +1365,6 @@ inline constexpr std::size_t levenshtein_step_lanes_k = (std::size_t)sz_levensht
 /** Positions one step arm walks per call, the transpose width the sweeps feed it from. */
 inline constexpr std::size_t levenshtein_step_positions_k = sz_levenshtein_positions_per_transpose_k;
 
-/** Queries one prepared batch carries, so the sweeps cross a query axis wider than one. */
-inline constexpr std::size_t levenshtein_queries_per_batch_k = 8;
-
 /** The query lengths every sweep runs: the slice's median token, and the 1024 bytes whose match
  *  masks fill a 32 KB L1, where the multi-word regime starts. */
 inline std::array<std::size_t, 2> levenshtein_query_lengths(corpus_t const &corpus) {
@@ -1392,67 +1392,121 @@ inline std::vector<sz_u8_t> levenshtein_staged_classes(corpus_t const &corpus, s
     return classes;
 }
 
-/** One batch prepared per arm by @p init_, scored against the next @c candidates tokens at their
- *  own length. */
-template <sz_kernel_levenshtein_engine_init_t init_, sz_kernel_levenshtein_distances_t function_>
+inline check_value_t levenshtein_check_value(std::span<sz_size_t const> answers) {
+    check_value_t accumulators[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    std::size_t const count = answers.size();
+    std::size_t index = 0;
+    for (; index + 8 <= count; index += 8)
+        for (std::size_t lane = 0; lane != 8; ++lane)
+            accumulators[lane] = accumulators[lane] * 31u + (check_value_t)answers[index + lane];
+    for (; index != count; ++index) {
+        std::size_t const lane = index % 8;
+        accumulators[lane] = accumulators[lane] * 31u + (check_value_t)answers[index];
+    }
+    check_value_t mixed = 0;
+    for (std::size_t lane = 0; lane != 8; ++lane) mixed = mixed * 31u + accumulators[lane];
+    return mixed;
+}
+
+inline check_value_t levenshtein_check_value_rolling_(std::span<sz_size_t const> answers) {
+    check_value_t mixed = 0;
+    for (sz_size_t const distance : answers) mixed = mixed * 31u + distance;
+    return mixed;
+}
+
+/** A prepared batch over rolling corpus tokens or a borrowed resident sequence. */
+template <typename function_type_>
 struct levenshtein_distances_from_sz {
+    function_type_ function;
+    check_value_t (*check)(std::span<sz_size_t const>);
+    std::variant<std::reference_wrapper<corpus_t const>, sz_sequence_t> source;
+    std::vector<sz_string_view_t> query_views, views;
 
-    /** The tokens the queries and candidates are drawn from. */
-    corpus_t const &corpus;
-
-    /** Bytes every query is clamped to. */
-    std::size_t query_bytes;
-
-    /** Candidates one round scores, which is also the row stride. */
-    std::size_t candidates;
-
-    /** @b [queries] the batch was prepared from. */
-    std::vector<sz_string_view_t> query_views;
-
-    /** @b [candidates] one round's texts. */
-    std::vector<sz_string_view_t> views;
-
-    /** @b [queries, candidates] one round's answers. */
-    std::vector<sz_size_t> distances;
-
-    /** The batch, prepared once and reused by every round. */
+    /** Host lengths avoid migrating device tape offsets during the timed readback. */
+    std::span<sz_string_view_t const> fixed_views;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+    std::optional<device_vector<sz_size_t>> device_distances;
+    pinned_vector<sz_size_t> answers;
     sz_levenshtein_engine_t engine {};
 
-    levenshtein_distances_from_sz(corpus_t const &corpus, std::size_t query_bytes, std::size_t candidates,
-                                  sz_levenshtein_symbol_t symbol)
-        : corpus(corpus), query_bytes(query_bytes), candidates(candidates),
-          query_views(levenshtein_queries_per_batch_k), views(candidates),
-          distances(levenshtein_queries_per_batch_k * candidates) {
+    levenshtein_distances_from_sz(auto init, function_type_ function, corpus_t const &corpus, std::size_t query_bytes,
+                                  std::size_t candidates, sz_levenshtein_symbol_t symbol)
+        : function(function), check(levenshtein_check_value_rolling_), source(std::cref(corpus)), query_views(8),
+          views(candidates) {
         for (std::size_t query = 0; query != query_views.size(); ++query) {
-            std::string_view const token = std::string_view(corpus.tokens[query % corpus.tokens.size()]);
-            std::string_view const text = token.substr(0, query_bytes);
-            query_views[query] = {text.data(), text.size()};
+            std::string_view const token = corpus.tokens[query % corpus.tokens.size()];
+            query_views[query] = {token.data(), std::min(token.size(), query_bytes)};
         }
-        sz_sequence_t queries;
-        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
-        if (init_(&engine, &queries, symbol, nullptr, nullptr) != sz_success_k)
-            throw std::runtime_error("The engine could not be prepared.");
+        prepare_(init, symbol, candidates);
     }
-    ~levenshtein_distances_from_sz() { sz_levenshtein_engine_free(&engine, nullptr); }
+
+    /** Both borrowed candidate views must outlive the arm. */
+    levenshtein_distances_from_sz(auto init, function_type_ function, std::span<sz_string_view_t const> queries,
+                                  sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
+                                  sz_levenshtein_symbol_t symbol,
+                                  std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : function(function), check(levenshtein_check_value), source(candidates),
+          query_views(queries.begin(), queries.end()), fixed_views(candidate_views), runtime(runtime) {
+        prepare_(init, symbol, candidates.count);
+    }
+
+    ~levenshtein_distances_from_sz() noexcept {
+        sz_levenshtein_engine_free(&engine, runtime ? runtime->get().stream : nullptr);
+    }
     levenshtein_distances_from_sz(levenshtein_distances_from_sz const &) = delete;
     levenshtein_distances_from_sz &operator=(levenshtein_distances_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t bytes = 0, query_symbols = 0;
-        for (std::size_t query = 0; query != query_views.size(); ++query) query_symbols += query_views[query].length;
-        for (std::size_t candidate = 0; candidate != candidates; ++candidate) {
-            std::string_view const token = corpus.tokens[(token_index + 1 + candidate) % corpus.tokens.size()];
-            views[candidate] = {token.data(), token.size()};
-            bytes += token.size();
+        sz_sequence_t candidates {};
+        std::span<sz_string_view_t const> candidate_views = fixed_views;
+        if (auto const *rolling = std::get_if<std::reference_wrapper<corpus_t const>>(&source)) {
+            corpus_t const &corpus = rolling->get();
+            for (std::size_t candidate = 0; candidate != views.size(); ++candidate) {
+                std::string_view const token = corpus.tokens[(token_index + 1 + candidate) % corpus.tokens.size()];
+                views[candidate] = {token.data(), token.size()};
+            }
+            sz_sequence_from_string_views(views.data(), views.size(), &candidates);
+            candidate_views = views;
         }
-        sz_sequence_t sequence;
-        sz_sequence_from_string_views(views.data(), candidates, &sequence);
-        if (function_(&engine, &sequence, distances.data(), candidates, nullptr) != sz_success_k)
+        else candidates = std::get<sz_sequence_t>(source);
+        sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
+        if (function(&engine, &candidates, runtime ? device_distances->data() : answers.data(), candidates.count,
+                     stream) != sz_success_k)
             throw std::runtime_error("The cross-product entry failed.");
-        // Multiplied rather than summed, so two candidates swapping distances cannot cancel out.
-        check_value_t mixed = 0;
-        for (sz_size_t const distance : distances) mixed = mixed * 31u + distance;
-        return call_result_t(bytes, mixed, query_symbols * bytes);
+        if (runtime) {
+            if (copy_device_to_host(*device_distances, std::span<sz_size_t>(answers), runtime->get()) != sz_success_k ||
+                sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
+                throw std::runtime_error("The answers would not come back.");
+        }
+        std::size_t bytes = 0, query_symbols = 0;
+        for (sz_string_view_t const &view : candidate_views) bytes += view.length;
+        for (sz_string_view_t const &view : query_views) query_symbols += view.length;
+        return call_result_t(bytes, check(answers), query_symbols * bytes);
+    }
+
+  private:
+    void prepare_(auto init, sz_levenshtein_symbol_t symbol, std::size_t candidates) {
+        sz_allocator_t allocator;
+        if (runtime) allocator = runtime->get().unified;
+        else if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+        if (candidates && query_views.size() > (std::numeric_limits<std::size_t>::max)() / candidates)
+            throw std::bad_alloc();
+        std::size_t const count = query_views.size() * candidates;
+        sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
+        answers = pinned_vector<sz_size_t>(
+            count, 0, pinned_alloc<sz_size_t>(runtime ? runtime->get().pinned : allocator, stream));
+        if (runtime) {
+            device_distances.emplace(device_alloc<sz_size_t>(runtime->get().device, stream));
+            if (device_distances->resize_uninitialized(count) != sz::status_t::success_k)
+                throw std::runtime_error("The device would not hold the distances.");
+        }
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
+        if (init(&engine, &queries, symbol, &allocator, stream) != sz_success_k) {
+            sz_levenshtein_engine_free(&engine, stream);
+            throw std::runtime_error("The engine could not be prepared.");
+        }
     }
 };
 
@@ -1554,13 +1608,14 @@ template <sz_kernel_levenshtein_engine_init_t init_, sz_kernel_levenshtein_dista
 void bench_levenshtein_distances_kernels(environment_t &env, std::string_view kit, sz_levenshtein_symbol_t symbol) {
     corpus_t const &corpus = env.corpora.multilingual_lines();
     std::size_t const candidates = candidates_per_call(env, corpus);
-    using serial_t = levenshtein_distances_from_sz<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>;
     for (std::size_t const query_bytes : levenshtein_query_lengths(corpus)) {
         std::string const suffix = fmt::format("{}:q{}", symbol == sz_levenshtein_runes_k ? ":utf8" : "", query_bytes);
-        bench_kernel_unary(env, corpus, fmt::format("sz_levenshtein_distances_{}{}", kit, suffix),
-                           "sz_levenshtein_distances_serial" + suffix,
-                           serial_t {corpus, query_bytes, candidates, symbol},
-                           levenshtein_distances_from_sz<init_, distances_> {corpus, query_bytes, candidates, symbol});
+        bench_kernel_unary(
+            env, corpus, fmt::format("sz_levenshtein_distances_{}{}", kit, suffix),
+            "sz_levenshtein_distances_serial" + suffix,
+            levenshtein_distances_from_sz {sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial, corpus,
+                                           query_bytes, candidates, symbol},
+            levenshtein_distances_from_sz {init_, distances_, corpus, query_bytes, candidates, symbol});
     }
 }
 
@@ -1787,51 +1842,122 @@ struct query_preparation_from_sz {
     }
 };
 
-/** The engine's round over the next @c candidates tokens, its forest prepared at construction. */
-template <sz_kernel_overlap_engine_init_t init_, sz_kernel_overlap_scores_t scores_>
-struct scores_from_sz {
-    corpus_t const &corpus;
-    overlap_query_t const &query;
-    std::size_t candidates;
-    sz_allocator_t allocator;
+struct overlap_corpus_t {
     std::vector<sz_string_view_t> views;
-    std::vector<sz_f32_t> scores;
+    tape_t candidates;
+
+    overlap_corpus_t(std::span<sz_string_view_t const> views, device_backend_t const &runtime)
+        : views(views.begin(), views.end()), candidates(unified_alloc<char>(runtime.unified, runtime.stream)) {
+        sz_sequence_t source {};
+        sz_sequence_from_string_views(this->views.data(), this->views.size(), &source);
+        if (sz::failed(candidates.assign(source))) throw std::runtime_error("Unified memory could not hold the tape.");
+        if (sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
+            throw std::runtime_error("The tape would not reach the device.");
+    }
+    sz_sequence_t host_candidates() const noexcept {
+        sz_sequence_t result {};
+        sz_sequence_from_string_views(views.data(), views.size(), &result);
+        return result;
+    }
+    std::size_t bytes() const noexcept {
+        std::size_t total = 0;
+        for (sz_string_view_t const &view : views) total += view.length;
+        return total;
+    }
+};
+
+inline check_value_t overlap_check_value_bits_(std::span<sz_f32_t const> scores) {
+    check_value_t mixed = 0;
+    for (sz_f32_t const score : scores) mixed = mixed * 31u + std::bit_cast<sz_u32_t>(score);
+    return mixed;
+}
+
+inline check_value_t overlap_check_value_quantized_(std::span<sz_f32_t const> scores) {
+    check_value_t mixed = 0;
+    for (sz_f32_t const score : scores) mixed = mixed * 31u + static_cast<check_value_t>(score * 1048576.0f);
+    return mixed;
+}
+
+/** The same prepared forest scores rolling corpus tokens or a borrowed resident sequence. */
+template <typename function_type_>
+struct scores_from_sz {
+    function_type_ function;
+    check_value_t (*check)(std::span<sz_f32_t const>);
+    std::variant<std::reference_wrapper<corpus_t const>, sz_sequence_t> source;
+    std::vector<sz_string_view_t> views;
+
+    /** Host lengths keep timed metrics from migrating device tape offsets. */
+    std::span<sz_string_view_t const> fixed_views;
+    unified_vector<sz_f32_t> scores;
+    std::size_t width;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
     sz_overlap_engine_t engine {};
 
-    scores_from_sz(corpus_t const &corpus, overlap_query_t const &query, std::size_t candidates)
-        : corpus(corpus), query(query), candidates(candidates), views(candidates), scores(candidates) {
-        sz_allocator_init_default(&allocator);
-        sz_string_view_t const view {query.text.data(), query.text.size()};
-        sz_sequence_t queries {};
-        sz_sequence_from_string_views(&view, 1, &queries);
-        sz_size_t const width = query.width;
-        if (init_(&engine, &queries, &width, 1, 0, &allocator, nullptr) != sz_success_k)
-            throw std::runtime_error("The query forest could not be prepared.");
+    scores_from_sz(auto init, function_type_ function, corpus_t const &corpus, overlap_query_t const &query,
+                   std::size_t candidates)
+        : function(function), check(overlap_check_value_bits_), source(std::cref(corpus)), views(candidates),
+          scores(candidates), width(query.width) {
+        prepare_(init, query.text);
     }
-    ~scores_from_sz() { sz_overlap_engine_free(&engine, nullptr); }
+
+    /** The candidate descriptor borrows its tape for the arm's lifetime. */
+    scores_from_sz(auto init, function_type_ function, std::string_view query, std::size_t width,
+                   sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
+                   std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : function(function), check(overlap_check_value_quantized_), source(candidates), fixed_views(candidate_views),
+          scores(candidates.count, 0.0f,
+                 runtime ? unified_alloc<sz_f32_t>(runtime->get().unified, runtime->get().stream)
+                         : unified_alloc<sz_f32_t>()),
+          width(width), runtime(runtime) {
+        prepare_(init, query);
+    }
+
+    ~scores_from_sz() noexcept { sz_overlap_engine_free(&engine, runtime ? runtime->get().stream : nullptr); }
     scores_from_sz(scores_from_sz const &) = delete;
     scores_from_sz &operator=(scores_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
-        std::size_t bytes = 0, windows = 0;
-        for (std::size_t candidate = 0; candidate != candidates; ++candidate) {
-            std::string_view const text = corpus.tokens[(token_index + candidate) % corpus.tokens.size()];
-            views[candidate] = {text.data(), text.size()};
-            bytes += text.size();
-            windows += query.width <= text.size() ? text.size() - query.width + 1 : 0;
+        sz_sequence_t candidates {};
+        std::span<sz_string_view_t const> candidate_views = fixed_views;
+        if (auto const *rolling = std::get_if<std::reference_wrapper<corpus_t const>>(&source)) {
+            corpus_t const &corpus = rolling->get();
+            for (std::size_t candidate = 0; candidate != views.size(); ++candidate) {
+                std::string_view const text = corpus.tokens[(token_index + candidate) % corpus.tokens.size()];
+                views[candidate] = {text.data(), text.size()};
+            }
+            sz_sequence_from_string_views(views.data(), views.size(), &candidates);
+            candidate_views = views;
         }
-        sz_sequence_t sequence {};
-        sz_sequence_from_string_views(views.data(), candidates, &sequence);
-        if (scores_(&engine, &sequence, scores.data(), candidates, 1, nullptr) != sz_success_k)
+        else candidates = std::get<sz_sequence_t>(source);
+        sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
+        if (function(&engine, &candidates, scores.data(), scores.size(), 1, stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
-        // Multiplied rather than summed, so two candidates swapping scores cannot cancel out.
-        check_value_t mixed = 0;
-        for (sz_f32_t const score : scores) {
-            sz_u32_t bits = 0;
-            std::memcpy(&bits, &score, sizeof(bits));
-            mixed = mixed * 31u + bits;
+        if (runtime && sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
+            throw std::runtime_error("The GPU round did not finish.");
+        std::size_t bytes = 0, windows = 0;
+        for (sz_string_view_t const &view : candidate_views) {
+            sz_size_t const length = view.length;
+            bytes += length;
+            windows += width <= length ? length - width + 1 : 0;
         }
-        return call_result_t(bytes, mixed, windows);
+        return call_result_t(bytes, check(scores), windows);
+    }
+
+  private:
+    void prepare_(auto init, std::string_view query) {
+        sz_allocator_t allocator;
+        if (runtime) allocator = runtime->get().unified;
+        else if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+        sz_string_view_t const view {query.data(), query.size()};
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(&view, 1, &queries);
+        sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
+        if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_sequence_t>(source).count : 0, &allocator,
+                 stream) != sz_success_k) {
+            sz_overlap_engine_free(&engine, stream);
+            throw std::runtime_error("The query forest could not be prepared.");
+        }
     }
 };
 
@@ -1884,17 +2010,13 @@ void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
     std::string const suffix = ":w" + std::to_string(query.width);
     bench_kernel_unary(
         env, corpus, fmt::format("sz_overlap_scores_{}{}", kit, suffix), "sz_overlap_scores_serial" + suffix,
-        scores_from_sz<sz_overlap_engine_init_serial, sz_overlap_scores_serial> {corpus, query, candidates},
-        scores_from_sz<init_, scores_> {corpus, query, candidates});
+        scores_from_sz {sz_overlap_engine_init_serial, sz_overlap_scores_serial, corpus, query, candidates},
+        scores_from_sz {init_, scores_, corpus, query, candidates});
 }
 
 #pragma endregion Overlap
 
 #pragma region Substrings
-
-/*  The arms `substrings.cuh` shares with the GPU compile every vocabulary through the engine's
- *  dispatch point, a stub in header-only builds, so these kernels run in library builds alone. */
-#if !STRINGZILLA_HEADER_ONLY
 
 /** One vocabulary slice of the corpus, compiled, with the label every row over it carries. */
 struct substrings_vocabulary_t {
@@ -1921,7 +2043,8 @@ inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t
         {substrings_slice_t::sampled_k, sz_substrings_cased_k},
     };
     sz_allocator_t allocator;
-    sz_allocator_init_default(&allocator);
+    if (sz_allocator_init_heap(&allocator) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
     for (auto const &[slice, sensitivity] : slices)
         vocabularies.emplace_back(env, corpus, slice, sensitivity, allocator);
     return vocabularies;
@@ -1934,9 +2057,13 @@ inline std::string substrings_cover(substrings_vocabulary_t const &vocabulary, s
 
 /** Times one capability's counting, reporting, rewriting, and scoring over every vocabulary, under
  *  every overlap policy each verb accepts. */
-template <sz_kernel_substrings_counts_t counts_, sz_kernel_substrings_find_t find_,
-          sz_kernel_substrings_replace_t replace_, sz_kernel_substrings_bm25_scores_t bm25_>
+template <sz_kernel_substrings_engine_init_t init_, sz_kernel_substrings_counts_t counts_,
+          sz_kernel_substrings_find_t find_, sz_kernel_substrings_replace_t replace_,
+          sz_kernel_substrings_bm25_scores_t bm25_>
 void bench_substrings_kernels(environment_t &env, std::string_view kit) {
+    sz_allocator_t allocator;
+    if (sz_allocator_init_heap(&allocator) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
     corpus_t const &corpus = env.corpora.multilingual_lines();
     substrings_corpus_t const staged(corpus);
     auto const name = [&](char const *verb, std::string_view of, std::string const &cover) {
@@ -1947,34 +2074,32 @@ void bench_substrings_kernels(environment_t &env, std::string_view kit) {
         substrings_dictionary_t const &dictionary = vocabulary.dictionary;
         if (dictionary.needles.empty()) continue;
         for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
-            substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
+            substrings_engine_t engine(dictionary, policy, init_, allocator);
             std::string const cover = substrings_cover(vocabulary, policy);
             bench_kernel_unary(
                 env, corpus, name("counts", kit, cover), name("counts", "serial", cover),
-                substrings_counts_from_sz<sz_substrings_counts_serial> {engine, staged, staged.haystacks},
-                substrings_counts_from_sz<counts_> {engine, staged, staged.haystacks});
+                substrings_counts_from_sz {sz_substrings_counts_serial, engine, staged, staged.haystacks()},
+                substrings_counts_from_sz {counts_, engine, staged, staged.haystacks()});
             bench_kernel_unary(env, corpus, name("find", kit, cover), name("find", "serial", cover),
-                               substrings_find_from_sz<sz_substrings_find_serial> {engine, staged, staged.haystacks},
-                               substrings_find_from_sz<find_> {engine, staged, staged.haystacks});
+                               substrings_find_from_sz {sz_substrings_find_serial, engine, staged, staged.haystacks()},
+                               substrings_find_from_sz {find_, engine, staged, staged.haystacks()});
         }
         for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
-            substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
+            substrings_engine_t engine(dictionary, policy, init_, allocator);
             std::string const cover = substrings_cover(vocabulary, policy);
             bench_kernel_unary(
                 env, corpus, name("replace", kit, cover), name("replace", "serial", cover),
-                substrings_replace_from_sz<sz_substrings_replace_serial> {engine, staged, staged.haystacks,
-                                                                          dictionary.replacements},
-                substrings_replace_from_sz<replace_> {engine, staged, staged.haystacks, dictionary.replacements});
+                substrings_replace_from_sz {sz_substrings_replace_serial, engine, staged, staged.haystacks(),
+                                            dictionary.replacements()},
+                substrings_replace_from_sz {replace_, engine, staged, staged.haystacks(), dictionary.replacements()});
         }
-        substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
-        bench_kernel_unary(env, corpus, name("bm25_scores", kit, vocabulary.label),
-                           name("bm25_scores", "serial", vocabulary.label),
-                           substrings_bm25_from_sz<sz_substrings_bm25_scores_serial> {engine, staged, staged.haystacks},
-                           substrings_bm25_from_sz<bm25_> {engine, staged, staged.haystacks});
+        substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, init_, allocator);
+        bench_kernel_unary(
+            env, corpus, name("bm25_scores", kit, vocabulary.label), name("bm25_scores", "serial", vocabulary.label),
+            substrings_bm25_from_sz {sz_substrings_bm25_scores_serial, engine, staged, staged.haystacks()},
+            substrings_bm25_from_sz {bm25_, engine, staged, staged.haystacks()});
     }
 }
-
-#endif // !STRINGZILLA_HEADER_ONLY
 
 #pragma endregion Substrings
 

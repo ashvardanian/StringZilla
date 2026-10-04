@@ -31,9 +31,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_FILTER=levenshtein \
- *  build_release/stringzilla_cpu_bench
+ *  build_release/stringzilla_bench
  *  @endcode
  */
 #include <stdexcept>   // `std::runtime_error`
@@ -107,14 +107,16 @@ void bench_levenshtein_one_pair(environment_t const &env, corpus_t const &corpus
 /** Cross-product verbs at one query length, over bytes and runes, on the engine's kernel. */
 void bench_levenshtein_cross_product(environment_t const &env, corpus_t const &corpus, std::size_t query_bytes,
                                      std::size_t candidates) {
-    using verbs_t = levenshtein_distances_from_sz<levenshtein_engine_init_cpu_, sz_levenshtein_distances>;
     std::string const suffix = ":q" + std::to_string(query_bytes);
-    std::optional<row_t> const base = bench_unary(env, corpus, "sz_levenshtein_distances" + suffix,
-                                                  verbs_t {corpus, query_bytes, candidates, sz_levenshtein_bytes_k});
+    std::optional<row_t> const base = bench_unary(
+        env, corpus, "sz_levenshtein_distances" + suffix,
+        levenshtein_distances_from_sz {levenshtein_engine_init_cpu_, sz_levenshtein_distances, corpus, query_bytes,
+                                       candidates, sz_levenshtein_bytes_k});
     print(base);
     // The rune rows decode every candidate byte, so their cost over the byte rows is the decoder's.
     print(bench_unary(env, corpus, "sz_levenshtein_distances:utf8" + suffix,
-                      verbs_t {corpus, query_bytes, candidates, sz_levenshtein_runes_k}),
+                      levenshtein_distances_from_sz {levenshtein_engine_init_cpu_, sz_levenshtein_distances, corpus,
+                                                     query_bytes, candidates, sz_levenshtein_runes_k}),
           baseline_of(base));
 }
 

@@ -15,22 +15,23 @@ The family files test the dispatch points and `stringzilla.hpp`, and the cross f
 - `cross_serial.cpp`, `cross_x8664.cpp`, `cross_arm64.cpp`, `cross_riscv64.cpp`, `cross_loongarch64.cpp`, `cross_ppc64.cpp`, `cross_wasm.cpp` — one per architecture, naming its kernels, one section per capability, skipping those the CPU lacks.
 - `harness.hpp` and `utf8.hpp` are the shared harnesses.
 
-Three executables share these sources:
+The linked suite runs the CPU checks once, then checks each selected GPU. Two additional executables cover different linkage contracts:
 
-- `stringzilla_cpu_test` links `stringzilla_static` and cross-checks every kernel the library defines.
-- `stringzilla_cpu_shared_test` links `stringzilla_shared` with every capability off, so only the dispatch points run.
+- `stringzilla_test` links `stringzilla_static` and cross-checks CPU and enabled GPU kernels.
+- `stringzilla_shared_test` links `stringzilla_shared`, testing CPU dispatch points and the same selected GPU backends.
 - `stringzilla_cpu_header_test` compiles the kernels inline, header-only, and runs the cross-checks and the dispatch-point stubs, not the family suites.
 
 ## C++ on GPUs
 
 The GPU tests check each vendor's engine kernels by name, and the dispatch points over them, against the serial answers.
 
-- `main_cuda.cu`, `main_rocm.hip`, `main_metal.cpp` — the entry points, one per vendor.
+- `cross_cuda.cu`, `cross_rocm.hip`, `cross_metal.cpp` — vendor entry points called by the common runner.
 - `cross_simt.cuh` — the device checks CUDA and ROCm share, over device-reachable memory, device-bound sequences, a caller's own stream, and the refusals that keep host pointers off the device.
 - `cross_cuda.cu`, `cross_rocm.hip` — the CUDA and ROCm kernels by name, through `cross_simt.cuh`.
 - `cross_metal.cpp` — the Metal kernels of edit distances, window overlap and multi-pattern search on Apple GPUs.
 
-Each builds one executable over `stringzilla_static`: `stringzilla_cuda_test`, `stringzilla_rocm_test`, and `stringzilla_metal_test`.
+All enabled vendors build into `stringzilla_test`; CUDA and ROCm can coexist in one build and run.
+`STRINGZILLA_DEVICES=cuda:0,rocm:1` selects vendor-qualified ordinals. Unset, the runner visits device zero of each available compiled vendor; an explicit unavailable device is an error.
 
 ## Running
 

@@ -25,9 +25,9 @@
  *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D CMAKE_BUILD_TYPE=Release -B build_release
- *  cmake --build build_release --config Release --target stringzilla_cpu_bench
+ *  cmake --build build_release --config Release --target stringzilla_bench
  *  STRINGWARS_DATASET=xlsum.csv STRINGWARS_TOKENS=lines STRINGWARS_FILTER=substrings \
- *  build_release/stringzilla_cpu_bench
+ *  build_release/stringzilla_bench
  *  @endcode
  *
  *  This file is the sibling of `substrings.cu`.
@@ -41,6 +41,16 @@
 
 namespace ashvardanian::stringzilla::bench {
 
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
+                                        sz_substrings_case_sensitivity_t sensitivity,
+                                        sz_substrings_overlap_policy_t policy, sz_size_t hot_states,
+                                        sz_size_t matches_budget, sz_size_t haystacks_budget, sz_allocator_t *allocator,
+                                        sz_stream_t stream) {
+    return sz_substrings_engine_init(engine, needles, sensitivity, policy, hot_states, matches_budget, haystacks_budget,
+                                     sz::default_capabilities(), allocator, stream);
+}
+
 #pragma region Compilation
 
 /** Compiles the vocabulary from scratch: the cost a pipeline pays once rather than per haystack. */
@@ -48,18 +58,22 @@ struct substrings_build_from_sz {
 
     /** The needles to compile, and the sensitivity to compile them at. */
     substrings_dictionary_t const &dictionary;
+    sz_capability_t capabilities;
 
     call_result_t operator()(std::size_t) const {
         sz_allocator_t allocator;
         sz_substrings_engine_t engine;
-        sz_allocator_init_default(&allocator);
-        if (sz_substrings_engine_init(&engine, &dictionary.needle_sequence, dictionary.sensitivity,
-                                      sz_substrings_overlapping_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                      sz::default_capabilities(), &allocator, nullptr) != sz_success_k)
+        if (sz_allocator_init_heap(&allocator) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+        sz_sequence_t const needles = dictionary.needle_sequence();
+        if (sz_substrings_engine_init(&engine, &needles, dictionary.sensitivity, sz_substrings_overlapping_k,
+                                      STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, capabilities, &allocator,
+                                      nullptr) != sz_success_k)
             throw std::runtime_error("The vocabulary would not compile.");
         check_value_t const mixed = (check_value_t)engine.state_count * 31u + engine.max_outputs_per_state;
         sz_substrings_engine_free(&engine, nullptr);
-        call_result_t result(dictionary.needle_bytes, mixed, dictionary.needle_bytes);
+        std::size_t const bytes = dictionary.needle_bytes();
+        call_result_t result(bytes, mixed, bytes);
         return result;
     }
 };
@@ -71,6 +85,10 @@ struct substrings_build_from_sz {
 /** One vocabulary slice, compiled, then walked by every verb under every policy it accepts. */
 void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, substrings_corpus_t const &staged,
                             substrings_vocabulary_t const &vocabulary) {
+    sz_allocator_t allocator;
+    if (sz_allocator_init_heap(&allocator) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+
     substrings_dictionary_t const &dictionary = vocabulary.dictionary;
     std::string const &suffix = vocabulary.label;
     if (dictionary.needles.empty()) {
@@ -78,29 +96,30 @@ void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, su
         return;
     }
     {
-        substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
+        substrings_engine_t probe(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, allocator);
         fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
                      dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
     }
 
-    print(bench_unary(env, corpus, "sz_substrings_engine_init" + suffix, substrings_build_from_sz {dictionary}));
+    print(bench_unary(env, corpus, "sz_substrings_engine_init" + suffix,
+                      substrings_build_from_sz {dictionary, env.machine.enabled}));
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
-        substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
+        substrings_engine_t engine(dictionary, policy, substrings_engine_init_cpu_, allocator);
         std::string const cover = substrings_cover(vocabulary, policy);
         print(bench_unary(env, corpus, "sz_substrings_counts" + cover,
-                          substrings_counts_from_sz<sz_substrings_counts> {engine, staged, staged.haystacks}));
+                          substrings_counts_from_sz {sz_substrings_counts, engine, staged, staged.haystacks()}));
         print(bench_unary(env, corpus, "sz_substrings_find" + cover,
-                          substrings_find_from_sz<sz_substrings_find> {engine, staged, staged.haystacks}));
+                          substrings_find_from_sz {sz_substrings_find, engine, staged, staged.haystacks()}));
     }
     for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k) {
-        substrings_engine_t engine(dictionary, policy, substrings_residency_t::host_k);
+        substrings_engine_t engine(dictionary, policy, substrings_engine_init_cpu_, allocator);
         print(bench_unary(env, corpus, "sz_substrings_replace" + substrings_cover(vocabulary, policy),
-                          substrings_replace_from_sz<sz_substrings_replace> {engine, staged, staged.haystacks,
-                                                                             dictionary.replacements}));
+                          substrings_replace_from_sz {sz_substrings_replace, engine, staged, staged.haystacks(),
+                                                      dictionary.replacements()}));
     }
-    substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_residency_t::host_k);
+    substrings_engine_t engine(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, allocator);
     print(bench_unary(env, corpus, "sz_substrings_bm25_scores" + suffix,
-                      substrings_bm25_from_sz<sz_substrings_bm25_scores> {engine, staged, staged.haystacks}));
+                      substrings_bm25_from_sz {sz_substrings_bm25_scores, engine, staged, staged.haystacks()}));
 }
 
 #pragma endregion Verbs
