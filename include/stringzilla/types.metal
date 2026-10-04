@@ -18,6 +18,21 @@
 
 using namespace metal;
 
+typedef uchar sz_u8_t;
+typedef ushort sz_u16_t;
+typedef uint sz_u32_t;
+typedef ulong sz_u64_t;
+typedef uint sz_rune_t;
+
+/** Lookup table storage in the Metal constant address space. */
+#define STRINGZILLA_CONSTANT constant
+
+/** Device-resident lookup table storage in the Metal constant address space. */
+#define STRINGZILLA_DEVICE_CONSTANT constant
+
+/** Aligns shared records to the same boundary as their host declarations. */
+#define sz_align_(n) alignas(n)
+
 /** Divides rounding up, as @c sz_size_divide_round_up does in the C headers MSL cannot include. */
 template <typename scalar_type_>
 constexpr scalar_type_ sz_size_divide_round_up_metal_(scalar_type_ number, scalar_type_ divisor) {

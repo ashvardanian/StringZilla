@@ -213,11 +213,19 @@
 #define STRINGZILLA_API
 #endif
 
-/** Device-side inlining policy. It is only meaningful under a CUDA or HIP compiler, since the
- *  functions it marks exist only on the device. */
+/** Translation-unit-local lookup table storage; read-only types carry @c const separately. */
+#define STRINGZILLA_CONSTANT static
+
 #if defined(__CUDACC__) || defined(__HIP__)
+
+/** Forces a CUDA or HIP device helper inline. */
 #define STRINGZILLA_DEVICE static __device__ __forceinline__
+
+/** Keeps a CUDA or HIP device helper out of line. */
 #define STRINGZILLA_DEVICE_NOINLINE __device__ __noinline__
+
+/** Device-resident lookup table storage, without the size limit of CUDA constant memory. */
+#define STRINGZILLA_DEVICE_CONSTANT static __device__
 #endif
 
 /**

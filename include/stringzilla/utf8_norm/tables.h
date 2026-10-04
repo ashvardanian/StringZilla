@@ -51,14 +51,12 @@
 #ifndef STRINGZILLA_UTF8_NORM_TABLES_H_
 #define STRINGZILLA_UTF8_NORM_TABLES_H_
 
+#if !defined(__METAL_VERSION__)
 #include "stringzilla/types.h"
-
-#ifdef __cplusplus
-extern "C" {
 #endif
 
-/** Per-codepoint normalization properties, one entry per distinct combination. */
-typedef struct sz_utf8_norm_props_t {
+/** Per-codepoint normalization properties, word-aligned for Metal constant-table reads. */
+typedef struct sz_align_(4) sz_utf8_norm_props_t {
 
     /** Canonical_Combining_Class, 0 for a starter. */
     sz_u8_t canonical_combining_class;
@@ -93,7 +91,7 @@ typedef struct sz_utf8_norm_compose_starter_t {
     sz_u16_t offset;
     sz_u16_t count;
 } sz_utf8_norm_compose_starter_t;
-static sz_u16_t const sz_utf8_norm_stage1_[768] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_stage1_[768] = {
     0,  1,  2,  3,  4,   5,   6,   7,  8,  9,  10, 11,  12,  13, 14, 15, 16, 17, 18, 19, 18, 18,  18, 20, 21, 22, 23,
     24, 25, 26, 27, 28,  29,  30,  31, 32, 33, 18, 18,  18,  18, 18, 34, 18, 35, 36, 37, 38, 39,  40, 41, 42, 18, 18,
     18, 18, 18, 18, 18,  18,  18,  18, 18, 18, 18, 18,  18,  18, 18, 18, 18, 18, 18, 18, 18, 18,  18, 18, 18, 18, 18,
@@ -124,7 +122,7 @@ static sz_u16_t const sz_utf8_norm_stage1_[768] = {
     18, 18, 18, 18, 18,  18,  18,  18, 18, 18, 18, 18,  18,  18, 18, 18, 18, 18, 18, 18, 18, 18,  18, 18, 18, 18, 18,
     18, 18, 18, 18, 103, 104, 105, 18, 18, 18, 18, 18};
 
-static sz_u16_t const sz_utf8_norm_stage2_[3392] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_stage2_[3392] = {
     0,    0,    0,    0,    0,    0,    0,    1,    2,    3,    4,    5,    6,    7,    8,    9,    0,    0,    0,
     0,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   20,   21,   22,   23,   24,   25,   26,   27,
     28,   29,   30,   31,   32,   33,   34,   35,   36,   37,   0,    0,    0,    0,    38,   39,   40,   0,    41,
@@ -305,7 +303,7 @@ static sz_u16_t const sz_utf8_norm_stage2_[3392] = {
     1033, 0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,
     0,    0,    0,    0,    0,    0,    0,    0,    0,    0};
 
-static sz_u16_t const sz_utf8_norm_stage3_[8272] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_stage3_[8272] = {
     0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    1,    2,    3,    0,    0,    4,    5,
     6,    7,    8,    9,    10,   11,   12,   13,   14,   15,   16,   17,   18,   19,   0,    20,   21,   22,   23,
     24,   25,   26,   27,   28,   0,    0,    0,    0,    0,    0,    29,   30,   31,   32,   33,   34,   35,   36,
@@ -743,7 +741,7 @@ static sz_u16_t const sz_utf8_norm_stage3_[8272] = {
     3584, 1734, 3586, 1755, 1757, 3598, 3593, 3595, 3606, 3607, 3619, 3623, 3620, 3625, 3630, 3632, 3608, 3609, 3610,
     3611, 3612, 3654, 3613, 3614, 0,    0};
 
-static sz_utf8_norm_props_t const sz_utf8_norm_props_[4196] = {
+STRINGZILLA_CONSTANT sz_utf8_norm_props_t const sz_utf8_norm_props_[4196] = {
     {0, 0, 0, 0, 0xFFFF, 0xFFFF},        {0, 0, 0, 0, 0xFFFF, 0x0},           {0, 0, 0, 0, 0xFFFF, 0x1},
     {0, 0, 0, 0, 0xFFFF, 0x2},           {0, 0, 0, 0, 0xFFFF, 0x3},           {0, 0, 0, 0, 0xFFFF, 0x4},
     {0, 0, 0, 0, 0xFFFF, 0x5},           {0, 0, 0, 0, 0xFFFF, 0x6},           {0, 0, 0, 0, 0xFFFF, 0x7},
@@ -2144,14 +2142,14 @@ static sz_utf8_norm_props_t const sz_utf8_norm_props_[4196] = {
     {0, 4, 0, 3763, 0xFFFF, 0xFFFF},     {0, 4, 0, 3764, 0xFFFF, 0xFFFF},     {0, 4, 0, 3765, 0xFFFF, 0xFFFF},
     {0, 4, 0, 3766, 0xFFFF, 0xFFFF},     {0, 4, 0, 3767, 0xFFFF, 0xFFFF}};
 
-static sz_u16_t const sz_utf8_norm_scan_palette_[69] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_scan_palette_[69] = {
     0x0,   0x1,   0x6,   0x7,   0x9,   0xA,   0xB,   0xC,   0xD,   0xE,   0xF,   0x10,  0x11,  0x12,
     0x13,  0x14,  0x15,  0x16,  0x17,  0x18,  0x19,  0x1A,  0x1B,  0x1C,  0x1D,  0x1E,  0x1F,  0x20,
     0x21,  0x22,  0x23,  0x24,  0x54,  0x67,  0x6B,  0x76,  0x7A,  0x81,  0x82,  0x84,  0xCA,  0xD6,
     0xD8,  0xDA,  0xDC,  0xDE,  0xE0,  0xE2,  0xE4,  0xE6,  0xE8,  0xE9,  0xEA,  0x300, 0x301, 0x307,
     0x308, 0x309, 0x35B, 0x3CA, 0x3D8, 0x3DC, 0x3E6, 0x3F0, 0xA00, 0xC00, 0xE00, 0xF00, 0xFE6};
 
-static sz_u16_t const sz_utf8_norm_scan_stage1_[768] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_scan_stage1_[768] = {
     0,  1,  2,  3,   4,  5,  6,   7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18,  19, 18, 18,  18,  20, 21, 22, 23, 24,
     25, 26, 27, 28,  29, 30, 31,  32, 33, 18, 18, 18, 18, 18, 34, 18, 35, 36, 37,  38, 39, 40,  41,  42, 18, 18, 18, 18,
     18, 18, 18, 18,  18, 18, 18,  18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,  18, 18, 18,  18,  18, 18, 18, 18, 18,
@@ -2181,7 +2179,7 @@ static sz_u16_t const sz_utf8_norm_scan_stage1_[768] = {
     18, 18, 18, 18,  18, 18, 18,  18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,  18, 18, 18,  18,  18, 18, 18, 18, 18,
     18, 18, 18, 18,  51, 51, 104, 18, 18, 18, 18, 18};
 
-static sz_u16_t const sz_utf8_norm_scan_stage2_[1680] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_scan_stage2_[1680] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   1,   2,   3,   4,   3,   5,   6,   7,   8,   9,   10,  11,  8,
     12,  0,   0,   13,  14,  15,  16,  17,  18,  6,   19,  20,  21,  0,   0,   0,   0,   0,   0,   0,   22,  0,   23,
     24,  0,   25,  26,  27,  28,  29,  30,  31,  32,  33,  14,  34,  14,  35,  36,  0,   37,  38,  39,  0,   39,  0,
@@ -2257,7 +2255,7 @@ static sz_u16_t const sz_utf8_norm_scan_stage2_[1680] = {
     0,   0,   0,   0,   0,   0,   0,   237, 224, 225, 0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
     0};
 
-static sz_u8_t const sz_utf8_norm_scan_stage3_[5424] = {
+STRINGZILLA_CONSTANT sz_u8_t const sz_utf8_norm_scan_stage3_[5424] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  64, 0,  0,  0,  0,  0,  0,  0,  64, 0,  64, 0,  0,
     0,  0,  64, 0,  0,  64, 64, 64, 64, 0,  0,  64, 64, 64, 0,  64, 64, 64, 0,  65, 65, 65, 65, 65, 65, 0,  65, 65, 65,
     65, 65, 65, 65, 65, 65, 0,  65, 65, 65, 65, 65, 65, 0,  0,  65, 65, 65, 65, 65, 0,  0,  0,  65, 65, 65, 65, 65, 65,
@@ -2447,7 +2445,7 @@ static sz_u8_t const sz_utf8_norm_scan_stage3_[5424] = {
     0,  0,  0,  0,  0,  0,  0,  0,  64, 64, 64, 0,  0,  0,  64, 64, 64, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0};
 
-static sz_utf8_norm_decomp_t const sz_utf8_norm_decomp_[3768] = {
+STRINGZILLA_CONSTANT sz_utf8_norm_decomp_t const sz_utf8_norm_decomp_[3768] = {
     {0, 0},    {0, 1},    {1, 1},    {2, 2},    {4, 1},    {5, 2},     {7, 1},    {8, 1},    {9, 2},    {11, 1},
     {12, 2},   {14, 1},   {15, 1},   {16, 3},   {19, 3},   {22, 3},    {25, 2},   {27, 2},   {29, 2},   {31, 2},
     {33, 2},   {35, 2},   {37, 2},   {39, 2},   {41, 2},   {43, 2},    {45, 2},   {47, 2},   {49, 2},   {51, 2},
@@ -2826,7 +2824,7 @@ static sz_utf8_norm_decomp_t const sz_utf8_norm_decomp_[3768] = {
     {6745, 1}, {6746, 1}, {6747, 1}, {6748, 1}, {6749, 1}, {6750, 1},  {6751, 1}, {6752, 1}, {6753, 1}, {6754, 1},
     {6755, 1}, {6756, 1}, {6757, 1}, {6758, 1}, {6759, 1}, {6760, 1},  {6761, 1}, {6762, 1}};
 
-static sz_u16_t const sz_utf8_norm_pool_[6763] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_pool_[6763] = {
     0x51CC, 0x20,   0x20,   0x308,  0x61,   0x20,   0x304,  0x32,   0x33,   0x20,   0x301,  0x3BC,  0x20,   0x327,
     0x31,   0x6F,   0x31,   0x2044, 0x34,   0x31,   0x2044, 0x32,   0x33,   0x2044, 0x34,   0x41,   0x300,  0x41,
     0x301,  0x41,   0x302,  0x41,   0x303,  0x41,   0x308,  0x41,   0x30A,  0x43,   0x327,  0x45,   0x300,  0x45,
@@ -3312,7 +3310,7 @@ static sz_u16_t const sz_utf8_norm_pool_[6763] = {
     0x3099, 0x309A, 0xA2,   0xA3,   0xAC,   0xA6,   0xA5,   0x20A9, 0x2502, 0x2190, 0x2191, 0x2192, 0x2193, 0x25A0,
     0x25CB};
 
-static sz_rune_t const sz_utf8_norm_pool_astral_[161] = {
+STRINGZILLA_CONSTANT sz_rune_t const sz_utf8_norm_pool_astral_[161] = {
     0x105D2, 0x105DA, 0x11099, 0x1109B, 0x110A5, 0x110BA, 0x11127, 0x11131, 0x11132, 0x1133E, 0x11347, 0x11357, 0x11382,
     0x11384, 0x1138B, 0x11390, 0x113B8, 0x113BB, 0x113C2, 0x113C9, 0x114B0, 0x114B9, 0x114BA, 0x114BD, 0x115AF, 0x115B8,
     0x115B9, 0x11930, 0x11935, 0x1611E, 0x1611F, 0x16120, 0x16129, 0x16D63, 0x16D67, 0x1D157, 0x1D158, 0x1D165, 0x1D16E,
@@ -3327,7 +3325,7 @@ static sz_rune_t const sz_utf8_norm_pool_astral_[161] = {
     0x285D2, 0x285ED, 0x2872E, 0x28BFA, 0x28D77, 0x29145, 0x291DF, 0x2921A, 0x2940A, 0x29496, 0x295B6, 0x29B30, 0x2A0CE,
     0x2A105, 0x2A20E, 0x2A291, 0x2A392, 0x2A600};
 
-static sz_utf8_norm_compose_starter_t const sz_utf8_norm_compose_starters_[391] = {
+STRINGZILLA_CONSTANT sz_utf8_norm_compose_starter_t const sz_utf8_norm_compose_starters_[391] = {
     {0, 1},    {1, 1},   {2, 1},   {3, 16},   {19, 3},  {22, 5},  {27, 6},   {33, 17},  {50, 1},  {51, 7},   {58, 7},
     {65, 15},  {80, 1},  {81, 5},  {86, 6},   {92, 3},  {95, 9},  {104, 16}, {120, 2},  {122, 8}, {130, 7},  {137, 7},
     {144, 19}, {163, 2}, {165, 6}, {171, 2},  {173, 9}, {182, 6}, {188, 16}, {204, 3},  {207, 5}, {212, 6},  {218, 17},
@@ -3365,7 +3363,7 @@ static sz_utf8_norm_compose_starter_t const sz_utf8_norm_compose_starters_[391] 
     {935, 2},  {937, 1}, {938, 1}, {939, 1},  {940, 1}, {941, 3}, {944, 3},  {947, 1},  {948, 1}, {949, 1},  {950, 4},
     {954, 2},  {956, 1}, {957, 1}, {958, 1},  {959, 1}, {960, 1}};
 
-static sz_u16_t const sz_utf8_norm_compose_partner_[961] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_compose_partner_[961] = {
     27, 27, 27, 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  11, 12, 13, 17, 19, 22, 6,  17, 26, 1,  2,  6,  11, 21, 6,  11,
     17, 21, 23, 26, 0,  1,  2,  3,  4,  5,  6,  7,  8,  11, 12, 13, 17, 21, 22, 23, 25, 6,  1,  2,  4,  5,  6,  11, 21,
     2,  6,  7,  11, 17, 21, 24, 0,  1,  2,  3,  4,  5,  6,  7,  8,  11, 12, 13, 17, 22, 25, 2,  1,  11, 17, 21, 26, 1,
@@ -3401,7 +3399,7 @@ static sz_u16_t const sz_utf8_norm_compose_partner_[961] = {
     6,  6,  54, 54, 54, 55, 55, 56, 57, 61, 59, 60, 61, 58, 60, 61, 62, 63, 64, 65, 65, 66, 67, 68, 69, 70, 68, 69, 68,
     68, 71, 71, 71};
 
-static sz_rune_t const sz_utf8_norm_compose_value_[961] = {
+STRINGZILLA_CONSTANT sz_rune_t const sz_utf8_norm_compose_value_[961] = {
     0x226E,  0x2260,  0x226F,  0xC0,    0xC1,    0xC2,    0xC3,    0x100,   0x102,   0x226,   0xC4,    0x1EA2,  0xC5,
     0x1CD,   0x200,   0x202,   0x1EA0,  0x1E00,  0x104,   0x1E02,  0x1E04,  0x1E06,  0x106,   0x108,   0x10A,   0x10C,
     0xC7,    0x1E0A,  0x10E,   0x1E0C,  0x1E10,  0x1E12,  0x1E0E,  0xC8,    0xC9,    0xCA,    0x1EBC,  0x112,   0x114,
@@ -3479,14 +3477,14 @@ static sz_rune_t const sz_utf8_norm_compose_value_[961] = {
 
 /** Hot-path lead classifier: index = lead_byte & 0x3F, bits = the `sz_utf8_norm_quick_check_*_k`
  *  flags possibly present. */
-static sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
+STRINGZILLA_CONSTANT sz_u8_t const sz_utf8_norm_lead_lut_[64] = {
     0x0, 0x0, 0xA, 0xC, 0xE, 0xE, 0xC, 0xE, 0xC, 0x0, 0xA, 0xA, 0xF, 0xF, 0xF, 0xE, 0xC, 0xC, 0xF, 0xC, 0x0, 0x0,
     0xF, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0x0, 0xF, 0xF, 0xF, 0xF, 0xF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xF, 0xC,
     0xC, 0xC, 0x0, 0xF, 0xF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
 
 /** Cold-loop flat 2-byte lookup for U+0000-07FF, each value holding
  *  `(quick_check_flags << 8) | canonical_combining_class`. */
-static sz_u16_t const sz_utf8_norm_twobyte_[2048] = {
+STRINGZILLA_CONSTANT sz_u16_t const sz_utf8_norm_twobyte_[2048] = {
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,
@@ -3615,9 +3613,5 @@ static sz_u16_t const sz_utf8_norm_twobyte_[2048] = {
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,
     0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0xE6,  0xE6,  0xE6,  0xE6,  0xE6,
     0xE6,  0xE6,  0xDC,  0xE6,  0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0x0,   0xDC,  0x0,   0x0};
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif // STRINGZILLA_UTF8_NORM_TABLES_H_
