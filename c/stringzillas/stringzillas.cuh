@@ -69,7 +69,8 @@ struct sz_sequence_u64tape_as_cpp_container_t {
     std::string_view operator[](std::size_t index) const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
-        return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+        sz_u64_t const length64 = tape_->offsets[index + 1] - tape_->offsets[index];
+        return {tape_->data + tape_->offsets[index], static_cast<std::size_t>(length64)};
     }
 };
 
@@ -85,7 +86,8 @@ struct sz_sequence_u32tape_as_cpp_container_t {
     std::string_view operator[](std::size_t index) const noexcept {
         sz_assert_(tape_ != nullptr && "Tape must not be null");
         sz_assert_(index < tape_->count && "Index out of bounds");
-        return {tape_->data + tape_->offsets[index], tape_->offsets[index + 1] - tape_->offsets[index]};
+        sz_u32_t const length32 = tape_->offsets[index + 1] - tape_->offsets[index];
+        return {tape_->data + tape_->offsets[index], static_cast<std::size_t>(length32)};
     }
 };
 
