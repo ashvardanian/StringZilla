@@ -264,44 +264,44 @@ SZ_API_COMPTIME sz_status_t sz_pgrams_sort_neon(sz_pgram_t *pgrams, sz_size_t co
     return sz_success_k;
 }
 
+typedef struct sz_argsort_neon_scratch_t {
+    sz_pgram_t *temporary_pgrams;
+    sz_sorted_idx_t *temporary_order;
+} sz_argsort_neon_scratch_t;
+
+SZ_HELPER_AUTO void sz_argsort_neon_sort_range_(sz_pgram_t *pgrams, sz_sorted_idx_t *order, sz_size_t start,
+                                                sz_size_t end, sz_size_t top_count, void *context) {
+    sz_argsort_neon_scratch_t *scratch = (sz_argsort_neon_scratch_t *)context;
+    sz_sequence_argsort_neon_quicksort_pgrams_(pgrams, order, scratch->temporary_pgrams, scratch->temporary_order, start,
+                                               end, top_count);
+}
+
+/**
+ *  @brief Quick-Sort adaptation for strings, that processes the strings a few N-grams at a time.
+ *      It combines `sz_sequence_argsort_serial_export_byte_window_` and `sz_sequence_argsort_neon_quicksort_pgrams_`.
+ *      Equal pgrams are walked iteratively, so a long shared prefix does not grow the call stack.
+ *
+ *  @param sequence The collection of strings to sort.
+ *  @param global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param global_order Current permutation array, updated in place.
+ *  @param temporary_pgrams Scratch buffer of the same size as `global_pgrams`.
+ *  @param temporary_order Scratch buffer of the same size as `global_order`.
+ *  @param start_in_sequence First index (inclusive) of the range to process.
+ *  @param end_in_sequence One-past-the-last index of the range to process.
+ *  @param start_character Byte offset into each string for the current pgram window.
+ *  @param top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
+ *  @param reverse Whether to export complemented keys for descending order.
+ *  @param frames Scratch stack of at least `end_in_sequence - start_in_sequence` window frames.
+ */
 SZ_API_COMPTIME void sz_sequence_argsort_neon_sort_byte_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const start_character, sz_size_t const top_count,
-    sz_bool_t const reverse) {
+    sz_bool_t const reverse, sz_argsort_window_frame_t *const frames) {
 
-    sz_sequence_argsort_serial_export_byte_window_(sequence, global_pgrams, global_order, start_in_sequence,
-                                                   end_in_sequence, start_character, reverse);
-
-    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                               start_in_sequence, end_in_sequence, top_count);
-
-    sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
-    sz_size_t nested_start = start_in_sequence;
-    sz_size_t nested_end = start_in_sequence;
-    while (nested_end != end_in_sequence) {
-        if (top_count != 0 && nested_start >= top_count) break;
-
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
-
-        sz_pgram_t const length_source = reverse ? ~current_pgram : current_pgram;
-        sz_cptr_t const length_str = (sz_cptr_t)&length_source;
-#if !SZ_IS_BIG_ENDIAN_
-        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[0];
-#else
-        sz_size_t current_pgram_length = (sz_size_t)(sz_u8_t)length_str[pgram_capacity];
-#endif
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = current_pgram_length == pgram_capacity;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
-                                                        temporary_order, nested_start, nested_end,
-                                                        start_character + pgram_capacity, top_count, reverse);
-        else if (has_multiple_strings)
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
-        nested_start = nested_end;
-    }
+    sz_argsort_neon_scratch_t scratch = {temporary_pgrams, temporary_order};
+    sz_argsort_walk_byte_windows_(sequence, global_pgrams, global_order, start_in_sequence, end_in_sequence,
+                                  start_character, top_count, reverse, sz_argsort_neon_sort_range_, &scratch, frames);
 }
 
 SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequence, sz_memory_allocator_t *alloc,
@@ -322,14 +322,16 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequen
     }
 
     // `global_pgrams` (count) + two scratch buffers (count + 24 slack each: two inter-region gaps + spill).
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24) +
+                             sizeof(sz_argsort_window_frame_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
+    if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
-    if (!global_pgrams) return sz_bad_alloc_k;
+    sz_argsort_window_frame_t *frames = (sz_argsort_window_frame_t *)(temporary_order + count + 24);
 
     sz_sequence_argsort_neon_sort_byte_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, 0,
-                                                count, 0, top_count, reverse);
+                                                count, 0, top_count, reverse, frames);
 
     alloc->free(global_pgrams, memory_usage, alloc);
     return sz_success_k;
@@ -344,36 +346,12 @@ SZ_API_COMPTIME void sz_sequence_argsort_neon_sort_casefold_windows_(
     sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
     sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
     sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
-    sz_bool_t const reverse) {
+    sz_bool_t const reverse, sz_argsort_window_frame_t *const frames) {
 
-    sz_sequence_argsort_serial_export_casefold_window_(sequence, global_pgrams, global_order, start_in_sequence,
-                                                       end_in_sequence, folded_skip_count, reverse);
-    sz_sequence_argsort_neon_quicksort_pgrams_(global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                               start_in_sequence, end_in_sequence, top_count);
-
-    // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
-    // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
-    sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
-    sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
-    sz_size_t nested_start = start_in_sequence;
-    sz_size_t nested_end = start_in_sequence;
-    while (nested_end != end_in_sequence) {
-        if (top_count != 0 && nested_start >= top_count) break;
-
-        sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
-
-        sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
-        int has_multiple_strings = nested_end - nested_start > 1;
-        int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
-        if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, global_order, temporary_pgrams,
-                                                            temporary_order, nested_start, nested_end,
-                                                            folded_skip_count + fields_per_pgram, top_count, reverse);
-        else if (has_multiple_strings)
-            sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
-        nested_start = nested_end;
-    }
+    sz_argsort_neon_scratch_t scratch = {temporary_pgrams, temporary_order};
+    sz_argsort_walk_casefold_windows_(sequence, global_pgrams, global_order, start_in_sequence, end_in_sequence,
+                                      folded_skip_count, top_count, reverse, sz_argsort_neon_sort_range_, &scratch,
+                                      frames);
 }
 
 SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
@@ -394,14 +372,16 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_uncased_neon(    //
     // Same layout as the byte arg-sort - `global_pgrams` (count) + two scratch buffers (count + 24 slack each:
     // two inter-region gaps + spill, since the NEON table compaction overruns). The folded export is stateless
     // (re-folds the prefix on demand), so unlike the earlier design there is no per-string cursor array.
-    sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24);
+    sz_size_t const memory_usage = sizeof(sz_pgram_t) * (count + count + 24) + sizeof(sz_sorted_idx_t) * (count + 24) +
+                                   sizeof(sz_argsort_window_frame_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)alloc->allocate(memory_usage, alloc);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
     sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count + 24);
+    sz_argsort_window_frame_t *frames = (sz_argsort_window_frame_t *)(temporary_order + count + 24);
 
     sz_sequence_argsort_neon_sort_casefold_windows_(sequence, global_pgrams, order, temporary_pgrams, temporary_order,
-                                                    0, count, 0, top_count, reverse);
+                                                    0, count, 0, top_count, reverse, frames);
 
     alloc->free(global_pgrams, memory_usage, alloc);
     return sz_success_k;

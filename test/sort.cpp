@@ -532,6 +532,12 @@ void test_sort_equivalence(reference_ reference, candidate_ candidate, sz_size_t
             for (std::size_t i = 0; i < count; ++i) varied.push_back(sz::scripts::random_string(6 + i % 40, "abc", 3));
             datasets.push_back(varied);
         }
+        { // Shared prefix longer than a few pgram windows. Order is decided only at the tail.
+            std::string const prefix(400, 'a');
+            strs_t shared_prefix;
+            for (std::size_t i = 0; i < 33; ++i) shared_prefix.push_back(prefix + std::to_string(i));
+            datasets.push_back(shared_prefix);
+        }
         { // Deterministic mixed-case / multi-script set so the uncased path sees real folds.
             char const *seed[] = {"Apple",   "apple",  "BANANA", "banana", "Straße",
                                   "STRASSE", "Привет", "ПРИВЕТ", "Ab",     "aB"};
