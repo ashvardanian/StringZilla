@@ -69,12 +69,11 @@
 #endif
 
 #if STRINGZILLA_WITH_STL
-#include <exception>        // `std::terminate`
 #include <initializer_list> // `std::initializer_list` is only ~100 LOC
 #include <iterator>         // `std::random_access_iterator_tag` pulls 20K LOC
 #include <limits>           // `std::numeric_limits`
 #include <memory>           // `std::allocator_traits` for allocator rebinding
-#include <new>              // `std::bad_alloc`
+#include <new>              // Placement construction
 #include <span>             // `std::span`
 #include <type_traits>      // `std::is_const_v`, `std::is_arithmetic_v`, `std::is_trivially_destructible`
 #include <utility>          // `std::move`
@@ -374,22 +373,46 @@ struct dummy_alloc {
 
 using dummy_alloc_t = dummy_alloc<char>;
 
-/** Allocates @p count elements through @p allocator, reading a throw as null, so the @c noexcept
- *  containers report @c bad_alloc_k where @c std::allocator would terminate them. */
-template <typename allocator_type_>
-typename std::allocator_traits<allocator_type_>::pointer allocate_or_null_(allocator_type_ &allocator,
-                                                                           std::size_t count) noexcept {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-    try {
-        return std::allocator_traits<allocator_type_>::allocate(allocator, count);
-    }
-    catch (...) {
+/** Nullable heap allocator using the C allocation policy. */
+template <typename value_type_>
+struct heap_alloc {
+    using value_type = value_type_;
+    using pointer = value_type *;
+    using size_type = std::size_t;
+    using propagate_on_container_move_assignment = std::true_type;
+    using is_always_equal = std::true_type;
+
+    template <typename other_value_type_>
+    struct rebind {
+        using other = heap_alloc<other_value_type_>;
+    };
+
+    constexpr heap_alloc() noexcept = default;
+    template <typename other_value_type_>
+    constexpr heap_alloc(heap_alloc<other_value_type_> const &) noexcept {}
+
+    pointer allocate(size_type count) const noexcept {
+        count = count ? count : 1;
+        if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) return nullptr;
+        sz_allocator_t allocator {};
+        if (sz_allocator_init_heap(&allocator) != sz_success_k) return nullptr;
+        pointer result = static_cast<pointer>(
+            allocator.allocate(count * sizeof(value_type), allocator.handle, nullptr));
+        if (!result || reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
+        allocator.free(result, count * sizeof(value_type), allocator.handle, nullptr);
         return nullptr;
     }
-#else
-    return std::allocator_traits<allocator_type_>::allocate(allocator, count);
-#endif
-}
+    void deallocate(pointer start, size_type count) const noexcept {
+        if (!start) return;
+        sz_allocator_t allocator {};
+        if (sz_allocator_init_heap(&allocator) != sz_success_k) return;
+        allocator.free(start, (count ? count : 1) * sizeof(value_type), allocator.handle, nullptr);
+    }
+    template <typename other_value_type_>
+    constexpr bool operator==(heap_alloc<other_value_type_> const &) const noexcept {
+        return true;
+    }
+};
 
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
@@ -606,7 +629,7 @@ using packed_tape_view = tape_view<char_type_, offset_type_, tape_termination_t:
  *  canonical block of 64-bit offsets and unterminated bytes. Packed append repacks the block;
  *  only the default layout promises amortized growth.
  */
-template <typename char_type_, typename offset_type_, typename allocator_type_,
+template <typename char_type_, typename offset_type_, typename allocator_type_ = heap_alloc<char_type_>,
           tape_termination_t termination_ = tape_termination_t::nul_terminated_k>
 struct tape {
     static_assert(termination_ != tape_termination_t::packed_k ||
@@ -626,6 +649,25 @@ struct tape {
     using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
     using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
 
+    static_assert(std::is_nothrow_copy_constructible<allocator_t>::value &&
+                      std::is_nothrow_destructible<char_alloc_t>::value &&
+                      std::is_nothrow_destructible<offset_alloc_t>::value &&
+                      std::is_nothrow_default_constructible<char_alloc_t>::value &&
+                      std::is_nothrow_default_constructible<offset_alloc_t>::value &&
+                      std::is_nothrow_constructible<char_alloc_t, allocator_t const &>::value &&
+                      std::is_nothrow_constructible<offset_alloc_t, allocator_t const &>::value &&
+                      std::is_nothrow_constructible<allocator_t, char_alloc_t const &>::value &&
+                      std::is_nothrow_move_constructible<char_alloc_t>::value &&
+                      std::is_nothrow_move_constructible<offset_alloc_t>::value &&
+                      std::is_nothrow_move_assignable<char_alloc_t>::value &&
+                      std::is_nothrow_move_assignable<offset_alloc_t>::value,
+                  "Tape allocator construction and moves must be noexcept");
+    static_assert(noexcept(std::declval<char_alloc_t &>().allocate(std::size_t {})) &&
+                      noexcept(std::declval<offset_alloc_t &>().allocate(std::size_t {})) &&
+                      noexcept(std::declval<char_alloc_t &>().deallocate(nullptr, std::size_t {})) &&
+                      noexcept(std::declval<offset_alloc_t &>().deallocate(nullptr, std::size_t {})),
+                  "Tape allocators must return nullptr on failure and never throw");
+
     /** Largest offset the tape can address, past which an @c offset_t would wrap around. */
     static constexpr std::size_t max_offset_k = static_cast<std::size_t>((std::numeric_limits<offset_t>::max)());
 
@@ -637,7 +679,7 @@ struct tape {
     std::size_t count_ = 0;
 
   public:
-    constexpr tape() = default;
+    constexpr tape() noexcept = default;
 
     tape(tape const &) = delete;
     tape &operator=(tape const &) = delete;
@@ -658,9 +700,9 @@ struct tape {
         return *this;
     }
 
-    explicit constexpr tape(allocator_t allocator) : char_alloc_(allocator), offset_alloc_(allocator) {}
+    explicit constexpr tape(allocator_t allocator) noexcept : char_alloc_(allocator), offset_alloc_(allocator) {}
 
-    constexpr tape(std::span<char_t> buffer, std::span<offset_t> offsets, allocator_t allocator)
+    constexpr tape(std::span<char_t> buffer, std::span<offset_t> offsets, allocator_t allocator) noexcept
         requires(termination_ == tape_termination_t::nul_terminated_k)
         : buffer_(buffer), offsets_(offsets), char_alloc_(allocator), offset_alloc_(allocator) {}
 
@@ -699,7 +741,7 @@ struct tape {
         if constexpr (termination_ == tape_termination_t::packed_k) {
             std::size_t const header = (count + 1) * sizeof(offset_t);
             if (combined_length > max_offset_k - header) return status_t::overflow_risk_k;
-            char_t *block = allocate_or_null_(next.char_alloc_, header + combined_length);
+            char_t *block = next.char_alloc_.allocate(header + combined_length);
             if (!block) return status_t::bad_alloc_k;
             next.buffer_ = {block, header + combined_length};
             if (reinterpret_cast<sz_size_t>(block) % alignof(offset_t)) return status_t::bad_alloc_k;
@@ -707,10 +749,10 @@ struct tape {
             next.offsets_[0] = static_cast<offset_t>(header);
         }
         else if (count) {
-            char_t *buffer = allocate_or_null_(next.char_alloc_, combined_length);
+            char_t *buffer = next.char_alloc_.allocate(combined_length);
             if (!buffer) return status_t::bad_alloc_k;
             next.buffer_ = {buffer, combined_length};
-            offset_t *offsets = allocate_or_null_(next.offset_alloc_, count + 1);
+            offset_t *offsets = next.offset_alloc_.allocate(count + 1);
             if (!offsets) return status_t::bad_alloc_k;
             next.offsets_ = {offsets, count + 1};
             next.offsets_[0] = 0;
@@ -796,7 +838,7 @@ struct tape {
         if (count_ + 2 > offsets_.size()) {
             std::size_t const capacity = sz_size_bit_ceil(count_ + 2);
             if (!capacity || capacity > max_offsets) return status_t::overflow_risk_k;
-            offset_t *offsets = allocate_or_null_(offset_alloc_, capacity);
+            offset_t *offsets = offset_alloc_.allocate(capacity);
             if (!offsets) return status_t::bad_alloc_k;
             if (offsets_.data()) {
                 for (std::size_t i = 0; i <= count_; ++i) offsets[i] = offsets_[i];
@@ -809,7 +851,7 @@ struct tape {
         if (needed > buffer_.size()) {
             std::size_t const capacity = sz_size_bit_ceil(needed);
             if (!capacity) return status_t::overflow_risk_k;
-            char_t *buffer = allocate_or_null_(char_alloc_, capacity);
+            char_t *buffer = char_alloc_.allocate(capacity);
             if (!buffer) return status_t::bad_alloc_k;
             next = {buffer, capacity};
             for (std::size_t i = 0; i < current_used; ++i) next[i] = buffer_[i];
@@ -1076,7 +1118,7 @@ constexpr head_body_tail_t head_body_tail(element_type_ *first_address, std::siz
 
 /** Safer alternative to @c std::vector, that avoids exceptions and copy constructors: every member
  *  that allocates returns a @c status_t instead of throwing. */
-template <typename value_type_, typename allocator_type_>
+template <typename value_type_, typename allocator_type_ = heap_alloc<value_type_>>
 class vector {
   public:
     using value_type = value_type_;
@@ -1089,6 +1131,16 @@ class vector {
                   "Allocator value type must be the same size as the vector value type");
     static_assert(allocator_traits::propagate_on_container_move_assignment::value,
                   "Allocator must propagate on move assignment, otherwise the move assignment won't be `noexcept`.");
+
+    static_assert(std::is_nothrow_destructible<allocator_type>::value &&
+                      std::is_nothrow_default_constructible<allocator_type>::value &&
+                      std::is_nothrow_copy_constructible<allocator_type>::value &&
+                      std::is_nothrow_move_constructible<allocator_type>::value &&
+                      std::is_nothrow_move_assignable<allocator_type>::value &&
+                      noexcept(std::declval<allocator_type &>().allocate(size_type {})) &&
+                      noexcept(std::declval<allocator_type &>().deallocate(nullptr, size_type {})),
+                  "Vector allocators must return nullptr on failure and never throw");
+    static_assert(std::is_nothrow_destructible<value_type>::value, "Vector element destruction must be noexcept");
 
   private:
     value_type *data_;
@@ -1103,7 +1155,7 @@ class vector {
      *  Growth moves live elements on the host, so an allocator over memory the host cannot touch
      *  opts out with `static constexpr bool host_accessible_k = false` and gets a build error here
      *  instead of a segmentation fault, as @ref device_alloc does. Allocators that say nothing -
-     *  @c std::allocator included - are assumed reachable, so nothing else needs changing.
+     *  are assumed reachable.
      */
     static constexpr bool allocator_reachable_from_host_() noexcept {
         if constexpr (requires { allocator_type::host_accessible_k; }) return allocator_type::host_accessible_k;
@@ -1158,13 +1210,15 @@ class vector {
     }
 
     status_t assign(std::span<value_type const> const other) noexcept {
+        static_assert(std::is_nothrow_copy_constructible<value_type>::value &&
+                      std::is_nothrow_copy_assignable<value_type>::value);
         reset();
 
         if (other.size() == 0) return status_t::success_k; // Nothing to do :)
 
         // Allocate exact needed capacity
         size_type new_cap = other.size();
-        allocated_type *raw = allocate_or_null_(alloc_, new_cap);
+        allocated_type *raw = alloc_.allocate(new_cap);
         if (!raw) return status_t::bad_alloc_k;
         data_ = reinterpret_cast<value_type *>(raw);
         capacity_ = new_cap;
@@ -1184,10 +1238,11 @@ class vector {
     }
 
     status_t reserve(size_type new_cap) noexcept {
+        static_assert(std::is_nothrow_move_constructible<value_type>::value);
         static_assert(allocator_reachable_from_host_(),
                       "Growing host-moves live elements, so device-only storage must use `resize_uninitialized`");
         if (new_cap <= capacity_) return status_t::success_k;
-        value_type *new_data = (value_type *)allocate_or_null_(alloc_, new_cap);
+        value_type *new_data = (value_type *)alloc_.allocate(new_cap);
         if (!new_data) return status_t::bad_alloc_k;
         for (size_type i = 0; i < size_; ++i) {
             new (new_data + i) value_type(std::move(data_[i]));
@@ -1200,6 +1255,7 @@ class vector {
     }
 
     status_t resize(size_type new_size) noexcept {
+        static_assert(std::is_nothrow_default_constructible<value_type>::value);
         if (new_size > capacity_ && reserve(new_size) != status_t::success_k) return status_t::bad_alloc_k;
 
         if (new_size > size_) {
@@ -1227,7 +1283,7 @@ class vector {
         static_assert(std::is_trivially_destructible<value_type>::value,
                       "resize_uninitialized requires a trivially-destructible value type");
         if (new_size > capacity_) {
-            value_type *new_data = (value_type *)allocate_or_null_(alloc_, new_size);
+            value_type *new_data = (value_type *)alloc_.allocate(new_size);
             if (!new_data) return status_t::bad_alloc_k;
             if (data_) alloc_.deallocate((allocated_type *)data_, capacity_);
             data_ = new_data;
@@ -1238,6 +1294,7 @@ class vector {
     }
 
     status_t push_back(value_type const &value) noexcept {
+        static_assert(std::is_nothrow_copy_constructible<value_type>::value);
         if (size_ == capacity_) {
             size_type new_cap = capacity_ ? capacity_ * 2 : 1;
             if (reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
@@ -1248,6 +1305,7 @@ class vector {
     }
 
     status_t push_back(value_type &&value) noexcept {
+        static_assert(std::is_nothrow_move_constructible<value_type>::value);
         if (size_ == capacity_) {
             size_type new_cap = capacity_ ? capacity_ * 2 : 1;
             if (reserve(new_cap) != status_t::success_k) return status_t::bad_alloc_k;
@@ -1258,6 +1316,7 @@ class vector {
     }
 
     status_t append(std::span<value_type const> source) noexcept {
+        static_assert(std::is_nothrow_copy_constructible<value_type>::value);
         size_type needed = size_ + source.size();
         if (needed > capacity_) {
             size_type new_cap = capacity_ ? capacity_ : 1;
@@ -1311,10 +1370,10 @@ class vector {
  *  @brief Allocator over the @b unified memory of one device group, which the host and that
  *      group's devices all address.
  *
- *  Compatible with @c std::vector, @ref tape and @ref vector.
+ *  Nullable allocator for @ref tape and @ref vector.
  *  @p capabilities_ picks the default vendor; an initialized C allocator can select it at runtime.
  *  The allocator handle and stream must outlive its allocations; a null stream uses the vendor's
- *  default device. Allocation or alignment failure throws @c std::bad_alloc.
+ *  default device. Failure returns null; @c make reports initialization errors.
  *
  *  @tparam capabilities_ One device's capabilities, like @c sz_cap_cuda_k.
  */
@@ -1336,17 +1395,13 @@ struct unified_alloc {
         using other = unified_alloc<other_value_type_, capabilities_>;
     };
 
-    unified_alloc() : unified_alloc(nullptr) {}
-    explicit unified_alloc(sz_stream_t stream) : stream(stream) {
-        if constexpr (capabilities_ == sz_cap_serial_k) {
-            if (sz_allocator_init_heap(&unified) == sz_success_k) return;
-        }
-        else if (sz_allocator_init_unified_best(&unified, capabilities_) == sz_success_k) return;
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-        throw std::bad_alloc();
-#else
-        std::terminate();
-#endif
+    constexpr unified_alloc() noexcept = default;
+    static expected<unified_alloc> make(sz_stream_t stream = nullptr) noexcept {
+        sz_allocator_t policy {};
+        sz_status_t status = sz_success_k;
+        if constexpr (capabilities_ == sz_cap_serial_k) status = sz_allocator_init_heap(&policy);
+        else status = sz_allocator_init_unified_best(&policy, capabilities_);
+        return {unified_alloc(policy, stream), static_cast<status_t>(status)};
     }
     constexpr unified_alloc(sz_allocator_t const &unified, sz_stream_t stream = nullptr) noexcept
         : unified(unified), stream(stream) {}
@@ -1354,22 +1409,17 @@ struct unified_alloc {
     constexpr unified_alloc(unified_alloc<other_value_type_, other_capabilities_> const &other) noexcept
         : unified(other.unified), stream(other.stream) {}
 
-    value_type *allocate(size_type count) const {
-        pointer result = nullptr;
+    value_type *allocate(size_type count) const noexcept {
         count = count ? count : 1;
-        if (count > (std::numeric_limits<size_type>::max)() / sizeof(value_type)) goto failed;
-        result = static_cast<pointer>(unified.allocate(count * sizeof(value_type), unified.handle, stream));
-        if (!result) goto failed;
-        if (reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
+        if (!unified.allocate || !unified.free || count > (std::numeric_limits<size_type>::max)() / sizeof(value_type))
+            return nullptr;
+        pointer result = static_cast<pointer>(unified.allocate(count * sizeof(value_type), unified.handle, stream));
+        if (!result || reinterpret_cast<sz_size_t>(result) % alignof(value_type) == 0) return result;
         unified.free(result, count * sizeof(value_type), unified.handle, stream);
-    failed:
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-        throw std::bad_alloc();
-#else
-        std::terminate();
-#endif
+        return nullptr;
     }
     void deallocate(pointer start, size_type count) const noexcept {
+        if (!start) return;
         unified.free(start, (count ? count : 1) * sizeof(value_type), unified.handle, stream);
     }
     template <typename other_type_, sz_capability_t other_capabilities_>

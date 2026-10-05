@@ -48,7 +48,7 @@ A device engine's arena is sized once, by `sz_substrings_engine_init` from `matc
 Every round of one engine shares that arena and its report, so the caller orders them, on one stream or with events between two, and reads the report only after joining the round that wrote it.
 A device round over no haystacks returns at once and leaves the report as the round before it wrote it.
 On Metal a round is one command buffer on the device's queue, nothing is staged in threadgroup memory, and BM25 runs on 64 threadgroups whose tallies hold 2048 needles before hashing, its terms computed in `f32`, as Apple GPUs have no `f64`.
-A case-insensitive vocabulary is refused there at init with `sz_device_code_mismatch_k`, since its walk folds through Unicode tables that have no Metal port.
+Case-insensitive Metal walks reuse the folding tables shared with CUDA and ROCm and report matches in the haystack's original byte offsets.
 
 ## Methodology
 
@@ -71,6 +71,7 @@ Every match of every needle, including nested ones, over text.
 | CUDA @ SM120          |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
 | Serial @ M5 Pro       |           905.2 |     1,421.4 |          695.9 |    1,152.0 |
 | NEON @ M5 Pro         |           894.2 |     7,010.1 |          692.9 |    6,233.3 |
+| Metal @ M5 Pro        |        18,086.8 |    33,734.4 |        8,220.8 |   17,799.2 |
 
 ## Leftmost Cover
 
@@ -87,6 +88,7 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 | CUDA @ SM120          |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
 | Serial @ M5 Pro       |           524.5 |     1,284.9 |          519.8 |    1,295.2 |
 | NEON @ M5 Pro         |           520.9 |     5,498.2 |          516.7 |    5,461.8 |
+| Metal @ M5 Pro        |         7,761.8 |    17,952.5 |        7,525.6 |   17,737.4 |
 
 ## Rewriting
 
@@ -103,11 +105,13 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 | CUDA @ SM120          |           7,024.6 |      15,923.2 |
 | Serial @ M5 Pro       |             461.5 |       1,244.7 |
 | NEON @ M5 Pro         |             444.3 |       4,818.3 |
+| Metal @ M5 Pro        |           5,386.3 |      12,808.1 |
 
 ## Scoring
 
 BM25 with the vocabulary as the query, one score per haystack, over raw overlapping term frequencies.
-A CPU sums each haystack's terms in ascending needle order and a device in fixed point, so each backend is bit-stable across runs and the two agree to rounding.
+A CPU sums each haystack's terms in ascending needle order, while device backends accumulate in fixed point.
+Metal evaluates each term in `f32` before conversion to fixed point.
 
 | Backend               | BM25, Frequent | BM25, Rare |
 | :-------------------- | -------------: | ---------: |
@@ -120,6 +124,7 @@ A CPU sums each haystack's terms in ascending needle order and a device in fixed
 | CUDA @ SM120          |        8,140.8 |   31,037.4 |
 | Serial @ M5 Pro       |          640.3 |    1,104.2 |
 | NEON @ M5 Pro         |          637.2 |    4,989.1 |
+| Metal @ M5 Pro        |        7,404.1 |   18,186.1 |
 
 ## Nucleotides
 
@@ -147,6 +152,7 @@ The frequent slice with both sides folded, which is the cost of matching a vocab
 | Ice Lake @ Xeon 6776P |   135.9 |   124.1 |   118.3 |
 | Serial @ M5 Pro       |   314.7 |   317.3 |   264.4 |
 | NEON @ M5 Pro         |   314.8 |   314.0 |   263.7 |
+| Metal @ M5 Pro        | 5,558.3 | 2,812.8 | 2,259.4 |
 | NEON @ Graviton4      |       … |       … |       … |
 | CUDA @ SM90           |       … |       … |       … |
 | CUDA @ SM103 MIG      | 2,955.0 | 1,528.0 | 1,212.0 |

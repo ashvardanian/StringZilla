@@ -604,11 +604,11 @@ inline void iterate_in_random_slices(std::mt19937 &generator, std::string const 
 template <typename body_type_>
 inline void for_each_cacheline_offset_(std::size_t usable_length, body_type_ &&body) {
     static constexpr std::size_t offsets[] = {0, 1, 7, 8, 15, 16, 31, 32, 33, 48, 63};
-    std::vector<char> storage(usable_length + 2 * STRINGZILLA_CACHE_LINE_BYTES + 1, '\0');
+    std::vector<char> storage(usable_length + 2 * sz_default_alignment_k + 1, '\0');
     for (std::size_t offset : offsets) {
         std::fill(storage.begin(), storage.end(), '\0');
         char *pointer = storage.data();
-        while (reinterpret_cast<std::uintptr_t>(pointer) % STRINGZILLA_CACHE_LINE_BYTES != offset) ++pointer;
+        while (reinterpret_cast<std::uintptr_t>(pointer) % sz_default_alignment_k != offset) ++pointer;
         body(reinterpret_cast<sz_ptr_t>(pointer), offset);
     }
 }

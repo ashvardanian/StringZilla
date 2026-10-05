@@ -2,7 +2,7 @@
  *  @file include/stringzilla/utf8_uncased_fold/metal.metal
  *  @author Ash Vardanian
  *  @date October 4, 2026
- *  @brief Lossless Unicode folding and ordered single-threadgroup tiles on Metal.
+ *  @brief Lossless Unicode folding with parallel counting, prefix sums, and output on Metal.
  */
 struct sz_utf8_folded_image_metal_t {
     ulong bytes;
@@ -69,8 +69,17 @@ inline uint sz_utf8_uncased_fold_span_metal_(device uchar const *source, ulong l
 }
 
 struct sz_utf8_uncased_fold_arguments_metal_t {
-    ulong length, begin, end;
+    ulong length, span, groups;
 };
+
+inline uint sz_utf8_uncased_fold_prefix_metal_(uint measured, uint lane, threadgroup uint *totals) {
+    uint const preceding = simd_prefix_exclusive_sum(measured);
+    if ((lane & 31) == 31) totals[lane / 32] = preceding + measured;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint before = preceding;
+    for (uint group = 0; group != lane / 32; ++group) before += totals[group];
+    return before;
+}
 
 kernel void sz_utf8_uncased_fold_clear_metal_kernel_(device ulong *target_length [[buffer(0)]]) { *target_length = 0; }
 
@@ -78,26 +87,71 @@ kernel void sz_utf8_uncased_fold_metal_kernel_(device uchar const *source [[buff
                                                device uchar *target [[buffer(1)]],
                                                device ulong *target_length [[buffer(2)]],
                                                constant sz_utf8_uncased_fold_arguments_metal_t &args [[buffer(3)]],
-                                               uint lane [[thread_index_in_threadgroup]],
-                                               uint simd_width [[threads_per_simdgroup]]) {
-    threadgroup uint totals[256];
-    threadgroup ulong base;
-    ulong const thread_bytes = sz_size_divide_round_up_metal_(args.end - args.begin, 256ul);
-    ulong const begin = sz_utf8_fold_cut_metal_(source, args.length, min(args.begin + lane * thread_bytes, args.end));
-    ulong const end = sz_utf8_fold_cut_metal_(source, args.length,
-                                              min(args.begin + (lane + 1) * thread_bytes, args.end));
+                                               uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup uint totals[8];
+    ulong const begin = sz_utf8_fold_cut_metal_(source, args.length, min(ulong(lane) * args.span, args.length));
+    ulong const end = sz_utf8_fold_cut_metal_(source, args.length, min(ulong(lane + 1) * args.span, args.length));
     uint const measured = sz_utf8_uncased_fold_span_metal_(source, args.length, begin, end, nullptr);
-    uint const within = lane % simd_width, group = lane / simd_width, groups = 256 / simd_width;
-    uint const preceding = simd_prefix_exclusive_sum(measured);
-    uint const subtotal = simd_sum(measured);
-    if (within + 1 == simd_width) totals[group] = subtotal;
-    if (!lane) base = *target_length;
+    uint const preceding = sz_utf8_uncased_fold_prefix_metal_(measured, lane, totals);
+    sz_utf8_uncased_fold_span_metal_(source, args.length, begin, end, target + preceding);
+    if (lane == 255) *target_length = ulong(preceding) + measured;
+}
+
+kernel void sz_utf8_uncased_fold_count_metal_kernel_(device uchar const *source [[buffer(0)]],
+                                                     device ulong *scratch [[buffer(3)]],
+                                                     constant sz_utf8_uncased_fold_arguments_metal_t &args
+                                                     [[buffer(4)]],
+                                                     uint group [[threadgroup_position_in_grid]],
+                                                     uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup uint totals[8];
+    ulong const index = ulong(group) * 256 + lane;
+    ulong const begin = sz_utf8_fold_cut_metal_(source, args.length, min(index * args.span, args.length));
+    ulong const end = sz_utf8_fold_cut_metal_(source, args.length, min((index + 1) * args.span, args.length));
+    uint const measured = sz_utf8_uncased_fold_span_metal_(source, args.length, begin, end, nullptr);
+    uint const preceding = sz_utf8_uncased_fold_prefix_metal_(measured, lane, totals);
+    device uint *offsets = (device uint *)(scratch + args.groups);
+    offsets[index] = preceding;
+    if (lane == 255) scratch[group] = ulong(preceding) + measured;
+}
+
+inline ulong sz_utf8_uncased_fold_scan_metal_(ulong value, uint lane, threadgroup ulong *totals) {
+    uint const low = uint(value);
+    uint const low_prefix = simd_prefix_exclusive_sum(low);
+    uint const carries = simd_prefix_exclusive_sum(uint(low_prefix + low < low_prefix));
+    uint const high_prefix = simd_prefix_exclusive_sum(uint(value >> 32));
+    ulong const prefix = (ulong(high_prefix + carries) << 32) | low_prefix;
+    if ((lane & 31) == 31) totals[lane / 32] = prefix + value;
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    uint before = 0, total = 0;
-    for (uint index = 0; index != groups; ++index) {
-        if (index < group) before += totals[index];
-        total += totals[index];
+    ulong preceding = prefix;
+    for (uint group = 0; group != lane / 32; ++group) preceding += totals[group];
+    return preceding;
+}
+
+kernel void sz_utf8_uncased_fold_scan_metal_kernel_(device ulong *target_length [[buffer(2)]],
+                                                    device ulong *scratch [[buffer(3)]],
+                                                    constant sz_utf8_uncased_fold_arguments_metal_t &args [[buffer(4)]],
+                                                    uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup ulong totals[8];
+    ulong const span = sz_size_divide_round_up_metal_(args.groups, 256ul);
+    ulong const begin = min(ulong(lane) * span, args.groups), end = min(begin + span, args.groups);
+    ulong measured = 0;
+    for (ulong index = begin; index != end; ++index) measured += scratch[index];
+    ulong preceding = sz_utf8_uncased_fold_scan_metal_(measured, lane, totals);
+    if (lane == 255) *target_length = preceding + measured;
+    for (ulong index = begin; index != end; ++index) {
+        ulong const count = scratch[index];
+        scratch[index] = preceding;
+        preceding += count;
     }
-    sz_utf8_uncased_fold_span_metal_(source, args.length, begin, end, target + base + before + preceding);
-    if (!lane) *target_length = base + total;
+}
+
+kernel void sz_utf8_uncased_fold_write_metal_kernel_(
+    device uchar const *source [[buffer(0)]], device uchar *target [[buffer(1)]],
+    device ulong const *scratch [[buffer(3)]], constant sz_utf8_uncased_fold_arguments_metal_t &args [[buffer(4)]],
+    uint group [[threadgroup_position_in_grid]], uint lane [[thread_index_in_threadgroup]]) {
+    ulong const index = ulong(group) * 256 + lane;
+    ulong const begin = sz_utf8_fold_cut_metal_(source, args.length, min(index * args.span, args.length));
+    ulong const end = sz_utf8_fold_cut_metal_(source, args.length, min((index + 1) * args.span, args.length));
+    device uint const *offsets = (device uint const *)(scratch + args.groups);
+    sz_utf8_uncased_fold_span_metal_(source, args.length, begin, end, target + scratch[group] + offsets[index]);
 }

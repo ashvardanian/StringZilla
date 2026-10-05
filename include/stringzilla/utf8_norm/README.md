@@ -9,9 +9,11 @@ Every operation has a serial baseline plus per-ISA SIMD backends, and each `_bes
 
 `bench/utf8_norm.cpp` measures throughput over the first 64 MiB of the multilingual `xlsum.csv` corpus by default.
 `STRINGWARS_BYTES` controls the input size; `STRINGWARS_TOKENS` selects words, lines, or the file as one input.
+Metal rows use a standalone driver on the same corpus slice, reporting the median of three runs with a stream synchronization after each input.
 The Serial row is the reference; there is no Standard row here, since no standard library ships Unicode normalization.
 For a comparison against ICU, see the main project README.
 Results are split into Short Words, Long Lines, and Whole File workloads.
+A `—` cell means the quick-check API has no GPU kernel.
 A `↑` cell means there is no dedicated kernel for that operation at that backend, so the dispatcher reuses the tier above it.
 
 ## Short Words
@@ -38,6 +40,7 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | Ice Lake @ Xeon4 |          362.3 MB/s |                       505.6 MB/s |
 | Serial @ M5 Pro  |         749.3 MiB/s |                      819.3 MiB/s |
 | NEON @ M5 Pro    |       1,640.4 MiB/s |                    1,857.8 MiB/s |
+| Metal @ M5 Pro   |          24.4 MiB/s |                                — |
 | NEON @ Graviton4 |                   … |                                … |
 | SVE2 @ Graviton4 |                   … |                                … |
 | SVE @ Graviton3  |                   … |                                … |
@@ -50,3 +53,4 @@ The corpus slice normalized to NFC in one call.
 | :-------------- | ------------------: |
 | Serial @ M5 Pro |         752.1 MiB/s |
 | NEON @ M5 Pro   |       1,647.4 MiB/s |
+| Metal @ M5 Pro  |       5,566.1 MiB/s |

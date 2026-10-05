@@ -1515,15 +1515,24 @@ inline void check_utf8_uncased_device_equivalence_(test_context_t &context, auto
 inline void check_utf8_uncased_device_safety_(test_context_t &context, auto const &backend) {
     auto const staged = utf8_uncased_fold_staged_(backend);
     std::vector<char> expected, produced;
-    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
+    auto const compare = [&](char const *input, std::size_t length) {
         expected.resize(length * 3 + 4), produced.resize(length * 3 + 4);
         sz_size_t const expected_length = kernel_result<sz_size_t>(sz_utf8_uncased_fold_serial, input, length,
                                                                    expected.data());
         sz_size_t const produced_length = kernel_result<sz_size_t>(staged, input, length, produced.data());
         if (produced_length != expected_length ||
             !std::equal(expected.begin(), expected.begin() + expected_length, produced.begin()))
-            fail_backend_(backend.name, "a malformed text folds differently from serial");
-    });
+            fail_backend_(backend.name, "a text folds differently from serial");
+    };
+    for_each_adversarial_utf8_input_(context, context.iterations(1000), compare);
+    for (std::size_t length : {std::size_t(16383), std::size_t(16384), std::size_t(16385)}) {
+        std::string input(length, 'A');
+        input.replace(length - 2, 2, "\xC3\x9F", 2);
+        compare(input.data(), input.size());
+    }
+    std::string malformed(65539, char(0x80));
+    malformed += "\xC3\x9F\xF0\x9F";
+    compare(malformed.data(), malformed.size());
 
     std::string const host_source = "HELLO";
     unified_vector<char> source(host_source.begin(), host_source.end(),
@@ -1575,15 +1584,13 @@ inline void check_utf8_norm_device_equivalence_(test_context_t &context, auto co
     check_utf8_normalize_equivalence_(context, utf8_norm_staged_(backend));
 }
 
-/** The well-formed adversarial inputs every CPU normalizer faces, which the device normalizes byte
- *  for byte as serial does in every form, and memory the device cannot reach, which it refuses. */
+/** Adversarial inputs and bulk boundaries against serial, plus inaccessible-memory refusals. */
 inline void check_utf8_norm_device_safety_(test_context_t &context, auto const &backend) {
     static sz_normal_form_t const norm_forms[4] = {sz_normal_form_nfd_k, sz_normal_form_nfc_k, sz_normal_form_nfkd_k,
                                                    sz_normal_form_nfkc_k};
     auto const staged = utf8_norm_staged_(backend);
     std::vector<char> expected, produced;
-    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
-        if (sz_utf8_find_malformed(input, (sz_size_t)length) != STRINGZILLA_NULL_CHAR) return;
+    auto const compare = [&](char const *input, std::size_t length) {
         expected.resize(length * 18 + 18), produced.resize(length * 18 + 18);
         for (sz_normal_form_t form : norm_forms) {
             sz_size_t const expected_length = kernel_result<sz_size_t>(sz_utf8_norm_serial, input, length, form,
@@ -1593,7 +1600,22 @@ inline void check_utf8_norm_device_safety_(test_context_t &context, auto const &
                 !std::equal(expected.begin(), expected.begin() + expected_length, produced.begin()))
                 fail_backend_(backend.name, "a text normalizes differently from serial");
         }
+    };
+    for_each_adversarial_utf8_input_(context, context.iterations(1000), [&](char const *input, std::size_t length) {
+        if (sz_utf8_find_malformed(input, length) == STRINGZILLA_NULL_CHAR) compare(input, length);
     });
+    std::string hangul(17 * 1024 - 3, 'x');
+    hangul += "\xE1\x84\x80\xE1\x85\xA1\xE1\x86\xA8";
+    hangul.append(1024, 'y');
+    compare(hangul.data(), hangul.size());
+    std::string marks = "a";
+    for (std::size_t index = 0; index != 70000; ++index) marks += index % 2 ? "\xCC\x80" : "\xCC\x95";
+    marks += "\xFF";
+    marks += "e\xCC\x81";
+    compare(marks.data(), marks.size());
+    std::string malformed(65539, char(0x80));
+    malformed += "e\xCC\x81\xF0\x9F";
+    compare(malformed.data(), malformed.size());
 
     std::string const host_source = "caf\xC3\xA9";
     unified_vector<char> source(host_source.begin(), host_source.end(),

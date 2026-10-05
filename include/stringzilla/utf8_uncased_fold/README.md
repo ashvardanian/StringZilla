@@ -8,6 +8,7 @@ Every operation has a serial baseline plus per-ISA SIMD backends, and `sz_utf8_u
 
 `bench/utf8_uncased.cpp` measures throughput over the first 64 MiB of the multilingual `xlsum.csv` corpus by default.
 `STRINGWARS_BYTES` controls the input size; `STRINGWARS_TOKENS` selects words, lines, or the file as one input.
+Metal rows use a standalone driver on the same corpus slice, reporting the median of three runs with a stream synchronization after each input.
 The Serial row is the reference; there is no Standard row here, since no standard library ships Unicode case folding.
 Results are split into a Short Words workload (tokens averaging a handful of bytes), a Long Lines workload (full sentences), and a Whole File workload (the entire corpus folded in one pass).
 A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at that backend, so the dispatcher reuses the tier above it.
@@ -34,6 +35,7 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at 
 | Ice Lake @ Xeon4 |                  860.1 MB/s |
 | Serial @ M5 Pro  |                 550.8 MiB/s |
 | NEON @ M5 Pro    |               1,233.6 MiB/s |
+| Metal @ M5 Pro   |                  53.5 MiB/s |
 | NEON @ Graviton4 |                           … |
 | SVE2 @ Graviton4 |                           … |
 | SVE @ Graviton3  |                           … |
@@ -47,6 +49,7 @@ A `↑` cell means there is no dedicated `sz_utf8_uncased_fold_<isa>` kernel at 
 | Ice Lake @ Xeon4 |                 1289.4 MB/s |
 | Serial @ M5 Pro  |                 551.5 MiB/s |
 | NEON @ M5 Pro    |               1,218.7 MiB/s |
+| Metal @ M5 Pro   |              16,810.0 MiB/s |
 | NEON @ Graviton4 |                           … |
 | SVE2 @ Graviton4 |                           … |
 | SVE @ Graviton3  |                           … |

@@ -1811,7 +1811,17 @@ inline void raise(status_t status) noexcept(false) {
  *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
 template <typename allocator_type_>
 inline void *allocate_through_(sz_size_t n, void *allocator_state, void *) noexcept {
-    return allocate_or_null_(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+        return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state),
+                                                                n);
+    }
+    catch (...) {
+        return nullptr;
+    }
+#else
+    return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
+#endif
 }
 
 template <typename allocator_type_>

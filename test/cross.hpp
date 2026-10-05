@@ -203,8 +203,8 @@ inline void check_memory_equivalence_(test_context_t &context, memory_backend_t 
 
             // A randomized source with embedded NULs - the byte primitives must stay length-driven.
             // It is read from a cache-line-shifted span, so the load alignment varies too.
-            std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
-            sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
+            std::vector<char> source_storage(length + sz_default_alignment_k, '\0');
+            sz_cptr_t const source = source_storage.data() + (input % sz_default_alignment_k);
             if (length) randomize_string(context.generator, {const_cast<char *>(source), length});
 
             // `copy` and `fill`: place the destination at every sub-cache-line alignment, comparing
@@ -280,8 +280,8 @@ inline void check_lookup_equivalence_(test_context_t &context, lookup_backend_t 
         for (sz_size_t length : lengths) {
             for (sz_size_t input = 0; input != inputs; ++input) {
 
-                std::vector<char> source_storage(length + STRINGZILLA_CACHE_LINE_BYTES, '\0');
-                sz_cptr_t const source = source_storage.data() + (input % STRINGZILLA_CACHE_LINE_BYTES);
+                std::vector<char> source_storage(length + sz_default_alignment_k, '\0');
+                sz_cptr_t const source = source_storage.data() + (input % sz_default_alignment_k);
                 if (length) randomize_string(context.generator, {const_cast<char *>(source), length});
 
                 for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {

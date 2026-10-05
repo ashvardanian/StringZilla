@@ -90,16 +90,6 @@ inline bool sz_utf8_norm_hangul_metal_(uint codepoint) {
             codepoint < sz_utf8_norm_hangul_s_base_k + sz_utf8_norm_hangul_s_count_k);
 }
 
-inline bool sz_utf8_norm_boundary_metal_(uint codepoint, sz_utf8_norm_props_t properties, uint form) {
-    if (properties.canonical_combining_class != 0) return false;
-    switch (form) {
-    case sz_normal_form_nfc_k: return ((properties.quick_check & 3) == 0);
-    case sz_normal_form_nfkc_k: return ((properties.quick_check & 12) == 0);
-    case sz_normal_form_nfd_k: return (!properties.nfd && !sz_utf8_norm_hangul_metal_(codepoint));
-    default: return (!properties.nfkd && !sz_utf8_norm_hangul_metal_(codepoint));
-    }
-}
-
 inline bool sz_utf8_norm_dirty_metal_(uint codepoint, sz_utf8_norm_props_t properties, uint form) {
     if (properties.canonical_combining_class != 0) return true;
     switch (form) {
@@ -258,20 +248,20 @@ inline ulong sz_utf8_norm_step_metal_(device uchar const *text, ulong length, ul
         *boundary = true;
         return 1;
     }
-    *boundary = sz_utf8_norm_boundary_metal_(rune, sz_utf8_norm_lookup_metal_(rune), form);
+    *boundary = !sz_utf8_norm_dirty_metal_(rune, sz_utf8_norm_lookup_metal_(rune), form);
     return rune_length;
 }
 
-inline ulong sz_utf8_norm_cut_metal_(device uchar const *text, ulong length, ulong position, uint form) {
-    bool boundary = false;
-    for (uint step = 0; step != 3 && position != 0 && position < length && (text[position] & 0xC0u) == 0x80u; ++step)
-        ++position;
-    while (position != 0 && position < length) {
+inline ulong sz_utf8_norm_cut_metal_(device uchar const *text, ulong length, ulong position, ulong limit, uint form) {
+    if (!position) return 0;
+    for (uint step = 0; step != 3 && position < length && (text[position] & 0xC0u) == 0x80u; ++step) ++position;
+    while (position < limit) {
+        bool boundary;
         ulong const step = sz_utf8_norm_step_metal_(text, length, position, form, &boundary);
-        if (boundary) break;
+        if (boundary) return position;
         position += step;
     }
-    return position;
+    return limit;
 }
 
 inline ulong sz_utf8_norm_span_metal_(device uchar const *text, ulong length, ulong begin, ulong end, uint form,
@@ -287,8 +277,8 @@ inline ulong sz_utf8_norm_span_metal_(device uchar const *text, ulong length, ul
             continue;
         }
         properties = sz_utf8_norm_lookup_metal_(rune);
-        if (sz_utf8_norm_boundary_metal_(rune, properties, form)) segment = position;
         if (!sz_utf8_norm_dirty_metal_(rune, properties, form)) {
+            segment = position;
             position += rune_length;
             continue;
         }
@@ -310,7 +300,7 @@ inline ulong sz_utf8_norm_span_metal_(device uchar const *text, ulong length, ul
 }
 
 struct sz_utf8_norm_arguments_metal_t {
-    ulong length, form;
+    ulong length, form, chunks;
 };
 kernel void sz_utf8_norm_metal_kernel_(device uchar const *text [[buffer(0)]], device uchar *target [[buffer(1)]],
                                        device ulong *target_length [[buffer(2)]],
@@ -320,10 +310,10 @@ kernel void sz_utf8_norm_metal_kernel_(device uchar const *text [[buffer(0)]], d
     threadgroup ulong offsets[256];
     ulong const length = arguments.length;
     ulong const quotient = length / threads, remainder = length % threads;
-    ulong const begin = sz_utf8_norm_cut_metal_(text, length, lane * quotient + min((ulong)lane, remainder),
+    ulong const begin = sz_utf8_norm_cut_metal_(text, length, lane * quotient + min((ulong)lane, remainder), length,
                                                 (uint)arguments.form);
     ulong const end = sz_utf8_norm_cut_metal_(text, length, (lane + 1) * quotient + min((ulong)(lane + 1), remainder),
-                                              (uint)arguments.form);
+                                              length, (uint)arguments.form);
     offsets[lane] = sz_utf8_norm_span_metal_(text, length, begin, end, (uint)arguments.form, nullptr);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (!lane) {
@@ -337,4 +327,76 @@ kernel void sz_utf8_norm_metal_kernel_(device uchar const *text [[buffer(0)]], d
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     sz_utf8_norm_span_metal_(text, length, begin, end, (uint)arguments.form, target + offsets[lane]);
+}
+
+struct sz_utf8_norm_span_metal_t {
+    ulong begin, end, offset;
+};
+
+inline ulong sz_utf8_norm_scan_metal_(ulong value, uint lane, threadgroup ulong *totals) {
+    uint const low = uint(value);
+    uint const low_prefix = simd_prefix_exclusive_sum(low);
+    uint const carries = simd_prefix_exclusive_sum(uint(low_prefix + low < low_prefix));
+    uint const high_prefix = simd_prefix_exclusive_sum(uint(value >> 32));
+    ulong const prefix = (ulong(high_prefix + carries) << 32) | low_prefix;
+    if ((lane & 31) == 31) totals[lane / 32] = prefix + value;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    ulong preceding = 0;
+    for (uint group = 0; group < lane / 32; ++group) preceding += totals[group];
+    return preceding + prefix;
+}
+
+kernel void sz_utf8_norm_count_metal_kernel_(device uchar const *text [[buffer(0)]],
+                                             device sz_utf8_norm_span_metal_t *spans [[buffer(3)]],
+                                             device ulong *blocks [[buffer(4)]],
+                                             constant sz_utf8_norm_arguments_metal_t &arguments [[buffer(5)]],
+                                             uint group [[threadgroup_position_in_grid]],
+                                             uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup ulong totals[1];
+    ulong const index = ulong(group) * 32 + lane;
+    ulong begin = arguments.length, end = arguments.length, bytes = 0;
+    if (index < arguments.chunks) {
+        ulong const first = index * 64, limit = min(first + 64, arguments.length);
+        begin = sz_utf8_norm_cut_metal_(text, arguments.length, first, limit, uint(arguments.form));
+        if (begin < limit) {
+            end = sz_utf8_norm_cut_metal_(text, arguments.length, limit, arguments.length, uint(arguments.form));
+            bytes = sz_utf8_norm_span_metal_(text, arguments.length, begin, end, uint(arguments.form), nullptr);
+        }
+        else begin = end;
+    }
+    ulong const offset = sz_utf8_norm_scan_metal_(bytes, lane, totals);
+    if (index < arguments.chunks) spans[index] = {begin, end, offset};
+    if (lane == 31) blocks[group] = offset + bytes;
+}
+
+kernel void sz_utf8_norm_offsets_metal_kernel_(device ulong *target_length [[buffer(2)]],
+                                               device ulong *blocks [[buffer(4)]],
+                                               constant sz_utf8_norm_arguments_metal_t &arguments [[buffer(5)]],
+                                               uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup ulong totals[8];
+    ulong const count = sz_size_divide_round_up_metal_<ulong>(arguments.chunks, 32);
+    ulong const chunk = sz_size_divide_round_up_metal_<ulong>(count, 256);
+    ulong const begin = min(ulong(lane) * chunk, count), end = min(begin + chunk, count);
+    ulong sum = 0;
+    for (ulong index = begin; index < end; ++index) {
+        ulong const bytes = blocks[index];
+        blocks[index] = sum;
+        sum += bytes;
+    }
+    ulong const offset = sz_utf8_norm_scan_metal_(sum, lane, totals);
+    for (ulong index = begin; index < end; ++index) blocks[index] += offset;
+    if (lane == 255) *target_length = offset + sum;
+}
+
+kernel void sz_utf8_norm_write_metal_kernel_(device uchar const *text [[buffer(0)]], device uchar *target [[buffer(1)]],
+                                             device sz_utf8_norm_span_metal_t const *spans [[buffer(3)]],
+                                             device ulong const *blocks [[buffer(4)]],
+                                             constant sz_utf8_norm_arguments_metal_t &arguments [[buffer(5)]],
+                                             uint group [[threadgroup_position_in_grid]],
+                                             uint lane [[thread_index_in_threadgroup]]) {
+    ulong const index = ulong(group) * 32 + lane;
+    if (index >= arguments.chunks) return;
+    sz_utf8_norm_span_metal_t const span = spans[index];
+    sz_utf8_norm_span_metal_(text, arguments.length, span.begin, span.end, uint(arguments.form),
+                             target + blocks[group] + span.offset);
 }

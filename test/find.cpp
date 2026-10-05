@@ -189,11 +189,11 @@ void check_find_misaligned_(test_context_t &context, std::string_view haystack_p
     std::size_t const max_repeats = context.iterations_quadratic(40);
 
     // Allocate a buffer to store the haystack with enough padding to mis-align it.
-    std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * STRINGZILLA_CACHE_LINE_BYTES;
+    std::size_t haystack_buffer_length = max_repeats * haystack_pattern.size() + 2 * sz_default_alignment_k;
     std::vector<char> haystack_buffer(haystack_buffer_length, 'x');
     char *haystack = haystack_buffer.data();
 
-    while (reinterpret_cast<std::uintptr_t>(haystack) % STRINGZILLA_CACHE_LINE_BYTES != misalignment) ++haystack;
+    while (reinterpret_cast<std::uintptr_t>(haystack) % sz_default_alignment_k != misalignment) ++haystack;
 
     for (std::size_t repeats = 0; repeats != max_repeats; ++repeats) {
         std::size_t haystack_length = (repeats + 1) * haystack_pattern.size();

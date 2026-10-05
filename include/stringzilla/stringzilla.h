@@ -47,8 +47,7 @@
  *  Performance tuning:
  *
  *  - `STRINGZILLA_SWAR_THRESHOLD=24` - length from which SWAR replaces serial byte-level loops.
- *  - `STRINGZILLA_CACHE_LINE_BYTES=?` - cache-line width, derived from the target, that affects
- *    some algorithms and the first heap buffer of a growing string.
+ *  - `STRINGZILLA_DEFAULT_ALIGNMENT=?` - default alignment and allocation-size heuristics.
  *
  *  Different generations of CPUs and SIMD capabilities can be toggled with the following macros:
  *

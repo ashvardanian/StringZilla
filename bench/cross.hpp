@@ -858,9 +858,7 @@ struct copy_from_sz {
 
     inline call_result_t operator()(std::string_view slice) const noexcept {
         std::size_t output_offset = slice.data() - corpus.dataset.data();
-        // Round down to the nearest multiple of a cache line width for aligned writes
-        output_offset = round_up_to_multiple<STRINGZILLA_CACHE_LINE_BYTES>(output_offset) -
-                        STRINGZILLA_CACHE_LINE_BYTES;
+        output_offset -= output_offset % sz_default_alignment_k;
         // Ensure unaligned exports if needed
         output_offset += page_misalignment_;
         copy_func_(output + output_offset, slice.data(), slice.size(), nullptr);

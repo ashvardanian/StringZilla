@@ -23,6 +23,7 @@ That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored
 | Skylake @ Xeon6  |                   … |
 | Serial @ M5 Pro  |               180.8 |
 | NEON @ M5 Pro    |               201.7 |
+| Metal @ M5 Pro   |               1,051 |
 | CUDA @ SM90      |                   … |
 | CUDA @ SM103 MIG |               545.1 |
 | CUDA @ SM120     |                   … |
@@ -36,6 +37,7 @@ That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored
 | Skylake @ Xeon6  |                   … |
 | Serial @ M5 Pro  |               133.1 |
 | NEON @ M5 Pro    |               201.7 |
+| Metal @ M5 Pro   |              25,020 |
 | CUDA @ SM90      |                   … |
 | CUDA @ SM103 MIG |               8,919 |
 | CUDA @ SM120     |                   … |

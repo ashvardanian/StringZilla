@@ -1369,18 +1369,21 @@ STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *vi
 #define STRINGZILLA_NULL_CHAR ((char *)0)
 #endif
 
-/** The one cache-line width the library assumes, in bytes: the stride of equality checks and
- *  relative-order heuristics, and the smallest heap buffer a growing string asks for. Derived from
- *  the target; define it from outside to override. */
-#if !defined(STRINGZILLA_CACHE_LINE_BYTES)
+/** Default alignment policy for padding and allocation-size heuristics. */
+#if !defined(STRINGZILLA_DEFAULT_ALIGNMENT)
 #if defined(__s390x__)
-#define STRINGZILLA_CACHE_LINE_BYTES (256) // bytes
-#elif defined(__APPLE__) && defined(__aarch64__)
-#define STRINGZILLA_CACHE_LINE_BYTES (128) // bytes - Apple's cores carry a whole 128-byte line
+#define STRINGZILLA_DEFAULT_ALIGNMENT 256
+#elif defined(__wasm__) || defined(__EMSCRIPTEN__)
+#define STRINGZILLA_DEFAULT_ALIGNMENT 64
 #else
-#define STRINGZILLA_CACHE_LINE_BYTES (64) // bytes
+#define STRINGZILLA_DEFAULT_ALIGNMENT 128
 #endif
 #endif
+#if STRINGZILLA_DEFAULT_ALIGNMENT < 64 || (STRINGZILLA_DEFAULT_ALIGNMENT & (STRINGZILLA_DEFAULT_ALIGNMENT - 1))
+#error "STRINGZILLA_DEFAULT_ALIGNMENT must be a power of two and at least 64 bytes"
+#endif
+
+enum { sz_default_alignment_k = STRINGZILLA_DEFAULT_ALIGNMENT };
 
 #define STRINGZILLA_SIZE_MAX ((sz_size_t)(-1))
 #define STRINGZILLA_SSIZE_MAX ((sz_ssize_t)(STRINGZILLA_SIZE_MAX >> 1))

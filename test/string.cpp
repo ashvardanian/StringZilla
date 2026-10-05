@@ -254,7 +254,7 @@ void test_sequence_unit() {
 
 /** Verifies assignment from forward iterators and appending an element from the same tape. */
 void test_tape_assign_unit() {
-    sz::tape<char, std::uint32_t, std::allocator<char>> tape;
+    sz::tape<char, std::uint32_t> tape;
 
     // A forward list is walked forward only, but any number of times - all that `assign` needs.
     std::forward_list<std::string> strings {"alpha", "", "gamma"};
@@ -283,7 +283,9 @@ void test_tape_assign_unit() {
     sz::packed_tape_view<char, std::uint32_t> const packed({"alpha", 5}, offsets);
     verify(packed[1].empty());
 
-    tape_t owned, independent;
+    auto const [allocator, status] = sz::unified_alloc<char, sz_cap_serial_k>::make();
+    verify(status == sz::status_t::success_k);
+    tape_t owned(allocator), independent(allocator);
     verify(owned.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
     verify(owned.size() == 3 && owned[1].empty());
     std::array<sz_string_view_t, 3> views {{{"a\0b", 3}, {"", 0}, {"de", 2}}};
@@ -308,7 +310,7 @@ void test_tape_assign_unit() {
     verify(owned.assign(std::span<sz_string_view_t const> {}) == sz::status_t::success_k);
     verify(owned.size() == 0);
 
-    sz::tape<char16_t, std::uint32_t, std::allocator<char16_t>> wide;
+    sz::tape<char16_t, std::uint32_t> wide;
     std::array<std::u16string_view, 2> const units {u"alpha", u""};
     verify(wide.assign(units.begin(), units.end()) == sz::status_t::success_k);
     verify(wide.append(wide[0]) == sz::status_t::success_k);
@@ -320,7 +322,7 @@ void test_tape_assign_unit() {
 /** Validates that @c tape refuses to grow past the range of its offset type. */
 void test_tape_overflow_unit() {
     // 8-bit offsets hit the same code path as 32-bit offsets past 4 GB, but already at 256 bytes.
-    using small_tape_t = sz::tape<char, std::uint8_t, std::allocator<char>>;
+    using small_tape_t = sz::tape<char, std::uint8_t>;
 
     // Appending past the offset range must fail cleanly and leave the stored strings untouched.
     {
@@ -440,12 +442,13 @@ void test_allocator_unit() {
                allocator.handle == original.handle);
     }
     {
-        sz::unified_alloc<char, sz_cap_serial_k> allocator;
+        auto const [allocator, status] = sz::unified_alloc<char, sz_cap_serial_k>::make();
+        verify(status == sz::status_t::success_k);
         char *empty = allocator.allocate(0);
         verify(empty != nullptr);
         allocator.deallocate(empty, 0);
-        sz::unified_alloc<sz_size_t, sz_cap_serial_k> words;
-        throws_verify(words.allocate(STRINGZILLA_SIZE_MAX), std::bad_alloc);
+        sz::unified_alloc<sz_size_t, sz_cap_serial_k> words(allocator);
+        verify(words.allocate(STRINGZILLA_SIZE_MAX) == nullptr);
     }
 }
 

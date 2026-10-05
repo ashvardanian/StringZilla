@@ -134,7 +134,7 @@ The most important ones, mirrored from `stringzilla.h`:
 | `STRINGZILLA_WITH_LIBC`              |      `1` | `0` builds freestanding, without libc    |
 | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` | platform | Unaligned word loads in SWAR fallbacks   |
 | `STRINGZILLA_SWAR_THRESHOLD`         |     `24` | Length below which scalar loops are used |
-| `STRINGZILLA_CACHE_LINE_BYTES`       | platform | Cache-line width for heuristics          |
+| `STRINGZILLA_DEFAULT_ALIGNMENT`      | platform | Default alignment and padding policy     |
 
 `STRINGZILLA_HEADER_ONLY` chooses between the two builds: with `0`, the default, the dispatch points live in the library, which compiles every capability and picks one by the mask each call passes; with `1` the kernels your compiler flags enable inline into your translation unit, and the dispatch points report `sz_missing_library_k`.
 `STRINGZILLA_WITH_LIBC=0` builds freestanding without the C standard library, which disables the default `malloc`-based allocator and the `offsetof` static checks.

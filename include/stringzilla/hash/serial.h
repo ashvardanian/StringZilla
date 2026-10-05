@@ -47,11 +47,7 @@ typedef struct __attribute__((packed)) sz_hash_state_t {
 /** Bytes in a SHA256 digest, fixed by FIPS 180-4. */
 #define STRINGZILLA_SHA256_DIGEST_LENGTH (32)
 
-/**
- *  @brief Bytes in a SHA256 message block, fixed by FIPS 180-4.
- *  @note Coincides with @c STRINGZILLA_CACHE_LINE_BYTES and the ZMM width, which are unrelated
- *      reasons for the same 64.
- */
+/** Bytes in a SHA256 message block, fixed by FIPS 180-4. */
 #define STRINGZILLA_SHA256_BLOCK_LENGTH (64)
 
 /**
