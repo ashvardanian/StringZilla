@@ -2,7 +2,7 @@
  *  @file c/dispatch/levenshtein.c
  *  @author Ash Vardanian
  *  @date September 6, 2023
- *  @brief The Levenshtein engine's dispatch points, @c sz_levenshtein_distance_tiled_best, their
+ *  @brief The Levenshtein engine's dispatch points, their
  *      lists and finder.
  */
 #include <stringzilla/levenshtein.h>
@@ -103,34 +103,6 @@ static sz_capability_kernels_t const *sz_levenshtein_distances_capabilities(void
     return lists;
 }
 
-static sz_capability_kernels_t const *sz_levenshtein_distance_tiled_capabilities(void) {
-    static sz_kernel_punned_t const cuda[] = {
-        STRINGZILLA_NULL,
-#if STRINGZILLA_TARGET_CUDA
-        (sz_kernel_punned_t)&sz_levenshtein_distance_tiled_cuda,
-#endif
-    };
-    static sz_kernel_punned_t const rocm[] = {
-        STRINGZILLA_NULL,
-#if STRINGZILLA_TARGET_ROCM
-        (sz_kernel_punned_t)&sz_levenshtein_distance_tiled_rocm,
-#endif
-    };
-    static sz_kernel_punned_t const metal[] = {
-        STRINGZILLA_NULL,
-#if STRINGZILLA_TARGET_METAL
-        (sz_kernel_punned_t)&sz_levenshtein_distance_tiled_metal,
-#endif
-    };
-    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {0, sz_no_kernels_},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
-        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
-        {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
-    };
-    return lists;
-}
-
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
                                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
                                                        sz_allocator_t *allocator, sz_stream_t stream) {
@@ -151,21 +123,12 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *en
     return kernel ? kernel(engine, candidates, distances, distances_stride, stream) : sz_missing_kernel_k;
 }
 
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_capability_t capabilities, sz_stream_t stream) {
-    sz_kernel_levenshtein_distance_tiled_t const kernel = (sz_kernel_levenshtein_distance_tiled_t)sz_kernel_pick_(
-        capabilities, sz_levenshtein_distance_tiled_capabilities());
-    return kernel ? kernel(a, a_length, b, b_length, scratch, distance, stream) : sz_missing_kernel_k;
-}
-
 STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                        sz_kernel_punned_t *kernel, sz_capability_t *capability) {
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
     case sz_kernel_levenshtein_engine_init_k: lists = sz_levenshtein_engine_init_capabilities(); break;
     case sz_kernel_levenshtein_distances_k: lists = sz_levenshtein_distances_capabilities(); break;
-    case sz_kernel_levenshtein_distance_tiled_k: lists = sz_levenshtein_distance_tiled_capabilities(); break;
     default: break;
     }
     *kernel = lists ? sz_kernel_pick_(capabilities, lists) : (sz_kernel_punned_t)STRINGZILLA_NULL;

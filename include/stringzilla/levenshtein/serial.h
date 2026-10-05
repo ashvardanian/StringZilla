@@ -60,7 +60,9 @@ enum { sz_levenshtein_words_stride_k = 32 };
 
 /** Words a query of @p length symbols spans - every class's row holds that many, one
  *  bit per symbol. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_words(sz_size_t length) { return (length + 63) / 64; }
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_words(sz_size_t length) {
+    return length / 64 + (length % 64 != 0);
+}
 
 /** Words from one class's mask row to the next: the query's words, padded
  *  to @c sz_levenshtein_words_stride_k. */
@@ -305,8 +307,7 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_utf8(sz_levenshtein_query_
 /** Symbols one side of a tile of the device wavefront spans. */
 enum { sz_levenshtein_tile_side_k = 128 };
 
-/** Query words a GPU engine reaches, a warp's thirty-two lanes at eight words each; a longer query
- *  is refused rather than silently truncated. */
+/** Maximum query words held in registers by the fixed-width GPU kernels. */
 enum { sz_levenshtein_gpu_words_max_k = 256 };
 
 /** Lanes a warped candidate is spread across, which is a warp or a simdgroup, and the query words
@@ -334,19 +335,30 @@ enum { sz_levenshtein_gpu_grid_rows_max_k = 65535 };
  *  count that scales with the lanes. */
 enum { sz_levenshtein_gpu_lanes_waves_min_k = 12 };
 
-/** Device-reachable scratch bytes required by @ref sz_levenshtein_distance_tiled_best. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_distance_tiled_scratch_bytes(sz_size_t a_length, sz_size_t b_length) {
-    sz_size_t const shorter_length = sz_min_of_two(a_length, b_length);
-    sz_size_t const longer_length = sz_max_of_two(a_length, b_length);
-    sz_size_t const tile_grid_columns = sz_size_divide_round_up(longer_length, sz_levenshtein_tile_side_k);
-    sz_size_t const row_frontier_cells =
-        sz_size_divide_round_up(shorter_length, sz_levenshtein_tile_side_k) * sz_levenshtein_tile_side_k + 1;
-    return (row_frontier_cells + tile_grid_columns) * sizeof(sz_u32_t);
-}
-
 #pragma endregion Generic Public Helpers
 
 #pragma region Generic Internal Helpers
+
+/** Empty strings and power-of-two length ranges across the full size type. */
+enum { sz_levenshtein_length_buckets_k = sizeof(sz_size_t) * 8 + 2 };
+
+/** One contiguous group of original indices with similar string lengths. */
+typedef struct sz_levenshtein_length_bucket_t {
+
+    /** First index in the reordered index array. */
+    sz_size_t offset;
+
+    /** Number of indices in the bucket. */
+    sz_size_t count;
+
+    /** Maximum string length in the bucket. */
+    sz_size_t length_max;
+} sz_levenshtein_length_bucket_t;
+
+/** Maps lengths to buckets: empty, one, two, three through four, five through eight, and so on. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_length_bucket_(sz_size_t length) {
+    return length <= 1 ? length : sz_size_log2i_nonzero(length - 1) + 2;
+}
 
 /** The bit of the query's last symbol within its last word: where the score deltas are read. */
 STRINGZILLA_CONSTEXPR sz_u64_t sz_levenshtein_last_symbol_bit_(sz_size_t length) {
@@ -612,6 +624,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t cons
         sz_u8_t seen[sz_levenshtein_byte_classes_k];
         for (sz_size_t index = 0; index != queries->count; ++index) {
             sz_size_t const length = queries->get_length(queries->handle, index);
+            if (length > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
             sz_cptr_t const text = queries->get_start(queries->handle, index);
             shapes[index].length = (sz_u32_t)length;
             shapes[index].classes = length != 0 ? (sz_u32_t)sz_levenshtein_engine_byte_classes_(text, length, seen) : 0;
@@ -621,42 +634,75 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_measure_(sz_sequence_t cons
     }
     // Runes never outnumber bytes, so the longest text bounds the page table every measurement reuses.
     sz_size_t longest = 0;
-    for (sz_size_t index = 0; index != queries->count; ++index)
-        longest = sz_max_of_two(longest, queries->get_length(queries->handle, index));
+    for (sz_size_t index = 0; index != queries->count; ++index) {
+        sz_size_t const length = queries->get_length(queries->handle, index);
+        if (length > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
+        shapes[index].length = (sz_u32_t)length;
+        longest = sz_max_of_two(longest, length);
+    }
     sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_bytes_(longest);
     sz_u16_t *const page_rows = (sz_u16_t *)allocator->allocate(pages_bytes, allocator->handle, stream);
     if (!page_rows) return sz_bad_alloc_k;
     sz_u32_t *const class_rows = (sz_u32_t *)(page_rows + sz_levenshtein_utf8_pages_k);
     for (sz_size_t index = 0; index != queries->count; ++index)
-        sz_levenshtein_engine_rune_classes_(queries->get_start(queries->handle, index),
-                                            queries->get_length(queries->handle, index), page_rows, class_rows,
-                                            shapes + index);
+        sz_levenshtein_engine_rune_classes_(queries->get_start(queries->handle, index), shapes[index].length, page_rows,
+                                            class_rows, shapes + index);
     allocator->free(page_rows, pages_bytes, allocator->handle, stream);
     return sz_success_k;
 }
 
+STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_engine_layout_add_(sz_size_t bytes, sz_size_t *offset) {
+    if (bytes > STRINGZILLA_SIZE_MAX - 63) return sz_false_k;
+    sz_size_t const aligned = sz_levenshtein_align64_(bytes);
+    if (aligned > STRINGZILLA_SIZE_MAX - *offset) return sz_false_k;
+    *offset += aligned;
+    return sz_true_k;
+}
+
 /** Lays @p count queries of the given @p shapes out inside one block, after a tier's
  *  own @p head_bytes. */
-STRINGZILLA_CONSTEXPR void sz_levenshtein_engine_layout_(sz_size_t count, sz_levenshtein_symbol_t symbol,
-                                                         sz_levenshtein_engine_shape_t const *shapes,
-                                                         sz_size_t head_bytes, sz_levenshtein_engine_layout_t *layout) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_engine_layout_(sz_size_t count, sz_levenshtein_symbol_t symbol,
+                                                              sz_levenshtein_engine_shape_t const *shapes,
+                                                              sz_size_t head_bytes,
+                                                              sz_levenshtein_engine_layout_t *layout) {
+    if (count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t) - 1) return sz_false_k;
     sz_size_t words = 0, rows = 0;
     for (sz_size_t index = 0; index != count; ++index) {
-        words += (sz_size_t)shapes[index].classes * sz_levenshtein_query_stride(shapes[index].length);
+        sz_size_t const stride = sz_levenshtein_query_stride(shapes[index].length);
+        if (stride && shapes[index].classes > (STRINGZILLA_SIZE_MAX / sizeof(sz_u64_t) - words) / stride)
+            return sz_false_k;
+        words += (sz_size_t)shapes[index].classes * stride;
+        if (shapes[index].rows > STRINGZILLA_SIZE_MAX / (256 * sizeof(sz_u32_t)) - rows) return sz_false_k;
         rows += shapes[index].rows;
     }
-    layout->head_bytes = sz_levenshtein_align64_(head_bytes);
-    layout->masks_offset = layout->head_bytes;
+    sz_size_t classes_bytes;
+    if (symbol == sz_levenshtein_bytes_k) {
+        if (count > STRINGZILLA_SIZE_MAX / sz_levenshtein_byte_classes_k) return sz_false_k;
+        classes_bytes = count * sz_levenshtein_byte_classes_k;
+    }
+    else {
+        classes_bytes = (count + 1) * sizeof(sz_size_t);
+        sz_size_t const pages_bytes = sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t);
+        if (count > (STRINGZILLA_SIZE_MAX - classes_bytes) / pages_bytes) return sz_false_k;
+        classes_bytes += count * pages_bytes;
+        if (rows > (STRINGZILLA_SIZE_MAX - classes_bytes) / (256 * sizeof(sz_u32_t))) return sz_false_k;
+        classes_bytes += rows * 256 * sizeof(sz_u32_t);
+    }
+    sz_size_t offset = 0;
+    if (!sz_levenshtein_engine_layout_add_(head_bytes, &offset)) return sz_false_k;
+    layout->head_bytes = offset;
+    layout->masks_offset = offset;
     layout->masks_words = words;
-    layout->offsets_offset = layout->masks_offset + sz_levenshtein_align64_(words * sizeof(sz_u64_t));
-    layout->lengths_offset = layout->offsets_offset + sz_levenshtein_align64_((count + 1) * sizeof(sz_size_t));
-    layout->classes_offset = layout->lengths_offset + sz_levenshtein_align64_(count * sizeof(sz_u32_t));
-    layout->classes_bytes = symbol == sz_levenshtein_bytes_k
-                                ? count * sz_levenshtein_byte_classes_k
-                                : (count + 1) * sizeof(sz_size_t) +
-                                      count * sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) +
-                                      rows * 256 * sizeof(sz_u32_t);
-    layout->total_bytes = layout->classes_offset + sz_levenshtein_align64_(layout->classes_bytes);
+    if (!sz_levenshtein_engine_layout_add_(words * sizeof(sz_u64_t), &offset)) return sz_false_k;
+    layout->offsets_offset = offset;
+    if (!sz_levenshtein_engine_layout_add_((count + 1) * sizeof(sz_size_t), &offset)) return sz_false_k;
+    layout->lengths_offset = offset;
+    if (!sz_levenshtein_engine_layout_add_(count * sizeof(sz_u32_t), &offset)) return sz_false_k;
+    layout->classes_offset = offset;
+    if (!sz_levenshtein_engine_layout_add_(classes_bytes, &offset)) return sz_false_k;
+    layout->classes_bytes = classes_bytes;
+    layout->total_bytes = offset;
+    return sz_true_k;
 }
 
 /** Points @p engine 's tensors into its block and writes the offsets and lengths the
@@ -718,6 +764,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const 
                                                             sz_allocator_t const *allocator, sz_stream_t stream,
                                                             sz_levenshtein_engine_t *engine) {
     sz_size_t const count = queries->count;
+    if (count > STRINGZILLA_SIZE_MAX / sizeof(sz_levenshtein_engine_shape_t)) return sz_unexpected_dimensions_k;
     sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
     sz_levenshtein_engine_shape_t *const shapes = (sz_levenshtein_engine_shape_t *)allocator->allocate(
         shapes_bytes, allocator->handle, stream);
@@ -729,7 +776,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_sequence_t const 
     }
 
     sz_levenshtein_engine_layout_t layout;
-    sz_levenshtein_engine_layout_(count, symbol, shapes, head_bytes, &layout);
+    if (!sz_levenshtein_engine_layout_(count, symbol, shapes, head_bytes, &layout)) {
+        allocator->free(shapes, shapes_bytes, allocator->handle, stream);
+        return sz_unexpected_dimensions_k;
+    }
     void *const block = allocator->allocate(layout.total_bytes, allocator->handle, stream);
     if (!block) {
         allocator->free(shapes, shapes_bytes, allocator->handle, stream);

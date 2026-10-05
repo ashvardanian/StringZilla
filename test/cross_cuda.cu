@@ -37,7 +37,6 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         "cuda",
         runtime,
         sz_levenshtein_distances_cuda,
-        sz_levenshtein_distance_tiled_cuda,
         sz_overlap_scores_cuda,
         sz_substrings_counts_cuda,
         sz_substrings_find_cuda,

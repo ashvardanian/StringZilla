@@ -5,7 +5,10 @@ A batch is prepared by `sz_levenshtein_engine_init` for the best capability of a
 The operation has a serial baseline plus per-ISA SIMD backends — `haswell`, `skylake`, `icelake` on x86 and `neon` on Arm — and `cuda`, `rocm` and `metal` backends on the device.
 The CUDA and ROCm kernels share `simt.cuh`, each vendor launches them from its own host code in `cuda.cuh` and `rocm.cuh`, which `c/target/cuda.cu` and `c/target/rocm.hip` compile into the library, and the Metal ones live in `metal.h` with the `metal.metal` shaders, which `c/target/metal.c` compiles.
 Each capability has its own init kernel, which records that capability in the engine, and every round runs the same capability's kernel on the device of its own stream; Ice Lake has no rune arm, so its kernel scores a rune batch with Skylake's.
-The `cuda` and `rocm` backends also hold the tiled wavefront behind `sz_levenshtein_distance_tiled_best`, for one pair too long for a single thread's recurrence: it runs in caller-owned device scratch of `sz_levenshtein_distance_tiled_scratch_bytes`, allocates and joins nothing, and leaves the distance in device-reachable memory once the caller joins the stream.
+The `cuda`, `rocm` and `metal` collection backends use an internal tiled wavefront for long byte pairs and dynamic Myers state for long rune queries.
+Empty and mixed-length queries use the same engine and scoring API.
+Long queries and candidates are grouped by length, and each bucket cross-product is split to fit its workspace and launch limits while preserving the original output order.
+Temporary workspace belongs to each queued round, so independent streams can score one engine concurrently.
 
 The batched kernels run Myers' bit-parallel algorithm: every query is a pattern, packed 64 symbols per machine word, and every candidate streams one symbol per step.
 The engine prepares the whole batch's match masks once and advances several candidates per step — one per scalar state on `serial`, two per NEON register on `neon`, four per YMM on `haswell`, eight per ZMM on `skylake`, and sixty-four byte lanes per ZMM on `icelake` when the query is eight symbols or fewer.
@@ -32,6 +35,7 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | Serial @ Graviton4 |           … |           … |
 | Serial @ M5 Pro    |  1.25 GCUPS | 39.88 GCUPS |
 | NEON @ M5 Pro      |  1.78 GCUPS | 44.55 GCUPS |
+| Metal @ M5 Pro     | 50.01 GCUPS | 1,309 GCUPS |
 | CUDA @ SM90        |           … |           … |
 | CUDA @ SM103 MIG   | 33.88 GCUPS | 3,603 GCUPS |
 | CUDA @ SM120       |  3.59 GCUPS |           … |
@@ -47,6 +51,20 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 | Serial @ Graviton4 |           … |            … |
 | Serial @ M5 Pro    |  0.37 GCUPS |  73.66 GCUPS |
 | NEON @ M5 Pro      |  0.40 GCUPS |  92.13 GCUPS |
+| Metal @ M5 Pro     | 44.05 GCUPS | 915.15 GCUPS |
 | CUDA @ SM90        |           … |            … |
 | CUDA @ SM103 MIG   | 36.72 GCUPS |  4,264 GCUPS |
 | CUDA @ SM120       |           … |            … |
+
+## Long Byte Collections
+
+The internal tiled path uses a wavefront recurrence for long byte pairs within a collection.
+Each measurement below submits a 1 × 1 cross-product through `sz_levenshtein_distances`.
+Cells are milliseconds for equal-length strings over four byte values, reporting the median of seven runs and including device queue synchronization.
+
+| Backend         | 16,384 Bytes | 32,768 Bytes |
+| :-------------- | -----------: | -----------: |
+| Serial @ M5 Pro |         8.40 |        27.50 |
+| Metal @ M5 Pro  |         7.43 |        15.01 |
+
+The collection keeps short pairs on the Myers kernels because tiled launch costs outweigh their parallelism at shorter lengths.

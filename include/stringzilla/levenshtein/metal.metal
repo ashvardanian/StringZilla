@@ -4,7 +4,7 @@
  *  @date September 25, 2026
  *  @brief Levenshtein distances on Apple GPUs of Metal family 7, M1 and newer: Myers' bit-parallel
  *      recurrence over a batch of prepared queries, one candidate per thread for a narrow query and
- *      one per simdgroup for a wide one, and a tiled wavefront for a long single pair.
+ *      one per simdgroup for a wide one, and a batched tiled wavefront for long byte pairs.
  *
  *  @sa include/stringzilla/levenshtein/metal.h, which embeds and launches this source
  *  @sa include/stringzilla/levenshtein/simt.cuh, the CUDA sibling this mirrors step for step
@@ -16,9 +16,8 @@
  *
  *  The engine's planes are host addresses inside its block, turned into the kernel's own by
  *  @ref sz_reach_metal_ against the block's host address, while the candidates' tape and the
- *  distances are bound directly. A word count is a template argument, as it is a literal on CUDA,
- *  so the verticals stay in registers; the host instantiates one entry point per word count a
- *  batch reaches.
+ *  distances are bound directly. Template word counts keep verticals in registers, with one
+ *  entry point per word count.
  */
 
 /** Unicode as 256-rune pages, as @c sz_levenshtein_utf8_pages_k. */
@@ -78,33 +77,10 @@ inline sz_levenshtein_query_metal_t sz_levenshtein_row_metal_(device uchar *engi
 /** The rune at @p position, advancing it, as @c sz_utf8_next_rune_ decodes: one @c U+FFFD per
  *  ill-formed byte. */
 inline uint sz_levenshtein_next_rune_metal_(device uchar const *text, ulong length, thread ulong &position) {
-    ulong const available = length - position;
-    uint const lead = text[position];
-    uint rune = 0xFFFD;
-    ulong consumed = 1;
-    if (lead < 0x80) rune = lead;
-    else if (lead >= 0xC2 && lead <= 0xF4) {
-        ulong const needed = lead < 0xE0 ? 2 : lead < 0xF0 ? 3 : 4;
-        if (available >= needed) {
-            uint const second = text[position + 1];
-            bool formed = (second & 0xC0) == 0x80;
-            if (lead == 0xE0) formed = formed && second >= 0xA0;
-            if (lead == 0xED) formed = formed && second < 0xA0;
-            if (lead == 0xF0) formed = formed && second >= 0x90;
-            if (lead == 0xF4) formed = formed && second < 0x90;
-            for (ulong index = 2; index < needed; ++index) formed = formed && (text[position + index] & 0xC0) == 0x80;
-            if (formed) {
-                if (needed == 2) rune = (lead & 0x1F) << 6 | (second & 0x3F);
-                else if (needed == 3) rune = (lead & 0x0F) << 12 | (second & 0x3F) << 6 | (text[position + 2] & 0x3F);
-                else
-                    rune = (lead & 0x07) << 18 | (second & 0x3F) << 12 | (text[position + 2] & 0x3F) << 6 |
-                           (text[position + 3] & 0x3F);
-                consumed = needed;
-            }
-        }
-    }
-    position += consumed;
-    return rune;
+    uint rune;
+    uint const consumed = sz_utf8_decode_rune_metal_(text, length, position, rune);
+    position += consumed ? consumed : 1;
+    return consumed ? rune : 0xFFFD;
 }
 
 /** The class of @p rune under a rune query, zero for a rune the query lacks. */
@@ -423,8 +399,84 @@ template [[host_name("sz_levenshtein_distances_utf8_k8_metal_kernel_")]] kernel 
 sz_levenshtein_warped_metal_kernel_<8, true>(device uchar *, device ulong const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 
+struct sz_levenshtein_long_arguments_metal_t {
+    sz_levenshtein_arguments_metal_t common;
+    ulong query_first, candidate_first, candidate_count, words_stride;
+    ulong query_offsets, query_text, scratch_stride;
+    uint diagonal, row_first;
+};
+
+template <bool runes_>
+kernel void sz_levenshtein_long_metal_kernel_(device uchar *engine [[buffer(0)]],
+                                              device ulong const *candidates [[buffer(1)]],
+                                              device ulong *distances [[buffer(2)]],
+                                              device ulong *scratch [[buffer(3)]],
+                                              device ulong const *candidate_order [[buffer(4)]],
+                                              constant sz_levenshtein_long_arguments_metal_t &arguments [[buffer(5)]],
+                                              uint2 position [[thread_position_in_grid]]) {
+    if (position.x >= arguments.candidate_count) return;
+    device uint const *const order = sz_reach_metal_<uint>(engine, arguments.common.engine_host,
+                                                           arguments.common.order);
+    ulong const query_index = order[position.y];
+    ulong const candidate = candidate_order[arguments.candidate_first + position.x];
+    sz_levenshtein_query_metal_t const query = sz_levenshtein_row_metal_<runes_>(engine, arguments.common, query_index);
+    ulong const words = (query.length + 63) / 64;
+    sz_sequence_tape_metal_t const tape = {candidates};
+    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
+    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    ulong score = query.length;
+    if (!words) {
+        if (runes_) {
+            for (ulong cursor = 0; cursor < text_length; ++score)
+                sz_levenshtein_next_rune_metal_(text, text_length, cursor);
+        }
+        else score = text_length;
+    }
+    else {
+        device ulong *positive = scratch + (ulong(position.y) * arguments.candidate_count + position.x) *
+                                               arguments.words_stride * 2;
+        device ulong *negative = positive + arguments.words_stride;
+        for (ulong word = 0; word < words; ++word) positive[word] = ~0ul, negative[word] = 0;
+        ulong const last_symbol_bit = 1ul << ((query.length - 1) & 63);
+        for (ulong cursor = 0; cursor < text_length;) {
+            ulong const symbol_class = runes_ ? sz_levenshtein_rune_class_metal_(
+                                                    query, sz_levenshtein_next_rune_metal_(text, text_length, cursor))
+                                              : query.byte_to_class[text[cursor++]];
+            device ulong const *masks = query.masks + symbol_class * query.stride;
+            ulong positive_carry = 1, negative_carry = 0;
+            for (ulong word = 0; word < words; ++word) {
+                ulong const equality = masks[word];
+                ulong const vertical_carry = equality | negative[word];
+                ulong const matched = equality | negative_carry;
+                ulong const diagonal = (((matched & positive[word]) + positive[word]) ^ positive[word]) | matched;
+                ulong horizontal_positive = negative[word] | ~(diagonal | positive[word]);
+                ulong horizontal_negative = positive[word] & diagonal;
+                if (word + 1 == words) {
+                    score += (horizontal_positive & last_symbol_bit) != 0;
+                    score -= (horizontal_negative & last_symbol_bit) != 0;
+                }
+                ulong const next_positive_carry = horizontal_positive >> 63;
+                ulong const next_negative_carry = horizontal_negative >> 63;
+                horizontal_positive = (horizontal_positive << 1) | positive_carry;
+                horizontal_negative = (horizontal_negative << 1) | negative_carry;
+                positive_carry = next_positive_carry, negative_carry = next_negative_carry;
+                positive[word] = horizontal_negative | ~(vertical_carry | horizontal_positive);
+                negative[word] = horizontal_positive & vertical_carry;
+            }
+        }
+    }
+    distances[query_index * arguments.common.distances_stride + candidate] = score;
+}
+
+template [[host_name("sz_levenshtein_long_metal_kernel_")]] kernel void sz_levenshtein_long_metal_kernel_<false>(
+    device uchar *, device ulong const *, device ulong *, device ulong *, device ulong const *,
+    constant sz_levenshtein_long_arguments_metal_t &, uint2);
+template [[host_name("sz_levenshtein_long_utf8_metal_kernel_")]] kernel void sz_levenshtein_long_metal_kernel_<true>(
+    device uchar *, device ulong const *, device ulong *, device ulong *, device ulong const *,
+    constant sz_levenshtein_long_arguments_metal_t &, uint2);
+
 struct sz_levenshtein_tiled_arguments_metal_t {
-    uint shorter_length, longer_length, tile_rows, diagonal, row_first;
+    uint shorter_length, longer_length, tile_rows, diagonal;
 };
 
 inline uint4 sz_levenshtein_edge_load_metal_(device uchar const *edge, uint lane) {
@@ -436,19 +488,43 @@ inline uint4 sz_levenshtein_edge_load_metal_(device uchar const *edge, uint lane
     return uint4(prefix) + first;
 }
 
-kernel void sz_levenshtein_store_metal_kernel_(device ulong *distance [[buffer(0)]],
-                                               constant ulong &value [[buffer(1)]]) {
-    *distance = value;
-}
-
-kernel void sz_levenshtein_tiled_metal_kernel_(device uchar const *shorter [[buffer(0)]],
-                                               device uchar const *longer [[buffer(1)]],
-                                               device uchar *scratch [[buffer(2)]],
-                                               device ulong *distance [[buffer(3)]],
-                                               constant sz_levenshtein_tiled_arguments_metal_t &arguments [[buffer(4)]],
-                                               uint group [[threadgroup_position_in_grid]],
+template <bool ordered_>
+kernel void sz_levenshtein_tiled_metal_kernel_(device uchar *engine [[buffer(0)]],
+                                               device ulong const *candidates [[buffer(1)]],
+                                               device ulong *distances [[buffer(2)]],
+                                               device uchar *workspace [[buffer(3)]],
+                                               device ulong const *candidate_order [[buffer(4)]],
+                                               constant sz_levenshtein_long_arguments_metal_t &batch [[buffer(5)]],
+                                               uint2 group [[threadgroup_position_in_grid]],
                                                uint lane [[thread_index_in_threadgroup]]) {
-    uint const tile_row = arguments.row_first + group, tile_column = arguments.diagonal - tile_row;
+    ulong const pair = group.y;
+    device uint const *const order = sz_reach_metal_<uint>(engine, batch.common.engine_host, batch.common.order);
+    ulong const query_index = ordered_ ? order[pair / batch.candidate_count]
+                                       : batch.query_first + pair / batch.candidate_count;
+    ulong const candidate_position = batch.candidate_first + pair % batch.candidate_count;
+    ulong const candidate = ordered_ ? candidate_order[candidate_position] : candidate_position;
+    device uint const *lengths = sz_reach_metal_<uint>(engine, batch.common.engine_host, batch.common.lengths);
+    uint const query_length = lengths[query_index];
+    sz_sequence_tape_metal_t const tape = {candidates};
+    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    if (query_length <= 16384 || text_length <= 16384 || text_length > 0xFFFFFF00ul) return;
+    device ulong const *offsets = (device ulong const *)(engine + batch.query_offsets);
+    device uchar const *query_text = engine + batch.query_text + offsets[query_index];
+    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
+    bool const query_shorter = query_length <= text_length;
+    device uchar const *shorter = query_shorter ? query_text : text;
+    device uchar const *longer = query_shorter ? text : query_text;
+    sz_levenshtein_tiled_arguments_metal_t const arguments = {
+        uint(min(ulong(query_length), text_length)), uint(max(ulong(query_length), text_length)),
+        uint((min(ulong(query_length), text_length) + 127) / 128), batch.diagonal};
+    uint const tile_row = batch.row_first + group.x;
+    uint const tile_columns = (arguments.longer_length + 127) / 128;
+    if (tile_row >= arguments.tile_rows || tile_row > arguments.diagonal ||
+        arguments.diagonal - tile_row >= tile_columns)
+        return;
+    uint const tile_column = arguments.diagonal - tile_row;
+    device uchar *scratch = workspace + pair * batch.scratch_stride;
+    device ulong *distance = distances + query_index * batch.common.distances_stride + candidate;
     uint const first_row = tile_row * 128, first_column = tile_column * 128;
     ulong const plane_bytes = ulong(arguments.tile_rows) * 132;
     device uchar *right = scratch + ulong(tile_row) * 132;
@@ -533,3 +609,10 @@ kernel void sz_levenshtein_tiled_metal_kernel_(device uchar const *shorter [[buf
         *(device uint *)bottom = left[128];
     }
 }
+template [[host_name("sz_levenshtein_tiled_metal_kernel_")]] kernel void sz_levenshtein_tiled_metal_kernel_<true>(
+    device uchar *, device ulong const *, device ulong *, device uchar *, device ulong const *,
+    constant sz_levenshtein_long_arguments_metal_t &, uint2, uint);
+template [[host_name("sz_levenshtein_tiled_identity_metal_kernel_")]] kernel void
+sz_levenshtein_tiled_metal_kernel_<false>(device uchar *, device ulong const *, device ulong *, device uchar *,
+                                          device ulong const *, constant sz_levenshtein_long_arguments_metal_t &, uint2,
+                                          uint);

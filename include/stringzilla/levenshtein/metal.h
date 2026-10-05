@@ -37,7 +37,7 @@ extern "C" {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
 
-/** The MSL source of the Levenshtein kernels, compiled once per device behind the shared prelude. */
+/** Levenshtein MSL source, compiled once per device. */
 static char const sz_levenshtein_source_metal_[] = {
 #embed "stringzilla/levenshtein/metal.metal"
     , 0};
@@ -85,25 +85,32 @@ STRINGZILLA_INLINE char const *sz_levenshtein_entry_metal_(sz_levenshtein_symbol
                                              [sz_size_divide_round_up(words, sz_levenshtein_gpu_warp_lanes_k) - 1];
 }
 
-/** What a round needs that the batch already fixed: the queries bucketed by word count with the
- *  threads each bucket's entry point takes, its tables addressed by byte offsets inside the block. */
+/** Query buckets and launch geometry at the start of the engine's allocation. */
 typedef struct sz_levenshtein_head_metal_t {
 
-    /** Word counts the batch spans, one bucket each, the widest query's own last. */
+    /** Number of query word-count buckets. */
     sz_size_t buckets;
 
-    /** Where the @b [buckets+1] first position of each word count inside @c order sits. */
+    /** Byte offset of @b [buckets+1] bucket boundaries in @c order. */
     sz_size_t bucket_offsets;
 
-    /** Where the @b [buckets] threads a threadgroup of that bucket's entry point runs sit. */
+    /** Byte offset of @b [buckets] thread counts per threadgroup. */
     sz_size_t per_group;
 
-    /** Where the @b [count] query indices sit, the buckets' runs back to back. */
+    /** Byte offset of @b [count] query indices grouped by word count. */
     sz_size_t order;
+
+    /** Byte offset of @b [count+1] query boundaries relative to @c query_text. */
+    sz_size_t query_offsets;
+
+    /** Byte offset of packed long byte queries used by the tiled kernel. */
+    sz_size_t query_text;
+
+    /** Empty and long queries, grouped by length in the tail of @c order. */
+    sz_levenshtein_length_bucket_t long_buckets[sz_levenshtein_length_buckets_k];
 } sz_levenshtein_head_metal_t;
 
-/** Bytes the tier-private head takes ahead of a batch of @p count queries spanning @p buckets
- *  word counts. */
+/** Bytes required for the header and bucket tables of @p count queries in @p buckets buckets. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_head_bytes_metal_(sz_size_t count, sz_size_t buckets) {
     return sizeof(sz_levenshtein_head_metal_t) + (2 * buckets + 1) * sizeof(sz_size_t) + count * sizeof(sz_u32_t);
 }
@@ -116,15 +123,14 @@ typedef struct {
 } sz_levenshtein_arguments_metal_t;
 
 /**
- *  @brief Lays the head's tables out in the block, buckets the batch by word count, and builds the
- *      entry point every bucket launches.
- *  @return @c sz_success_k, or @c sz_device_code_mismatch_k when a kernel fails to build.
+ *  @brief Groups queries by word count and prepares their kernel pipelines.
+ *  @return @c sz_success_k, or @c sz_device_code_mismatch_k if a pipeline is unusable.
  */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_bind_head_metal_(sz_levenshtein_engine_t *engine,
                                                                sz_metal_context_t *context, sz_size_t buckets_bound) {
     char *const block = (char *)engine->memory;
     sz_levenshtein_head_metal_t *const head = (sz_levenshtein_head_metal_t *)block;
-    head->buckets = sz_levenshtein_engine_words_max_(engine);
+    head->buckets = sz_min_of_two(sz_levenshtein_engine_words_max_(engine), (sz_size_t)sz_levenshtein_gpu_words_max_k);
     head->bucket_offsets = sizeof(sz_levenshtein_head_metal_t);
     head->per_group = head->bucket_offsets + (buckets_bound + 1) * sizeof(sz_size_t);
     head->order = head->per_group + buckets_bound * sizeof(sz_size_t);
@@ -133,18 +139,46 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_bind_head_metal_(sz_levenshtein_en
     sz_u32_t *const order = (sz_u32_t *)(block + head->order);
     sz_size_t cursors[sz_levenshtein_gpu_words_max_k];
 
-    // A counting sort by word count, so one dispatch only carries queries that share
-    // an entry point.
+    // Group queries by word count so each dispatch uses one kernel.
     for (sz_size_t bucket = 0; bucket != head->buckets + 1; ++bucket) bucket_offsets[bucket] = 0;
-    for (sz_size_t index = 0; index != engine->count; ++index)
-        ++bucket_offsets[sz_levenshtein_query_words(engine->lengths[index])];
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const words = sz_levenshtein_query_words(engine->lengths[index]);
+        if (words && words <= head->buckets) ++bucket_offsets[words];
+    }
     for (sz_size_t bucket = 1; bucket != head->buckets + 1; ++bucket)
         bucket_offsets[bucket] += bucket_offsets[bucket - 1];
     for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) cursors[bucket] = bucket_offsets[bucket];
-    for (sz_size_t index = 0; index != engine->count; ++index)
-        order[cursors[sz_levenshtein_query_words(engine->lengths[index]) - 1]++] = (sz_u32_t)index;
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const words = sz_levenshtein_query_words(engine->lengths[index]);
+        if (words && words <= head->buckets) order[cursors[words - 1]++] = (sz_u32_t)index;
+    }
 
-    // Building every pipeline here keeps the compiles out of the rounds and names their ceilings.
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket) {
+        head->long_buckets[bucket].offset = 0;
+        head->long_buckets[bucket].count = 0;
+        head->long_buckets[bucket].length_max = 0;
+    }
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const length = engine->lengths[index];
+        sz_size_t const words = sz_levenshtein_query_words(length);
+        if (words && words <= head->buckets) continue;
+        sz_levenshtein_length_bucket_t *const bucket = head->long_buckets + sz_levenshtein_length_bucket_(length);
+        ++bucket->count;
+        bucket->length_max = sz_max_of_two(bucket->length_max, length);
+    }
+    sz_size_t cursor = bucket_offsets[head->buckets];
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket) {
+        head->long_buckets[bucket].offset = cursor;
+        cursors[bucket] = cursor;
+        cursor += head->long_buckets[bucket].count;
+    }
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const length = engine->lengths[index];
+        sz_size_t const words = sz_levenshtein_query_words(length);
+        if (!words || words > head->buckets) order[cursors[sz_levenshtein_length_bucket_(length)]++] = (sz_u32_t)index;
+    }
+
+    // Compile pipelines once during initialization and cache their threadgroup sizes.
     for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) {
         per_group[bucket] = 0;
         if (bucket_offsets[bucket] == bucket_offsets[bucket + 1]) continue;
@@ -157,6 +191,24 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_bind_head_metal_(sz_levenshtein_en
         sz_size_t const threads = sz_min_of_two(ceiling, (sz_size_t)sz_levenshtein_threads_per_group_max_metal_k);
         per_group[bucket] = threads / width * width;
     }
+    if (bucket_offsets[head->buckets] != engine->count) {
+        char const *const name = engine->symbol == sz_levenshtein_runes_k ? "sz_levenshtein_long_utf8_metal_kernel_"
+                                                                          : "sz_levenshtein_long_metal_kernel_";
+        void *const pipeline = sz_metal_pipeline_(context, sz_levenshtein_source_metal_, name);
+        if (!pipeline || sz_metal_count_(pipeline, "maxTotalThreadsPerThreadgroup") < 32)
+            return sz_device_code_mismatch_k;
+    }
+    if (engine->symbol == sz_levenshtein_bytes_k &&
+        sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k) {
+        char const *const names[] = {"sz_levenshtein_tiled_metal_kernel_",
+                                     "sz_levenshtein_tiled_identity_metal_kernel_"};
+        for (sz_size_t index = 0; index != 2; ++index) {
+            void *const pipeline = sz_metal_pipeline_(context, sz_levenshtein_source_metal_, names[index]);
+            if (!pipeline || sz_metal_count_(pipeline, "threadExecutionWidth") != 32 ||
+                sz_metal_count_(pipeline, "maxTotalThreadsPerThreadgroup") < 32)
+                return sz_device_code_mismatch_k;
+        }
+    }
     return sz_success_k;
 }
 
@@ -167,40 +219,90 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (queries->count == 0) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
+    if (queries->count == 0 || queries->count > 0xFFFFFFFFu) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
-    // Every query seeds its score from its own last word, so an empty one has no word to read it
-    // off, and the ceiling is checked twice: on the bytes here, which bound the runes, and on the
-    // symbols once measured.
-    sz_size_t longest = 0;
+    sz_size_t longest = 0, text_bytes = 0;
     for (sz_size_t index = 0; index != queries->count; ++index) {
         sz_size_t const bytes = queries->get_length(queries->handle, index);
-        if (bytes == 0) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
         longest = sz_max_of_two(longest, bytes);
+        if (symbol == sz_levenshtein_bytes_k && bytes > sz_levenshtein_gpu_words_max_k * 64) {
+            if (bytes > 0xFFFFFF00u || text_bytes > STRINGZILLA_SIZE_MAX - bytes)
+                return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
+            text_bytes += bytes;
+        }
     }
-    if (symbol == sz_levenshtein_bytes_k && longest > sz_levenshtein_gpu_words_max_k * 64)
-        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
-
     sz_allocator_t unified;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_metal(&unified);
-    sz_size_t const buckets_bound = sz_levenshtein_query_words(longest);
-    status = sz_levenshtein_engine_build_(
-        queries, symbol, sz_levenshtein_head_bytes_metal_(queries->count, buckets_bound), &unified, stream, engine);
+    sz_size_t const buckets_bound = sz_min_of_two(sz_levenshtein_query_words(longest),
+                                                  (sz_size_t)sz_levenshtein_gpu_words_max_k);
+    sz_size_t const head_bytes = sz_levenshtein_head_bytes_metal_(queries->count, buckets_bound);
+    sz_size_t const offsets_bytes = (queries->count + 1) * sizeof(sz_size_t);
+    sz_size_t const aligned_head_bytes = sz_size_divide_round_up(head_bytes, sizeof(sz_size_t)) * sizeof(sz_size_t);
+    if (aligned_head_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes ||
+        text_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes - aligned_head_bytes)
+        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
+    status = sz_levenshtein_engine_build_(queries, symbol, aligned_head_bytes + offsets_bytes + text_bytes, &unified,
+                                          stream, engine);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     sz_metal_bound_t memory;
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &memory))
         status = sz_device_memory_mismatch_k;
-    else if (sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k)
-        status = sz_unexpected_dimensions_k;
     else status = sz_levenshtein_bind_head_metal_(engine, call.context, buckets_bound);
     if (status != sz_success_k) {
         sz_levenshtein_engine_free_(engine, stream);
         return sz_metal_commit_(&call, status);
     }
+    sz_levenshtein_head_metal_t *const head = (sz_levenshtein_head_metal_t *)engine->memory;
+    head->query_offsets = aligned_head_bytes;
+    head->query_text = head->query_offsets + offsets_bytes;
+    sz_size_t *const offsets = (sz_size_t *)((char *)engine->memory + head->query_offsets);
+    char *const text = (char *)engine->memory + head->query_text;
+    sz_size_t cursor = 0;
+    for (sz_size_t index = 0; index != queries->count; ++index) {
+        offsets[index] = cursor;
+        sz_size_t const bytes = queries->get_length(queries->handle, index);
+        if (symbol == sz_levenshtein_bytes_k && bytes > sz_levenshtein_gpu_words_max_k * 64) {
+            sz_cptr_t const source = queries->get_start(queries->handle, index);
+            for (sz_size_t byte = 0; byte != bytes; ++byte) text[cursor + byte] = source[byte];
+            cursor += bytes;
+        }
+    }
+    offsets[queries->count] = cursor;
     sz_levenshtein_engine_fill_(engine, queries);
     engine->capability = sz_cap_metal_k;
     return sz_metal_commit_(&call, sz_success_k);
+}
+
+/** Launch parameters for the dynamic Myers and tiled kernels, shared with the Metal source. */
+typedef struct sz_levenshtein_long_arguments_metal_t {
+    sz_levenshtein_arguments_metal_t common;
+    sz_u64_t query_first, candidate_first, candidate_count, words_stride;
+    sz_u64_t query_offsets, query_text, scratch_stride;
+    sz_u32_t diagonal, row_first;
+} sz_levenshtein_long_arguments_metal_t;
+
+/** Scratch stride and wavefront geometry for one cross-product of length buckets. */
+typedef struct sz_levenshtein_long_layout_metal_t {
+    sz_size_t scratch_stride, rows, columns;
+    sz_bool_t tiled;
+} sz_levenshtein_long_layout_metal_t;
+
+STRINGZILLA_INLINE sz_levenshtein_long_layout_metal_t sz_levenshtein_long_layout_metal_(sz_levenshtein_symbol_t symbol,
+                                                                                        sz_size_t query_max,
+                                                                                        sz_size_t candidate_max) {
+    sz_levenshtein_long_layout_metal_t layout = {0};
+    layout.tiled = symbol == sz_levenshtein_bytes_k && query_max > sz_levenshtein_gpu_words_max_k * 64 &&
+                           candidate_max > sz_levenshtein_gpu_words_max_k * 64 && candidate_max <= 0xFFFFFF00u
+                       ? sz_true_k
+                       : sz_false_k;
+    if (layout.tiled) {
+        layout.rows = sz_size_divide_round_up(sz_min_of_two(query_max, candidate_max), 128);
+        layout.columns = sz_size_divide_round_up(sz_max_of_two(query_max, candidate_max), 128);
+        layout.scratch_stride = layout.rows * 396;
+    }
+    else layout.scratch_stride = sz_levenshtein_query_words(query_max) * 2 * sizeof(sz_u64_t);
+    return layout;
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
@@ -214,7 +316,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
+    if (engine->count > 1 && distances_stride > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
+        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
     sz_size_t const distances_count = (engine->count - 1) * distances_stride + candidates->count;
+    if (distances_count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
+        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
         !sz_metal_resolve_call_(&call, distances, distances_count * sizeof(sz_size_t), &buffers[2]))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
@@ -250,57 +356,122 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
             if (status != sz_success_k) return sz_metal_commit_(&call, status);
         }
     }
-    return sz_metal_commit_(&call, sz_success_k);
-}
-
-typedef struct sz_levenshtein_tiled_arguments_metal_t {
-    sz_u32_t shorter_length, longer_length, tile_rows, diagonal, row_first;
-} sz_levenshtein_tiled_arguments_metal_t;
-
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_metal(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                                sz_stream_t stream) {
-    if (a_length > ((sz_size_t)1 << 32) - 256 || b_length > ((sz_size_t)1 << 32) - 256)
-        return sz_unexpected_dimensions_k;
-    sz_metal_call_t call;
-    sz_status_t status = sz_device_enter_metal_(stream, &call);
-    if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    sz_metal_bound_t buffers[4];
-    if (!sz_metal_resolve_call_(&call, distance, sizeof(sz_size_t), &buffers[3]))
-        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
-    sz_size_t const shorter_length = sz_min_of_two(a_length, b_length);
-    sz_size_t const longer_length = sz_max_of_two(a_length, b_length);
-    sz_metal_size_t const one = {1, 1, 1};
-    if (!shorter_length) {
-        status = sz_metal_encode_(&call, sz_levenshtein_source_metal_, "sz_levenshtein_store_metal_kernel_",
-                                  buffers + 3, 1, &longer_length, sizeof(longer_length), one, one);
-        return sz_metal_commit_(&call, status);
-    }
-    sz_cptr_t const shorter = a_length <= b_length ? a : b;
-    sz_cptr_t const longer = a_length <= b_length ? b : a;
-    sz_size_t const rows = sz_size_divide_round_up(shorter_length, sz_levenshtein_tile_side_k);
-    sz_size_t const columns = sz_size_divide_round_up(longer_length, sz_levenshtein_tile_side_k);
-    // Three delta-coded edge planes fit within the public scratch bound: 3 * 132 < 4 * 128.
-    if (!sz_metal_resolve_call_(&call, shorter, shorter_length, &buffers[0]) ||
-        !sz_metal_resolve_call_(&call, longer, longer_length, &buffers[1]) ||
-        !sz_metal_resolve_call_(&call, scratch, rows * 3 * 132, &buffers[2]))
-        return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
-    void *const pipeline = sz_metal_pipeline_(call.context, sz_levenshtein_source_metal_,
-                                              "sz_levenshtein_tiled_metal_kernel_");
-    if (!pipeline || sz_metal_count_(pipeline, "threadExecutionWidth") != 32 ||
-        sz_metal_count_(pipeline, "maxTotalThreadsPerThreadgroup") < 32)
+    if (bucket_offsets[head->buckets] == engine->count) return sz_metal_commit_(&call, status);
+    char const *const myers_kernel = engine->symbol == sz_levenshtein_runes_k ? "sz_levenshtein_long_utf8_metal_kernel_"
+                                                                              : "sz_levenshtein_long_metal_kernel_";
+    void *const myers_pipeline = sz_metal_pipeline_(call.context, sz_levenshtein_source_metal_, myers_kernel);
+    if (!myers_pipeline || sz_metal_count_(myers_pipeline, "maxTotalThreadsPerThreadgroup") < 32)
         return sz_metal_commit_(&call, sz_device_code_mismatch_k);
-    sz_levenshtein_tiled_arguments_metal_t arguments;
-    arguments.shorter_length = (sz_u32_t)shorter_length, arguments.longer_length = (sz_u32_t)longer_length;
-    arguments.tile_rows = (sz_u32_t)rows;
-    sz_metal_size_t const threads = {32, 1, 1};
-    for (sz_size_t diagonal = 0; diagonal != rows + columns - 1; ++diagonal) {
-        sz_size_t const first = diagonal >= columns ? diagonal - columns + 1 : 0;
-        sz_size_t const end = sz_min_of_two(diagonal + 1, rows);
-        sz_metal_size_t const groups = {end - first, 1, 1};
-        arguments.diagonal = (sz_u32_t)diagonal, arguments.row_first = (sz_u32_t)first;
-        sz_metal_enqueue_(call.encoder, pipeline, buffers, 4, &arguments, sizeof(arguments), groups, threads);
+
+    sz_levenshtein_length_bucket_t candidate_buckets[sz_levenshtein_length_buckets_k] = {0};
+    sz_size_t cursors[sz_levenshtein_length_buckets_k];
+    for (sz_size_t candidate = 0; candidate != candidates->count; ++candidate) {
+        sz_size_t const bytes = candidates->get_length(candidates->handle, candidate);
+        sz_levenshtein_length_bucket_t *const bucket = candidate_buckets + sz_levenshtein_length_bucket_(bytes);
+        ++bucket->count;
+        bucket->length_max = sz_max_of_two(bucket->length_max, bytes);
     }
+    sz_size_t cursor = 0;
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket) {
+        candidate_buckets[bucket].offset = cursor;
+        cursors[bucket] = cursor;
+        cursor += candidate_buckets[bucket].count;
+    }
+    void *const candidate_order = ((void *(*)(void *, SEL, sz_size_t, sz_size_t))objc_msgSend)(
+        call.context->device, sel_registerName("newBufferWithLength:options:"), candidates->count * sizeof(sz_u64_t),
+        (sz_size_t)0);
+    if (!candidate_order) return sz_metal_commit_(&call, sz_bad_alloc_k);
+    sz_u64_t *const indices = (sz_u64_t *)sz_metal_get_(candidate_order, "contents");
+    for (sz_size_t candidate = 0; candidate != candidates->count; ++candidate) {
+        sz_size_t const bytes = candidates->get_length(candidates->handle, candidate);
+        indices[cursors[sz_levenshtein_length_bucket_(bytes)]++] = candidate;
+    }
+    sz_size_t const working_set = sz_metal_count_(call.context->device, "recommendedMaxWorkingSetSize");
+    sz_size_t const budget = sz_max_of_two((sz_size_t)4 * 1024 * 1024,
+                                           sz_min_of_two(working_set / 128, (sz_size_t)64 * 1024 * 1024));
+    sz_size_t scratch_bytes = 1;
+    for (sz_size_t query_bucket = 0; query_bucket != sz_levenshtein_length_buckets_k; ++query_bucket) {
+        sz_levenshtein_length_bucket_t const *const queries = head->long_buckets + query_bucket;
+        if (!queries->count) continue;
+        for (sz_size_t candidate_bucket = 0; candidate_bucket != sz_levenshtein_length_buckets_k; ++candidate_bucket) {
+            sz_levenshtein_length_bucket_t const *const texts = candidate_buckets + candidate_bucket;
+            if (!texts->count) continue;
+            sz_levenshtein_long_layout_metal_t const layout = sz_levenshtein_long_layout_metal_(
+                engine->symbol, queries->length_max, texts->length_max);
+            sz_size_t const stride = layout.scratch_stride;
+            if (!stride) continue;
+            sz_size_t const pairs = sz_min_of_two(queries->count * texts->count,
+                                                  sz_min_of_two((sz_size_t)sz_levenshtein_gpu_grid_rows_max_k,
+                                                                sz_max_of_two(budget / stride, (sz_size_t)1)));
+            scratch_bytes = sz_max_of_two(scratch_bytes, pairs * stride);
+        }
+    }
+    void *const scratch = ((void *(*)(void *, SEL, sz_size_t, sz_size_t))objc_msgSend)(
+        call.context->device, sel_registerName("newBufferWithLength:options:"), scratch_bytes, (sz_size_t)32);
+    if (!scratch) {
+        sz_metal_do_(candidate_order, "release");
+        return sz_metal_commit_(&call, sz_bad_alloc_k);
+    }
+    sz_metal_bound_t long_buffers[5] = {buffers[0], buffers[1], buffers[2], {scratch, 0}, {candidate_order, 0}};
+    sz_levenshtein_long_arguments_metal_t long_arguments = {0};
+    long_arguments.common = arguments;
+    long_arguments.query_offsets = head->query_offsets, long_arguments.query_text = head->query_text;
+    sz_metal_size_t const threads = {32, 1, 1};
+    for (sz_size_t query_bucket = 0; status == sz_success_k && query_bucket != sz_levenshtein_length_buckets_k;
+         ++query_bucket) {
+        sz_levenshtein_length_bucket_t const *const queries = head->long_buckets + query_bucket;
+        if (!queries->count) continue;
+        long_arguments.words_stride = sz_levenshtein_query_words(queries->length_max);
+        for (sz_size_t candidate_bucket = 0; candidate_bucket != sz_levenshtein_length_buckets_k; ++candidate_bucket) {
+            sz_levenshtein_length_bucket_t const *const texts = candidate_buckets + candidate_bucket;
+            if (!texts->count) continue;
+            sz_levenshtein_long_layout_metal_t const layout = sz_levenshtein_long_layout_metal_(
+                engine->symbol, queries->length_max, texts->length_max);
+            char const *const tiled_kernel = queries->count == engine->count && texts->count == candidates->count
+                                                 ? "sz_levenshtein_tiled_identity_metal_kernel_"
+                                                 : "sz_levenshtein_tiled_metal_kernel_";
+            void *const pipeline = layout.tiled
+                                       ? sz_metal_pipeline_(call.context, sz_levenshtein_source_metal_, tiled_kernel)
+                                       : myers_pipeline;
+            if (!pipeline) {
+                status = sz_device_code_mismatch_k;
+                break;
+            }
+            long_arguments.scratch_stride = layout.scratch_stride;
+            sz_size_t const pair_capacity = long_arguments.scratch_stride
+                                                ? sz_min_of_two(scratch_bytes / long_arguments.scratch_stride,
+                                                                (sz_size_t)sz_levenshtein_gpu_grid_rows_max_k)
+                                                : (sz_size_t)sz_levenshtein_gpu_grid_rows_max_k;
+            sz_size_t const candidate_chunk = sz_min_of_two(texts->count, pair_capacity);
+            sz_size_t const query_chunk = sz_min_of_two(queries->count, pair_capacity / candidate_chunk);
+            for (sz_size_t query = 0; query < queries->count; query += query_chunk) {
+                sz_size_t const query_count = sz_min_of_two(queries->count - query, query_chunk);
+                long_arguments.common.order = (sz_u64_t)(order + queries->offset + query);
+                long_arguments.query_first = query;
+                for (sz_size_t candidate = 0; candidate < texts->count; candidate += candidate_chunk) {
+                    sz_size_t const candidate_count = sz_min_of_two(texts->count - candidate, candidate_chunk);
+                    long_arguments.candidate_first = texts->offset + candidate;
+                    long_arguments.candidate_count = candidate_count;
+                    if (!layout.tiled) {
+                        sz_metal_size_t const groups = {sz_size_divide_round_up(candidate_count, 32), query_count, 1};
+                        sz_metal_enqueue_(call.encoder, pipeline, long_buffers, 5, &long_arguments,
+                                          sizeof(long_arguments), groups, threads);
+                        continue;
+                    }
+                    for (sz_size_t diagonal = 0; diagonal < layout.rows + layout.columns - 1; ++diagonal) {
+                        sz_size_t const first = diagonal >= layout.columns ? diagonal - layout.columns + 1 : 0;
+                        sz_size_t const end = sz_min_of_two(layout.rows, diagonal + 1);
+                        sz_metal_size_t const groups = {end - first, query_count * candidate_count, 1};
+                        long_arguments.diagonal = (sz_u32_t)diagonal, long_arguments.row_first = (sz_u32_t)first;
+                        sz_metal_enqueue_(call.encoder, pipeline, long_buffers, 5, &long_arguments,
+                                          sizeof(long_arguments), groups, threads);
+                    }
+                }
+            }
+        }
+    }
+    sz_metal_do_(scratch, "release");
+    sz_metal_do_(candidate_order, "release");
     return sz_metal_commit_(&call, status);
 }
 
@@ -309,5 +480,5 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_metal(sz_cptr_t a, sz_
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_METAL
-#endif // STRINGZILLA_LEVENSHTEIN_METAL_H_
+#endif
+#endif

@@ -134,27 +134,35 @@ static sz_size_t sz_levenshtein_lanes_candidates_min_rocm_(void) {
 
 #pragma region Myers Engine
 
-/** What a device round needs that the batch already fixed: its rung buckets and the geometry each
- *  of them takes. */
+/** Query buckets and launch geometry at the start of the engine's allocation. */
 typedef struct sz_levenshtein_head_rocm_t {
 
-    /** Rung keys the batch spans: @c words_max plus the two narrow ones. */
+    /** Number of word-count buckets plus the two narrow-kernel buckets. */
     sz_size_t buckets;
 
-    /** Candidates before a narrow rung is launched, asked of the device once. */
+    /** Minimum candidate count for the narrow kernels. */
     sz_size_t candidates_min;
 
-    /** Threads the byte-lane and the short-lane entry points take. */
+    /** Threads per block for the byte-lane and short-lane kernels. */
     sz_size_t narrow_per_block[2];
 
-    /** The @b [buckets+1] first position of each key inside @c order. */
+    /** @b [buckets+1] bucket boundaries in @c order. */
     sz_size_t *bucket_offsets;
 
-    /** The @b [buckets] threads that key's own wide entry point takes. */
+    /** @b [buckets] thread counts per block for the wide kernels. */
     sz_size_t *per_block;
 
-    /** The @b [count] query indices, the keys' runs back to back. */
+    /** @b [count] query indices grouped by bucket. */
     sz_u32_t *order;
+
+    /** @b [count+1] query byte offsets into @c query_text. */
+    sz_size_t *query_offsets;
+
+    /** Empty and long query indices, grouped by length after the short-query buckets. */
+    sz_levenshtein_length_bucket_t long_buckets[sz_levenshtein_length_buckets_k];
+
+    /** Packed long byte queries used by the tiled kernel. */
+    sz_ptr_t query_text;
 } sz_levenshtein_head_rocm_t;
 
 /** The rung key a query of @p length symbols launches from: the two narrow lanes, then one
@@ -198,7 +206,8 @@ static void sz_levenshtein_bind_head_rocm_(sz_levenshtein_engine_t *engine, sz_s
     sz_levenshtein_head_rocm_t *const head = (sz_levenshtein_head_rocm_t *)engine->memory;
     sz_size_t *const tables = (sz_size_t *)((sz_ptr_t)engine->memory + sizeof(sz_levenshtein_head_rocm_t));
     sz_size_t cursors[sz_levenshtein_gpu_words_max_k + 2];
-    head->buckets = sz_levenshtein_buckets_rocm_(sz_levenshtein_engine_words_max_(engine));
+    head->buckets = sz_levenshtein_buckets_rocm_(
+        sz_min_of_two(sz_levenshtein_engine_words_max_(engine), (sz_size_t)sz_levenshtein_gpu_words_max_k));
     head->bucket_offsets = tables;
     head->per_block = tables + buckets_bound + 1;
     head->order = (sz_u32_t *)(tables + 2 * buckets_bound + 1);
@@ -206,15 +215,40 @@ static void sz_levenshtein_bind_head_rocm_(sz_levenshtein_engine_t *engine, sz_s
     // A counting sort by rung key, so one launch only ever carries queries that share an entry point.
     for (sz_size_t bucket = 0; bucket != head->buckets + 1; ++bucket) head->bucket_offsets[bucket] = 0;
     for (sz_size_t index = 0; index != engine->count; ++index)
-        ++head->bucket_offsets[sz_levenshtein_bucket_rocm_(engine->lengths[index]) + 1];
+        if (engine->lengths[index] &&
+            sz_levenshtein_query_words(engine->lengths[index]) <= sz_levenshtein_gpu_words_max_k)
+            ++head->bucket_offsets[sz_levenshtein_bucket_rocm_(engine->lengths[index]) + 1];
     for (sz_size_t bucket = 1; bucket != head->buckets + 1; ++bucket)
         head->bucket_offsets[bucket] += head->bucket_offsets[bucket - 1];
     for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) cursors[bucket] = head->bucket_offsets[bucket];
     for (sz_size_t index = 0; index != engine->count; ++index)
-        head->order[cursors[sz_levenshtein_bucket_rocm_(engine->lengths[index])]++] = (sz_u32_t)index;
+        if (engine->lengths[index] &&
+            sz_levenshtein_query_words(engine->lengths[index]) <= sz_levenshtein_gpu_words_max_k)
+            head->order[cursors[sz_levenshtein_bucket_rocm_(engine->lengths[index])]++] = (sz_u32_t)index;
 
     // Every driver round trip a round would otherwise pay: the residency floor once, and one occupancy walk
     // per entry point the batch can reach, which the buckets fixed here and no later call can widen.
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
+        head->long_buckets[bucket] = (sz_levenshtein_length_bucket_t) {0, 0, 0};
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const length = engine->lengths[index];
+        if (length && sz_levenshtein_query_words(length) <= sz_levenshtein_gpu_words_max_k) continue;
+        sz_levenshtein_length_bucket_t *const bucket = head->long_buckets + sz_levenshtein_length_bucket_(length);
+        ++bucket->count;
+        bucket->length_max = sz_max_of_two(bucket->length_max, length);
+    }
+    for (sz_size_t bucket = 0, offset = head->bucket_offsets[head->buckets]; bucket != sz_levenshtein_length_buckets_k;
+         ++bucket) {
+        head->long_buckets[bucket].offset = offset;
+        cursors[bucket] = offset;
+        offset += head->long_buckets[bucket].count;
+    }
+    for (sz_size_t index = 0; index != engine->count; ++index) {
+        sz_size_t const length = engine->lengths[index];
+        if (length && sz_levenshtein_query_words(length) <= sz_levenshtein_gpu_words_max_k) continue;
+        head->order[cursors[sz_levenshtein_length_bucket_(length)]++] = (sz_u32_t)index;
+    }
+
     head->candidates_min = sz_levenshtein_lanes_candidates_min_rocm_();
     head->narrow_per_block[0] = sz_levenshtein_per_block_rocm_(
         (void const *)sz_levenshtein_distances_u8x4_simt_kernel_);
@@ -288,29 +322,44 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_e
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_rocm_(&unified);
-    if (queries->count == 0) return sz_unexpected_dimensions_k;
+    if (queries->count == 0 || queries->count > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
 
-    // Every query seeds its score from its own last word, so an empty one has no word to read it off, and the
-    // rung ceiling is checked twice: on the bytes here, which bound the runes, and on the symbols once measured.
-    sz_size_t longest = 0;
+    sz_size_t longest = 0, text_bytes = 0, all_text_bytes = 0;
+    if (queries->count > (STRINGZILLA_SIZE_MAX / sizeof(sz_string_view_t)) - 1) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != queries->count; ++index) {
         sz_size_t const bytes = queries->get_length(queries->handle, index);
-        if (bytes == 0) return sz_unexpected_dimensions_k;
+        if (bytes > 0xFFFFFF00u) return sz_unexpected_dimensions_k;
+        if (bytes > STRINGZILLA_SIZE_MAX - all_text_bytes) return sz_unexpected_dimensions_k;
+        all_text_bytes += bytes;
         longest = sz_max_of_two(longest, bytes);
+        if (symbol == sz_levenshtein_bytes_k && bytes > sz_levenshtein_gpu_words_max_k * 64) text_bytes += bytes;
     }
-    if (symbol == sz_levenshtein_bytes_k && longest > sz_levenshtein_gpu_words_max_k * 64)
+    if (all_text_bytes > STRINGZILLA_SIZE_MAX - queries->count * sizeof(sz_string_view_t))
         return sz_unexpected_dimensions_k;
-
-    sz_size_t const buckets_bound = sz_levenshtein_buckets_rocm_(sz_size_divide_round_up(longest, 64));
-    sz_size_t const head_bytes = sz_levenshtein_head_bytes_rocm_(queries->count, buckets_bound);
-    sz_status_t status = sz_levenshtein_engine_build_(queries, symbol, head_bytes, &unified, stream, engine);
+    sz_size_t const buckets_bound = sz_levenshtein_buckets_rocm_(
+        sz_min_of_two(longest / 64 + (longest % 64 != 0), (sz_size_t)sz_levenshtein_gpu_words_max_k));
+    sz_size_t const head_bytes = (sz_levenshtein_head_bytes_rocm_(queries->count, buckets_bound) + 7) & ~(sz_size_t)7;
+    sz_size_t const offsets_bytes = (queries->count + 1) * sizeof(sz_size_t);
+    if (head_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes ||
+        text_bytes > STRINGZILLA_SIZE_MAX - head_bytes - offsets_bytes)
+        return sz_unexpected_dimensions_k;
+    sz_status_t status = sz_levenshtein_engine_build_(queries, symbol, head_bytes + offsets_bytes + text_bytes,
+                                                      &unified, stream, engine);
     if (status != sz_success_k) return status;
-    if (sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k) {
-        sz_levenshtein_engine_free_(engine, stream);
-        return sz_unexpected_dimensions_k;
-    }
     engine->capability = sz_cap_rocm_k;
     sz_levenshtein_bind_head_rocm_(engine, buckets_bound);
+    sz_levenshtein_head_rocm_t *const head = (sz_levenshtein_head_rocm_t *)engine->memory;
+    head->query_offsets = (sz_size_t *)((sz_ptr_t)engine->memory + head_bytes);
+    head->query_text = (sz_ptr_t)head->query_offsets + offsets_bytes;
+    for (sz_size_t index = 0, written = 0; index != queries->count; ++index) {
+        head->query_offsets[index] = written;
+        sz_size_t const bytes = queries->get_length(queries->handle, index);
+        if (symbol == sz_levenshtein_bytes_k && bytes > sz_levenshtein_gpu_words_max_k * 64) {
+            sz_copy_serial_(head->query_text + written, queries->get_start(queries->handle, index), bytes);
+            written += bytes;
+        }
+        head->query_offsets[index + 1] = written;
+    }
 
     // The rune planes are the host's: a page table is a scan with no counterpart here, and an init may join
     // where a round may not, so the one crossing is a bulk migration rather than a fault per page.
@@ -351,6 +400,160 @@ static sz_status_t sz_levenshtein_launch_rocm_(void const *entry_point, sz_size_
     return sz_launch_rocm_(entry_point, grid, block, arguments, 0, stream);
 }
 
+/** Enqueues candidate ordering and bucket cross-products into per-call workspace. */
+static sz_status_t sz_levenshtein_enqueue_long_rocm_(sz_levenshtein_engine_t engine, sz_sequence_t candidates,
+                                                     sz_levenshtein_length_bucket_t const *candidate_buckets,
+                                                     sz_size_t resident, sz_bool_t cooperative, sz_size_t *distances,
+                                                     sz_size_t distances_stride, sz_ptr_t workspace,
+                                                     sz_size_t *candidate_storage, sz_stream_t stream) {
+    sz_levenshtein_head_rocm_t const *const head = (sz_levenshtein_head_rocm_t const *)engine.memory;
+    sz_size_t *candidate_order = STRINGZILLA_NULL;
+    sz_status_t status = sz_success_k;
+    if (candidate_storage) {
+        candidate_order = candidate_storage + sz_levenshtein_length_buckets_k;
+        status = sz_fill_rocm_(candidate_storage, sz_levenshtein_length_buckets_k * sizeof(sz_size_t), 0, stream);
+        if (status != sz_success_k) return status;
+        sz_levenshtein_candidate_buckets_simt_t buckets;
+        for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
+            buckets.offsets[bucket] = candidate_buckets[bucket].offset;
+        void *arguments[] = {&candidates, &buckets, &candidate_storage, &candidate_order};
+        sz_size_t const blocks = sz_min_of_two(sz_size_divide_round_up(candidates.count, 128), resident * 4);
+        status = sz_launch_rocm_((void const *)sz_levenshtein_order_simt_kernel_, dim3((unsigned)blocks, 1, 1),
+                                 dim3(128, 1, 1), arguments, 0, stream);
+        if (status != sz_success_k) return status;
+    }
+    sz_levenshtein_long_arguments_simt_t batch = {0};
+    batch.distances_stride = distances_stride;
+    batch.query_order = head->order, batch.candidate_order = candidate_order;
+    batch.query_offsets = head->query_offsets, batch.query_text = head->query_text;
+    for (sz_size_t query_bucket = 0; query_bucket != sz_levenshtein_length_buckets_k; ++query_bucket) {
+        sz_levenshtein_length_bucket_t const queries = head->long_buckets[query_bucket];
+        if (!queries.count) continue;
+        for (sz_size_t candidate_bucket = 0; candidate_bucket != sz_levenshtein_length_buckets_k; ++candidate_bucket) {
+            sz_levenshtein_length_bucket_t const group = candidate_buckets[candidate_bucket];
+            if (!group.count) continue;
+            sz_levenshtein_long_layout_simt_t const layout = sz_levenshtein_long_layout_simt_(engine.symbol, queries,
+                                                                                              group, resident);
+            batch.scratch_stride = layout.scratch_stride, batch.frontier_cells = layout.frontier_cells;
+            sz_size_t const query_chunk = sz_min_of_two(queries.count, layout.pairs);
+            for (sz_size_t query = 0; query < queries.count;) {
+                sz_size_t const query_count = sz_min_of_two(queries.count - query, query_chunk);
+                batch.query_first = queries.offset + query;
+                for (sz_size_t candidate = 0; candidate < group.count;) {
+                    batch.candidate_first = group.offset + candidate;
+                    batch.candidate_count = sz_min_of_two(group.count - candidate, layout.pairs / query_count);
+                    batch.pair_count = query_count * batch.candidate_count;
+                    void *arguments[] = {&engine, &candidates, &distances, &workspace, &batch};
+                    if (layout.tiled) {
+                        status = sz_fill_rocm_(workspace, layout.scratch_stride * batch.pair_count, 0, stream);
+                        if (status != sz_success_k) return status;
+                        sz_size_t const wanted = sz_size_divide_round_up(layout.progress_cells,
+                                                                         sz_levenshtein_tiled_warps_per_block_simt_k);
+                        sz_size_t const blocks = cooperative && batch.pair_count < resident
+                                                     ? sz_min_of_two(wanted, resident / batch.pair_count)
+                                                     : 1;
+                        dim3 const grid((unsigned)blocks, (unsigned)batch.pair_count, 1);
+                        dim3 const block(sz_levenshtein_tiled_threads_per_block_simt_k, 1, 1);
+                        if (blocks > 1) {
+                            // Cooperative admission keeps every producer resident.
+                            if (hipLaunchCooperativeKernel((void const *)sz_levenshtein_tiled_batch_simt_kernel_, grid,
+                                                           block, arguments, 0, (hipStream_t)stream) != hipSuccess)
+                                return sz_device_code_mismatch_k;
+                        }
+                        else
+                            status = sz_launch_rocm_((void const *)sz_levenshtein_tiled_batch_simt_kernel_, grid, block,
+                                                     arguments, 0, stream);
+                    }
+                    else {
+                        sz_size_t const blocks = sz_size_divide_round_up(batch.pair_count, 128);
+                        status = sz_launch_rocm_((void const *)sz_levenshtein_long_simt_kernel_,
+                                                 dim3((unsigned)blocks, 1, 1), dim3(128, 1, 1), arguments, 0, stream);
+                    }
+                    if (status != sz_success_k) return status;
+                    candidate += batch.candidate_count;
+                }
+                query += query_count;
+            }
+        }
+    }
+    return sz_success_k;
+}
+
+static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
+                                             sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream) {
+    sz_levenshtein_head_rocm_t const *const head = (sz_levenshtein_head_rocm_t const *)engine->memory;
+    if (head->bucket_offsets[head->buckets] == engine->count) return sz_success_k;
+    sz_levenshtein_length_bucket_t candidate_buckets[sz_levenshtein_length_buckets_k] = {{0, 0, 0}};
+    hipPointerAttribute_t attributes;
+    sz_bool_t const host_readable = hipPointerGetAttributes(&attributes, candidates->handle) == hipSuccess &&
+                                            attributes.type == hipMemoryTypeManaged
+                                        ? sz_true_k
+                                        : sz_false_k;
+    sz_size_t populated = 0;
+    if (host_readable) {
+        for (sz_size_t index = 0; index != candidates->count; ++index) {
+            sz_size_t const length = candidates->get_length(candidates->handle, index);
+            sz_levenshtein_length_bucket_t *const bucket = candidate_buckets + sz_levenshtein_length_bucket_(length);
+            ++bucket->count;
+            bucket->length_max = sz_max_of_two(bucket->length_max, length);
+        }
+        for (sz_size_t bucket = 0, offset = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket) {
+            candidate_buckets[bucket].offset = offset;
+            offset += candidate_buckets[bucket].count;
+            populated += candidate_buckets[bucket].count != 0;
+        }
+    }
+    else {
+        // Device-only offsets keep the generic kernel to avoid a synchronous metadata readback.
+        candidate_buckets[0].count = candidates->count;
+        populated = 1;
+    }
+
+    sz_bool_t has_tiled = sz_false_k;
+    if (engine->symbol == sz_levenshtein_bytes_k &&
+        sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k)
+        for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
+            if (candidate_buckets[bucket].length_max > sz_levenshtein_gpu_words_max_k * 64 &&
+                candidate_buckets[bucket].length_max <= 0xFFFFFF00u)
+                has_tiled = sz_true_k;
+    sz_size_t const multiprocessors = sz_device_multiprocessors_rocm_();
+    void const *const entry_point = has_tiled ? (void const *)sz_levenshtein_tiled_batch_simt_kernel_
+                                              : (void const *)sz_levenshtein_long_simt_kernel_;
+    sz_size_t const per_block = has_tiled ? sz_levenshtein_tiled_threads_per_block_simt_k : 128;
+    sz_size_t const resident = multiprocessors * sz_resident_blocks_rocm_(entry_point, per_block, 0);
+    if (!resident) return sz_device_code_mismatch_k;
+    sz_bool_t const cooperative = has_tiled && sz_device_attribute_rocm_(hipDeviceAttributeCooperativeLaunch)
+                                      ? sz_true_k
+                                      : sz_false_k;
+    sz_size_t scratch_bytes = sizeof(sz_size_t);
+    for (sz_size_t query = 0; query != sz_levenshtein_length_buckets_k; ++query) {
+        if (!head->long_buckets[query].count) continue;
+        for (sz_size_t candidate = 0; candidate != sz_levenshtein_length_buckets_k; ++candidate) {
+            if (!candidate_buckets[candidate].count) continue;
+            sz_levenshtein_long_layout_simt_t const layout = sz_levenshtein_long_layout_simt_(
+                engine->symbol, head->long_buckets[query], candidate_buckets[candidate], resident);
+            scratch_bytes = sz_max_of_two(scratch_bytes, layout.scratch_stride * layout.pairs);
+        }
+    }
+    sz_size_t candidate_bytes = 0;
+    if (populated > 1) {
+        if (candidates->count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t) - sz_levenshtein_length_buckets_k)
+            return sz_unexpected_dimensions_k;
+        candidate_bytes = (candidates->count + sz_levenshtein_length_buckets_k) * sizeof(sz_size_t);
+    }
+    if (candidate_bytes > STRINGZILLA_SIZE_MAX - scratch_bytes) return sz_unexpected_dimensions_k;
+    sz_ptr_t workspace = STRINGZILLA_NULL;
+    if (hipMallocAsync((void **)&workspace, scratch_bytes + candidate_bytes, (hipStream_t)stream) != hipSuccess)
+        return sz_bad_alloc_k;
+    sz_size_t *const candidate_storage = candidate_bytes ? (sz_size_t *)(workspace + scratch_bytes) : STRINGZILLA_NULL;
+    sz_status_t status = sz_levenshtein_enqueue_long_rocm_(*engine, *candidates, candidate_buckets, resident,
+                                                           cooperative, distances, distances_stride, workspace,
+                                                           candidate_storage, stream);
+    if (hipFreeAsync(workspace, (hipStream_t)stream) != hipSuccess && status == sz_success_k)
+        status = sz_device_code_mismatch_k;
+    return status;
+}
+
 /** Enqueues one round on the device the caller already made current, which is every step of
  *  @ref sz_levenshtein_distances_scoped_rocm_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_engine_t *engine,
@@ -358,6 +561,10 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
                                                               sz_size_t distances_stride, sz_stream_t stream) {
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     if (candidates->count == 0) return sz_success_k;
+    if (engine->count > 1 && distances_stride > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
+        return sz_unexpected_dimensions_k;
+    if ((engine->count - 1) * distances_stride + candidates->count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
+        return sz_unexpected_dimensions_k;
 
     if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_rocm_(distances)) return sz_device_memory_mismatch_k;
@@ -402,7 +609,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
             if (launched != sz_success_k) return launched;
         }
     }
-    return sz_success_k;
+    return sz_levenshtein_long_rocm_(engine, candidates, distances, distances_stride, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_rocm_(sz_levenshtein_engine_t *engine,
@@ -419,112 +626,6 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_rocm_(sz_levensht
 
 #pragma endregion Myers Engine
 
-#pragma region Tiled
-
-/** The wavefront's block on ROCm: its warps a whole 64-lane wavefront apart, as a wavefront holding
- *  two tile-columns would march them in lockstep, one spinning on the other for good. */
-enum {
-    sz_levenshtein_tiled_warp_stride_rocm_k = 64,
-    sz_levenshtein_tiled_threads_per_block_rocm_k = sz_levenshtein_tiled_warps_per_block_simt_k *
-                                                    sz_levenshtein_tiled_warp_stride_rocm_k,
-};
-
-/*  Tile-rows a pair needs before the wavefront is worth reaching for: under three of them the
- *  wavefront is a serial chain down the long axis and one Myers lane's sweep is quicker. */
-enum { sz_levenshtein_tiled_rows_min_rocm_k = 3 };
-
-/**
- *  @brief One pair's Levenshtein distance through the tiled wavefront, on texts the
- *      device already reaches, on the caller's current device.
- *  @param[in] a First text, device-reachable.
- *  @param[in] a_length Its length in bytes.
- *  @param[in] b Second text, device-reachable.
- *  @param[in] b_length Its length in bytes.
- *  @param[in] scratch The frontier, device-reachable, at least
- *      @ref sz_levenshtein_distance_tiled_scratch_bytes bytes, and untouched by anything else until
- *      the caller joins @p stream.
- *  @param[out] distance Device-reachable slot the distance lands in once @p stream is joined.
- *  @param[in] stream The @c hipStream_t to schedule on, or @c STRINGZILLA_NULL for the default one.
- *  @return @c sz_success_k, @c sz_unexpected_dimensions_k when either text is longer than the
- *      kernel indexes, or @c sz_device_memory_mismatch_k when a text, the scratch or the distance
- *      is not memory the device reaches.
- *  @note Enqueues and returns, allocating nothing and joining nothing.
- */
-STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_rocm_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                   sz_size_t b_length, void *scratch,
-                                                                   sz_size_t *distance, sz_stream_t stream) {
-    if (a_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32) ||
-        b_length + sz_levenshtein_tiled_padding_simt_k > ((sz_size_t)1 << 32))
-        return sz_unexpected_dimensions_k;
-    if (!sz_memory_accessible_rocm_(distance)) return sz_device_memory_mismatch_k;
-
-    // The recurrence is symmetric, and putting the shorter text on the row axis keeps the frontier small and
-    // makes the parallel axis the long one.
-    sz_cptr_t const shorter_text = a_length <= b_length ? a : b;
-    sz_cptr_t const longer_text = a_length <= b_length ? b : a;
-    sz_u32_t const shorter_length = (sz_u32_t)(a_length <= b_length ? a_length : b_length);
-    sz_u32_t const longer_length = (sz_u32_t)(a_length <= b_length ? b_length : a_length);
-    if (shorter_length == 0) {
-        // A copy out of a host local may join the stream, and a launch captures its arguments instead.
-        sz_size_t *launch_distance = distance;
-        sz_size_t launch_value = longer_length;
-        void *arguments[2];
-        dim3 one;
-        one.x = 1, one.y = 1, one.z = 1;
-        arguments[0] = &launch_distance, arguments[1] = &launch_value;
-        return sz_launch_rocm_((void const *)sz_levenshtein_store_simt_kernel_, one, one, arguments, 0, stream);
-    }
-    if (!sz_memory_accessible_rocm_(shorter_text) || !sz_memory_accessible_rocm_(longer_text) ||
-        !sz_memory_accessible_rocm_(scratch))
-        return sz_device_memory_mismatch_k;
-
-    sz_size_t const tile_grid_columns = sz_size_divide_round_up(longer_length, sz_levenshtein_tile_side_simt_k);
-    sz_size_t const row_frontier_cells =
-        sz_size_divide_round_up(shorter_length, sz_levenshtein_tile_side_simt_k) * sz_levenshtein_tile_side_simt_k + 1u;
-    sz_u32_t *const row_frontier = (sz_u32_t *)scratch;
-    sz_u32_t *const progress = row_frontier + row_frontier_cells;
-
-    // Every launched block has to be resident, since a block spins on a tile-column another block owns.
-    sz_size_t const resident_per_multiprocessor = sz_resident_blocks_rocm_(
-        (void const *)sz_levenshtein_tiled_simt_kernel_, sz_levenshtein_tiled_threads_per_block_rocm_k, 0);
-    sz_size_t const resident_blocks = sz_device_multiprocessors_rocm_() *
-                                      sz_max_of_two(resident_per_multiprocessor, (sz_size_t)1);
-    if (!resident_blocks) return sz_missing_gpu_k;
-    sz_status_t const cleared = sz_fill_rocm_(progress, tile_grid_columns * sizeof(sz_u32_t), 0, stream);
-    if (cleared != sz_success_k) return cleared;
-
-    // A warp waits on the tile-column to its left, so a block that never gets scheduled is a block its
-    // neighbour spins on forever; the grid is capped at what the occupancy answer says stays resident.
-    sz_size_t const wanted_blocks = sz_size_divide_round_up(tile_grid_columns,
-                                                            sz_levenshtein_tiled_warps_per_block_simt_k);
-    dim3 grid, block;
-    grid.x = (unsigned)(wanted_blocks < resident_blocks ? wanted_blocks : resident_blocks), grid.y = 1, grid.z = 1;
-    block.x = sz_levenshtein_tiled_threads_per_block_rocm_k, block.y = 1, block.z = 1;
-
-    sz_cptr_t launch_shorter_text = shorter_text, launch_longer_text = longer_text;
-    sz_u32_t launch_shorter_length = shorter_length, launch_longer_length = longer_length;
-    sz_u32_t *launch_row_frontier = row_frontier, *launch_progress = progress;
-    sz_size_t *launch_distance = distance;
-    void *arguments[7];
-    arguments[0] = &launch_shorter_text, arguments[1] = &launch_shorter_length;
-    arguments[2] = &launch_longer_text, arguments[3] = &launch_longer_length;
-    arguments[4] = &launch_row_frontier, arguments[5] = &launch_progress, arguments[6] = &launch_distance;
-    return sz_launch_rocm_((void const *)sz_levenshtein_tiled_simt_kernel_, grid, block, arguments, 0, stream);
-}
-
-STRINGZILLA_INLINE sz_status_t sz_levenshtein_distance_tiled_scoped_rocm_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                          sz_size_t b_length, void *scratch,
-                                                                          sz_size_t *distance, sz_stream_t stream) {
-    int caller = 0;
-    sz_status_t status = sz_device_enter_rocm_(stream, &caller);
-    if (status != sz_success_k) return status;
-    status = sz_levenshtein_distance_tiled_rocm_(a, a_length, b, b_length, scratch, distance, stream);
-    sz_device_leave_rocm_(caller);
-    return status;
-}
-
-#pragma endregion Tiled
-
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
                                                             sz_sequence_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
@@ -536,12 +637,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream) {
     return sz_levenshtein_distances_scoped_rocm_(engine, candidates, distances, distances_stride, stream);
-}
-
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_rocm(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_stream_t stream) {
-    return sz_levenshtein_distance_tiled_scoped_rocm_(a, a_length, b, b_length, scratch, distance, stream);
 }
 
 #ifdef __cplusplus

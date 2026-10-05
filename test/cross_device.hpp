@@ -27,7 +27,7 @@ namespace ashvardanian::stringzilla::test {
 
 /** One vendor's engine kernels, or the dispatch points in their place, which take the same
  *  arguments: a device engine records its capability, so a verb reaches that vendor's kernel. */
-template <typename tiled_type_, typename fold_type_, typename norm_type_>
+template <typename fold_type_, typename norm_type_>
 struct device_kernels {
 
     /** The spelling @ref fail_backend_ and the test names carry. */
@@ -35,7 +35,6 @@ struct device_kernels {
     device_backend_t const &runtime;
 
     sz_kernel_levenshtein_distances_t levenshtein_distances;
-    tiled_type_ levenshtein_distance_tiled;
     sz_kernel_overlap_scores_t overlap_scores;
     sz_kernel_substrings_counts_t substrings_counts;
     sz_kernel_substrings_find_t substrings_find;
@@ -240,18 +239,6 @@ inline std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_device_c
 
 #pragma region Levenshtein Expectations
 
-/**
- *  @brief The status a query of @p query_symbols symbols draws, as the widest rung decides it.
- *
- *  Both alphabets reach the warped rung, whose thirty-two lanes hold
- *  @ref sz_levenshtein_gpu_words_max_k words between them; a rune query gets there by riding its
- *  class down the lanes rather than by indexing the candidate.
- */
-inline constexpr sz_status_t levenshtein_device_expected_status_(std::size_t query_symbols) {
-    return query_symbols <= (std::size_t)sz_levenshtein_gpu_words_max_k * 64 ? sz_success_k
-                                                                             : sz_unexpected_dimensions_k;
-}
-
 /** Symbol-pairs one sweep scores before it drops the widest batch, so the serial reference stays
  *  quadratic in time but bounded in it as the rungs widen. */
 enum { levenshtein_device_sweep_budget_k = 4u * 1024u * 1024u };
@@ -286,17 +273,11 @@ inline void check_levenshtein_device_equivalence_(auto const &backend, levenshte
             if (count * query_symbols * queries > (std::size_t)levenshtein_device_sweep_budget_k) continue;
             levenshtein_device_corpus_t corpus(backend.runtime, count, query_symbols, queries, alphabet);
             sz_sequence_t const query_sequence = corpus.query_sequence();
-            std::size_t longest = 0;
-            for (sz_string_view_t const &query : corpus.query_views)
-                longest = std::max<std::size_t>(longest, symbol == sz_levenshtein_runes_k
-                                                             ? sz_levenshtein_utf8_runes(query.start, query.length)
-                                                             : query.length);
-
             sz_levenshtein_engine_t engine {};
             sz_status_t const prepared = sz_levenshtein_engine_init(&engine, &query_sequence, symbol,
                                                                     backend.runtime.capabilities, STRINGZILLA_NULL,
                                                                     backend.runtime.stream);
-            if (prepared != levenshtein_device_expected_status_(longest))
+            if (prepared != sz_success_k)
                 fail_backend_(backend.name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
             sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
@@ -404,44 +385,110 @@ inline void check_levenshtein_device_skewed_(std::mt19937 &generator, auto const
     }
 }
 
-inline void check_levenshtein_device_tiled_(auto const &backend, std::mt19937 &generator) {
-    sz_stream_t const queue = backend.runtime.stream;
-    std::array<std::pair<sz_size_t, sz_size_t>, 6> const shapes {
-        {{0, 17}, {17, 0}, {127, 129}, {257, 513}, {513, 257}, {16385, 16385}}};
-    for (auto const [a_length, b_length] : shapes) {
-        unified_vector<char> a(a_length, 0, unified_alloc<char>(backend.runtime.unified, queue));
-        unified_vector<char> b(b_length, 0, unified_alloc<char>(backend.runtime.unified, queue));
-        for (char &byte : a) byte = (char)generator();
-        for (char &byte : b) byte = (char)generator();
-        sz_string_view_t const a_view {a.data(), a.size()}, b_view {b.data(), b.size()};
-        sz_sequence_t queries {}, candidates {};
-        sz_sequence_from_string_views(&a_view, 1, &queries);
-        sz_sequence_from_string_views(&b_view, 1, &candidates);
+inline void check_levenshtein_device_mixed_(auto const &backend) {
+    std::string unicode;
+    for (std::size_t index = 0; index != 16641; ++index) unicode += "é";
+    std::array<std::string, 9> const texts {std::string(65, 'b'),    "",
+                                            std::string(32769, 'c'), "k\xFFtten",
+                                            std::string(16384, 'a'), std::string(63, 'd'),
+                                            std::string(32768, 'e'), unicode,
+                                            std::string(64, 'f')};
+    std::array<sz_string_view_t, texts.size()> views;
+    for (std::size_t index = 0; index != texts.size(); ++index)
+        views[index] = {texts[index].data(), texts[index].size()};
+    sz_sequence_t queries {};
+    sz_sequence_from_string_views(views.data(), views.size(), &queries);
+    std::array<std::string, 19> candidates_text {"x",
+                                                 std::string(16385, 'a'),
+                                                 "",
+                                                 "kitten",
+                                                 "é",
+                                                 "f",
+                                                 std::string(65, 'b'),
+                                                 "\xFF",
+                                                 std::string(32768, 'e'),
+                                                 "dd",
+                                                 "abc",
+                                                 std::string(64, 'f'),
+                                                 "ef",
+                                                 std::string(16384, 'a'),
+                                                 "éé",
+                                                 std::string(63, 'd'),
+                                                 std::string(32769, 'c'),
+                                                 "c",
+                                                 "ba"};
+    std::array<sz_string_view_t, candidates_text.size()> candidate_views;
+    std::size_t const stride = candidates_text.size() + 3;
+    unified_vector<sz_size_t> distances(texts.size() * stride, STRINGZILLA_SIZE_MAX,
+                                        unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
+    for (sz_levenshtein_symbol_t symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
         handle_checked_heap_t heap;
-        sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init_serial(&engine, &queries, sz_levenshtein_bytes_k, &heap.allocator, nullptr) ==
-               sz_success_k);
-        sz_size_t expected;
-        verify(sz_levenshtein_distances_serial(&engine, &candidates, &expected, 1, nullptr) == sz_success_k);
-        sz_levenshtein_engine_free(&engine, nullptr);
+        sz_levenshtein_engine_t host {}, device {};
+        verify(sz_levenshtein_engine_init_serial(&host, &queries, symbol, &heap.allocator, nullptr) == sz_success_k);
+        verify(sz_levenshtein_engine_init(&device, &queries, symbol, backend.runtime.capabilities, nullptr,
+                                          backend.runtime.stream) == sz_success_k);
+        std::vector<sz_size_t> expected(distances.size(), STRINGZILLA_SIZE_MAX);
+        for (bool reverse : {false, true}) {
+            for (std::size_t index = 0; index != candidate_views.size(); ++index) {
+                std::string const &text = candidates_text[reverse ? candidate_views.size() - 1 - index : index];
+                candidate_views[index] = {text.data(), text.size()};
+            }
+            sz_sequence_t reference {};
+            sz_sequence_from_string_views(candidate_views.data(), candidate_views.size(), &reference);
+            tape_t tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
+            verify(tape.assign(candidate_views) == status_t::success_k);
+            sz_sequence_t const candidates = tape.sequence();
+            std::fill(distances.begin(), distances.end(), STRINGZILLA_SIZE_MAX);
+            if (!reverse)
+                verify(sz_levenshtein_distances_serial(&host, &reference, expected.data(), stride, nullptr) ==
+                       sz_success_k);
+            else
+                for (std::size_t row = 0; row != texts.size(); ++row)
+                    std::reverse(expected.begin() + row * stride,
+                                 expected.begin() + row * stride + candidate_views.size());
+            verify(backend.levenshtein_distances(&device, &candidates, distances.data(), stride,
+                                                 backend.runtime.stream) == sz_success_k);
+            join_(backend.runtime, backend.runtime.stream);
+            verify(std::equal(distances.begin(), distances.end(), expected.begin()));
+        }
+        sz_levenshtein_engine_free(&device, backend.runtime.stream);
+        sz_levenshtein_engine_free(&host, nullptr);
         verify(heap.live_allocations == 0);
-
-        sz_size_t const scratch_bytes = sz_levenshtein_distance_tiled_scratch_bytes(a_length, b_length);
-        unified_vector<sz_u8_t> scratch(scratch_bytes + 32, 0xA5,
-                                        unified_alloc<sz_u8_t>(backend.runtime.unified, queue));
-        unified_vector<sz_size_t> distance(1, STRINGZILLA_SIZE_MAX,
-                                           unified_alloc<sz_size_t>(backend.runtime.unified, queue));
-        void *const workspace = a_length && b_length ? scratch.data() : nullptr;
-        verify(backend.levenshtein_distance_tiled(a.data(), a_length, b.data(), b_length, workspace, distance.data(),
-                                                  queue) == sz_success_k);
-        verify(sz_stream_synchronize_best(backend.runtime.capabilities, queue) == sz_success_k);
-        verify(distance[0] == expected);
-        distance[0] = STRINGZILLA_SIZE_MAX;
-        verify(sz_levenshtein_distance_tiled_best(a.data(), a_length, b.data(), b_length, workspace, distance.data(),
-                                                  backend.runtime.capabilities, queue) == sz_success_k);
-        verify(sz_stream_synchronize_best(backend.runtime.capabilities, queue) == sz_success_k);
-        verify(distance[0] == expected);
-        for (sz_size_t index = scratch_bytes; index != scratch.size(); ++index) verify(scratch[index] == 0xA5);
+    }
+    {
+        std::array<std::string, 40> texts;
+        std::array<sz_string_view_t, 40> query_views, candidate_views;
+        for (std::size_t index = 0; index != texts.size(); ++index) {
+            texts[index].assign(17000 + index, 'a');
+            query_views[index] = {texts[index].data(), texts[index].size()};
+        }
+        std::reverse_copy(query_views.begin(), query_views.end(), candidate_views.begin());
+        sz_sequence_t queries {};
+        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
+        tape_t tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
+        verify(tape.assign(candidate_views) == status_t::success_k);
+        sz_sequence_t const candidates = tape.sequence();
+        std::size_t const stride = 43;
+        unified_vector<sz_size_t> distances(texts.size() * stride, STRINGZILLA_SIZE_MAX,
+                                            unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
+        sz_levenshtein_engine_t engine {};
+        verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
+                                          nullptr, backend.runtime.stream) == sz_success_k);
+        verify(backend.levenshtein_distances(&engine, &candidates, distances.data(), stride, backend.runtime.stream) ==
+               sz_success_k);
+        join_(backend.runtime, backend.runtime.stream);
+        for (std::size_t row = 0; row != texts.size(); ++row) {
+            for (std::size_t column = 0; column != candidate_views.size(); ++column) {
+                std::size_t const query_length = query_views[row].length,
+                                  candidate_length = candidate_views[column].length;
+                verify(distances[row * stride + column] == (query_length > candidate_length
+                                                                ? query_length - candidate_length
+                                                                : candidate_length - query_length));
+            }
+            for (std::size_t column = candidate_views.size(); column != stride; ++column)
+                verify(distances[row * stride + column] == STRINGZILLA_SIZE_MAX);
+        }
+        sz_levenshtein_engine_free(&engine, backend.runtime.stream);
     }
 }
 
@@ -479,59 +526,40 @@ inline void check_levenshtein_device_memory_safety_(std::mt19937 &generator, aut
     for (sz_size_t const untouched : corpus.distances) verify(untouched == STRINGZILLA_SIZE_MAX);
 }
 
-/** The builder refusing a query past what the widest rung holds, in bytes and again in runes. */
-inline void check_levenshtein_device_query_safety_(auto const &backend) {
-    enum { symbols_k = sz_levenshtein_gpu_words_max_k * 64 + 1 };
-    for (levenshtein_device_alphabet_t const alphabet :
-         {levenshtein_device_alphabet_t::bytes_k, levenshtein_device_alphabet_t::runes_k}) {
-        levenshtein_device_corpus_t corpus(backend.runtime, 1, symbols_k, 1, alphabet);
-        sz_sequence_t const query_sequence = corpus.query_sequence();
-        sz_levenshtein_engine_t engine {};
-        if (sz_levenshtein_engine_init(&engine, &query_sequence, levenshtein_device_symbol_(alphabet),
-                                       backend.runtime.capabilities, STRINGZILLA_NULL,
-                                       backend.runtime.stream) != sz_unexpected_dimensions_k)
-            fail_backend_("dispatched", "a query past the verticals was not refused");
-        if (engine.memory != STRINGZILLA_NULL) fail_backend_("dispatched", "a refused build still kept a block");
-    }
-}
-
-/** An empty query has no last word to read a score off, so a batch holding one is refused. */
-inline void check_levenshtein_device_empty_query_safety_(auto const &backend) {
-    std::vector<sz_string_view_t> query_views(1);
-    query_views[0].start = STRINGZILLA_NULL, query_views[0].length = 0;
-    sz_sequence_t queries {};
-    sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
-    sz_levenshtein_engine_t engine {};
-    if (sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
-                                   STRINGZILLA_NULL, backend.runtime.stream) != sz_unexpected_dimensions_k)
-        fail_backend_("dispatched", "an empty query was not refused");
-}
-
 /** Two threads scoring on two queues of one device at once, each joining only its own: encoders
  *  live per call, and the device's shared state sits under one lock. */
 inline void check_levenshtein_device_threads_(auto const &backend) {
     sz_stream_t const queue = backend.runtime.stream;
     stream_t const second(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
-    auto const round = [&backend](sz_stream_t stream) {
-        levenshtein_device_corpus_t corpus(backend.runtime, 129, 300, levenshtein_device_sweep_queries_k,
-                                           levenshtein_device_alphabet_t::bytes_k);
-        sz_sequence_t const query_sequence = corpus.query_sequence();
-        sz_levenshtein_engine_t engine {};
-        verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k,
-                                          backend.runtime.capabilities, STRINGZILLA_NULL, stream) == sz_success_k);
-        sz_sequence_t const corpus_candidates_sequence = corpus.device_tape.sequence();
-        verify(sz_levenshtein_distances(&engine, &corpus_candidates_sequence, corpus.distances.data(), corpus.count(),
-                                        stream) == sz_success_k);
-        verify(sz_stream_synchronize_best(backend.runtime.capabilities, stream) == sz_success_k);
-        sz_levenshtein_engine_free(&engine, stream);
-        std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
-        for (std::size_t index = 0; index != expected.size(); ++index)
-            if (corpus.distances[index] != expected[index])
-                fail_backend_("dispatched", "a round beside another thread's differs from serial");
+    levenshtein_device_corpus_t corpus(backend.runtime, 3, 16385, 2, levenshtein_device_alphabet_t::bytes_k);
+    sz_sequence_t const queries = corpus.query_sequence(), candidates = corpus.device_tape.sequence();
+    sz_levenshtein_engine_t engine {};
+    verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities, nullptr,
+                                      queue) == sz_success_k);
+    join_(backend.runtime, queue);
+    std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
+    unified_vector<sz_size_t> other_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX,
+                                              unified_alloc<sz_size_t>(backend.runtime.unified, queue));
+    std::vector<sz_string_view_t> reversed_views(corpus.views.rbegin(), corpus.views.rend());
+    tape_t reversed_tape {unified_alloc<char>(backend.runtime.unified, queue)};
+    verify(reversed_tape.assign(reversed_views) == status_t::success_k);
+    sz_sequence_t const reversed = reversed_tape.sequence();
+    std::vector<sz_size_t> reversed_expected = expected;
+    for (std::size_t row = 0; row != corpus.query_views.size(); ++row)
+        std::reverse(reversed_expected.begin() + row * corpus.count(),
+                     reversed_expected.begin() + (row + 1) * corpus.count());
+    join_(backend.runtime, queue);
+    auto const round = [&](sz_stream_t stream, sz_sequence_t const &inputs, sz_size_t *output,
+                           std::vector<sz_size_t> const &reference) {
+        verify(sz_levenshtein_distances(&engine, &inputs, output, corpus.count(), stream) == sz_success_k);
+        join_(backend.runtime, stream);
+        if (!std::equal(reference.begin(), reference.end(), output))
+            fail_backend_("dispatched", "concurrent scoring of one engine differs from serial");
     };
-    std::thread other(round, second.handle);
-    round(queue);
+    std::thread other([&] { round(second.handle, reversed, other_distances.data(), reversed_expected); });
+    round(queue, candidates, corpus.distances.data(), expected);
     other.join();
+    sz_levenshtein_engine_free(&engine, queue);
 }
 
 /** Releasing a queued input retains it until the stream finishes reading it. */
@@ -1596,7 +1624,7 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
         check_levenshtein_device_equivalence_(backend, levenshtein_device_alphabet_t::runes_k, sz_levenshtein_runes_k);
         check_levenshtein_device_equivalence_(backend, levenshtein_device_alphabet_t::bytes_k, sz_levenshtein_runes_k);
         check_levenshtein_device_short_queries_(context.generator, backend);
-        check_levenshtein_device_tiled_(backend, context.generator);
+        check_levenshtein_device_mixed_(backend);
     });
     check("test_levenshtein_skewed_" + suffix, [&](test_context_t &context) {
         check_levenshtein_device_skewed_(context.generator, backend, levenshtein_device_alphabet_t::bytes_k);
@@ -1642,8 +1670,9 @@ inline void check_sequence_realloc_device_(auto const &backend) {
     sz_sequence_t again {};
     sz_size_t again_bytes = 1;
     sz_sequence_t const tape_sequence = tape.sequence();
-    verify(sz_sequence_realloc_best(&again, &tape_sequence, &backend.runtime.unified, &again_bytes,
-                                    backend.runtime.capabilities, backend.runtime.stream) == sz_success_k);
+    sz_allocator_t allocator = backend.runtime.unified;
+    verify(sz_sequence_realloc_best(&again, &tape_sequence, &allocator, &again_bytes, backend.runtime.capabilities,
+                                    backend.runtime.stream) == sz_success_k);
     verify(again_bytes == 0 && again.handle == tape_sequence.handle && again.get_start == tape_sequence.get_start);
     verify(tape.sequence().get_start == sz_sequence_tape_start);
     verify(tape[2].size() == 7);
@@ -1663,7 +1692,6 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
     device_kernels const dispatched {"dispatched",
                                      runtime,
                                      sz_levenshtein_distances,
-                                     gpu_best<sz_levenshtein_distance_tiled_best>(capabilities),
                                      sz_overlap_scores,
                                      sz_substrings_counts,
                                      sz_substrings_find,
@@ -1676,10 +1704,6 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
     check.section("Cross Dispatch", runtime.capabilities);
     check_device_kernels_(check, dispatched);
     check("test_sequence_realloc_dispatched", [&] { check_sequence_realloc_device_(dispatched); });
-    check("test_levenshtein_refusals_dispatched", [&] {
-        check_levenshtein_device_query_safety_(dispatched);
-        check_levenshtein_device_empty_query_safety_(dispatched);
-    });
     check("test_levenshtein_threads_dispatched", [&] { check_levenshtein_device_threads_(dispatched); });
     check("test_levenshtein_deferred_free_dispatched", [&] { check_levenshtein_device_deferred_free_(dispatched); });
     check("test_overlap_streams_dispatched",

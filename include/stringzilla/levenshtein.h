@@ -11,16 +11,16 @@
  *  - @c sz_levenshtein_engine_free - returns an engine's blocks to the allocator that built them.
  *  - @c sz_levenshtein_distances - the @b [queries, candidates] edit distances of one batch, on the
  *    capability its engine was prepared for.
- *  - @c sz_levenshtein_distance_tiled_best - one long pair through the GPU wavefront.
  *  - @c sz_levenshtein_find_kernel - the kernel any of them would run, for a caller that keeps it.
  *
- *  All run Myers' bit-parallel algorithm: every query is a pattern, packed 64 symbols per machine
+ *  Myers' bit-parallel algorithm treats every query as a pattern, packed 64 symbols per machine
  *  word, and every candidate streams one symbol per step. An engine prepares the whole batch's
  *  match masks once and advances several candidates per step - one per scalar state, four per YMM,
  *  eight per ZMM, one per thread on a device - so the tables are built once per batch rather than
  *  once per pair. A byte is its own mask class, while a rune takes the class its query assigned it
  *  or class zero when the query lacks it, which @ref sz_levenshtein_symbol_t picks between. Strings
- *  of any length are accepted on either side.
+ *  of any length are accepted on either side; device queries are bounded by their length index.
+ *  Long byte pairs on a device use an internal tiled wavefront for intra-pair parallelism.
  *
  *  The building blocks are public as well, for callers that own the loop nest: the query
  *  preparation and the transposes on the query side, and per backend a state, a vertical, and the
@@ -59,8 +59,8 @@ extern "C" {
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
  *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
  *      @c sz_bad_alloc_k when a block could not be allocated; or on a device
- *      @c sz_unexpected_dimensions_k for an empty query or one past
- *      @ref sz_levenshtein_gpu_words_max_k words, @c sz_device_memory_mismatch_k for memory or a
+ *      @c sz_unexpected_dimensions_k for an unrepresentable query length,
+ *      @c sz_device_memory_mismatch_k for memory or a
  *      @p stream the device cannot use, @c sz_missing_gpu_k when the device doesn't answer, or
  *      @c sz_device_code_mismatch_k when a launch fails.
  *  @note May join @p stream; no scoring verb ever does.
@@ -87,8 +87,8 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
  *  @return @c sz_success_k, on a device once enqueued; @c sz_unexpected_dimensions_k when
- *      @p distances_stride is under the candidate count; @c sz_bad_alloc_k when a host round's
- *      verticals could not be allocated; @c sz_missing_kernel_k for an empty engine; or on a device
+ *      @p distances_stride is under the candidate count; @c sz_bad_alloc_k when round workspace
+ *      could not be allocated; @c sz_missing_kernel_k for an empty engine; or on a device
  *      @c sz_device_memory_mismatch_k for an engine, an output, a sequence or a @p stream the
  *      device of @p stream cannot use, and @c sz_device_code_mismatch_k for a launch it refused.
  *  @note Grows the engine's host scratch when a round needs more than the last one did; never
@@ -97,35 +97,6 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
                                                      sz_size_t *distances, sz_size_t distances_stride,
                                                      sz_stream_t stream);
-
-/**
- *  @brief One pair's distance through the GPU's tiled wavefront, enqueued on @p stream on the
- *      device it names.
- *
- *  Myers parallelizes over candidates and over the query's words, and a pair is one candidate, so
- *  an engine of one query hands it a single lane. The wavefront parallelizes over the long text's
- *  tile-columns instead, which is the axis the bit-parallel recurrence cannot touch, and is the
- *  entry point for a pair too long for it.
- *
- *  @param[in] a First text, device-reachable.
- *  @param[in] a_length Its length in bytes.
- *  @param[in] b Second text, device-reachable.
- *  @param[in] b_length Its length in bytes.
- *  @param[in] scratch The frontier, device-reachable and at least
- *      @ref sz_levenshtein_distance_tiled_scratch_bytes bytes, owned by the caller.
- *  @param[out] distance Device-reachable slot the distance lands in once @p stream is joined.
- *  @param[in] capabilities One device's capabilities; CUDA, ROCm and Metal have the wavefront.
- *  @param[in] stream The GPU stream to queue on, which also names the device; null for the default.
- *  @return @c sz_success_k once enqueued, @c sz_missing_kernel_k for any other capability,
- *      @c sz_unexpected_dimensions_k when either text is longer than the kernel indexes,
- *      @c sz_device_memory_mismatch_k when a text, the scratch or the distance is not memory the
- *      device reaches or @p stream is one the runtime cannot place, or
- *      @c sz_missing_gpu_k when no device answers.
- *  @note Allocates nothing and joins nothing.
- */
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_capability_t capabilities, sz_stream_t stream);
 
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_engine_t *engine,
@@ -195,10 +166,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engin
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream);
-/** @copydoc sz_levenshtein_distance_tiled_best */
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_cuda(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
@@ -211,10 +178,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engin
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_t *engine,
                                                           sz_sequence_t const *candidates, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream);
-/** @copydoc sz_levenshtein_distance_tiled_best */
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_rocm(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL
@@ -227,10 +190,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
                                                            sz_sequence_t const *candidates, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_stream_t stream);
-/** @copydoc sz_levenshtein_distance_tiled_best */
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_metal(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                                sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                                sz_stream_t stream);
 #endif
 
 /**
@@ -272,14 +231,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *en
                                                      sz_size_t *distances, sz_size_t distances_stride,
                                                      sz_stream_t stream) {
     sz_unused_(engine), sz_unused_(candidates), sz_unused_(distances), sz_unused_(distances_stride), sz_unused_(stream);
-    return sz_missing_library_k;
-}
-
-STRINGZILLA_API sz_status_t sz_levenshtein_distance_tiled_best(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b,
-                                                               sz_size_t b_length, void *scratch, sz_size_t *distance,
-                                                               sz_capability_t capabilities, sz_stream_t stream) {
-    sz_unused_(a), sz_unused_(a_length), sz_unused_(b), sz_unused_(b_length), sz_unused_(scratch), sz_unused_(distance),
-        sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

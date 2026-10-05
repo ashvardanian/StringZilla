@@ -358,9 +358,6 @@ typedef enum sz_kernel_kind_t {
     /** Levenshtein distances of a batch against the prepared queries. */
     sz_kernel_levenshtein_distances_k,
 
-    /** One long Levenshtein distance in tiles, device only. */
-    sz_kernel_levenshtein_distance_tiled_k,
-
     /** Overlap engine preparation. */
     sz_kernel_overlap_engine_init_k,
 
@@ -447,7 +444,6 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_utf8_find_cased_k: return "utf8_find_cased";
     case sz_kernel_levenshtein_engine_init_k: return "levenshtein_engine_init";
     case sz_kernel_levenshtein_distances_k: return "levenshtein_distances";
-    case sz_kernel_levenshtein_distance_tiled_k: return "levenshtein_distance_tiled";
     case sz_kernel_overlap_engine_init_k: return "overlap_engine_init";
     case sz_kernel_overlap_scores_k: return "overlap_scores";
     case sz_kernel_substrings_engine_init_k: return "substrings_engine_init";
@@ -524,7 +520,6 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "utf8_find_cased")) return sz_kernel_utf8_find_cased_k;
     if (sz_same_literal_(name, length, "levenshtein_engine_init")) return sz_kernel_levenshtein_engine_init_k;
     if (sz_same_literal_(name, length, "levenshtein_distances")) return sz_kernel_levenshtein_distances_k;
-    if (sz_same_literal_(name, length, "levenshtein_distance_tiled")) return sz_kernel_levenshtein_distance_tiled_k;
     if (sz_same_literal_(name, length, "overlap_engine_init")) return sz_kernel_overlap_engine_init_k;
     if (sz_same_literal_(name, length, "overlap_scores")) return sz_kernel_overlap_scores_k;
     if (sz_same_literal_(name, length, "substrings_engine_init")) return sz_kernel_substrings_engine_init_k;
@@ -724,10 +719,6 @@ typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein
 /** Signature of every @c sz_levenshtein_distances kernel, at either alphabet. */
 typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
                                                          sz_size_t *, sz_size_t, sz_stream_t);
-
-/** Signature of every @c sz_levenshtein_distance_tiled_best kernel. */
-typedef sz_status_t (*sz_kernel_levenshtein_distance_tiled_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, void *,
-                                                              sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_overlap_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,

@@ -37,7 +37,6 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
         "rocm",
         runtime,
         sz_levenshtein_distances_rocm,
-        sz_levenshtein_distance_tiled_rocm,
         sz_overlap_scores_rocm,
         sz_substrings_counts_rocm,
         sz_substrings_find_rocm,

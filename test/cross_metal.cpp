@@ -37,7 +37,6 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
         "metal",
         runtime,
         sz_levenshtein_distances_metal,
-        sz_levenshtein_distance_tiled_metal,
         sz_overlap_scores_metal,
         sz_substrings_counts_metal,
         sz_substrings_find_metal,

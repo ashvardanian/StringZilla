@@ -144,7 +144,6 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_sequence_argsort_best),
         call_stub_(sz_sequence_argsort_uncased_best),
         call_stub_(sz_sequence_intersect_best),
-        call_stub_(sz_levenshtein_distance_tiled_best),
         call_stub_(sz_utf8_count_best),
         call_stub_(sz_utf8_seek_best),
         call_stub_(sz_utf8_decode_best),

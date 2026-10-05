@@ -46,7 +46,24 @@ static levenshtein_backend_t const levenshtein_dispatched {"dispatched", levensh
 
 /** Known answers: the classic pairs, empties on either side, identity, the 64-symbol word boundary,
  *  and multi-byte runes, through the dispatched entry points. */
-void test_levenshtein_unit() { check_levenshtein_unit_(levenshtein_dispatched); }
+void test_levenshtein_unit() {
+    verify(sz_levenshtein_length_bucket_(0) == 0);
+    verify(sz_levenshtein_length_bucket_(1) == 1);
+    verify(sz_levenshtein_length_bucket_(16384) == 15);
+    verify(sz_levenshtein_length_bucket_(16385) == 16);
+    verify(sz_levenshtein_length_bucket_(STRINGZILLA_SIZE_MAX) == sz_levenshtein_length_buckets_k - 1);
+    verify(sz_levenshtein_query_words(STRINGZILLA_SIZE_MAX) == STRINGZILLA_SIZE_MAX / 64 + 1);
+    sz_levenshtein_engine_shape_t shape {65, 3, 0};
+    sz_levenshtein_engine_layout_t layout {};
+    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, 1, &layout));
+    verify(layout.head_bytes == 64 && layout.masks_offset == 64 && layout.offsets_offset == 832 &&
+           layout.lengths_offset == 896 && layout.classes_offset == 960 && layout.total_bytes == 1216);
+    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, STRINGZILLA_SIZE_MAX - 63, &layout));
+    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, STRINGZILLA_SIZE_MAX - 62, &layout));
+    shape = {0xFFFFFFFFu, 256, 0};
+    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, 0, &layout) == (sizeof(sz_size_t) > 4));
+    check_levenshtein_unit_(levenshtein_dispatched);
+}
 
 /** Degenerate inputs for the edit-distance family, asserting survival and the stated refusals.
  *  Answers are not the subject here: empties are accepted, a refused allocation is reported, and no
