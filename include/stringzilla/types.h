@@ -209,6 +209,32 @@
 #endif
 
 /**
+ *  @brief Non-zero when this translation unit is instrumented with UndefinedBehaviorSanitizer.
+ */
+#if defined(__clang__)
+#define SZ_UBSAN_ENABLED_ __has_feature(undefined_behavior_sanitizer)
+#elif defined(__GNUC__) && defined(__SANITIZE_UNDEFINED__)
+#define SZ_UBSAN_ENABLED_ 1
+#else
+#define SZ_UBSAN_ENABLED_ 0
+#endif
+
+/**
+ *  @brief Suppresses the alignment check on an intentionally misaligned SWAR access.
+ *
+ *  `aligned(1)` on the pointer variable does not change the pointee alignment, so UndefinedBehaviorSanitizer
+ *  still instruments the load. Under a sanitizer build the helper is also `noinline`: once inlined, the check
+ *  is re-inserted at the caller and the attribute no longer covers it. Release builds stay inline.
+ */
+#if (defined(__GNUC__) || defined(__clang__)) && SZ_UBSAN_ENABLED_
+#define SZ_NO_SANITIZE_ALIGNMENT_ __attribute__((no_sanitize("alignment"), noinline))
+#elif defined(__GNUC__) || defined(__clang__)
+#define SZ_NO_SANITIZE_ALIGNMENT_ __attribute__((no_sanitize("alignment")))
+#else
+#define SZ_NO_SANITIZE_ALIGNMENT_
+#endif
+
+/**
  *  @brief Alignment macro for N-byte alignment.
  */
 #if defined(_MSC_VER)
@@ -1859,7 +1885,7 @@ SZ_HELPER_AUTO sz_u64_t sz_u64_transpose(sz_u64_t x) {
 
 /** @brief Load a 16-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1879,7 +1905,7 @@ SZ_HELPER_AUTO sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 
 /** @brief Load a 32-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1901,7 +1927,7 @@ SZ_HELPER_AUTO sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
 
 /** @brief Load a 64-bit unsigned integer from a potentially unaligned pointer. Can be expensive on some platforms.
  */
-SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t result_vec;
     result_vec.u8s[0] = ptr[0];
@@ -1926,7 +1952,7 @@ SZ_HELPER_AUTO sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
 }
 
 /** @brief Store a 16-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u16_vec_t vec;
     vec.u16 = value;
@@ -1945,7 +1971,7 @@ SZ_HELPER_AUTO void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
 }
 
 /** @brief Store a 32-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u32_vec_t vec;
     vec.u32 = value;
@@ -1966,7 +1992,7 @@ SZ_HELPER_AUTO void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
 }
 
 /** @brief Store a 64-bit unsigned integer to a potentially unaligned pointer. Can be expensive on some platforms. */
-SZ_HELPER_AUTO void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
+SZ_HELPER_AUTO SZ_NO_SANITIZE_ALIGNMENT_ void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
 #if !SZ_USE_MISALIGNED_LOADS
     sz_u64_vec_t vec;
     vec.u64 = value;

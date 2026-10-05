@@ -46,9 +46,10 @@ SZ_API_COMPTIME void sz_fill_serial(sz_ptr_t target, sz_size_t length, sz_u8_t v
 #endif
 
 SZ_API_COMPTIME void sz_copy_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t length) {
-#if SZ_USE_MISALIGNED_LOADS
-    while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)source, target += 8, source += 8, length -= 8;
-#endif
+    while (length >= 8) {
+        sz_u64_store(target, sz_u64_load(source).u64);
+        target += 8, source += 8, length -= 8;
+    }
     while (length--) *(target++) = *(source++);
 }
 
@@ -63,17 +64,19 @@ SZ_API_COMPTIME void sz_move_serial(sz_ptr_t target, sz_cptr_t source, sz_size_t
     // Or if we know that they don't intersect! In that case the traversal order is irrelevant,
     // but older CPUs may predict and fetch forward-passes better.
     if (target < source || target >= source + length) {
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)target = *(sz_u64_t const *)(source), target += 8, source += 8, length -= 8;
-#endif
+        while (length >= 8) {
+            sz_u64_store(target, sz_u64_load(source).u64);
+            target += 8, source += 8, length -= 8;
+        }
         while (length--) *(target++) = *(source++);
     }
     else {
-        // Jump to the end and walk backwards.
+        // Jump to the end and walk backwards. The word goes through a temporary, so the ranges may overlap.
         target += length, source += length;
-#if SZ_USE_MISALIGNED_LOADS
-        while (length >= 8) *(sz_u64_t *)(target -= 8) = *(sz_u64_t const *)(source -= 8), length -= 8;
-#endif
+        while (length >= 8) {
+            target -= 8, source -= 8, length -= 8;
+            sz_u64_store(target, sz_u64_load(source).u64);
+        }
         while (length--) *(--target) = *(--source);
     }
 }
