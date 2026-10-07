@@ -218,12 +218,12 @@ function (set_compiler_flags target cpp_standard target_arch)
                 if (supports_march_native)
                     target_compile_options(${target} PRIVATE "$<${sz_gcc_style_}:-march=native>")
                 endif ()
-                if (STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH)
+                if (sz_cuda_native_arch_compiles)
                     target_compile_options(${target} PRIVATE "$<${sz_nvcc_}:-Xcompiler=-march=native>")
                 endif ()
             endif ()
         endif ()
-    elseif (NOT STRINGZILLA_ARCH_WASM_) # There it names the module's SIMD kit, which a directory-wide flag carries
+    elseif (NOT STRINGZILLA_ARCH_WASM_) # There it names the module's SIMD capability, which a directory-wide flag sets
         if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
             set(sz_host_arch_ "/arch:${target_arch}")
         else ()
@@ -273,12 +273,12 @@ function (set_architecture_simd_definitions target)
     else ()
         target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=0" "STRINGZILLA_ARCH_ARM64_=0")
     endif ()
-    target_compile_definitions(${target} PRIVATE ${sz_compile_definitions_})
+    target_link_libraries(${target} PRIVATE $<BUILD_INTERFACE:stringzilla_cpu_capabilities_compiled>)
 endfunction ()
 
 # Apply the ABI floor (`-march`/`-mcpu`/`/arch`) that lets one compilation host every SIMD
-# capability: each tier header scopes its kernels to their kit with a target pragma, and LASX and
-# POWER9 raise only their own units, so the serial code runs on every CPU of the architecture.
+# capability: each capability's headers scope its kernels with a target pragma, so the serial
+# code runs on every CPU of the architecture.
 # `STRINGZILLA_TARGET_ARCH` swaps the floor for a host-tuned build.
 function (set_baseline_architecture_flags target)
     if (STRINGZILLA_TARGET_ARCH)

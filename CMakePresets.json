@@ -125,12 +125,12 @@
     {
       "name": "linux_loongarch64",
       "inherits": "cross",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64-llvm.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchain-loongarch64-gnu.cmake"
     },
     {
       "name": "linux_ppc64le",
       "inherits": "cross",
-      "toolchainFile": "${sourceDir}/cmake/toolchain-ppc64le-llvm.cmake"
+      "toolchainFile": "${sourceDir}/cmake/toolchain-ppc64le-gnu.cmake"
     },
     {
       "name": "wasm32_wasi",

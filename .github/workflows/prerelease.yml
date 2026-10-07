@@ -576,19 +576,24 @@ jobs:
             target_arch: loongarch64
             target: loongarch64-linux-gnu
             target_processor: loong64
-            cross_package: g++-13-loongarch64-linux-gnu
+            cross_package: g++-15-loongarch64-linux-gnu
+            cc: loongarch64-linux-gnu-gcc-15
+            cxx: loongarch64-linux-gnu-g++-15
             file_id: LoongArch
           - os: ubuntu-26.04
             arch: x86-64
             target_arch: ppc64le
             target: powerpc64le-linux-gnu
             target_processor: ppc64el
-            cross_package: crossbuild-essential-ppc64el
+            cross_package: g++-15-powerpc64le-linux-gnu
+            cc: powerpc64le-linux-gnu-gcc-15
+            cxx: powerpc64le-linux-gnu-g++-15
             file_id: PowerPC
 
+    # LASX and POWER9 scope per function only from GCC 15 on, so those two legs cross-compile with GCC.
     env:
-      CC: clang-21
-      CXX: clang++-21
+      CC: ${{ matrix.cc || 'clang-21' }}
+      CXX: ${{ matrix.cxx || 'clang++-21' }}
       AR: llvm-ar-21
       NM: llvm-nm-21
       RANLIB: llvm-ranlib-21

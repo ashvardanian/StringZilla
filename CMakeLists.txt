@@ -113,8 +113,8 @@ elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
     set(STRINGZILLA_ARCH_PPC64_ TRUE)
     message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^wasm(32|64)$")
-    # A module's one SIMD kit is `STRINGZILLA_TARGET_ARCH`, which `types.h` reads back off the predefined macros, so
-    # no probe verdict is set here.
+    # A module's one SIMD capability is `STRINGZILLA_TARGET_ARCH`, which `types.h` reads back off the predefined
+    # macros, so no probe verdict is set here.
     set(STRINGZILLA_ARCH_WASM_ TRUE)
     message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
@@ -128,31 +128,10 @@ else ()
     set(STRINGZILLA_WITH_LIBC_ 1)
 endif ()
 
-# One probe per kit under `probes/`, whose `STRINGZILLA_TARGET_<KIT>=0/1` verdicts reach the libraries and
-# the CPU tests and benchmarks, but not `stringzilla_header`, whose consumers derive each kit from their
-# own flags in `types.h`.
+# One compile probe per capability under `probes/`, defining `STRINGZILLA_TARGET_<CAPABILITY>` as the toolchain
+# compiles it through `stringzilla::cpu_capabilities_compiled`, and as 0 through
+# `stringzilla_cpu_capabilities_disabled_`.
 include(cmake/sz_isa_probe.cmake)
-
-# LASX and POWER9 compile file-wide, so only the kit's own unit and the header-only cross-checks of its
-# architecture take the flag; every other header-only unit follows its own flags in `types.h`, which leave
-# those kits off.
-set(sz_in_header_only_suite_
-    "$<IN_LIST:$<TARGET_PROPERTY:NAME>,stringzilla_cpu_header_test;stringzilla_cpu_header_bench>"
-)
-if ("STRINGZILLA_TARGET_LOONGSONASX=1" IN_LIST sz_compile_definitions_)
-    set_source_files_properties(c/target/loongsonasx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_LOONGSONASX})
-    set_source_files_properties(
-        test/cross_loongarch64.cpp bench/cross_loongarch64.cpp
-        PROPERTIES COMPILE_OPTIONS "$<${sz_in_header_only_suite_}:${sz_kit_flags_LOONGSONASX}>"
-    )
-endif ()
-if ("STRINGZILLA_TARGET_POWERVSX=1" IN_LIST sz_compile_definitions_)
-    set_source_files_properties(c/target/powervsx.c PROPERTIES COMPILE_OPTIONS ${sz_kit_flags_POWERVSX})
-    set_source_files_properties(
-        test/cross_ppc64.cpp bench/cross_ppc64.cpp PROPERTIES COMPILE_OPTIONS
-                                                              "$<${sz_in_header_only_suite_}:${sz_kit_flags_POWERVSX}>"
-    )
-endif ()
 
 # Determine if StringZilla is built as a sub-project (using `add_subdirectory`) or if it is the main project
 set(STRINGZILLA_IS_MAIN_PROJECT ${PROJECT_IS_TOP_LEVEL})
@@ -197,11 +176,11 @@ option(STRINGZILLA_BUILD_COVERAGE "Instrument with Clang source-based coverage" 
 # Seeded from the environment at the first configure, so `cargo` and `cmake-js` honour `STRINGZILLA_TARGET_ARCH=native`.
 set(STRINGZILLA_TARGET_ARCH
     "$ENV{STRINGZILLA_TARGET_ARCH}"
-    CACHE STRING "Host-tuned `-march`, like native, or a WebAssembly module's SIMD kit, serial, v128 or v128relaxed"
+    CACHE STRING "Host-tuned `-march`, like native, or a WebAssembly SIMD capability: serial, v128 or v128relaxed"
 )
 
-# An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD kit, whatever flags a
-# binding passes, and `types.h` reads it back off the predefined macros.
+# An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD capability, whatever
+# flags a binding passes, and `types.h` reads it back off the predefined macros.
 if (STRINGZILLA_ARCH_WASM_)
     if (STRINGZILLA_TARGET_ARCH STREQUAL "v128relaxed")
         add_compile_options(-msimd128 -mrelaxed-simd)
@@ -225,7 +204,7 @@ if (STRINGZILLA_BUILD_CUDA)
     # arch-locked `a`. The libraries' CUDA unit adds forward PTX on top of these, which a listed GPU never JITs.
     set(STRINGZILLA_CUDA_ARCHITECTURES
         "75-real;80-real;90-real;100f-real;120f-real"
-        CACHE STRING "Real SASS tiers every CUDA target carries; override to match the machine at hand"
+        CACHE STRING "Real SASS architectures every CUDA target carries; override to match the machine at hand"
     )
     set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHITECTURES})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
@@ -301,11 +280,10 @@ function (define_gpu_suite target language source)
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
                    HIP_STANDARD 20
     )
-    target_compile_definitions(${target} PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_})
     if (MSVC AND language STREQUAL "CUDA")
         target_compile_definitions(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
     endif ()
-    target_link_libraries(${target} PRIVATE stringzilla_static fmt::fmt)
+    target_link_libraries(${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_static fmt::fmt)
 endfunction ()
 
 # One CPU test or benchmark linking `library`, whose capability `verdicts` declare every kernel the
@@ -315,9 +293,7 @@ function (define_cpu_launcher exec_name library verdicts)
     add_executable(${exec_name} ${ARGN})
     set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
     if (verdicts STREQUAL "SERIAL")
-        target_compile_definitions(${exec_name} PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_})
-    elseif (library STREQUAL "stringzilla_header")
-        target_compile_definitions(${exec_name} PRIVATE ${sz_header_only_definitions_})
+        target_link_libraries(${exec_name} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
         set_architecture_simd_definitions(${exec_name})
     endif ()
@@ -447,13 +423,9 @@ foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
     endif ()
 endforeach ()
 
-# Every probed kit switched off, for the units that must stay at the platform baseline: the GPU vendor units and the
-# CPU tests of the dispatch points alone.
-string(REPLACE "=1" "=0" STRINGZILLA_SERIAL_DEFINITIONS_ "${sz_compile_definitions_}")
-
 # Adds one GPU vendor's unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled without the CPU
-# kits, and linked with the runtime libraries that follow. Both the unit and the libraries' host units see `definition`,
-# so the dispatch lists name the unit's kernels.
+# capabilities, and linked with the runtime libraries that follow. Both the unit and the libraries' host units see
+# `definition`, so the dispatch lists name the unit's kernels.
 function (sz_add_gpu_unit_ source definition)
     get_filename_component(unit_ "${source}" NAME_WE)
     add_library(stringzilla_${unit_}_ OBJECT ${source})
@@ -471,10 +443,8 @@ function (sz_add_gpu_unit_ source definition)
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
     )
     set_compiler_flags(stringzilla_${unit_}_ "" "")
-    target_compile_definitions(
-        stringzilla_${unit_}_ PRIVATE ${STRINGZILLA_SERIAL_DEFINITIONS_} "STRINGZILLA_WITH_LIBC=1" "${definition}"
-    )
-    target_link_libraries(stringzilla_${unit_}_ PRIVATE ${ARGN})
+    target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition}")
+    target_link_libraries(stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ ${ARGN})
     foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
         target_sources(${library_} PRIVATE $<TARGET_OBJECTS:stringzilla_${unit_}_>)
         target_compile_definitions(${library_} PRIVATE "${definition}")

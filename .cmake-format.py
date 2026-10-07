@@ -22,3 +22,9 @@ with section("markup"):
     # Keep comments verbatim: the reflow engine only recognizes `*` bullets, so it merges
     # dash-bulleted lines into run-on prose.
     enable_markup = False
+
+
+# Commands defined here, so their keywords group like those of built-in commands.
+additional_commands = {
+    "sz_cpu_capability_": {"pargs": 2, "kwargs": {"GCC_FLAGS": "+", "MSVC_FLAGS": "+"}},
+}

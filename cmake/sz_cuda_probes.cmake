@@ -1,31 +1,19 @@
-# cmake/sz_cuda_probes.cmake — CUDA toolchain probes over the checked-in `probes/cuda_*.cu` sources.
+# cmake/sz_cuda_probes.cmake — whether NVCC and its host compiler build `.cu` units for this machine's own CPU
 #
-# Separate from the `sz_*_isa_probes.cmake` family, which asks the C compiler what it can emit and answers in
-# `sz_target_<tier>_compiles`. These ask what NVCC and its host compiler will accept together: NVCC delegates host
-# compilation but parses the host's headers itself on the device pass, so the pair decides, and putting the
-# question to the C++ compiler gets an answer about the wrong toolchain - it accepts flags NVCC then chokes on.
+# The CPU capability probes in `sz_isa_probe.cmake` ask the C compiler what it can emit. This one asks NVCC and its
+# host compiler together: NVCC delegates host compilation but parses the host's headers itself on the device pass, so
+# the pair decides, and the C++ compiler's answer is about the wrong toolchain - it accepts flags NVCC then chokes on.
 
-# Whether `.cu` sources may be built for this machine's own instruction set, cached in
-# `STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH`. A `Failed` verdict leaves them on the baseline architecture and says
-# nothing about the CPU tiers, which are compiled by the C and C++ compilers and probed separately.
+# Probes `probes/cuda_native_arch.cu` at `-march=native` into the cached `sz_cuda_native_arch_compiles`. A failed probe
+# leaves the `.cu` units on the baseline architecture and says nothing of the CPU capabilities.
 function (sz_cuda_probe_native_arch_)
-    if (DEFINED STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH)
-        return()
+    if (NOT DEFINED sz_cuda_native_arch_compiles)
+        set(CMAKE_TRY_COMPILE_CONFIGURATION "Release")
+        try_compile(
+            sz_cuda_native_arch_compiles ${CMAKE_BINARY_DIR}/sz_probes
+            ${CMAKE_CURRENT_SOURCE_DIR}/probes/cuda_native_arch.cu
+            CMAKE_FLAGS "-DCMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS} -Xcompiler=-march=native"
+        )
     endif ()
-    set(CMAKE_TRY_COMPILE_CONFIGURATION "Release")
-    try_compile(
-        sz_cuda_native_arch_ ${CMAKE_BINARY_DIR}/sz_probes
-        ${CMAKE_CURRENT_SOURCE_DIR}/probes/cuda_native_arch.cu
-        CMAKE_FLAGS "-DCMAKE_CUDA_FLAGS=${CMAKE_CUDA_FLAGS} -Xcompiler=-march=native"
-        OUTPUT_VARIABLE sz_cuda_native_arch_output_
-    )
-    set(STRINGZILLA_CUDA_ACCEPTS_NATIVE_ARCH
-        "${sz_cuda_native_arch_}"
-        CACHE INTERNAL "Whether NVCC and its host compiler build a `.cu` for this machine's own architecture"
-    )
-    if (sz_cuda_native_arch_)
-        message(STATUS "Performing CUDA probe native_arch - Success")
-    else ()
-        message(STATUS "Performing CUDA probe native_arch - Failed")
-    endif ()
+    message(STATUS "Performing CUDA probe native_arch - compiles: ${sz_cuda_native_arch_compiles}")
 endfunction ()

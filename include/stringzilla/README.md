@@ -183,7 +183,7 @@ unified.free((void *)candidates.handle, candidates_bytes, unified.handle, stream
 
 A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_capabilities_enabled_cuda(ordinal, &caps)`.
 
-StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD kit, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
+StringZilla also __compiles to WebAssembly__: the `wasm32` toolchain targets `wasm32-wasip1`, and `STRINGZILLA_TARGET_ARCH` names the module's one SIMD capability, `serial`, `v128` or the default `v128relaxed`, which enables the `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` kernels listed above.
 
 ## Types
 
@@ -939,7 +939,7 @@ The library probes the CPU once per process and caches the answer, while header-
 The GPU queries ask the vendor's runtime every time, by that runtime's own device ordinal, and report no devices where the vendor isn't built.
 The CPU probe inspects CPUID on x86, the AArch64 ID registers on Arm once the kernel's `HWCAP_CPUID` says it emulates `mrs`, falling back to NEON-only, `getauxval`/`riscv_hwprobe` on RISC-V, and the auxiliary-vector HWCAPs on LoongArch and Power.
 Detection always reports the full hardware truth, independent of which tiers a build compiled in; `sz_capabilities_enabled_cpu()` intersects it with the compile-time mask.
-Where the OS cannot be asked, detection reports only the kits the compiler's own flags guarantee, never the compiled ones, which the CPU may lack.
+Where the OS cannot be asked, detection reports only the capabilities the compiler's own flags guarantee, never the compiled ones, which the CPU may lack.
 WebAssembly is the exception with no runtime probe at all — a module carrying unsupported SIMD opcodes fails validation at instantiation, so its capabilities are fixed at compile time.
 Nothing is process-wide: narrowing the mask a call passes narrows the choice, so `capabilities & ~sz_cap_sve_k` skips SVE and `sz_cap_serial_k` alone runs the reference kernel.
 A host-only process never starts a GPU driver, as only the GPU queries and the engines built for a GPU reach one.
@@ -949,10 +949,10 @@ On Arm, having SVE in the capability mask doesn't mean SVE kernels always win: a
 So each such SVE kernel measures the register width on the running CPU (`svcntb`) and hands the 128-bit case to its NEON twin, and the dispatch point needs no special case.
 To force a specific backend regardless, narrow the mask or call its kernel directly.
 
-CMake, which every binding builds through, probes which kits the toolchain can __compile__: each kit's probe, `probes/<kit>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
-Every tier header scopes its kernels to their kit with a target pragma, on every platform, and LASX and POWER9 also take `-mlasx` and `-mcpu=power9` file-wide, only in their own units, as `lasxintrin.h` and `altivec.h` hide their contents without them.
-Libraries compile every kit the toolchain builds and leave the rest to the mask each call passes; header-only builds enable the kits their own flags name.
-`-D STRINGZILLA_TARGET_<KIT>=0` drops a kit from the libraries, and `=1` keeps one only where its probe compiles.
+CMake, which every binding builds through, probes which capabilities the toolchain can __compile__: each capability's probe, `probes/<capability>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it.
+Each capability's headers scope its kernels with a target pragma, on every platform; LASX and POWER9 need GCC 15 or newer for that, as Clang's `lasxintrin.h` and `altivec.h` stay closed without `-mlasx` and `-mcpu=power9`.
+Libraries compile every capability the toolchain builds and leave the rest to the mask each call passes; header-only builds enable the capabilities their own flags name.
+`-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability from the libraries, and `=1` keeps one only where its probe compiles.
 
 ```c
 #include <stdio.h>
@@ -1195,8 +1195,8 @@ __`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TAR
 
 > One can explicitly enable or disable individual SIMD families for compatibility or benchmarking purposes.
 > In header-only use the defaults are inferred from the compiler's predefined macros under your own `-march` flags; LASX and POWER9 need your `-mlasx` and `-mcpu=power9`, as their intrinsics headers hide without them.
-> The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each kit's probe, which calls one of its kernels, to learn whether the toolchain builds them — so the libraries carry every compilable kit.
-> The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` keeps a kit only where its probe compiles.
+> The CMake build, which every binding goes through, resolves them from the `probes/` sources instead — compiling each capability's probe, which calls one of its kernels, to learn whether the toolchain builds them — so the libraries carry every compilable capability.
+> The same names work as CMake cache options (`-D STRINGZILLA_TARGET_SVE2=0`) and as Cargo environment variables (`STRINGZILLA_TARGET_SVE2=0 cargo build`); an explicit `1` keeps a capability only where its probe compiles.
 
 __`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_ROCM`, `STRINGZILLA_TARGET_METAL`__:
 

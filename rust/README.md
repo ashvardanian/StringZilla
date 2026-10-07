@@ -54,14 +54,14 @@ use stringzilla::sz::StringZillableUnary;  // hash/segmentation extension method
 
 Every call picks its kernel from the capability mask it passes, `Capabilities::cpu_enabled()` (see [Runtime Dispatch and Capabilities](#runtime-dispatch-and-capabilities)) — the same `_best` dispatch points as the precompiled `stringzilla_shared` C library.
 One binary runs optimally on any CPU of the target architecture, at the cost of one pick per operation.
-CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<kit>.c` — tiny programs calling one of the kit's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
+CMake decides which capabilities to compile in, as for every other binding, by try-compiling `probes/<capability>.c` — tiny programs calling one of the capability's real kernels header-only at the baseline flags, so broken or old toolchains are caught up front.
 Every capability the toolchain can emit is built, and the enabled mask leaves out whatever the CPU lacks.
 Where the OS cannot be asked, as on OS-less targets, the CPU reports only the capabilities the C compiler's own flags guarantee.
 A WebAssembly module carries the one SIMD kit the Rust target declares: `+relaxed-simd` gives `v128relaxed`, `+simd128` gives `v128`, and neither gives `serial`.
 
 The build script forwards these environment variables to CMake, and rebuilds when one changes:
 
-- `STRINGZILLA_TARGET_<KIT>`, like `STRINGZILLA_TARGET_SVE2=0 cargo build`, forces one capability on or off, though never past what the toolchain can compile.
+- `STRINGZILLA_TARGET_<CAPABILITY>`, like `STRINGZILLA_TARGET_SVE2=0 cargo build`, forces one capability on or off, though never past what the toolchain can compile.
 - `STRINGZILLA_TARGET_ARCH=native` tunes the library for the building machine.
 - `STRINGZILLA_CUDA_ARCHITECTURES` and `STRINGZILLA_ROCM_ARCHITECTURES` narrow the GPU code the features compile.
 

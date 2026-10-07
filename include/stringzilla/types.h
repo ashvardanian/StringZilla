@@ -589,8 +589,8 @@
 #endif
 
 /** Whether a capability's helpers compile here: its own target, or any capability built on it.
- *  @c STRINGZILLA_TARGET_* alone decides where its kernels are defined, and a capability nothing
- *  builds on guards its helpers with its target. */
+ *  @c STRINGZILLA_TARGET_* alone decides where its kernels are defined. Each architecture's base
+ *  has a row, and any other capability nothing builds on guards its helpers with its target. */
 #define STRINGZILLA_ARCH_X8664_SKYLAKE_ (STRINGZILLA_TARGET_SKYLAKE || STRINGZILLA_TARGET_ICELAKE)
 #define STRINGZILLA_ARCH_X8664_HASWELL_ (STRINGZILLA_TARGET_HASWELL || STRINGZILLA_ARCH_X8664_SKYLAKE_)
 #define STRINGZILLA_ARCH_X8664_WESTMERE_ (STRINGZILLA_TARGET_WESTMERE || STRINGZILLA_ARCH_X8664_HASWELL_)
@@ -601,6 +601,8 @@
     (STRINGZILLA_TARGET_NEON || STRINGZILLA_ARCH_ARM64_NEONAES_ || STRINGZILLA_TARGET_NEONSHA || \
      STRINGZILLA_ARCH_ARM64_SVE_)
 #define STRINGZILLA_ARCH_RISCV64_RVV_ (STRINGZILLA_TARGET_RVV || STRINGZILLA_TARGET_RVVCRYPTO)
+#define STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ STRINGZILLA_TARGET_LOONGSONASX
+#define STRINGZILLA_ARCH_PPC64_POWERVSX_ STRINGZILLA_TARGET_POWERVSX
 #define STRINGZILLA_ARCH_WASM_V128_ (STRINGZILLA_TARGET_V128 || STRINGZILLA_TARGET_V128RELAXED)
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers. */
@@ -610,12 +612,29 @@
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #include <riscv_vector.h>
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
-#if defined(__loongarch_asx)
+/*  The LASX and POWER9 intrinsics headers open in the same target region as their kernels.
+ *  GCC 15 defines @c __loongarch_asx and @c __POWER9_VECTOR__ there, while Clang defines them
+ *  only under `-mlasx` or `-mcpu=power9`. */
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#if !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC target("lasx")
+#endif
 #include <lsxintrin.h>  // 128-bit `__lsx_*` intrinsics and the `__m128i` register type, for sub-32-byte inputs
 #include <lasxintrin.h> // 256-bit `__lasx_*` intrinsics and the `__m256i` register type
+#if !defined(__clang__)
+#pragma GCC pop_options
 #endif
-#if defined(__POWER9_VECTOR__)
+#endif
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+#if !defined(__clang__)
+#pragma GCC push_options
+#pragma GCC target("power9-vector")
+#endif
 #include <altivec.h>
+#if !defined(__clang__)
+#pragma GCC pop_options
+#endif
 #endif
 #if STRINGZILLA_ARCH_X8664_WESTMERE_ || STRINGZILLA_TARGET_GOLDMONT
 #include <immintrin.h>
@@ -1196,13 +1215,13 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u128_vec_t {
     float64x2_t f64x2;
     float32x4_t f32x4;
 #endif
-#if defined(__loongarch_asx)
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
     __m128i lsx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_
     v128_t v128;
 #endif
-#if defined(__POWER9_VECTOR__)
+#if STRINGZILLA_ARCH_PPC64_POWERVSX_
     __vector unsigned char vsx_u8;
     __vector unsigned short vsx_u16;
     __vector unsigned int vsx_u32;
@@ -1237,7 +1256,7 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
-#if defined(__loongarch_asx)
+#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
     __m256i lasx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_

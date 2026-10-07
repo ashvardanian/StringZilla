@@ -882,7 +882,7 @@ inline std::size_t run_test(settings_t const &settings, std::string_view name,
 /**
  *  @brief Runs an architecture's kernel cross-checks via @c run_test, a section per capability.
  *
- *  `#if STRINGZILLA_TARGET_<KIT>` says a capability's kernels are built, and @c section says
+ *  `#if STRINGZILLA_TARGET_<CAPABILITY>` says a capability's kernels are built, and @c section says
  *  whether this CPU runs them, announcing once a section it cannot run and skipping its checks.
  */
 struct cross_section_t {

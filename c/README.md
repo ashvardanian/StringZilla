@@ -10,5 +10,5 @@ This part of the project builds the compiled library behind the `_best` dispatch
 
 Which `STRINGZILLA_TARGET_*` capabilities a build enables is decided by the top-level `probes/` programs, which CMake compiles for every binding: each capability's probe, `probes/<capability>.c`, calls one of its kernels, compiled header-only at the baseline flags as the library compiles it, to learn whether the toolchain builds them.
 Every unit compiles at the architecture's floor, and each capability's tier headers scope its kernels with a target pragma, so the library carries every capability the toolchain builds and dispatches by runtime detection.
-`cpu/loongsonasx.c` and `cpu/powervsx.c` alone also take `-mlasx` and `-mcpu=power9` file-wide, as `lasxintrin.h` and `altivec.h` hide their contents without them.
-`-D STRINGZILLA_TARGET_<KIT>=0` drops a capability, and `=1` keeps one only where its probe compiles.
+LASX and POWER9 scope per function only under GCC 15 or newer, as Clang's `lasxintrin.h` and `altivec.h` stay closed without `-mlasx` and `-mcpu=power9`.
+`-D STRINGZILLA_TARGET_<CAPABILITY>=0` drops a capability, and `=1` keeps one only where its probe compiles.
