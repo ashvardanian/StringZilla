@@ -62,7 +62,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_byte_mask_from_bits
     unsigned char const low_byte = (unsigned char)((bits >> shift) & 0xFF);
     unsigned char const high_byte = (unsigned char)((bits >> (shift + 8)) & 0xFF);
     __vector unsigned char const position_u8x16 = vec_xl(0, bit_position_lanes);
-    __vector bool char const lane_half_u8x16 = (__vector bool char)vec_xl(0, lane_half);
+    __vector __bool char const lane_half_u8x16 = (__vector __bool char)vec_xl(0, lane_half);
     __vector unsigned char const byte_u8x16 = vec_sel(vec_splats(low_byte), vec_splats(high_byte), lane_half_u8x16);
     return (__vector unsigned char)vec_cmpeq(vec_and(byte_u8x16, position_u8x16), position_u8x16);
 }
@@ -112,7 +112,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_word_break_astral_class_powerv
     for (int group = 0; group < (int)sz_utf8_word_break_astral_leaf_groups_k; ++group) {
         __vector unsigned char const value_u8x16 = sz_utf8_rune_lut256_powervsx_(
             sz_utf8_word_break_astral_stage4_groups_ + group * 256, stage4_lut_index_u8x16);
-        __vector bool char const here_u8x16 = vec_cmpeq(leaf_group_u8x16, vec_splats((unsigned char)group));
+        __vector __bool char const here_u8x16 = vec_cmpeq(leaf_group_u8x16, vec_splats((unsigned char)group));
         result_u8x16 = vec_sel(result_u8x16, value_u8x16, here_u8x16);
     }
     return result_u8x16;
@@ -219,7 +219,7 @@ STRINGZILLA_INLINE void sz_utf8_word_break_classify_window_powervsx_( //
         __vector unsigned char const ascii_select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_powervsx_(ascii_starts,
                                                                                                            lane_base);
         out_q_u8x16 = vec_sel(out_q_u8x16, sz_utf8_word_break_ascii_class_powervsx_(raw_q_u8x16),
-                              (__vector bool char)ascii_select_u8x16);
+                              (__vector __bool char)ascii_select_u8x16);
 
         // 4-byte (astral) lanes: reconstruct the codepoint from the lead + three forward neighbours, then the astral
         // cascade addressed by offset = codepoint - 0x10000 (the offset's plane nibble is `plane - 1`).
@@ -241,7 +241,7 @@ STRINGZILLA_INLINE void sz_utf8_word_break_classify_window_powervsx_( //
             out_q_u8x16 = vec_sel(
                 out_q_u8x16,
                 sz_utf8_word_break_astral_class_powervsx_(plane_off_u8x16, high_four_u8x16, low_four_u8x16),
-                (__vector bool char)four_select_u8x16);
+                (__vector __bool char)four_select_u8x16);
         }
         classes_u8x16[quarter] = out_q_u8x16;
     }
@@ -349,7 +349,7 @@ STRINGZILLA_INLINE sz_utf8_word_break_frame_t sz_utf8_word_break_build_frame_pow
         for (int quarter = 0; quarter < 4; ++quarter) {
             __vector unsigned char const select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_powervsx_(truncated_raw,
                                                                                                          quarter * 16);
-            classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16, (__vector bool char)select_u8x16);
+            classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16, (__vector __bool char)select_u8x16);
         }
     }
 
@@ -520,7 +520,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_powervsx_( //
             for (int quarter = 0; quarter < 4; ++quarter) {
                 __vector unsigned char const select_u8x16 = sz_utf8_word_break_byte_mask_from_bits_powervsx_(
                     forced_other, quarter * 16);
-                classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16, (__vector bool char)select_u8x16);
+                classes_u8x16[quarter] = vec_sel(classes_u8x16[quarter], other_u8x16,
+                                                 (__vector __bool char)select_u8x16);
             }
         }
 

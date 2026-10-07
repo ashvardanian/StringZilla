@@ -113,7 +113,8 @@ template <typename value_type_>
 std::string render_operand(value_type_ const &value) {
     std::string rendered;
     if constexpr (std::is_null_pointer_v<value_type_>) rendered = "nullptr";
-    else if constexpr (std::is_pointer_v<value_type_>) rendered = fmt::format("{}", fmt::ptr(value));
+    else if constexpr (std::is_pointer_v<value_type_> || std::is_function_v<value_type_>)
+        rendered = fmt::format("{}", fmt::ptr(value));
     else if constexpr (std::is_array_v<value_type_> &&
                        std::is_same_v<std::remove_cv_t<std::remove_extent_t<value_type_>>, char>)
         rendered = fmt::format("{:?}", std::string_view(value, std::find(value, std::end(value), '\0')));

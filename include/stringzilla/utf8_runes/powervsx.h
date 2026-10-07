@@ -424,7 +424,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_gather16_powervsx_( //
     __vector unsigned char const gathered_low_u8x16 = vec_perm(regs_u8x16[0], regs_u8x16[1], index_u8x16);
     __vector unsigned char const gathered_high_u8x16 = vec_perm(regs_u8x16[2], regs_u8x16[3],
                                                                 vec_sub(index_u8x16, half_select_threshold_u8x16));
-    __vector bool char const select_high_mask_u8x16 = vec_cmpge(index_u8x16, half_select_threshold_u8x16);
+    __vector __bool char const select_high_mask_u8x16 = vec_cmpge(index_u8x16, half_select_threshold_u8x16);
     return vec_sel(gathered_low_u8x16, gathered_high_u8x16, select_high_mask_u8x16);
 }
 
@@ -537,8 +537,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
             __vector unsigned int const mask_word_c0_u32x4 = vec_splats((unsigned int)0xC0);
             __vector unsigned int const mask_word_e0_u32x4 = vec_splats((unsigned int)0xE0);
             __vector unsigned int const mask_word_f0_u32x4 = vec_splats((unsigned int)0xF0);
-            __vector bool int const two_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_c0_u32x4),
-                                                                  vec_cmplt(lead_u32x4, mask_word_e0_u32x4));
+            __vector __bool int const two_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_c0_u32x4),
+                                                                    vec_cmplt(lead_u32x4, mask_word_e0_u32x4));
             __vector unsigned int const two_byte_codepoint_u32x4 = vec_or(
                 vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x1F)), vec_splats((unsigned int)6)),
                 vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4));
@@ -552,8 +552,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
             // Bit-exact with the gated form: a window with no 3-/4-byte lead carries a width mask
             // that is all false.
             if (has_three) {
-                __vector bool int const three_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4),
-                                                                        vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
+                __vector __bool int const three_byte_mask_u32x4 = vec_and(vec_cmpge(lead_u32x4, mask_word_e0_u32x4),
+                                                                          vec_cmplt(lead_u32x4, mask_word_f0_u32x4));
                 __vector unsigned int const three_byte_codepoint_u32x4 = vec_or(
                     vec_or(vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x0F)), vec_splats((unsigned int)12)),
                            vec_sl(vec_and(continuation_byte_1_u32x4, mask_word_3f_u32x4), vec_splats((unsigned int)6))),
@@ -562,7 +562,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_rune_drain_powervsx_( //
                                                   three_byte_mask_u32x4);
             }
             if (has_four) { // SIBLING, not nested; has_four ⟹ has_three so the 3rd byte is already gathered.
-                __vector bool int const four_byte_mask_u32x4 = vec_cmpge(lead_u32x4, mask_word_f0_u32x4);
+                __vector __bool int const four_byte_mask_u32x4 = vec_cmpge(lead_u32x4, mask_word_f0_u32x4);
                 __vector unsigned int const four_byte_codepoint_u32x4 = vec_or(
                     vec_or(
                         vec_sl(vec_and(lead_u32x4, vec_splats((unsigned int)0x07)), vec_splats((unsigned int)18)),
@@ -822,10 +822,10 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_powervsx_( //
                                                                               : input_register_u8x16[3];
             __vector unsigned char const next_byte_u8x16 = vec_perm(register_value_u8x16, successor_register_u8x16,
                                                                     successor_iota_u8x16);
-            __vector bool char const length_2_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
-                                                                     vec_splats((unsigned char)2));
-            __vector bool char const length_4_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
-                                                                     vec_splats((unsigned char)4));
+            __vector __bool char const length_2_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                                       vec_splats((unsigned char)2));
+            __vector __bool char const length_4_mask_u8x16 = vec_cmpeq(sequence_length_per_register_u8x16[reg],
+                                                                       vec_splats((unsigned char)4));
             __vector unsigned char const lead_lt_c2_mask_u8x16 = (__vector unsigned char)vec_cmplt(register_value_u8x16,
                                                                                                    byte_c2_u8x16);
             __vector unsigned char const lead_gt_f4_mask_u8x16 = (__vector unsigned char)vec_cmpgt(register_value_u8x16,
@@ -1065,7 +1065,7 @@ STRINGZILLA_INLINE sz_utf8_rune_window_powervsx_t sz_utf8_rune_decode_window_pow
             vec_and(next_byte2_u8x16, low_six_bits_u8x16));
 
         // Blend 2-byte versus 3-byte per lane: select the 3-byte value where this lane is a 3-byte lead.
-        __vector bool char const three_select_u8x16 = (__vector bool char)three_byte_bool_u8x16[quarter];
+        __vector __bool char const three_select_u8x16 = (__vector __bool char)three_byte_bool_u8x16[quarter];
         result.high_byte_u8x16s[quarter] = vec_sel(high_two_u8x16, high_three_u8x16, three_select_u8x16);
         result.low_byte_u8x16s[quarter] = vec_sel(low_two_u8x16, low_three_u8x16, three_select_u8x16);
     }
@@ -1085,7 +1085,7 @@ STRINGZILLA_INLINE __vector unsigned char sz_utf8_rune_cascade_stage_powervsx_( 
     for (int tile = 0; tile < tile_count; ++tile) {
         __vector unsigned char const row_u8x16 = vec_xl(0, table + tile * 16);
         __vector unsigned char const gathered_u8x16 = vec_perm(row_u8x16, row_u8x16, within_nibble_u8x16);
-        __vector bool char const here_u8x16 = vec_cmpeq(selector_u8x16, vec_splats((unsigned char)tile));
+        __vector __bool char const here_u8x16 = vec_cmpeq(selector_u8x16, vec_splats((unsigned char)tile));
         result_u8x16 = vec_sel(result_u8x16, gathered_u8x16, here_u8x16);
     }
     return result_u8x16;

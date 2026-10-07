@@ -424,7 +424,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
     // If we are not lucky, we need to allocate more memory.
     else {
         // A size floor keeps the first few appends from repeatedly allocating.
-        sz_size_t next_planned_size = sz_max_of_two(sz_default_alignment_k, string_space * (sz_size_t)2);
+        sz_size_t next_planned_size = sz_max_of_two((sz_size_t)sz_default_alignment_k, string_space * (sz_size_t)2);
         sz_size_t min_needed_space = sz_size_bit_ceil(offset + string_length + added_length + 1);
         sz_size_t new_space = sz_max_of_two(min_needed_space, next_planned_size);
         string_start = sz_string_reserve(string, new_space - 1, allocator);
