@@ -161,6 +161,38 @@ static void check_find_unit_(                      //
 void test_find_unit() {
     std::printf("  - testing search & comparison known-answer vectors...\n");
 
+    // Empty needles match at the requested boundary, including a default-constructed view.
+    sz::string_view const empty_views[] = {sz::string_view(), sz::string_view("")};
+    for (auto const &empty_view : empty_views) {
+        verify(empty_view.find(sz::string_view()) == 0);
+        verify(empty_view.find("") == 0);
+        verify(empty_view.rfind(sz::string_view()) == 0);
+        verify(empty_view.rfind("") == 0);
+        verify(empty_view.rfind("", sz::string_view::npos) == 0);
+        verify(empty_view.contains(""));
+        verify(empty_view.find("a") == sz::string_view::npos);
+    }
+    sz::string_span empty_span;
+    verify(empty_span.find("") == 0);
+    verify(empty_span.rfind("") == 0);
+    verify(empty_span.contains(""));
+    sz::string empty_string;
+    verify(empty_string.find("") == 0);
+    verify(empty_string.rfind("") == 0);
+    verify(empty_string.contains(""));
+
+    sz::string_view const bounded("abc");
+    for (std::size_t skip : {bounded.size() + 1, sz::string_view::npos, std::numeric_limits<std::size_t>::max()}) {
+        verify(bounded.find("", skip) == sz::string_view::npos);
+        verify(bounded.find("a", skip) == sz::string_view::npos);
+        verify(bounded.find('a', skip) == sz::string_view::npos);
+        verify(bounded.find("a", skip, 1) == sz::string_view::npos);
+        verify(bounded.find_first_of("a", skip) == sz::string_view::npos);
+        verify(bounded.find_first_not_of("a", skip) == sz::string_view::npos);
+    }
+    verify(bounded.find("", bounded.size()) == bounded.size());
+    verify(bounded.find('a', bounded.size()) == sz::string_view::npos);
+
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
