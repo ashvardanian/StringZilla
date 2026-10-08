@@ -201,16 +201,72 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
     # Real SASS for every generation CUDA 13 targets, one family-wide cubin each for Blackwell (`f`) rather than the
-    # arch-locked `a`. The libraries' CUDA unit adds forward PTX on top of these, which a listed GPU never JITs.
+    # arch-locked `a`, and forward PTX for the Hopper and Blackwell tiers, which a listed GPU never JITs.
     set(STRINGZILLA_CUDA_ARCHITECTURES
-        "75-real;80-real;90-real;100f-real;120f-real"
-        CACHE STRING "Real SASS architectures every CUDA target carries; override to match the machine at hand"
+        "75-real;80-real;90-real;100f-real;120f-real;90-virtual;100-virtual"
+        CACHE STRING "Codes every CUDA target carries; override to match the machine at hand"
     )
     set(CMAKE_CUDA_ARCHITECTURES ${STRINGZILLA_CUDA_ARCHITECTURES})
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     include(cmake/sz_cuda_probes.cmake)
     sz_cuda_probe_native_arch_()
+    # "native", "all" and "all-major" stand for the lists CMake resolved them to, which the capability rows read.
+    set(STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_)
+    foreach (code_ IN LISTS STRINGZILLA_CUDA_ARCHITECTURES)
+        if (code_ STREQUAL "native")
+            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_NATIVE})
+        elseif (code_ STREQUAL "all")
+            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_ALL})
+        elseif (code_ STREQUAL "all-major")
+            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR})
+        else ()
+            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${code_})
+        endif ()
+    endforeach ()
+    # Clusters and their distributed shared memory: H100, H200, GH200, and every GPU since.
+    sz_gpu_capability_(
+        hopper STRINGZILLA_TARGET_HOPPER
+        CUDA_ARCHITECTURES
+            90
+            90a
+            100
+            100a
+            100f
+            103
+            103a
+            103f
+            110
+            110a
+            110f
+            120
+            120a
+            120f
+            121
+            121a
+            121f
+    )
+    # Cluster launch control, letting a block take over the tile of one not yet started: B200, B300, RTX 50, and every
+    # GPU since.
+    sz_gpu_capability_(
+        blackwell STRINGZILLA_TARGET_BLACKWELL
+        CUDA_ARCHITECTURES
+            100
+            100a
+            100f
+            103
+            103a
+            103f
+            110
+            110a
+            110f
+            120
+            120a
+            120f
+            121
+            121a
+            121f
+    )
 
     message(STATUS "CUDA support enabled")
     message(STATUS "CUDA Compiler: ${CMAKE_CUDA_COMPILER}")
@@ -283,7 +339,10 @@ function (define_gpu_suite target language source)
     if (MSVC AND language STREQUAL "CUDA")
         target_compile_definitions(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
     endif ()
-    target_link_libraries(${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_static fmt::fmt)
+    target_link_libraries(
+        ${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
+                          stringzilla_static fmt::fmt
+    )
 endfunction ()
 
 # One CPU test or benchmark linking `library`, whose capability `verdicts` declare every kernel the
@@ -423,10 +482,14 @@ foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
     endif ()
 endforeach ()
 
-# Adds one GPU vendor's unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled without the CPU
-# capabilities, and linked with the runtime libraries that follow. Both the unit and the libraries' host units see
-# `definition`, so the dispatch lists name the unit's kernels.
-function (sz_add_gpu_unit_ source definition)
+# Adds one GPU unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled for `codes` alone,
+# without the CPU capabilities and with the GPU ones the build's codes run, and linked with the runtime libraries that
+# follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition`,
+# so the dispatch lists name the unit's kernels.
+function (sz_add_gpu_unit_ source codes definition)
+    if (NOT codes)
+        return()
+    endif ()
     get_filename_component(unit_ "${source}" NAME_WE)
     add_library(stringzilla_${unit_}_ OBJECT ${source})
     target_include_directories(stringzilla_${unit_}_ PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/c)
@@ -439,27 +502,50 @@ function (sz_add_gpu_unit_ source definition)
                    CUDA_STANDARD 20
                    HIP_STANDARD 20
                    CUDA_SEPARABLE_COMPILATION OFF
-                   CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES};90-virtual"
-                   HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
+                   CUDA_ARCHITECTURES "${codes}"
+                   HIP_ARCHITECTURES "${codes}"
     )
     set_compiler_flags(stringzilla_${unit_}_ "" "")
     target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition}")
-    target_link_libraries(stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ ${ARGN})
+    target_link_libraries(
+        stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
+                                      ${ARGN}
+    )
     foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
         target_sources(${library_} PRIVATE $<TARGET_OBJECTS:stringzilla_${unit_}_>)
         target_compile_definitions(${library_} PRIVATE "${definition}")
-        target_link_libraries(${library_} PUBLIC ${ARGN})
+        target_link_libraries(
+            ${library_}
+            PRIVATE $<BUILD_INTERFACE:stringzilla_cuda_capabilities_compiled_>
+            PUBLIC ${ARGN}
+        )
     endforeach ()
 endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
-    sz_add_gpu_unit_(c/target/cuda.cu "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
+    # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
+    sz_gpu_codes_(
+        "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "${sz_target_hopper_architectures}"
+        STRINGZILLA_HOPPER_UNIT_CODES_
+    )
+    sz_gpu_codes_(
+        "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "${sz_target_blackwell_architectures}"
+        STRINGZILLA_BLACKWELL_UNIT_CODES_
+    )
+    sz_add_gpu_unit_(
+        c/target/cuda.cu "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    )
+    sz_add_gpu_unit_(c/target/hopper.cu "${STRINGZILLA_HOPPER_UNIT_CODES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
+    sz_add_gpu_unit_(
+        c/target/blackwell.cu "${STRINGZILLA_BLACKWELL_UNIT_CODES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    )
 endif ()
 if (STRINGZILLA_BUILD_ROCM)
-    sz_add_gpu_unit_(c/target/rocm.hip "STRINGZILLA_ARCH_ROCM_=1" hip::host)
+    sz_add_gpu_unit_(c/target/rocm.hip "${STRINGZILLA_ROCM_ARCHITECTURES}" "STRINGZILLA_ARCH_ROCM_=1" hip::host)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
-    sz_add_gpu_unit_(c/target/metal.c "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
+    # Metal compiles on the device, so its one code names the family the baseline needs.
+    sz_add_gpu_unit_(c/target/metal.c "apple7" "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
     target_compile_options(stringzilla_metal_ PRIVATE ${STRINGZILLA_EMBED_OPTIONS_})
     foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
         target_compile_options(${library_} PUBLIC ${STRINGZILLA_EMBED_OPTIONS_})

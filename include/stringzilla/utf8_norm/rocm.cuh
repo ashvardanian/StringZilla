@@ -14,7 +14,8 @@
 #include "stringzilla/rocm.cuh"
 #include "stringzilla/utf8_norm/simt.cuh"
 
-#if STRINGZILLA_TARGET_ROCM && defined(__HIP__)
+#if STRINGZILLA_ARCH_ROCM_
+#if STRINGZILLA_TARGET_ROCM
 
 #ifdef __cplusplus
 extern "C" {
@@ -114,5 +115,6 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_rocm(sz_cptr_t source, sz_size_t source
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_ROCM && defined(__HIP__)
+#endif // STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_UTF8_NORM_ROCM_CUH_

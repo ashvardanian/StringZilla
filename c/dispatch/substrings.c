@@ -30,6 +30,9 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
 #if STRINGZILLA_TARGET_CUDA
         (sz_kernel_punned_t)&sz_substrings_engine_init_cuda,
 #endif
+#if STRINGZILLA_TARGET_HOPPER
+        (sz_kernel_punned_t)&sz_substrings_engine_init_hopper,
+#endif
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -47,7 +50,7 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -73,6 +76,9 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
 #if STRINGZILLA_TARGET_CUDA
         (sz_kernel_punned_t)&sz_substrings_counts_cuda,
 #endif
+#if STRINGZILLA_TARGET_HOPPER
+        (sz_kernel_punned_t)&sz_substrings_counts_hopper,
+#endif
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -90,7 +96,7 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -116,6 +122,9 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
 #if STRINGZILLA_TARGET_CUDA
         (sz_kernel_punned_t)&sz_substrings_find_cuda,
 #endif
+#if STRINGZILLA_TARGET_HOPPER
+        (sz_kernel_punned_t)&sz_substrings_find_hopper,
+#endif
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -133,7 +142,7 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -159,6 +168,9 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
 #if STRINGZILLA_TARGET_CUDA
         (sz_kernel_punned_t)&sz_substrings_replace_cuda,
 #endif
+#if STRINGZILLA_TARGET_HOPPER
+        (sz_kernel_punned_t)&sz_substrings_replace_hopper,
+#endif
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -176,7 +188,7 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };
@@ -202,6 +214,9 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
 #if STRINGZILLA_TARGET_CUDA
         (sz_kernel_punned_t)&sz_substrings_bm25_scores_cuda,
 #endif
+#if STRINGZILLA_TARGET_HOPPER
+        (sz_kernel_punned_t)&sz_substrings_bm25_scores_hopper,
+#endif
     };
     static sz_kernel_punned_t const rocm[] = {
         STRINGZILLA_NULL,
@@ -219,7 +234,7 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
          cpu},
-        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {sz_cap_metal_k * STRINGZILLA_TARGET_METAL, metal},
     };

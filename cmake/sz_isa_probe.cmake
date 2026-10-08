@@ -1,4 +1,5 @@
-# cmake/sz_isa_probe.cmake — which CPU capabilities of the target architecture the toolchain compiles
+# cmake/sz_isa_probe.cmake — which CPU capabilities of the target architecture the toolchain compiles, and which GPU
+# capabilities the listed codes run
 #
 # One `sz_cpu_capability_` row per capability. Each probes `probes/<capability>.c` into the cached
 # `sz_target_<capability>_compiles`, caches the flags enabling the capability across a unit as
@@ -114,3 +115,43 @@ elseif (STRINGZILLA_ARCH_LOONGARCH64_)
 elseif (STRINGZILLA_ARCH_PPC64_)
     sz_cpu_capability_(powervsx STRINGZILLA_TARGET_POWERVSX GCC_FLAGS -mcpu=power9)
 endif ()
+
+# Linked by the GPU units, the libraries and the GPU suites: each CUDA capability's macro is 1 where some code the
+# build compiles, without CMake's "-real" or "-virtual", runs the capability, else 0.
+add_library(stringzilla_cuda_capabilities_compiled_ INTERFACE)
+
+# One CUDA capability, named `capability_name_` in its cache variable: caches the `CUDA_ARCHITECTURES` running it as
+# `sz_target_<capability>_architectures`, the twin of a CPU capability's `sz_target_<capability>_flags`, and defines
+# `capability_macro_` from the codes in `STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_`.
+function (sz_gpu_capability_ capability_name_ capability_macro_)
+    cmake_parse_arguments(PARSE_ARGV 2 argument "" "" "CUDA_ARCHITECTURES")
+    set(sz_target_${capability_name_}_architectures
+        "${argument_CUDA_ARCHITECTURES}"
+        CACHE INTERNAL "Architectures running ${capability_macro_}"
+    )
+    set(capability_enabled_ FALSE)
+    foreach (code_ IN LISTS STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_)
+        string(REGEX REPLACE "-(real|virtual)$" "" architecture_ "${code_}")
+        if (architecture_ IN_LIST argument_CUDA_ARCHITECTURES)
+            set(capability_enabled_ TRUE)
+        endif ()
+    endforeach ()
+    target_compile_definitions(
+        stringzilla_cuda_capabilities_compiled_ INTERFACE "${capability_macro_}=$<BOOL:${capability_enabled_}>"
+    )
+endfunction ()
+
+# The entries of `codes` that `capability_codes` names, keeping CMake's "-real" and "-virtual" suffixes.
+function (sz_gpu_codes_ codes capability_codes output)
+    set(kept_)
+    foreach (code_ IN LISTS codes)
+        string(REGEX REPLACE "-(real|virtual)$" "" architecture_ "${code_}")
+        if (architecture_ IN_LIST capability_codes)
+            list(APPEND kept_ "${code_}")
+        endif ()
+    endforeach ()
+    set(${output}
+        "${kept_}"
+        PARENT_SCOPE
+    )
+endfunction ()

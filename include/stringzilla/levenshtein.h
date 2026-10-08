@@ -32,8 +32,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
-#include "stringzilla/rocm.cuh"
 #include "stringzilla/metal.h"
 #include "stringzilla/levenshtein/serial.h" // `sz_levenshtein_engine_t`, `sz_levenshtein_symbol_t`
 
@@ -168,6 +166,18 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_
                                                           sz_size_t distances_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_BLACKWELL
+/** @copydoc sz_levenshtein_engine_init */
+STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_blackwell(sz_levenshtein_engine_t *engine,
+                                                                 sz_sequence_t const *queries,
+                                                                 sz_levenshtein_symbol_t symbol,
+                                                                 sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_levenshtein_distances */
+STRINGZILLA_API sz_status_t sz_levenshtein_distances_blackwell(sz_levenshtein_engine_t *engine,
+                                                               sz_sequence_t const *candidates, sz_size_t *distances,
+                                                               sz_size_t distances_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_levenshtein_engine_init */
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
@@ -209,6 +219,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz
 #include "stringzilla/levenshtein/icelake.h"
 #include "stringzilla/levenshtein/neon.h"
 #include "stringzilla/levenshtein/cuda.cuh"
+#include "stringzilla/levenshtein/blackwell.cuh"
 #include "stringzilla/levenshtein/rocm.cuh"
 #include "stringzilla/levenshtein/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY

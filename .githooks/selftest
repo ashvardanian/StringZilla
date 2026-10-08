@@ -2470,24 +2470,56 @@ assert_accepts "launch API in a library unit, and prose naming chevrons" c/targe
 void probe(void) { cudaLaunchKernel(kernel, grid, block, arguments, 0, stream); }
 FIXTURE
 
-assert_rejects "vendor test in a host file" "tests the GPU compiler in host code" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
-#if STRINGZILLA_TARGET_CUDA && defined(__CUDACC__) && !defined(__HIP__)
+assert_rejects "vendor test in a host file" "tests the GPU compiler" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
 #if defined(__HIP__)
 void probe(void) { hipFree(0); }
 #endif
-#endif
+#endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
-assert_accepts "one top guard in a vendor file" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
+assert_rejects "compiler test in a vendor guard" "tests the GPU compiler" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
 #if STRINGZILLA_TARGET_ROCM && defined(__HIP__)
 void probe(void) { hipFree(0); }
 #endif // STRINGZILLA_TARGET_ROCM && defined(__HIP__)
 FIXTURE
 
-assert_accepts "vendor spelling in a shared kernel" include/stringzilla/probe/simt.cuh <<'FIXTURE'
+assert_rejects "vendor spelling in a shared walk" "tests the GPU compiler" include/stringzilla/probe/simt.cuh <<'FIXTURE'
 #if defined(__HIP__)
 void probe(void) { __builtin_amdgcn_s_barrier(); }
 #endif
+FIXTURE
+
+assert_accepts "architecture then capability in a tier file" include/stringzilla/probe/blackwell.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_TARGET_BLACKWELL
+void probe(void) { __nanosleep(64); }
+#endif // STRINGZILLA_TARGET_BLACKWELL
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "compute capability branch in a GPU header" "tests the compute capability in a GPU header" \
+    include/stringzilla/probe/simt.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
+void probe(void) { __nanosleep(64); }
+#endif
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
+FIXTURE
+
+assert_rejects "GPU kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_accepts "GPU kernel under its capability, runtime under its vendor" include/stringzilla/probe/cuda.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_CUDA_
+STRINGZILLA_INLINE sz_status_t sz_stream_probe_cuda(sz_stream_t stream) { return sz_success_k; }
+#if STRINGZILLA_TARGET_CUDA
+STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_
 FIXTURE
 
 assert_rejects "raw CUDA compiler guard in a benchmark" "tests the GPU compiler in harness code" bench/probe.cpp <<'FIXTURE'

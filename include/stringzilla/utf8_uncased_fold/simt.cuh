@@ -30,7 +30,7 @@
 
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 #include "stringzilla/utf8_uncased_fold/tables.h"
 
@@ -141,6 +141,8 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_uncased_fold_span_simt_(sz_u8_t const *sour
     return folded;
 }
 
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+
 /** Folds one tile of @p source, @p tile_bytes wide, of the @p tiles a round cuts it into, measuring
  *  each thread's stretch first and writing it once the chain says where the tile begins. */
 static __global__ void sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes,
@@ -160,10 +162,12 @@ static __global__ void sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, 
     sz_utf8_uncased_fold_span_simt_(source, length, begin, end, target + tile_offset + preceding);
 }
 
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+
 #pragma endregion Fold Kernel
 
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_SIMT_CUH_

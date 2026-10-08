@@ -375,12 +375,14 @@ pub enum Capability {
     LoongsonAsx = 1 << 16, // LoongArch LASX 256-bit SIMD
     PowerVsx = 1 << 17,    // Power VSX 128-bit SIMD
     Cuda = 1 << 48,        // NVIDIA: every CUDA device
+    Hopper = 1 << 51,      // NVIDIA: clusters, from compute capability 9.0
+    Blackwell = 1 << 52,   // NVIDIA: cluster launch control, from compute capability 10.0
     Rocm = 1 << 56,        // AMD: every ROCm device
     Metal = 1 << 60,       // Apple: every Metal device
 }
 
 /// Every [`Capability`], in bit order.
-const CAPABILITIES: [Capability; 21] = [
+const CAPABILITIES: [Capability; 23] = [
     Capability::Serial,
     Capability::Westmere,
     Capability::Goldmont,
@@ -400,6 +402,8 @@ const CAPABILITIES: [Capability; 21] = [
     Capability::LoongsonAsx,
     Capability::PowerVsx,
     Capability::Cuda,
+    Capability::Hopper,
+    Capability::Blackwell,
     Capability::Rocm,
     Capability::Metal,
 ];
@@ -438,6 +442,8 @@ impl Capabilities {
     /// Every GPU capability, which the CPU never detects or enables, C's `sz_cap_gpus_k`.
     pub const GPUS: Self = Capabilities(
         Capability::Cuda as sz_capability_t
+            | Capability::Hopper as sz_capability_t
+            | Capability::Blackwell as sz_capability_t
             | Capability::Rocm as sz_capability_t
             | Capability::Metal as sz_capability_t,
     );
@@ -1148,6 +1154,8 @@ mod tests {
             "loongsonasx",
             "powervsx",
             "cuda",
+            "hopper",
+            "blackwell",
             "rocm",
             "metal",
         ];

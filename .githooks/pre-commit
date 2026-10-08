@@ -2870,25 +2870,63 @@ check_launches_report_status() {
         "$staged_path launches with <<< >>>, which loses the launch status; call the vendor's launch API:"
 }
 
-# Rejects `__CUDACC__`, `__HIP__` and `__HIP_DEVICE_COMPILE__` in host-side files, because each vendor's host
-# code lives in its own `cuda.cuh` or `rocm.cuh` behind one top guard; only shared kernels in `simt.cuh` and
-# `types.cuh` may spell a device helper per vendor, and types.h derives the target macros from the compiler.
+# Rejects `__CUDACC__`, `__HIP__` and `__HIP_DEVICE_COMPILE__` outside types.h, because types.h derives
+# `STRINGZILLA_ARCH_CUDA_` and `STRINGZILLA_ARCH_ROCM_` from the compiler once, and every vendor and tier header opens
+# with those switches, as the host units, which set them too, never include a `.cuh`.
 check_vendor_tested_only_in_kernels() {
     local tests
     tests=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
         grep -nE '__CUDACC__|__HIPCC__|__HIP__|__HIP_DEVICE_COMPILE__' |
-        added_list="$staged_added_line_numbers_list" guarded="$staged_path" awk -F: '
+        added_list="$staged_added_line_numbers_list" awk -F: '
             BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
-            !guard_seen && ENVIRON["guarded"] ~ /^include\/stringzilla\/(.*\/)?(cuda|rocm)\.cuh$/ && $2 ~ /^#if / { guard_seen = 1; next }
             ($1 + 0) in added' || true)
     if [ -n "$tests" ]; then
         case "$staged_path" in
         test/* | bench/*)
             reject_with_reason "$tests" "$staged_path tests the GPU compiler in harness code; use STRINGZILLA_ARCH_CUDA_ or STRINGZILLA_ARCH_ROCM_:"
             ;;
-        *) reject_with_reason "$tests" "$staged_path tests the GPU compiler in host code; put the body in the vendor's cuda.cuh or rocm.cuh:" ;;
+        *) reject_with_reason "$tests" "$staged_path tests the GPU compiler; open with STRINGZILLA_ARCH_CUDA_ or STRINGZILLA_ARCH_ROCM_:" ;;
         esac
     fi
+}
+
+# Rejects a compute capability tested inside a GPU header, because each generation's instructions live in its own
+# tier, built by its own unit for only the codes running it, so a branch on `__CUDA_ARCH__` would make one kernel a
+# different kernel per GPU, invisible to dispatch and tests; a `__trap` stub only papers over such a branch.
+check_generations_split_into_tiers() {
+    local tests
+    tests=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        grep -nE '__CUDA_ARCH(_FAMILY_SPECIFIC|_SPECIFIC|_LIST)?__|(^|[^A-Za-z0-9_])__trap[[:space:]]*\(' |
+        added_list="$staged_added_line_numbers_list" awk -F: '
+            BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+            ($1 + 0) in added' || true)
+    [ -z "$tests" ] || reject_with_reason "$tests" \
+        "$staged_path tests the compute capability in a GPU header; move the instruction into its tier's header" \
+        "            and unit, like levenshtein/blackwell.cuh and c/target/blackwell.cu:"
+}
+
+# Rejects a GPU capability's kernel declared or defined under its vendor's `STRINGZILLA_ARCH_` alone, because every
+# unit of a vendor switches off each of the vendor's capabilities but its own, so only `STRINGZILLA_TARGET_` says
+# where the kernel exists; runtime services, which every unit of the vendor shares, are exempt.
+check_gpu_kernels_under_targets() {
+    local gpu_capabilities misguarded
+    gpu_capabilities=$(printf '%s\n' "$capability_architectures" |
+        awk '$2 ~ /^(CUDA|ROCM)$/ { printf "%s%s", separator, $1; separator = "|" }')
+    misguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" gpu_capabilities=$gpu_capabilities awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = $0; guard_line[depth] = NR; next }
+        /^[[:space:]]*#[[:space:]]*elif/ { guard[depth] = $0; guard_line[depth] = NR; next }
+        /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
+        depth > 0 && match($0, /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]][^(=;]*[^A-Za-z0-9_]sz_[a-z0-9_]+[[:space:]]*\(/) {
+            if (!((NR in added) || (guard_line[depth] in added))) next
+            name = substr($0, RSTART, RLENGTH); sub(/[[:space:]]*\($/, "", name); sub(/.*[^a-z0-9_]/, "", name)
+            if (name ~ /allocator|memory_|stream_|sequence_realloc|device_count|capabilities_/) next
+            if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && guard[depth] ~ /STRINGZILLA_ARCH_(CUDA|ROCM)_/)
+                printf "line %d: kernel %s under %s\n", NR, name, guard[depth]
+        }' || true)
+    [ -z "$misguarded" ] || reject_with_reason "$misguarded" \
+        "$staged_path guards a GPU kernel by its vendor; open #if STRINGZILLA_TARGET_<CAPABILITY> inside the vendor's guard:"
 }
 
 # Rejects an export macro on a binding definition, because the binding declares its helpers plain `extern`
@@ -3201,14 +3239,20 @@ run_project_checks() {
         ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_cuda_headers_stay_c ;;
+    include/stringzilla/*.cuh | include/stringzilla/*/*.cuh)
+        check_cuda_headers_stay_c
+        check_generations_split_into_tiers
+        ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_gpu_kernels_under_targets ;;
     c/*.cu | c/*.hip) check_launches_report_status ;;
     python/*.c | python/*/*.c | javascript/*.c) check_binding_exports_absent ;;
     esac
     case "$staged_path" in
-    include/stringzilla/types.h | include/stringzilla/types.cuh | include/stringzilla/*/simt.cuh) ;;
-    include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/cuda.cuh | include/stringzilla/rocm.cuh | \
-        include/stringzilla/*/cuda.cuh | include/stringzilla/*/rocm.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip | \
+    include/stringzilla/types.h) ;;
+    include/stringzilla/*.h | include/stringzilla/*/*.h | include/stringzilla/*.cuh | \
+        include/stringzilla/*/*.cuh | c/*.c | c/*.h | c/*.cu | c/*.hip | \
         test/*.h | test/*.hpp | test/*.cpp | test/*.cu | test/*.cuh | test/*.hip | \
         bench/*.h | bench/*.hpp | bench/*.cpp | bench/*.cu | bench/*.cuh | bench/*.hip)
         check_vendor_tested_only_in_kernels

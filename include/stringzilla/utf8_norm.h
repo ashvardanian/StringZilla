@@ -18,8 +18,6 @@
 
 #include "stringzilla/types.h"        // `sz_normal_form_t`, `sz_size_t`, `sz_cptr_t`
 #include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
-#include "stringzilla/rocm.cuh"
 
 #ifdef __cplusplus
 extern "C" {

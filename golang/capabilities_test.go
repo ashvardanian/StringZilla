@@ -32,6 +32,8 @@ func TestCapabilityNames(t *testing.T) {
 		sz.CapLoongsonASX: "loongsonasx",
 		sz.CapPowerVSX:    "powervsx",
 		sz.CapCUDA:        "cuda",
+		sz.CapHopper:      "hopper",
+		sz.CapBlackwell:   "blackwell",
 		sz.CapROCm:        "rocm",
 		sz.CapMetal:       "metal",
 	} {

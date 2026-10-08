@@ -918,6 +918,7 @@ Within each architecture the bits ascend by preference, so the highest bit a mas
 - __WebAssembly__: `sz_cap_v128_k`, `sz_cap_v128relaxed_k`.
 - __LoongArch and Power__: `sz_cap_loongsonasx_k`, `sz_cap_powervsx_k`.
 - __GPUs__: one baseline per vendor above every CPU bit, `sz_cap_cuda_k` at bit 48, `sz_cap_rocm_k` at 56, and `sz_cap_metal_k` at 60.
+  CUDA generations follow its baseline: `sz_cap_hopper_k` at 51 for clusters from compute capability 9.0, and `sz_cap_blackwell_k` at 52 for cluster launch control from 10.0.
 
 `sz_cap_cpus_k` and `sz_cap_gpus_k` group the CPU and the GPU bits, and `sz_cap_any_k` sets every bit.
 

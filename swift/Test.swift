@@ -279,7 +279,7 @@ func detectNormalization(_ text: String, _ form: StringZillaNormalizationForm, _
         (.skylake, "skylake"), (.iceLake, "icelake"), (.neon, "neon"), (.neonAES, "neonaes"), (.neonSHA, "neonsha"),
         (.sve, "sve"), (.sve2, "sve2"), (.sve2AES, "sve2aes"), (.rvv, "rvv"), (.rvvCrypto, "rvvcrypto"),
         (.v128, "v128"), (.v128Relaxed, "v128relaxed"), (.loongsonASX, "loongsonasx"), (.powerVSX, "powervsx"),
-        (.cuda, "cuda"), (.rocm, "rocm"), (.metal, "metal"),
+        (.cuda, "cuda"), (.hopper, "hopper"), (.blackwell, "blackwell"), (.rocm, "rocm"), (.metal, "metal"),
     ]
     for (capability, name) in names { #expect(capability.description == name) }
     #expect(Capabilities.cpus.union(.gpus).isSubset(of: .any))

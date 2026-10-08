@@ -36,9 +36,11 @@ const (
 	CapLoongsonASX Capability = C.sz_cap_loongsonasx_k // LoongArch LASX 256-bit SIMD
 	CapPowerVSX    Capability = C.sz_cap_powervsx_k    // Power VSX 128-bit SIMD
 
-	CapCUDA  Capability = C.sz_cap_cuda_k  // Any CUDA device
-	CapROCm  Capability = C.sz_cap_rocm_k  // Any ROCm device
-	CapMetal Capability = C.sz_cap_metal_k // Any Metal device
+	CapCUDA      Capability = C.sz_cap_cuda_k      // Any CUDA device
+	CapHopper    Capability = C.sz_cap_hopper_k    // CUDA clusters, from compute capability 9.0
+	CapBlackwell Capability = C.sz_cap_blackwell_k // CUDA cluster launch control, from compute capability 10.0
+	CapROCm      Capability = C.sz_cap_rocm_k      // Any ROCm device
+	CapMetal     Capability = C.sz_cap_metal_k     // Any Metal device
 
 	CapCPUs Capability = C.sz_cap_cpus_k // Every CPU capability
 	CapGPUs Capability = C.sz_cap_gpus_k // Every GPU capability

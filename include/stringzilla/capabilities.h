@@ -53,7 +53,7 @@
 
 /* On 64-bit RISC-V we probe HWCAP via the auxiliary vector and vector sub-extensions via the
  * Linux @c riscv_hwprobe syscall; FreeBSD lacks it and uses @c elf_aux_info for base RVV only. */
-#if defined(__riscv) && (__riscv_xlen == 64) && STRINGZILLA_WITH_LIBC
+#if STRINGZILLA_ARCH_RISCV64_ && STRINGZILLA_WITH_LIBC
 #if STRINGZILLA_OS_LINUX_
 #include <sys/auxv.h>    // `getauxval`, `AT_HWCAP`
 #include <sys/syscall.h> // `SYS_riscv_hwprobe`
@@ -64,7 +64,7 @@
 #endif
 
 /* On LoongArch and IBM POWER the SIMD extensions are likewise reported through the aux vector. */
-#if (defined(__loongarch__) || defined(__powerpc64__) || defined(__powerpc__)) && STRINGZILLA_WITH_LIBC
+#if (STRINGZILLA_ARCH_LOONGARCH64_ || STRINGZILLA_ARCH_PPC64_) && STRINGZILLA_WITH_LIBC
 #if STRINGZILLA_OS_LINUX_
 #include <sys/auxv.h> // `getauxval`, `AT_HWCAP`, `AT_HWCAP2`
 #elif STRINGZILLA_OS_FREEBSD_
@@ -120,13 +120,18 @@ typedef sz_u64_t sz_capability_t;
 
 /** GPU capabilities, as each vendor's `sz_<vendor>_capabilities_*` functions report them for one
  *  device, grouped by vendor above bit 47 to leave room for more CPU capabilities and more per
- *  vendor. Each vendor's baseline runs on all its devices, as @c serial runs on every CPU. */
+ *  vendor. Each vendor's baseline runs on all its devices, as @c serial runs on every CPU, and each
+ *  later tier on every device from its generation on: @c hopper from compute capability 9.0, for
+ *  its clusters and their distributed shared memory, and @c blackwell from 10.0, for cluster launch
+ *  control, which lets a block take over the tile of one not yet started. */
 #define sz_cap_cuda_k ((sz_capability_t)1 << 48)
+#define sz_cap_hopper_k ((sz_capability_t)1 << 51)
+#define sz_cap_blackwell_k ((sz_capability_t)1 << 52)
 #define sz_cap_rocm_k ((sz_capability_t)1 << 56)
 #define sz_cap_metal_k ((sz_capability_t)1 << 60)
 
 /** Every GPU capability above, which the CPU queries never detect, compile or enable. */
-#define sz_cap_gpus_k (sz_cap_cuda_k | sz_cap_rocm_k | sz_cap_metal_k)
+#define sz_cap_gpus_k (sz_cap_cuda_k | sz_cap_hopper_k | sz_cap_blackwell_k | sz_cap_rocm_k | sz_cap_metal_k)
 
 /** Every CPU capability, the bits below the first GPU vendor's. */
 #define sz_cap_cpus_k (sz_cap_cuda_k - 1)
@@ -155,6 +160,8 @@ static struct {
     {"loongsonasx", sz_cap_loongsonasx_k},
     {"powervsx", sz_cap_powervsx_k},
     {"cuda", sz_cap_cuda_k},
+    {"hopper", sz_cap_hopper_k},
+    {"blackwell", sz_cap_blackwell_k},
     {"rocm", sz_cap_rocm_k},
     {"metal", sz_cap_metal_k},
     {0, 0},
@@ -991,7 +998,7 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_x8664_(void) {
 
 #endif // STRINGZILLA_ARCH_X8664_
 
-#if defined(__riscv) && (__riscv_xlen == 64)
+#if STRINGZILLA_ARCH_RISCV64_
 
 /** The capabilities of the current 64-bit RISC-V CPU. */
 STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
@@ -1043,9 +1050,9 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_riscv64_(void) {
 #endif
 }
 
-#endif // defined(__riscv) && (__riscv_xlen == 64)
+#endif // STRINGZILLA_ARCH_RISCV64_
 
-#if defined(__loongarch__)
+#if STRINGZILLA_ARCH_LOONGARCH64_
 
 /** The capabilities of the current LoongArch CPU. */
 STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
@@ -1062,9 +1069,9 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_loongarch64_(void) {
 #endif
 }
 
-#endif // defined(__loongarch__)
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
-#if defined(__powerpc64__) || defined(__powerpc__)
+#if STRINGZILLA_ARCH_PPC64_
 
 /** The capabilities of the current IBM POWER CPU. */
 STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
@@ -1090,7 +1097,7 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_power64_(void) {
 #endif
 }
 
-#endif // defined(__powerpc64__) || defined(__powerpc__)
+#endif // STRINGZILLA_ARCH_PPC64_
 
 /** Prepares the calling thread for @p capabilities, behind @c sz_thread_configure_cpu. */
 STRINGZILLA_INLINE sz_status_t sz_thread_configure_cpu_(sz_capability_t capabilities) {
@@ -1104,11 +1111,11 @@ STRINGZILLA_INLINE sz_capability_t sz_capabilities_detected_cpu_(void) {
     return sz_capabilities_detected_x8664_();
 #elif STRINGZILLA_ARCH_ARM64_
     return sz_capabilities_detected_arm64_();
-#elif defined(__riscv) && (__riscv_xlen == 64)
+#elif STRINGZILLA_ARCH_RISCV64_
     return sz_capabilities_detected_riscv64_();
-#elif defined(__loongarch__)
+#elif STRINGZILLA_ARCH_LOONGARCH64_
     return sz_capabilities_detected_loongarch64_();
-#elif defined(__powerpc64__) || defined(__powerpc__)
+#elif STRINGZILLA_ARCH_PPC64_
     return sz_capabilities_detected_power64_();
 #else
     return sz_capabilities_implied_cpu_();
@@ -1291,7 +1298,8 @@ STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
 
 /** The CUDA capabilities this binary holds kernels for. */
 STRINGZILLA_CONSTEXPR sz_capability_t sz_capabilities_compiled_cuda_(void) {
-    return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA;
+    return sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER |
+           sz_cap_blackwell_k * STRINGZILLA_TARGET_BLACKWELL;
 }
 
 /** The ROCm capabilities this binary holds kernels for. */

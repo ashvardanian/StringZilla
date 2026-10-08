@@ -12,6 +12,7 @@
 #endif
 
 namespace ashvardanian::stringzilla::bench {
+
 int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
 #if STRINGZILLA_ARCH_CUDA_
     auto const selected = sz::device_t::make(sz::device_kind_t::cuda_k, ordinal);
@@ -53,8 +54,46 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                   sz_substrings_counts_cuda,
                                   sz_substrings_find_cuda,
                                   sz_substrings_replace_cuda,
-                                  sz_substrings_bm25_scores_cuda};
-    int const result = bench_cross_simt(env, backend);
+                                  sz_substrings_bm25_scores_cuda,
+                                  sz_utf8_uncased_fold_cuda,
+                                  sz_utf8_norm_cuda};
+    int result = bench_cross_simt(env, backend);
+#if STRINGZILLA_TARGET_HOPPER
+    if (runtime.capabilities & sz_cap_hopper_k) {
+        simt_backend_t const hopper {"hopper",
+                                     runtime,
+                                     sz_levenshtein_engine_init_cuda,
+                                     sz_levenshtein_distances_cuda,
+                                     sz_overlap_engine_init_cuda,
+                                     sz_overlap_scores_cuda,
+                                     sz_substrings_engine_init_hopper,
+                                     sz_substrings_counts_hopper,
+                                     sz_substrings_find_hopper,
+                                     sz_substrings_replace_hopper,
+                                     sz_substrings_bm25_scores_hopper,
+                                     sz_utf8_uncased_fold_cuda,
+                                     sz_utf8_norm_cuda};
+        result += bench_cross_simt_substrings(env, hopper);
+    }
+#endif
+#if STRINGZILLA_TARGET_BLACKWELL
+    if (runtime.capabilities & sz_cap_blackwell_k) {
+        simt_backend_t const blackwell {"blackwell",
+                                        runtime,
+                                        sz_levenshtein_engine_init_blackwell,
+                                        sz_levenshtein_distances_blackwell,
+                                        sz_overlap_engine_init_blackwell,
+                                        sz_overlap_scores_blackwell,
+                                        sz_substrings_engine_init_cuda,
+                                        sz_substrings_counts_cuda,
+                                        sz_substrings_find_cuda,
+                                        sz_substrings_replace_cuda,
+                                        sz_substrings_bm25_scores_cuda,
+                                        sz_utf8_uncased_fold_cuda,
+                                        sz_utf8_norm_cuda};
+        result += bench_cross_simt_levenshtein_overlap(env, blackwell);
+    }
+#endif
     return result;
 #else
     sz_unused_(env);

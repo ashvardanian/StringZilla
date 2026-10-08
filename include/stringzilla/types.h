@@ -511,7 +511,8 @@
 /** Compiled as CUDA, host and device passes alike: nvcc, or Clang through its CUDA runtime wrapper.
  *  HIP on NVIDIA goes through nvcc, so it is CUDA here too. Unlike the CPU facts, both GPU facts
  *  hold beside the host's architecture, so they never follow one in an @c #elif chain. The library
- *  also sets it for its host units, which list the kernels of its one CUDA unit. */
+ *  also sets it for its host units, which list the kernels of its CUDA units and include no `.cuh`,
+ *  so device code compiles only where the compiler set it. */
 #if !defined(STRINGZILLA_ARCH_CUDA_)
 #if defined(__CUDACC__) && !defined(__HIP__)
 #define STRINGZILLA_ARCH_CUDA_ (1)
@@ -549,6 +550,22 @@
 #if !defined(STRINGZILLA_TARGET_CUDA) || (STRINGZILLA_TARGET_CUDA && !STRINGZILLA_ARCH_CUDA_)
 #undef STRINGZILLA_TARGET_CUDA
 #define STRINGZILLA_TARGET_CUDA STRINGZILLA_ARCH_CUDA_
+#endif
+
+/*  Defining the Hopper kernels, which group blocks into clusters sharing their shared memory, for
+ *  compute capability 9.0 on: STRINGZILLA_TARGET_HOPPER. Off unless the build says its codes run
+ *  them, and forced off where the unit is not compiled as CUDA. */
+#if !defined(STRINGZILLA_TARGET_HOPPER) || (STRINGZILLA_TARGET_HOPPER && !STRINGZILLA_ARCH_CUDA_)
+#undef STRINGZILLA_TARGET_HOPPER
+#define STRINGZILLA_TARGET_HOPPER 0
+#endif
+
+/*  Defining the Blackwell kernels, whose blocks take over the tiles of unstarted blocks through
+ *  cluster launch control, for compute capability 10.0 on: STRINGZILLA_TARGET_BLACKWELL. Off
+ *  unless the build says its codes run them, and forced off where a unit is not CUDA. */
+#if !defined(STRINGZILLA_TARGET_BLACKWELL) || (STRINGZILLA_TARGET_BLACKWELL && !STRINGZILLA_ARCH_CUDA_)
+#undef STRINGZILLA_TARGET_BLACKWELL
+#define STRINGZILLA_TARGET_BLACKWELL 0
 #endif
 
 /*  Defining the ROCm kernels, the SIMT baseline every AMD device runs: STRINGZILLA_TARGET_ROCM.

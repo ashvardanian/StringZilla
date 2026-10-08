@@ -16,6 +16,8 @@ c/target/*.c              Library units, one per CPU capability, each defining t
 c/dispatch/               Library units, one per kernel family, with its capability lists, dispatch points and finder
 c/dispatch.h              The capability lists' shape and the kernel pick the dispatch units share, internal to the library
 c/target/cuda.cu          The engines' cuda kernels and the CUDA device exports, under STRINGZILLA_BUILD_CUDA
+c/target/hopper.cu        The engines' hopper kernels, for the codes the build carries from compute capability 9.0
+c/target/blackwell.cu     The engines' blackwell kernels, for the codes the build carries from compute capability 10.0
 c/target/rocm.hip         The engines' rocm kernels and the ROCm device exports, under STRINGZILLA_BUILD_ROCM
 c/target/metal.c          The engines' metal kernels and the Metal device exports, under STRINGZILLA_BUILD_METAL
 c/parallel.h, .c          Tile-parallel runs on each platform's thread pool, compiled into the Python and Node extensions only
@@ -45,7 +47,7 @@ They have the broadest coverage of the library, and are the most important to ke
 - `bench/main.cpp` - runs every family file, then every `bench/cross_<arch>.cpp`, built as `stringzilla_bench`, and header-only as `stringzilla_cpu_header_bench`.
 - `bench/token.cpp`, `bench/find.cpp`, `bench/sequence.cpp`, `bench/container.cpp`, and the other family files - the dispatch points against the STL and LibC baselines.
 - `bench/cross_<arch>.cpp` - every capability's kernels against the serial ones, through the adapters in `bench/cross.hpp`.
-- `bench/cross_cuda.cu`, `bench/cross_rocm.hip`, and `bench/cross_metal.cpp` - each GPU vendor's engines against the widest CPU tier the build carries.
+- `bench/cross_cuda.cu`, `bench/cross_rocm.hip`, and `bench/cross_metal.cpp` - each GPU vendor's engines against the dispatched CPU entry.
 
 
 ## Benchmarking Datasets
@@ -116,7 +118,7 @@ Metal has no compiler macro on the host side, so its host API is a switch the bu
 Every name in these families is always defined, as 0 or 1, and tested with `#if`, never with `defined(...)`.
 
 C names put the capability last, `sz_<family>_<what>_<capability>`, like `sz_find_haswell`.
-Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_simt_kernel_`.
+Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_blackwell_kernel_`.
 A dispatch point puts `best` in the capability's place, like `sz_copy_best`, and the kernels it picks from are its twins, like `sz_copy_haswell`.
 
 Code that several capabilities share belongs to one of three layers, named in the capability's place:
@@ -129,6 +131,7 @@ A constant identical across the GPU layers is defined once in `serial.h` with th
 One whose value differs per layer takes its layer instead, like `sz_substrings_tally_slot_bits_simt_k` and `sz_substrings_tally_slot_bits_metal_k`.
 
 The GPU capability groups are `cuda`, `rocm` and `metal`, beside the CPU's `cpu`.
+A later generation in a group takes its own bit and unit, like `sz_cap_blackwell_k` and `c/target/blackwell.cu`, which every device of that generation and after reports beside the baseline.
 Each word names its group's baseline bit, like `sz_cap_cuda_k`, its functions and its library unit, like `c/target/cuda.cu`, and no symbol or source path names a vendor, like `nvidia`, `amd` or `apple`.
 A function that touches a device is either a producer or a consumer:
 
@@ -415,7 +418,7 @@ CUDA and ROCm can coexist in one build. `STRINGWARS_DEVICES=cuda:0,rocm:1` selec
 ordinals; unset, each available compiled vendor runs device zero. Explicit unavailable devices are errors.
 The tests follow the same rule with `stringzilla_test` and `STRINGZILLA_DEVICES`.
 
-GPU rows are named after the kernel they time, like `sz_levenshtein_distances_cuda:q1024:w16:sorted` or `sz_overlap_scores_metal:w5`, which is what `STRINGWARS_FILTER` matches.
+GPU rows are named after the kernel they time, like `sz_levenshtein_distances_cuda:0:q1024:w16:sorted` or `sz_overlap_scores_metal:0:w5`, which is what `STRINGWARS_FILTER` matches.
 
 All of them support customization via environment variables.
 Let's say you want to benchmark large-batch DNA edit distances:
@@ -426,8 +429,8 @@ cmake --build build_release --config Release --target stringzilla_bench --parall
 STRINGWARS_FILTER="sz_levenshtein_distances" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench
 STRINGWARS_DEVICES=cuda:0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench
 
-STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q[0-9]+:w" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench
-STRINGZILLA_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench
+STRINGWARS_FILTER="sz_levenshtein_distances_cuda:0:q[0-9]+:w" STRINGWARS_DATASET="acgt_1k.txt" build_release/stringzilla_bench
+STRINGZILLA_STRESS=0 STRINGWARS_FILTER="sz_levenshtein_distances_cuda:0:q1024:w16" STRINGWARS_DATASET="acgt_100k.txt" build_release/stringzilla_bench
 ```
 
 The benchmark harness reads these environment variables:

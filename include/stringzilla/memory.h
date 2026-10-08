@@ -30,8 +30,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
-#include "stringzilla/rocm.cuh"
 
 #ifdef __cplusplus
 extern "C" {

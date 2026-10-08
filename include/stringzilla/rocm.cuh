@@ -3,7 +3,8 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief The HIP runtime as the library's ROCm host code drives it: the device scope an engine
- *      call runs in, the memory both sides address, the launches, the streams and the producers.
+ *      call runs in, the memory both sides address, the launches, the streams and the producers,
+ *      and the cross-lane steps its kernels hand the shared walks.
  *
  *  Every call runs on the device of the stream it is given, which @ref sz_device_enter_rocm_ makes
  *  current for its duration, and a null stream runs on the caller's current device.
@@ -22,7 +23,7 @@
 #include "stringzilla/capabilities.h"  // `sz_cap_rocm_k`
 #include "stringzilla/memory/serial.h" // `sz_sequence_realloc_serial_`
 
-#if STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
+#if STRINGZILLA_ARCH_ROCM_
 #include <hip/hip_runtime.h> // `hipLaunchKernel`, `hipMallocManaged`, `hipSetDevice`
 
 #ifdef __cplusplus
@@ -304,6 +305,26 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_rocm_(sz_size_t ordinal, sz_stream
 
 #pragma endregion Devices
 
+/*  Every step stays inside its own 32 lanes, so a 64-wide wavefront runs two groups of the shared
+ *  walks side by side. */
+#pragma region Device Primitives
+
+/** Lane `lane - delta`'s @p value among this thread's 32 lanes, a lane's own below @p delta. */
+STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_rocm_(sz_u32_t value, unsigned delta) { return __shfl_up(value, delta, 32); }
+
+/** Lane `lane + delta`'s @p value among this thread's 32 lanes, a lane's own past the last. */
+STRINGZILLA_DEVICE int sz_shuffle_down_rocm_(int value, unsigned delta) { return __shfl_down(value, delta, 32); }
+
+/** Lane zero's @p value across this thread's 32 lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_rocm_(sz_u32_t value) { return __shfl(value, 0, 32); }
+
+/** Whether @p predicate holds on any of this thread's 32 lanes, from its half of the ballot. */
+STRINGZILLA_DEVICE int sz_lanes_any_rocm_(int predicate) {
+    return ((__ballot(predicate) >> (__lane_id() & 32u)) & 0xFFFFFFFFull) != 0;
+}
+
+#pragma endregion Device Primitives
+
 /*  The library defines these once, in `c/target/rocm.hip`; header-only builds define them here. */
 #if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_ROCM
 
@@ -356,5 +377,5 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_ARCH_ROCM_ && defined(__HIP__)
+#endif // STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_ROCM_CUH_

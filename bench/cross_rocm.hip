@@ -53,7 +53,9 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                   sz_substrings_counts_rocm,
                                   sz_substrings_find_rocm,
                                   sz_substrings_replace_rocm,
-                                  sz_substrings_bm25_scores_rocm};
+                                  sz_substrings_bm25_scores_rocm,
+                                  sz_utf8_uncased_fold_rocm,
+                                  sz_utf8_norm_rocm};
     int const result = bench_cross_simt(env, backend);
     return result;
 #else

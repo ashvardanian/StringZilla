@@ -4,6 +4,10 @@
  *  @date September 29, 2026
  *  @brief The @c cuda kernels and the CUDA device exports, defined once for the library.
  */
+#undef STRINGZILLA_TARGET_HOPPER
+#define STRINGZILLA_TARGET_HOPPER 0
+#undef STRINGZILLA_TARGET_BLACKWELL
+#define STRINGZILLA_TARGET_BLACKWELL 0
 #include "stringzilla/memory.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"

@@ -27,4 +27,5 @@ with section("markup"):
 # Commands defined here, so their keywords group like those of built-in commands.
 additional_commands = {
     "sz_cpu_capability_": {"pargs": 2, "kwargs": {"GCC_FLAGS": "+", "MSVC_FLAGS": "+"}},
+    "sz_gpu_capability_": {"pargs": 2, "kwargs": {"CUDA_ARCHITECTURES": "+"}},
 }

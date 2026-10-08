@@ -35,8 +35,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
-#include "stringzilla/rocm.cuh"
 #include "stringzilla/metal.h"
 #include "stringzilla/overlap/serial.h" // `sz_overlap_engine_t`
 
@@ -175,6 +173,18 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, 
                                                    sz_size_t scores_candidate_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_BLACKWELL
+/** @copydoc sz_overlap_engine_init */
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                                             sz_size_t const *window_widths,
+                                                             sz_size_t window_widths_count, sz_size_t candidates_budget,
+                                                             sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_overlap_scores */
+STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                        sz_size_t scores_candidate_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_overlap_engine_init */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
@@ -215,6 +225,7 @@ STRINGZILLA_API sz_status_t sz_overlap_find_kernel(sz_kernel_kind_t kind, sz_cap
 #include "stringzilla/overlap/skylake.h"
 #include "stringzilla/overlap/neon.h"
 #include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/overlap/blackwell.cuh"
 #include "stringzilla/overlap/rocm.cuh"
 #include "stringzilla/overlap/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY

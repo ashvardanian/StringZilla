@@ -3,7 +3,8 @@
  *  @author Ash Vardanian
  *  @date October 3, 2026
  *  @brief The CUDA runtime as the library's CUDA host code drives it: the device scope an engine
- *      call runs in, the memory both sides address, the launches, the streams and the producers.
+ *      call runs in, the memory both sides address, the launches, the streams and the producers,
+ *      and the cross-lane steps its kernels hand the shared walks.
  *
  *  Every call runs on the device of the stream it is given, which @ref sz_device_enter_cuda_ makes
  *  current for its duration, and a null stream runs on the caller's current device.
@@ -23,7 +24,7 @@
 #include "stringzilla/capabilities.h"  // `sz_cap_cuda_k`
 #include "stringzilla/memory/serial.h" // `sz_sequence_realloc_serial_`
 
-#if STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__) && !defined(__HIP__)
+#if STRINGZILLA_ARCH_CUDA_
 #include <cuda_runtime.h> // `cudaLaunchKernel`, `cudaMallocManaged`, `cudaSetDevice`
 
 #ifdef __cplusplus
@@ -204,28 +205,13 @@ STRINGZILLA_INLINE sz_status_t sz_launch_cuda_(void const *kernel, dim3 grid, di
                : sz_device_code_mismatch_k;
 }
 
-/** Whether @p kernel was compiled for Blackwell or later, whose blocks take over the tiles of
- *  blocks not yet started, so its grid may be sized by the work rather than by residency. */
-STRINGZILLA_INLINE sz_bool_t sz_kernel_steals_cuda_(void const *kernel) {
-    cudaFuncAttributes attributes;
-    if (cudaFuncGetAttributes(&attributes, kernel) != cudaSuccess) return sz_false_k;
-    return attributes.ptxVersion >= 100 ? sz_true_k : sz_false_k;
-}
-
-/**
- *  @brief Clusters of @p cluster_blocks blocks of @p threads running @p kernel with @p shared_bytes
- *      of dynamic shared memory the current device keeps resident at once, or zero for none.
- *
- *  A kernel built for a device older than Hopper has no cluster to read, so it is answered zero
- *  whatever the device could do.
- */
+/** Clusters of @p cluster_blocks blocks of @p threads running @p kernel with @p shared_bytes of
+ *  dynamic shared memory the current device keeps resident at once, or zero for none. */
 STRINGZILLA_INLINE sz_size_t sz_resident_clusters_cuda_(void const *kernel, sz_size_t threads, sz_size_t shared_bytes,
                                                         sz_size_t cluster_blocks) {
-    cudaFuncAttributes attributes;
     cudaLaunchConfig_t config;
     cudaLaunchAttribute attribute;
     int clusters = 0;
-    if (cudaFuncGetAttributes(&attributes, kernel) != cudaSuccess || attributes.ptxVersion < 90) return 0;
     config.gridDim = dim3((unsigned)cluster_blocks), config.blockDim = dim3((unsigned)threads);
     config.dynamicSmemBytes = shared_bytes, config.stream = 0;
     attribute.id = cudaLaunchAttributeClusterDimension;
@@ -350,14 +336,19 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_cuda_(void) {
     return cudaGetDeviceCount(&count) == cudaSuccess ? (sz_size_t)count : 0;
 }
 
-/** The capabilities CUDA device @p ordinal runs, by the runtime's own numbering. */
+/** The capabilities CUDA device @p ordinal runs, by the runtime's own numbering: every tier from
+ *  the baseline up to its compute capability's. */
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_cuda_(sz_size_t ordinal, sz_capability_t *capabilities) {
-    int multiprocessors = 0;
+    int multiprocessors = 0, major = 0;
     *capabilities = 0;
     if (ordinal >= sz_device_count_cuda_()) return sz_missing_gpu_k;
-    if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, (int)ordinal) != cudaSuccess)
+    if (cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, (int)ordinal) != cudaSuccess ||
+        cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, (int)ordinal) != cudaSuccess)
         return sz_device_code_mismatch_k;
-    if (multiprocessors > 0) *capabilities = sz_cap_cuda_k;
+    if (multiprocessors <= 0) return sz_success_k;
+    *capabilities = sz_cap_cuda_k;
+    if (major >= 9) *capabilities |= sz_cap_hopper_k;
+    if (major >= 10) *capabilities |= sz_cap_blackwell_k;
     return sz_success_k;
 }
 
@@ -376,6 +367,26 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_cuda_(sz_size_t ordinal, sz_stream
 }
 
 #pragma endregion Devices
+
+#pragma region Device Primitives
+
+/** Lane `lane - delta`'s @p value, a lane's own below @p delta, with @c shfl.sync.up . */
+STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_cuda_(sz_u32_t value, unsigned delta) {
+    return __shfl_up_sync(0xFFFFFFFFu, value, delta);
+}
+
+/** Lane `lane + delta`'s @p value, a lane's own past the last, with @c shfl.sync.down . */
+STRINGZILLA_DEVICE int sz_shuffle_down_cuda_(int value, unsigned delta) {
+    return __shfl_down_sync(0xFFFFFFFFu, value, delta);
+}
+
+/** Lane zero's @p value across the warp, with @c shfl.sync.idx . */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_cuda_(sz_u32_t value) { return __shfl_sync(0xFFFFFFFFu, value, 0); }
+
+/** Whether @p predicate holds on any lane of the warp, with @c vote.sync.any . */
+STRINGZILLA_DEVICE int sz_lanes_any_cuda_(int predicate) { return __any_sync(0xFFFFFFFFu, predicate) != 0; }
+
+#pragma endregion Device Primitives
 
 /*  The library defines these once, in `c/target/cuda.cu`; header-only builds define them here. */
 #if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_CUDA
@@ -429,5 +440,5 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_ARCH_CUDA_ && defined(__CUDACC__) && !defined(__HIP__)
+#endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_CUDA_CUH_

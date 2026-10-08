@@ -35,8 +35,6 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`
-#include "stringzilla/cuda.cuh"       // Ahead of `extern "C"`, as the GPU runtimes' headers declare templates
-#include "stringzilla/rocm.cuh"
 #include "stringzilla/metal.h"
 #include "stringzilla/substrings/serial.h" // `sz_substrings_engine_t`, `sz_substrings_match_t`
 
@@ -338,6 +336,33 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_
                                                            sz_size_t scores_stride, sz_stream_t stream);
 #endif
 
+#if STRINGZILLA_TARGET_HOPPER
+/** @copydoc sz_substrings_engine_init */
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_hopper(
+    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream);
+/** @copydoc sz_substrings_counts */
+STRINGZILLA_API sz_status_t sz_substrings_counts_hopper(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                        sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream);
+/** @copydoc sz_substrings_find */
+STRINGZILLA_API sz_status_t sz_substrings_find_hopper(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                      sz_size_t *matches_offsets, sz_stream_t stream);
+/** @copydoc sz_substrings_replace */
+STRINGZILLA_API sz_status_t sz_substrings_replace_hopper(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+                                                         sz_sequence_t const *replacements, sz_ptr_t target,
+                                                         sz_size_t target_capacity, sz_size_t *offsets,
+                                                         sz_stream_t stream);
+/** @copydoc sz_substrings_bm25_scores */
+STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_hopper(sz_substrings_engine_t *engine,
+                                                             sz_sequence_t const *haystacks,
+                                                             sz_f32_t const *document_lengths,
+                                                             sz_substrings_bm25_t const *parameters,
+                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,
+                                                             sz_size_t scores_stride, sz_stream_t stream);
+#endif
+
 #if STRINGZILLA_TARGET_ROCM
 /** @copydoc sz_substrings_engine_init */
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_rocm(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
@@ -410,6 +435,7 @@ STRINGZILLA_API sz_status_t sz_substrings_find_kernel(sz_kernel_kind_t kind, sz_
 #include "stringzilla/substrings/icelake.h"
 #include "stringzilla/substrings/neon.h"
 #include "stringzilla/substrings/cuda.cuh"
+#include "stringzilla/substrings/hopper.cuh"
 #include "stringzilla/substrings/rocm.cuh"
 #include "stringzilla/substrings/metal.h"
 #endif // STRINGZILLA_HEADER_ONLY

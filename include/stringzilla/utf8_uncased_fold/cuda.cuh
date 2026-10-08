@@ -14,7 +14,8 @@
 #include "stringzilla/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/simt.cuh"
 
-#if STRINGZILLA_TARGET_CUDA && defined(__CUDACC__) && !defined(__HIP__)
+#if STRINGZILLA_ARCH_CUDA_
+#if STRINGZILLA_TARGET_CUDA
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,5 +78,6 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_cuda(sz_cptr_t source, sz_size_
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_CUDA && defined(__CUDACC__) && !defined(__HIP__)
+#endif // STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_ARCH_CUDA_
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_CUDA_CUH_

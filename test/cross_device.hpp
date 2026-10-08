@@ -1638,8 +1638,9 @@ inline void check_utf8_norm_device_safety_(test_context_t &context, auto const &
 
 #pragma region Drivers
 
-/** Registers every check of one vendor's kernels, or of the dispatch points, in @p check. */
-inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
+/** Registers the Levenshtein checks of one vendor's kernels, of one tier's, or of the dispatch
+ *  points, in @p check. */
+inline void check_device_levenshtein_(cross_section_t &check, auto const &backend) {
     std::string const suffix = backend.name;
     check("test_levenshtein_equivalence_" + suffix, [&](test_context_t &context) {
         check_levenshtein_device_equivalence_(backend, levenshtein_device_alphabet_t::bytes_k, sz_levenshtein_bytes_k);
@@ -1654,6 +1655,12 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
     });
     check("test_levenshtein_safety_" + suffix,
           [&](test_context_t &context) { check_levenshtein_device_memory_safety_(context.generator, backend); });
+}
+
+/** Registers the overlap checks of one vendor's kernels, of one tier's, or of the dispatch
+ *  points, in @p check. */
+inline void check_device_overlap_(cross_section_t &check, auto const &backend) {
+    std::string const suffix = backend.name;
     check("test_overlap_equivalence_" + suffix,
           [&](test_context_t &context) { check_overlap_device_equivalence_(context.generator, backend); });
     check("test_overlap_skewed_" + suffix,
@@ -1662,10 +1669,24 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
         check_overlap_device_memory_safety_(context.generator, backend);
         check_overlap_device_width_safety_(context.generator, backend);
     });
+}
+
+/** Registers the substrings checks of one vendor's kernels, of one tier's, or of the dispatch
+ *  points, in @p check. */
+inline void check_device_substrings_(cross_section_t &check, auto const &backend) {
+    std::string const suffix = backend.name;
     check("test_substrings_unit_" + suffix, [&] { test_substrings_device_unit(backend); });
     check("test_substrings_equivalence_" + suffix,
           [&](test_context_t &context) { test_substrings_device_equivalence(context, backend); });
     check("test_substrings_safety_" + suffix, [&] { test_substrings_device_safety(backend); });
+}
+
+/** Registers every check of one vendor's kernels, or of the dispatch points, in @p check. */
+inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
+    std::string const suffix = backend.name;
+    check_device_levenshtein_(check, backend);
+    check_device_overlap_(check, backend);
+    check_device_substrings_(check, backend);
     check("test_utf8_uncased_equivalence_" + suffix,
           [&](test_context_t &context) { check_utf8_uncased_device_equivalence_(context, backend); });
     check("test_utf8_uncased_safety_" + suffix,

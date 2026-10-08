@@ -892,13 +892,15 @@ public struct Capabilities: OptionSet, Sendable, CustomStringConvertible {
     public static let powerVSX = Capabilities(rawValue: 1 << 17)
 
     public static let cuda = Capabilities(rawValue: 1 << 48)
+    public static let hopper = Capabilities(rawValue: 1 << 51)
+    public static let blackwell = Capabilities(rawValue: 1 << 52)
     public static let rocm = Capabilities(rawValue: 1 << 56)
     public static let metal = Capabilities(rawValue: 1 << 60)
 
     /// Every CPU capability, the bits below the first GPU vendor's.
     public static let cpus = Capabilities(rawValue: (1 << 48) - 1)
     /// Every GPU capability.
-    public static let gpus: Capabilities = [.cuda, .rocm, .metal]
+    public static let gpus: Capabilities = [.cuda, .hopper, .blackwell, .rocm, .metal]
     /// Every capability.
     public static let any = Capabilities(rawValue: .max)
 
