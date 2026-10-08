@@ -30,7 +30,6 @@
 #include <atomic>      // `std::atomic` to synchronize threads
 #include <type_traits> // `std::enable_if_t` for meta-programming
 #include <limits>      // `std::numeric_limits` for numeric types
-#include <iterator>    // `std::iterator_traits` for iterators
 
 namespace ashvardanian {
 namespace stringzillas {
@@ -83,7 +82,7 @@ struct affine_gap_costs_t {
     error_cost_t extend = 1;
 
     constexpr error_cost_magnitude_t magnitude() const noexcept {
-        return std::max(error_cost_abs(open), error_cost_abs(extend));
+        return max_of_two(error_cost_abs(open), error_cost_abs(extend));
     }
 
     /** @brief Whether opening a gap costs the same as extending it, making the second affine plane dead weight. */
@@ -110,7 +109,7 @@ struct uniform_substitution_costs_t {
     constexpr error_cost_t operator()(char a, char b) const noexcept { return a == b ? match : mismatch; }
     constexpr error_cost_t operator()(rune_t a, rune_t b) const noexcept { return a == b ? match : mismatch; }
     constexpr error_cost_magnitude_t magnitude() const noexcept {
-        return std::max(error_cost_abs(match), error_cost_abs(mismatch));
+        return max_of_two(error_cost_abs(match), error_cost_abs(mismatch));
     }
 };
 
@@ -207,7 +206,7 @@ struct error_costs_32x32_t {
         error_cost_magnitude_t max_magnitude = 0;
         for (size_t i = 0; i != classes_count_k; ++i)
             for (size_t j = 0; j != classes_count_k; ++j) //
-                max_magnitude = (std::max)(max_magnitude, error_cost_abs(class_substitution_costs[i][j]));
+                max_magnitude = max_of_two(max_magnitude, error_cost_abs(class_substitution_costs[i][j]));
         return max_magnitude;
     }
 
@@ -668,7 +667,7 @@ struct smith_waterman_scores;
 
 #pragma region Common Aliases
 
-using malloc_t = std::allocator<char>;
+using malloc_t = default_alloc<char>;
 
 /**
  *  In non-SIMD backends we still leverage multi-threading for parallelism.
@@ -788,8 +787,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -900,8 +899,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = first_char_t;
 
@@ -1012,8 +1011,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_global_k;
     static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = remove_cvref<first_char_t>;
 
@@ -1161,8 +1160,8 @@ struct tile_scorer<first_iterator_type_, second_iterator_type_, score_type_, sub
     static constexpr sz_similarity_locality_t locality_k = sz_similarity_local_k;
     static constexpr sz_capability_t capability_k = sz_cap_serial_k;
 
-    using first_char_t = typename std::iterator_traits<first_iterator_t>::value_type;
-    using second_char_t = typename std::iterator_traits<second_iterator_t>::value_type;
+    using first_char_t = iterator_value<first_iterator_t>;
+    using second_char_t = iterator_value<second_iterator_t>;
     static_assert(is_same_type<first_char_t, second_char_t>::value, "String characters must be of the same type.");
     using char_t = first_char_t;
 
@@ -2581,7 +2580,7 @@ struct levenshtein_distance {
         // table and, for very long patterns, the spilled vertical state.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (is_unit_cost(substituter_, gap_costs_) &&
-                (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512)) {
+                (myers_handles_any_length_k || min_of_two(first.size(), second.size()) <= 512)) {
                 return myers_t {}.layout(first, second, specs);
             }
 
@@ -2638,7 +2637,7 @@ struct levenshtein_distance {
         // families stay bounded to 512 and fall through to the anti-diagonal DP below for longer shorter sides.
         if constexpr (is_same_type<gap_costs_t, linear_gap_costs_t>::value && sizeof(char_t) == 1)
             if (is_unit_cost(substituter_, gap_costs_) &&
-                (myers_handles_any_length_k || (std::min)(first.size(), second.size()) <= 512))
+                (myers_handles_any_length_k || min_of_two(first.size(), second.size()) <= 512))
                 return myers_t {}(first, second, result_ref, scratch_space);
 
         // Estimate the maximum dimension of the DP matrix and choose the best type for it.
@@ -3215,7 +3214,7 @@ status_t cross_in_parallel_(                                         //
     // processing of large cells. Scan only the live cells (the lower triangle when symmetric).
     size_t max_memory_per_small = 0, max_memory_for_large = 0;
     auto const is_small = [&specs](size_t query_length, size_t candidate_length) noexcept {
-        return std::min(query_length, candidate_length) <= specs.l1_bytes;
+        return min_of_two(query_length, candidate_length) <= specs.l1_bytes;
     };
     for (size_t query_index = 0; query_index < queries_count; ++query_index) {
         size_t const candidate_end = is_symmetric ? query_index + 1 : candidates_count;
@@ -3223,12 +3222,12 @@ status_t cross_in_parallel_(                                         //
             size_t const needed = scoring.scratch_space_needed(to_view(queries[query_index]),
                                                                to_view(candidates[candidate_index]), specs);
             if (is_small(queries[query_index].size(), candidates[candidate_index].size()))
-                max_memory_per_small = std::max(max_memory_per_small, needed);
-            else max_memory_for_large = std::max(max_memory_for_large, needed);
+                max_memory_per_small = max_of_two(max_memory_per_small, needed);
+            else max_memory_for_large = max_of_two(max_memory_for_large, needed);
         }
     }
     size_t const threads_count = executor.threads_count();
-    size_t const max_memory_requirement = std::max(max_memory_per_small * threads_count, max_memory_for_large);
+    size_t const max_memory_requirement = max_of_two(max_memory_per_small * threads_count, max_memory_for_large);
     // The caller owns `scratch_buffer` (a grow-only engine member reused across calls); size it here.
     if (status_t status = scratch_buffer.try_resize(max_memory_requirement); status != status_t::success_k)
         return status;
@@ -3703,7 +3702,7 @@ struct levenshtein_distances {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     levenshtein_distances(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
@@ -3760,7 +3759,7 @@ struct levenshtein_distances_utf8 {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     levenshtein_distances_utf8(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
@@ -3817,7 +3816,7 @@ struct needleman_wunsch_scores {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     needleman_wunsch_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}
@@ -3873,7 +3872,7 @@ struct smith_waterman_scores {
     gap_costs_t gap_costs_ {};
     allocator_t alloc_ {};
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     safe_vector<std::byte, scratch_allocator_t> scratch_ {alloc_};
 
     smith_waterman_scores(allocator_t alloc = {}) noexcept : alloc_(alloc) {}

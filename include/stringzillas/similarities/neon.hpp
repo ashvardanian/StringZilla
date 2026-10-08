@@ -3553,8 +3553,8 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_length = std::min(first.size(), second.size());
-        size_t const longer_length = std::max(first.size(), second.size());
+        size_t const shorter_length = min_of_two(first.size(), second.size());
+        size_t const longer_length = max_of_two(first.size(), second.size());
         size_t const max_diagonal_length = shorter_length + 1;
         size_t const padded_diagonal_length =
             round_up_to_multiple(sizeof(i64_t) * max_diagonal_length, specs.cache_line_width) / sizeof(i64_t);
@@ -3632,8 +3632,8 @@ struct needleman_wunsch_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_length = std::min(first.size(), second.size());
-        size_t const longer_length = std::max(first.size(), second.size());
+        size_t const shorter_length = min_of_two(first.size(), second.size());
+        size_t const longer_length = max_of_two(first.size(), second.size());
         size_t const max_diagonal_length = shorter_length + 1;
         size_t const padded_diagonal_length =
             round_up_to_multiple(sizeof(i64_t) * max_diagonal_length, specs.cache_line_width) / sizeof(i64_t);
@@ -3710,8 +3710,8 @@ struct smith_waterman_score<char, error_costs_32x32_t, linear_gap_costs_t, sz_ca
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_length = std::min(first.size(), second.size());
-        size_t const longer_length = std::max(first.size(), second.size());
+        size_t const shorter_length = min_of_two(first.size(), second.size());
+        size_t const longer_length = max_of_two(first.size(), second.size());
         size_t const max_diagonal_length = shorter_length + 1;
         size_t const padded_diagonal_length =
             round_up_to_multiple(sizeof(i64_t) * max_diagonal_length, specs.cache_line_width) / sizeof(i64_t);
@@ -3788,8 +3788,8 @@ struct smith_waterman_score<char, error_costs_32x32_t, affine_gap_costs_t, sz_ca
 
     size_t scratch_space_needed(span<char_t const> first, span<char_t const> second,
                                 cpu_specs_t const &specs) const noexcept {
-        size_t const shorter_length = std::min(first.size(), second.size());
-        size_t const longer_length = std::max(first.size(), second.size());
+        size_t const shorter_length = min_of_two(first.size(), second.size());
+        size_t const longer_length = max_of_two(first.size(), second.size());
         size_t const max_diagonal_length = shorter_length + 1;
         size_t const padded_diagonal_length =
             round_up_to_multiple(sizeof(i64_t) * max_diagonal_length, specs.cache_line_width) / sizeof(i64_t);
@@ -5449,7 +5449,7 @@ struct levenshtein_distances<linear_gap_costs_t, allocator_type_, capability_,
     using lane_walker_wide_t = candidate_lane_walker<char, u32_t, uniform_substitution_costs_t, gap_costs_t,
                                                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_neon_k, 4,
                                                      void>; // ? NEON non-unit shared-query `u32` lanes.
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     uniform_substitution_costs_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -5758,7 +5758,7 @@ struct levenshtein_distances<affine_gap_costs_t, allocator_type_, capability_,
                                                      sz_minimize_distance_k, sz_similarity_global_k, sz_cap_neon_k, 4,
                                                      void>; // ? NEON affine shared-query `u32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
     using linear_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -5870,7 +5870,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, linear_gap_costs_t, allocato
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_global_k,
                               sz_cap_neon_k, 4, void>; // ? NEON shared-query `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -5973,7 +5973,7 @@ struct smith_waterman_scores<error_costs_32x32_t, linear_gap_costs_t, allocator_
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_local_k,
                               sz_cap_neon_k, 4, void>; // ? NEON shared-query local `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     linear_gap_costs_t gap_costs_ {};
@@ -6076,7 +6076,7 @@ struct needleman_wunsch_scores<error_costs_32x32_t, affine_gap_costs_t, allocato
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_global_k,
                               sz_cap_neon_k, 4, void>; // ? NEON shared-query `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
@@ -6180,7 +6180,7 @@ struct smith_waterman_scores<error_costs_32x32_t, affine_gap_costs_t, allocator_
         candidate_lane_walker<char, i32_t, substituter_t, gap_costs_t, sz_maximize_score_k, sz_similarity_local_k,
                               sz_cap_neon_k, 4, void>; // ? NEON shared-query local `i32` lanes.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
 
     substituter_t substituter_ {};
     affine_gap_costs_t gap_costs_ {};
@@ -6296,10 +6296,9 @@ struct levenshtein_distances_utf8<linear_gap_costs_t, allocator_type_, capabilit
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
     static constexpr index_t myers_lanes_k = myers_t::lanes_k;
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    using rune_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<rune_t>;
-    using rune_view_allocator_t =
-        typename std::allocator_traits<allocator_t>::template rebind_alloc<span<rune_t const>>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
+    using rune_allocator_t = rebound_allocator<allocator_t, rune_t>;
+    using rune_view_allocator_t = rebound_allocator<allocator_t, span<rune_t const>>;
     using bytes_fallback_t = levenshtein_distances<linear_gap_costs_t, allocator_t, capability_k>;
 
     uniform_substitution_costs_t substituter_ {};
@@ -6800,10 +6799,9 @@ struct levenshtein_distances_utf8<affine_gap_costs_t, allocator_type_, capabilit
                               sz_similarity_global_k, sz_cap_neon_k, 4, void>;         // ? 4-lane `u32` affine rune.
     using rune_scoring_t = levenshtein_distance<rune_t, gap_costs_t, sz_cap_serial_k>; // ? Per-pair rune DP fallback.
 
-    using scratch_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<std::byte>;
-    using rune_allocator_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<rune_t>;
-    using rune_view_allocator_t =
-        typename std::allocator_traits<allocator_t>::template rebind_alloc<span<rune_t const>>;
+    using scratch_allocator_t = rebound_allocator<allocator_t, std::byte>;
+    using rune_allocator_t = rebound_allocator<allocator_t, rune_t>;
+    using rune_view_allocator_t = rebound_allocator<allocator_t, span<rune_t const>>;
     using linear_fallback_t = levenshtein_distances_utf8<linear_gap_costs_t, allocator_t, capability_k>;
     using bytes_fallback_t = levenshtein_distances<affine_gap_costs_t, allocator_t, capability_k>;
 
