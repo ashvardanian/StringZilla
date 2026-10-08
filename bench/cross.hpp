@@ -69,36 +69,32 @@ inline void keep_serial_row(environment_t &env, std::optional<row_t> row, std::s
 /**
  *  @brief Times the kernel @p name over every token, as @c bench_unary does, stress-tested against
  *      @p serial and logged relative to it, unless it is the serial kernel @p serial_name itself.
- *  @param[in] extras The preprocessing and the check validator, when the kernel needs them.
  */
-template <typename serial_type_, typename callable_type_, typename... extras_types_>
+template <typename serial_type_, typename callable_type_>
 void bench_kernel_unary(environment_t &env, corpus_t const &corpus, std::string const &name,
-                        std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable,
-                        extras_types_ &&...extras) {
+                        std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable) {
     if (name == serial_name)
-        log_kernel(env, bench_unary(env, corpus, name, callable_no_op_t {}, callable, extras...), serial_name);
+        log_kernel(env, bench_unary(env, corpus, name, callable_no_op_t {}, callable), serial_name);
     else {
         if (needs_serial_row(env, name, serial_name))
-            keep_serial_row(env, bench_unary(env, corpus, name, callable_no_op_t {}, serial, extras...), serial_name);
-        log_kernel(env, bench_unary(env, corpus, name, serial, callable, extras...), serial_name);
+            keep_serial_row(env, bench_unary(env, corpus, name, callable_no_op_t {}, serial), serial_name);
+        log_kernel(env, bench_unary(env, corpus, name, serial, callable), serial_name);
     }
 }
 
 /**
  *  @brief Times the kernel @p name over the whole dataset, as @c bench_nullary does, stress-tested
  *      against @p serial and logged relative to it, unless it is the serial kernel @p serial_name.
- *  @param[in] extras The preprocessing and the check validator, when the kernel needs them.
  */
-template <typename serial_type_, typename callable_type_, typename... extras_types_>
+template <typename serial_type_, typename callable_type_>
 void bench_kernel_nullary(environment_t &env, corpus_t const &corpus, std::string const &name,
-                          std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable,
-                          extras_types_ &&...extras) {
+                          std::string const &serial_name, serial_type_ &&serial, callable_type_ &&callable) {
     if (name == serial_name)
-        log_kernel(env, bench_nullary(env, corpus, name, callable_no_op_t {}, callable, extras...), serial_name);
+        log_kernel(env, bench_nullary(env, corpus, name, callable_no_op_t {}, callable), serial_name);
     else {
         if (needs_serial_row(env, name, serial_name))
-            keep_serial_row(env, bench_nullary(env, corpus, name, callable_no_op_t {}, serial, extras...), serial_name);
-        log_kernel(env, bench_nullary(env, corpus, name, serial, callable, extras...), serial_name);
+            keep_serial_row(env, bench_nullary(env, corpus, name, callable_no_op_t {}, serial), serial_name);
+        log_kernel(env, bench_nullary(env, corpus, name, serial, callable), serial_name);
     }
 }
 
@@ -1261,12 +1257,8 @@ struct callable_for_associative_lookups {
     inline callable_for_associative_lookups(corpus_t const &corpus) noexcept : corpus(corpus) {}
     void preprocess() {
         using key_type = typename container_type_::key_type;
+        if (!container.empty()) return;
         for (std::string_view const &key : corpus.tokens) container[string_cast<key_type>(key)]++;
-    }
-
-    /** Helper API to produce a delayed construction lambda. */
-    inline auto preprocessor() {
-        return [this] { preprocess(); };
     }
 
     /** The actual lookup operation to be benchmarked. */
@@ -1283,9 +1275,7 @@ void bench_map_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.words();
     auto callable = callable_for_associative_lookups<std::map<std::string_view, unsigned, less_from_sz<order_>>>(
         corpus);
-    log_kernel(env,
-               bench_unary(env, corpus, fmt::format("map<sz_order_{}>::find", kit), callable_no_op_t(), callable,
-                           callable.preprocessor()),
+    log_kernel(env, bench_unary(env, corpus, fmt::format("map<sz_order_{}>::find", kit), callable_no_op_t(), callable),
                "map<sz_order_serial>::find");
 }
 
@@ -1298,7 +1288,7 @@ void bench_unordered_map_kernels(environment_t &env, std::string_view hash_kit, 
     log_kernel(
         env,
         bench_unary(env, corpus, fmt::format("unordered_map<sz_hash_{}, sz_equal_{}>::find", hash_kit, equal_kit),
-                    callable_no_op_t(), callable, callable.preprocessor()),
+                    callable_no_op_t(), callable),
         "unordered_map<sz_hash_serial, sz_equal_serial>::find");
 }
 
@@ -1334,6 +1324,13 @@ inline check_value_t levenshtein_check_value_rolling_(std::span<sz_size_t const>
     return mixed;
 }
 
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+inline sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
+                                                sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
+                                                sz_stream_t stream) {
+    return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), allocator, stream);
+}
+
 /** A prepared batch over rolling corpus tokens or a borrowed resident sequence. */
 template <typename function_type_>
 struct levenshtein_distances_from_sz {
@@ -1347,28 +1344,29 @@ struct levenshtein_distances_from_sz {
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
     std::optional<device_vector<sz_size_t>> device_distances;
     pinned_vector<sz_size_t> answers;
+    sz_kernel_levenshtein_engine_init_t init;
+    sz_levenshtein_symbol_t symbol;
     sz_levenshtein_engine_t engine {};
 
-    levenshtein_distances_from_sz(auto init, function_type_ function, corpus_t const &corpus, std::size_t query_bytes,
-                                  std::size_t candidates, sz_levenshtein_symbol_t symbol)
+    levenshtein_distances_from_sz(sz_kernel_levenshtein_engine_init_t init, function_type_ function,
+                                  corpus_t const &corpus, std::size_t query_bytes, std::size_t candidates,
+                                  sz_levenshtein_symbol_t symbol)
         : function(function), check(levenshtein_check_value_rolling_), source(std::cref(corpus)), query_views(8),
-          views(candidates) {
+          views(candidates), init(init), symbol(symbol) {
         for (std::size_t query = 0; query != query_views.size(); ++query) {
             std::string_view const token = corpus.tokens[query % corpus.tokens.size()];
             query_views[query] = {token.data(), std::min(token.size(), query_bytes)};
         }
-        prepare_(init, symbol, candidates);
     }
 
     /** Both borrowed candidate views must outlive the arm. */
-    levenshtein_distances_from_sz(auto init, function_type_ function, std::span<sz_string_view_t const> queries,
-                                  sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
-                                  sz_levenshtein_symbol_t symbol,
+    levenshtein_distances_from_sz(sz_kernel_levenshtein_engine_init_t init, function_type_ function,
+                                  std::span<sz_string_view_t const> queries, sz_sequence_t candidates,
+                                  std::span<sz_string_view_t const> candidate_views, sz_levenshtein_symbol_t symbol,
                                   std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(levenshtein_check_value), source(candidates),
-          query_views(queries.begin(), queries.end()), fixed_views(candidate_views), runtime(runtime) {
-        prepare_(init, symbol, candidates.count);
-    }
+          query_views(queries.begin(), queries.end()), fixed_views(candidate_views), runtime(runtime), init(init),
+          symbol(symbol) {}
 
     ~levenshtein_distances_from_sz() noexcept {
         sz_levenshtein_engine_free(&engine, runtime ? runtime->get().stream : nullptr);
@@ -1404,8 +1402,12 @@ struct levenshtein_distances_from_sz {
         return call_result_t(bytes, check(answers), query_symbols * bytes);
     }
 
-  private:
-    void prepare_(auto init, sz_levenshtein_symbol_t symbol, std::size_t candidates) {
+    /** Builds the engine and its answer buffers, once the filter keeps the row. */
+    void preprocess() {
+        if (engine.memory) return;
+        std::size_t const candidates = std::holds_alternative<sz_sequence_t>(source)
+                                           ? std::get<sz_sequence_t>(source).count
+                                           : views.size();
         sz_allocator_t allocator;
         if (runtime) allocator = runtime->get().unified;
         else if (sz_allocator_init_heap(&allocator) != sz_success_k)
@@ -1527,6 +1529,15 @@ inline check_value_t overlap_check_value_quantized_(std::span<sz_f32_t const> sc
     return mixed;
 }
 
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+inline sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+                                            sz_size_t const *window_widths, sz_size_t window_widths_count,
+                                            sz_size_t candidates_budget, sz_allocator_t *allocator,
+                                            sz_stream_t stream) {
+    return sz_overlap_engine_init(engine, queries, window_widths, window_widths_count, candidates_budget,
+                                  sz::default_capabilities(), allocator, stream);
+}
+
 /** The same prepared forest scores rolling corpus tokens or a borrowed resident sequence. */
 template <typename function_type_>
 struct scores_from_sz {
@@ -1537,29 +1548,25 @@ struct scores_from_sz {
 
     /** Host lengths keep timed metrics from migrating device tape offsets. */
     std::span<sz_string_view_t const> fixed_views;
-    unified_vector<sz_f32_t> scores;
+    std::optional<device_vector<sz_f32_t>> device_scores;
+    pinned_vector<sz_f32_t> scores;
     std::size_t width;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+    sz_kernel_overlap_engine_init_t init;
+    std::string_view query;
     sz_overlap_engine_t engine {};
 
-    scores_from_sz(auto init, function_type_ function, corpus_t const &corpus, overlap_query_t const &query,
-                   std::size_t candidates)
+    scores_from_sz(sz_kernel_overlap_engine_init_t init, function_type_ function, corpus_t const &corpus,
+                   overlap_query_t const &query, std::size_t candidates)
         : function(function), check(overlap_check_value_bits_), source(std::cref(corpus)), views(candidates),
-          scores(candidates), width(query.width) {
-        prepare_(init, query.text);
-    }
+          width(query.width), init(init), query(query.text) {}
 
-    /** The candidate descriptor borrows its tape for the arm's lifetime. */
-    scores_from_sz(auto init, function_type_ function, std::string_view query, std::size_t width,
-                   sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
+    /** The candidate descriptor and the query borrow their memory for the arm's lifetime. */
+    scores_from_sz(sz_kernel_overlap_engine_init_t init, function_type_ function, std::string_view query,
+                   std::size_t width, sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
                    std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(overlap_check_value_quantized_), source(candidates), fixed_views(candidate_views),
-          scores(candidates.count, 0.0f,
-                 runtime ? unified_alloc<sz_f32_t>(runtime->get().unified, runtime->get().stream)
-                         : unified_alloc<sz_f32_t>()),
-          width(width), runtime(runtime) {
-        prepare_(init, query);
-    }
+          width(width), runtime(runtime), init(init), query(query) {}
 
     ~scores_from_sz() noexcept { sz_overlap_engine_free(&engine, runtime ? runtime->get().stream : nullptr); }
     scores_from_sz(scores_from_sz const &) = delete;
@@ -1579,8 +1586,12 @@ struct scores_from_sz {
         }
         else candidates = std::get<sz_sequence_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, scores.data(), scores.size(), 1, stream) != sz_success_k)
+        if (function(&engine, &candidates, device_scores ? device_scores->data() : scores.data(), scores.size(), 1,
+                     stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
+        if (device_scores &&
+            copy_device_to_host(*device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The scores would not come back.");
         if (runtime && sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
             throw std::runtime_error("The GPU round did not finish.");
         std::size_t bytes = 0, windows = 0;
@@ -1592,8 +1603,12 @@ struct scores_from_sz {
         return call_result_t(bytes, check(scores), windows);
     }
 
-  private:
-    void prepare_(auto init, std::string_view query) {
+    /** Builds the forest and its score buffers, once the filter keeps the row. */
+    void preprocess() {
+        if (engine.memory) return;
+        std::size_t const candidates = std::holds_alternative<sz_sequence_t>(source)
+                                           ? std::get<sz_sequence_t>(source).count
+                                           : views.size();
         sz_allocator_t allocator;
         if (runtime) allocator = runtime->get().unified;
         else if (sz_allocator_init_heap(&allocator) != sz_success_k)
@@ -1602,6 +1617,14 @@ struct scores_from_sz {
         sz_sequence_t queries {};
         sz_sequence_from_string_views(&view, 1, &queries);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
+        bool const separate = runtime && runtime->get().separate();
+        scores = pinned_vector<sz_f32_t>(candidates, 0.0f,
+                                         pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : allocator, stream));
+        if (separate) {
+            device_scores.emplace(device_alloc<sz_f32_t>(runtime->get().device, stream));
+            if (device_scores->resize_uninitialized(candidates) != sz::status_t::success_k)
+                throw std::runtime_error("The device would not hold the scores.");
+        }
         if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_sequence_t>(source).count : 0, &allocator,
                  stream) != sz_success_k) {
             sz_overlap_engine_free(&engine, stream);
@@ -1626,23 +1649,35 @@ void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
 
 #pragma region Substrings
 
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+inline sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
+                                               sz_substrings_case_sensitivity_t sensitivity,
+                                               sz_substrings_overlap_policy_t policy, sz_size_t hot_states,
+                                               sz_size_t matches_budget, sz_size_t haystacks_budget,
+                                               sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_substrings_engine_init(engine, needles, sensitivity, policy, hot_states, matches_budget, haystacks_budget,
+                                     sz::default_capabilities(), allocator, stream);
+}
+
 /** One vocabulary slice of the corpus, compiled, with the label every row over it carries. */
 struct substrings_vocabulary_t {
     std::string label;
     substrings_dictionary_t dictionary;
 
-    substrings_vocabulary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
+    substrings_vocabulary_t(std::string label, std::vector<std::string> needles,
                             sz_substrings_case_sensitivity_t sensitivity, sz_allocator_t const &allocator)
-        : label(substrings_label(slice, sensitivity)), dictionary(env, corpus, slice, sensitivity, allocator) {}
+        : label(std::move(label)), dictionary(std::move(needles), sensitivity, allocator) {}
 };
 
 /**
  *  @brief The vocabulary slices every substrings row runs over: the frequent and the rare cased
  *      words, the frequent words uncased, and substrings sampled from the corpus itself.
  *
- *  Drawn once per corpus, as each draw sorts every word of the corpus.
+ *  Only the slices the filter keeps a @p kit row over are drawn, and the word slices share one
+ *  ranking, as ranking sorts every word of the corpus.
  */
-inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t const &env, corpus_t const &corpus) {
+inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t const &env, corpus_t const &corpus,
+                                                                   std::string_view kit) {
     std::deque<substrings_vocabulary_t> vocabularies;
     std::pair<substrings_slice_t, sz_substrings_case_sensitivity_t> const slices[] = {
         {substrings_slice_t::frequent_k, sz_substrings_cased_k},
@@ -1653,8 +1688,13 @@ inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t
     sz_allocator_t allocator;
     if (sz_allocator_init_heap(&allocator) != sz_success_k)
         throw std::runtime_error("The heap allocator could not be initialized.");
-    for (auto const &[slice, sensitivity] : slices)
-        vocabularies.emplace_back(env, corpus, slice, sensitivity, allocator);
+    std::optional<substrings_ranking_t> ranking;
+    for (auto const &[slice, sensitivity] : slices) {
+        std::string label = substrings_label(slice, sensitivity);
+        if (!substrings_selects(env, kit, label)) continue;
+        vocabularies.emplace_back(std::move(label), substrings_needles(env, corpus, ranking, slice), sensitivity,
+                                  allocator);
+    }
     return vocabularies;
 }
 
@@ -1673,11 +1713,13 @@ void bench_substrings_kernels(environment_t &env, std::string_view kit) {
     if (sz_allocator_init_heap(&allocator) != sz_success_k)
         throw std::runtime_error("The heap allocator could not be initialized.");
     corpus_t const &corpus = env.corpora.multilingual_lines();
+    std::deque<substrings_vocabulary_t> const vocabularies = substrings_vocabularies(env, corpus,
+                                                                                     "_" + std::string(kit));
+    if (vocabularies.empty()) return;
     substrings_corpus_t const staged(corpus);
     auto const name = [&](char const *verb, std::string_view of, std::string const &cover) {
         return fmt::format("sz_substrings_{}_{}{}", verb, of, cover);
     };
-    std::deque<substrings_vocabulary_t> const vocabularies = substrings_vocabularies(env, corpus);
     for (substrings_vocabulary_t const &vocabulary : vocabularies) {
         substrings_dictionary_t const &dictionary = vocabulary.dictionary;
         if (dictionary.needles.empty()) continue;
@@ -1871,25 +1913,18 @@ void bench_utf8_delimiters_kernels(environment_t &env, std::string_view kit) {
 template <sz_kernel_utf8_segmenter_t func_>
 struct utf8_word_forward_from_sz {
     corpus_t const &corpus;
-    utf8_word_forward_from_sz(corpus_t const &corpus_) : corpus(corpus_) {}
+    mutable std::vector<sz_size_t> lengths;
+    utf8_word_forward_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
+        std::size_t max_token = 1;
+        for (auto const &token : corpus.tokens) max_token = std::max(max_token, token.size());
+        lengths.resize(max_token + 1);
+    }
     inline call_result_t operator()(std::size_t i) const noexcept {
         token_view_t token = corpus.tokens[i];
-        sz_cptr_t cursor = token.data();
-        sz_size_t remaining = token.size();
-        sz_size_t lengths[16];
-        std::size_t words = 0;
-        while (remaining) {
-            sz_size_t produced = 0, consumed = 0;
-            func_(cursor, remaining, lengths, 16, &produced, nullptr);
-            words += static_cast<std::size_t>(produced);
-            // Only a full batch leaves a suffix to segment.
-            if (produced != 16) break;
-            for (sz_size_t index = 0; index != produced; ++index) consumed += lengths[index];
-            cursor += consumed;
-            remaining -= consumed;
-        }
-        do_not_optimize(words);
-        return {token.size(), static_cast<check_value_t>(words)};
+        sz_size_t produced = 0;
+        if (token.size()) func_(token.data(), token.size(), lengths.data(), lengths.size(), &produced, nullptr);
+        do_not_optimize(produced);
+        return {token.size(), static_cast<check_value_t>(produced)};
     }
 };
 
@@ -1942,38 +1977,90 @@ inline sz_kernel_bytesum_t output_checksum_kernel() noexcept {
     return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
 }
 
-/** Wraps a hardware-specific UTF-8 normalization backend (transforms to NFC). */
-template <sz_kernel_utf8_norm_t func_>
+/** Sizes @p output for @p growth times the longest token and, given a @p runtime, stages the corpus
+ *  and the outputs in the device's own memory. */
+inline void utf8_outputs_prepare_(corpus_t const &corpus,
+                                  std::optional<std::reference_wrapper<device_backend_t const>> runtime,
+                                  std::size_t growth, pinned_vector<char> &output,
+                                  std::optional<device_vector<char>> &device_text,
+                                  std::optional<device_vector<char>> &device_output,
+                                  std::optional<device_vector<sz_size_t>> &device_length) {
+    std::size_t longest = 0;
+    for (token_view_t const &token : corpus.tokens) longest = std::max(longest, token.size());
+    std::size_t const capacity = longest * growth;
+    sz_allocator_t heap;
+    if (sz_allocator_init_heap(&heap) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+    if (runtime && !runtime->get().separate())
+        throw std::runtime_error("The device has no memory of its own to stage the corpus in.");
+    device_backend_t const *backend = runtime ? &runtime->get() : nullptr;
+    sz_stream_t const stream = backend ? backend->stream : nullptr;
+    output = pinned_vector<char>(capacity, 0, pinned_alloc<char>(backend ? backend->pinned : heap, stream));
+    if (!backend) return;
+    device_text.emplace(device_alloc<char>(backend->device, stream));
+    device_output.emplace(device_alloc<char>(backend->device, stream));
+    device_length.emplace(device_alloc<sz_size_t>(backend->device, stream));
+    if (device_text->resize_uninitialized(corpus.dataset.size()) != sz::status_t::success_k ||
+        device_output->resize_uninitialized(capacity) != sz::status_t::success_k ||
+        device_length->resize_uninitialized(1) != sz::status_t::success_k ||
+        backend->copy(device_text->data(), corpus.dataset.data(), corpus.dataset.size(), stream) != sz_success_k ||
+        sz_stream_synchronize_best(backend->capabilities, stream) != sz_success_k)
+        throw std::runtime_error("The device would not hold the corpus.");
+}
+
+/** The output a device call left, copied back into @p output once its length is known. */
+inline std::span<char const> utf8_outputs_fetch_(device_backend_t const &backend,
+                                                 device_vector<char> const &device_output,
+                                                 device_vector<sz_size_t> const &device_length,
+                                                 pinned_vector<char> &output) {
+    sz_size_t length = 0;
+    if (backend.copy(&length, device_length.data(), sizeof(length), backend.stream) != sz_success_k ||
+        sz_stream_synchronize_best(backend.capabilities, backend.stream) != sz_success_k ||
+        backend.copy(output.data(), device_output.data(), length, backend.stream) != sz_success_k ||
+        sz_stream_synchronize_best(backend.capabilities, backend.stream) != sz_success_k)
+        throw std::runtime_error("The output would not come back.");
+    return {output.data(), length};
+}
+
+/** Normalizes every token to NFC on the host or, given a @p runtime, on its device. */
+template <typename function_type_>
 struct utf8_norm_from_sz {
 
+    function_type_ function;
     corpus_t const &corpus;
-    mutable std::vector<char> output_buffer;
-    sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+    std::optional<device_vector<char>> device_text, device_output;
+    std::optional<device_vector<sz_size_t>> device_length;
 
-    utf8_norm_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
-        // Pre-allocate worst-case buffer: 18x input size for the worst single-codepoint
-        // compatibility decomposition (see `sz_utf8_norm_best` buffer-sizing docs).
-        std::size_t max_token_size = 0;
-        for (auto const &token : corpus.tokens) max_token_size = std::max(max_token_size, token.size());
-        output_buffer.resize(max_token_size * 18 + 64); // Extra padding for safety
+    /** Room for the worst single-codepoint decomposition, 18 times the longest token. */
+    pinned_vector<char> output;
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    utf8_norm_from_sz(function_type_ function, corpus_t const &corpus,
+                      std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : function(function), corpus(corpus), runtime(runtime) {}
+
+    /** Sizes the output and stages the corpus on the device, once the filter keeps the row. */
+    void preprocess() {
+        if (!output.empty() || device_text) return;
+        utf8_outputs_prepare_(corpus, runtime, 18, output, device_text, device_output, device_length);
     }
 
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        // Ensure buffer is large enough
-        if (output_buffer.size() < buffer.size() * 18) output_buffer.resize(buffer.size() * 18 + 64);
-
-        sz_size_t result_length = 0;
-        func_(buffer.data(), buffer.size(), sz_normal_form_nfc_k, output_buffer.data(), &result_length, nullptr);
-        do_not_optimize(output_buffer.data());
-        do_not_optimize(result_length);
-
-        sz_u64_t checksum = 0;
-        checksum_(output_buffer.data(), result_length, &checksum, nullptr);
-        return {buffer.size(), static_cast<check_value_t>(checksum)};
+    call_result_t operator()(std::size_t token_index) {
+        token_view_t const token = corpus.tokens[token_index];
+        sz_cptr_t const source = device_text ? device_text->data() + (token.data() - corpus.dataset.data())
+                                             : token.data();
+        sz_size_t length = 0;
+        if (function(source, token.size(), sz_normal_form_nfc_k, device_output ? device_output->data() : output.data(),
+                     device_length ? device_length->data() : &length,
+                     runtime ? runtime->get().stream : nullptr) != sz_success_k)
+            throw std::runtime_error("The normalization failed.");
+        std::span<char const> const normalized = device_output ? utf8_outputs_fetch_(runtime->get(), *device_output,
+                                                                                     *device_length, output)
+                                                               : std::span<char const>(output.data(), length);
+        sz_u64_t sum = 0;
+        checksum(normalized.data(), normalized.size(), &sum, nullptr);
+        return {token.size(), static_cast<check_value_t>(sum)};
     }
 };
 
@@ -2006,7 +2093,7 @@ template <sz_kernel_utf8_norm_t norm_>
 void bench_utf8_norm_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.multilingual_slice();
     bench_kernel_unary(env, corpus, fmt::format("sz_utf8_norm_{}", kit), "sz_utf8_norm_serial",
-                       utf8_norm_from_sz<sz_utf8_norm_serial> {corpus}, utf8_norm_from_sz<norm_> {corpus});
+                       utf8_norm_from_sz {sz_utf8_norm_serial, corpus}, utf8_norm_from_sz {norm_, corpus});
 }
 
 /** Times one capability's NFC quick-check scan over the multilingual slice. */
@@ -2023,37 +2110,45 @@ void bench_utf8_find_denormalized_kernels(environment_t &env, std::string_view k
 
 #pragma region UTF8 Uncased
 
-/** Wraps a hardware-specific UTF-8 case folding backend. */
-template <sz_kernel_utf8_uncased_fold_t func_>
+/** Folds the case of every token on the host or, given a @p runtime, on its device. */
+template <typename function_type_>
 struct utf8_uncased_fold_from_sz {
 
+    function_type_ function;
     corpus_t const &corpus;
-    mutable std::vector<char> output_buffer;
-    sz_kernel_bytesum_t checksum_ = output_checksum_kernel();
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+    std::optional<device_vector<char>> device_text, device_output;
+    std::optional<device_vector<sz_size_t>> device_length;
 
-    utf8_uncased_fold_from_sz(corpus_t const &corpus_) : corpus(corpus_) {
-        // Pre-allocate worst-case buffer: 3x input size for worst-case expansion
-        std::size_t max_token_size = 0;
-        for (auto const &token : corpus.tokens) max_token_size = std::max(max_token_size, token.size());
-        output_buffer.resize(max_token_size * 3 + 64); // Extra padding for safety
+    /** Room for the widest fold, three times the longest token. */
+    pinned_vector<char> output;
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    utf8_uncased_fold_from_sz(function_type_ function, corpus_t const &corpus,
+                              std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : function(function), corpus(corpus), runtime(runtime) {}
+
+    /** Sizes the output and stages the corpus on the device, once the filter keeps the row. */
+    void preprocess() {
+        if (!output.empty() || device_text) return;
+        utf8_outputs_prepare_(corpus, runtime, 3, output, device_text, device_output, device_length);
     }
 
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view buffer) const noexcept {
-        // Ensure buffer is large enough
-        if (output_buffer.size() < buffer.size() * 3) output_buffer.resize(buffer.size() * 3 + 64);
-
-        sz_size_t result_length = 0;
-        func_(buffer.data(), buffer.size(), output_buffer.data(), &result_length, nullptr);
-        do_not_optimize(output_buffer.data());
-        do_not_optimize(result_length);
-
-        sz_u64_t checksum = 0;
-        checksum_(output_buffer.data(), result_length, &checksum, nullptr);
-        return {buffer.size(), static_cast<check_value_t>(checksum)};
+    call_result_t operator()(std::size_t token_index) {
+        token_view_t const token = corpus.tokens[token_index];
+        sz_cptr_t const source = device_text ? device_text->data() + (token.data() - corpus.dataset.data())
+                                             : token.data();
+        sz_size_t length = 0;
+        if (function(source, token.size(), device_output ? device_output->data() : output.data(),
+                     device_length ? device_length->data() : &length,
+                     runtime ? runtime->get().stream : nullptr) != sz_success_k)
+            throw std::runtime_error("The case folding failed.");
+        std::span<char const> const folded = device_output ? utf8_outputs_fetch_(runtime->get(), *device_output,
+                                                                                 *device_length, output)
+                                                           : std::span<char const>(output.data(), length);
+        sz_u64_t sum = 0;
+        checksum(folded.data(), folded.size(), &sum, nullptr);
+        return {token.size(), static_cast<check_value_t>(sum)};
     }
 };
 
@@ -2124,8 +2219,8 @@ template <sz_kernel_utf8_uncased_fold_t fold_>
 void bench_utf8_uncased_fold_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.multilingual_slice();
     bench_kernel_unary(env, corpus, fmt::format("sz_utf8_uncased_fold_{}", kit), "sz_utf8_uncased_fold_serial",
-                       utf8_uncased_fold_from_sz<sz_utf8_uncased_fold_serial> {corpus},
-                       utf8_uncased_fold_from_sz<fold_> {corpus});
+                       utf8_uncased_fold_from_sz {sz_utf8_uncased_fold_serial, corpus},
+                       utf8_uncased_fold_from_sz {fold_, corpus});
 }
 
 /** Times one capability's uncased substring search, each line a needle in the whole slice. */

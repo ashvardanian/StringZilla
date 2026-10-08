@@ -9,6 +9,8 @@
 
 #include <algorithm>   // `std::sort`, `std::min`, `std::max`
 #include <limits>      // `std::numeric_limits`
+#include <numeric>     // `std::iota`
+#include <optional>    // `std::optional`
 #include <random>      // `std::mt19937_64`
 #include <set>         // `std::set`
 #include <stdexcept>   // `std::runtime_error`
@@ -63,6 +65,20 @@ static sz_substrings_overlap_policy_t const substrings_policies_k[] = {
 static sz_substrings_overlap_policy_t const substrings_leftmost_policies_k[] = {sz_substrings_leftmost_longest_k,
                                                                                 sz_substrings_leftmost_first_k};
 
+/** Whether the filter keeps any row over the slice @p label, every row named after its verb, then
+ *  @p kit, like @c _haswell, then the slice and the policy, so an unwanted slice is never drawn. */
+inline bool substrings_selects(environment_t const &env, std::string_view kit, std::string const &label) {
+    auto const selects = [&](char const *verb, char const *policy) {
+        return env.settings.selects(fmt::format("sz_substrings_{}{}{}{}", verb, kit, label, policy));
+    };
+    for (sz_substrings_overlap_policy_t const policy : substrings_policies_k)
+        if (selects("counts", substrings_policy_name(policy)) || selects("find", substrings_policy_name(policy)))
+            return true;
+    for (sz_substrings_overlap_policy_t const policy : substrings_leftmost_policies_k)
+        if (selects("replace", substrings_policy_name(policy))) return true;
+    return selects("bm25_scores", "") || selects("engine_init", "");
+}
+
 /** Shortest word admitted: anything under three bytes matches at nearly every position and measures
  *  the reporting path rather than the automaton. */
 static constexpr std::size_t substrings_min_word_bytes_k = 3;
@@ -96,58 +112,82 @@ static std::vector<std::string> substrings_sampled(environment_t const &env, cor
 }
 
 /**
- *  @brief One percent of the post-cutoff vocabulary, taken from one end of the frequency ranking.
+ *  @brief The dataset's distinct words seen at least @c substrings_minimum_occurrences_k times,
+ *      most frequent first and by content within a count, which every word slice is a window of.
+ *
+ *  Drawn from the dataset's words whatever tokenization shapes the haystacks, so a line search and
+ *  a word search draw needles from the same vocabulary. Sorting every word is most of a draw, so a
+ *  caller ranks once and cuts every word slice it needs from the same ranking.
+ */
+struct substrings_ranking_t {
+
+    /** The kept words in rank order, viewing the corpus. */
+    std::vector<std::string_view> words;
+
+    /** Distinct words of any count, hapax included, which the frequent cutoff is a fraction of. */
+    std::size_t distinct_total = 0;
+
+    explicit substrings_ranking_t(corpus_t const &corpus) {
+        std::vector<std::string_view> occurrences;
+        {
+            tokens_t const tokenized = tokenize(corpus.dataset);
+            occurrences.reserve(tokenized.size());
+            for (token_view_t const word : tokenized)
+                if (word.size() >= substrings_min_word_bytes_k && word.size() <= substrings_max_word_bytes_k)
+                    occurrences.push_back(word);
+        }
+        std::sort(occurrences.begin(), occurrences.end());
+        std::vector<std::size_t> frequencies;
+        for (std::size_t position = 0; position != occurrences.size();) {
+            std::size_t run = position + 1;
+            while (run != occurrences.size() && occurrences[run] == occurrences[position]) ++run;
+            ++distinct_total;
+            if (run - position >= substrings_minimum_occurrences_k)
+                words.push_back(occurrences[position]), frequencies.push_back(run - position);
+            position = run;
+        }
+
+        // Frequency first, then content, so the ranking is deterministic across runs and platforms.
+        std::vector<std::size_t> ranks(words.size());
+        std::iota(ranks.begin(), ranks.end(), (std::size_t)0);
+        std::sort(ranks.begin(), ranks.end(), [&](std::size_t left, std::size_t right) {
+            if (frequencies[left] != frequencies[right]) return frequencies[left] > frequencies[right];
+            return words[left] < words[right];
+        });
+        std::vector<std::string_view> ranked(words.size());
+        for (std::size_t rank = 0; rank != ranks.size(); ++rank) ranked[rank] = words[ranks[rank]];
+        words = std::move(ranked);
+    }
+};
+
+/**
+ *  @brief One percent of the post-cutoff @p ranking, taken from the end @p slice names.
  *
  *  Both noisy ends are removed before any slice is taken. The most frequent one percent are
  *  stopwords that every haystack holds, which would measure the reporting path rather than the
  *  automaton; terms occurring once are noise no haystack reaches twice. The top cutoff is a
  *  fraction of @b all distinct terms, hapax included, so the slice stays where it is whenever the
  *  hapax filter moves.
- *
- *  Drawn from the dataset's words whatever tokenization shapes the haystacks, so a line search and
- *  a word search draw needles from the same vocabulary.
  */
-static std::vector<std::string> substrings_vocabulary(environment_t const &env, corpus_t const &corpus,
-                                                      substrings_slice_t slice) {
-    if (slice == substrings_slice_t::sampled_k) return substrings_sampled(env, corpus);
-    tokens_t const tokenized = tokenize(corpus.dataset);
-    std::vector<std::string_view> words;
-    std::vector<std::string> distinct;
-    std::vector<std::size_t> frequencies;
-    std::size_t distinct_total = 0;
-
-    words.reserve(tokenized.size());
-    for (auto const &word : tokenized) {
-        if (word.size() < substrings_min_word_bytes_k || word.size() > substrings_max_word_bytes_k) continue;
-        words.emplace_back(word.data(), word.size());
-    }
-    std::sort(words.begin(), words.end());
-    for (std::size_t index = 0; index != words.size();) {
-        std::size_t run = index;
-        while (run != words.size() && words[run] == words[index]) ++run;
-        ++distinct_total;
-        if (run - index >= substrings_minimum_occurrences_k)
-            distinct.emplace_back(words[index]), frequencies.push_back(run - index);
-        index = run;
-    }
-    if (distinct.empty()) return {}; // ? A corpus without repeated words, such as nucleotides, has no word slice.
-
-    // Frequency first, then content, so the ranking is deterministic across runs and platforms.
-    std::vector<std::size_t> order(distinct.size());
-    for (std::size_t index = 0; index != order.size(); ++index) order[index] = index;
-    std::sort(order.begin(), order.end(), [&](std::size_t left, std::size_t right) {
-        if (frequencies[left] != frequencies[right]) return frequencies[left] > frequencies[right];
-        return distinct[left] < distinct[right];
-    });
-
+static std::vector<std::string> substrings_vocabulary(substrings_ranking_t const &ranking, substrings_slice_t slice) {
+    // ? A corpus without repeated words, such as nucleotides, has no word slice.
+    if (ranking.words.empty()) return {};
     std::size_t const dropped = std::min<std::size_t>(
-        (std::size_t)((double)distinct_total * substrings_frequent_cutoff_k), order.size());
-    std::size_t const available = order.size() - dropped;
+        (std::size_t)((double)ranking.distinct_total * substrings_frequent_cutoff_k), ranking.words.size());
+    std::size_t const available = ranking.words.size() - dropped;
     std::size_t const wanted = std::max<std::size_t>(available / 100, 1);
     std::size_t const first = slice == substrings_slice_t::frequent_k ? dropped : dropped + available - wanted;
-    std::vector<std::string> vocabulary;
-    for (std::size_t rank = first; rank != first + wanted; ++rank) vocabulary.push_back(distinct[order[rank]]);
-    return vocabulary;
+    return {ranking.words.begin() + first, ranking.words.begin() + first + wanted};
+}
+
+/** The needles of @p slice: sampled from @p corpus, or cut from its word @p ranking, which the
+ *  first word slice a caller asks for builds and the rest reuse. */
+static std::vector<std::string> substrings_needles(environment_t const &env, corpus_t const &corpus,
+                                                   std::optional<substrings_ranking_t> &ranking,
+                                                   substrings_slice_t slice) {
+    if (slice == substrings_slice_t::sampled_k) return substrings_sampled(env, corpus);
+    if (!ranking) ranking.emplace(corpus);
+    return substrings_vocabulary(*ranking, slice);
 }
 
 #pragma endregion Vocabulary
@@ -168,10 +208,9 @@ struct substrings_dictionary_t {
 
     sz_substrings_case_sensitivity_t sensitivity;
 
-    substrings_dictionary_t(environment_t const &env, corpus_t const &corpus, substrings_slice_t slice,
-                            sz_substrings_case_sensitivity_t sensitivity, sz_allocator_t const &memory,
-                            sz_stream_t stream = nullptr)
-        : needles(substrings_vocabulary(env, corpus, slice)), replacement_bytes(unified_alloc<char>(memory, stream)),
+    substrings_dictionary_t(std::vector<std::string> words, sz_substrings_case_sensitivity_t sensitivity,
+                            sz_allocator_t const &memory, sz_stream_t stream = nullptr)
+        : needles(std::move(words)), replacement_bytes(unified_alloc<char>(memory, stream)),
           replacement_views(needles.size()), sensitivity(sensitivity) {
         for (std::size_t index = 0; index != needles.size(); ++index) {
             std::string const replacement = index % 2 ? std::string() : "<" + std::to_string(index) + ">";
@@ -293,17 +332,34 @@ struct substrings_counts_from_sz {
     /** Borrowed view of the strings read by this arm. */
     sz_sequence_t haystacks;
 
-    /** @b [haystacks], what a round fills. */
-    unified_vector<sz_size_t> counts;
+    /** @b [haystacks], what a round fills, on a device with memory of its own. */
+    std::optional<device_vector<sz_size_t>> device_counts;
+
+    /** @b [haystacks], what the host checks. */
+    pinned_vector<sz_size_t> counts;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
     substrings_counts_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                              sz_sequence_t const &haystacks)
-        : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks),
-          counts(corpus.views.size(), unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)) {}
+                              sz_sequence_t const &haystacks,
+                              std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks), runtime(runtime) {
+        bool const separate = runtime && runtime->get().separate();
+        counts = pinned_vector<sz_size_t>(
+            corpus.views.size(), 0,
+            pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+        if (!separate) return;
+        device_counts.emplace(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
+        if (device_counts->resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the counts.");
+    }
 
     call_result_t operator()(std::size_t) {
-        if (counts_kernel(&engine.engine, &haystacks, counts.data(), 1, engine.stream) != sz_success_k)
+        if (counts_kernel(&engine.engine, &haystacks, device_counts ? device_counts->data() : counts.data(), 1,
+                          engine.stream) != sz_success_k)
             throw std::runtime_error("The counting round failed.");
+        if (device_counts &&
+            copy_device_to_host(*device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The counts would not come back.");
         engine.join();
         check_value_t mixed = 0;
         for (sz_size_t const count : counts) mixed = mixed * 31u + (check_value_t)count;
@@ -330,17 +386,23 @@ struct substrings_find_from_sz {
 
     /** Sized by a size query, so a round never grows it. */
     unified_vector<sz_substrings_match_t> matches;
+    bool sized = false;
 
     substrings_find_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
                             sz_sequence_t const &haystacks)
         : engine(engine), find_kernel(kernel), corpus(corpus), haystacks(haystacks),
           offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
-          matches(unified_alloc<sz_substrings_match_t>(engine.engine.allocator, engine.stream)) {
+          matches(unified_alloc<sz_substrings_match_t>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
         if (find_kernel(&engine.engine, &haystacks, nullptr, 0, offsets.data(), engine.stream) != sz_success_k)
             throw std::runtime_error("The reporting round could not be sized.");
         engine.join();
         // The boundaries name the survivors, which a cover thins below what the sizing walk emitted.
         matches.resize(offsets[corpus.views.size()]);
+        sized = true;
     }
 
     call_result_t operator()(std::size_t) {
@@ -374,17 +436,23 @@ struct substrings_replace_from_sz {
 
     /** Sized by a size query, so a round never grows it. */
     unified_vector<char> tape;
+    bool sized = false;
 
     substrings_replace_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
                                sz_sequence_t const &haystacks, sz_sequence_t const &replacements)
         : engine(engine), replace_kernel(kernel), corpus(corpus), haystacks(haystacks), replacements(replacements),
           offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
-          tape(unified_alloc<char>(engine.engine.allocator, engine.stream)) {
+          tape(unified_alloc<char>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
         if (replace_kernel(&engine.engine, &haystacks, &replacements, nullptr, 0, offsets.data(), engine.stream) !=
             sz_success_k)
             throw std::runtime_error("The rewriting round could not be sized.");
         engine.join();
         tape.resize(engine.engine.report->target_length);
+        sized = true;
     }
 
     call_result_t operator()(std::size_t) {
@@ -416,22 +484,38 @@ struct substrings_bm25_from_sz {
     /** @b [needles], all one: a weight scales a term, not the walk. */
     unified_vector<sz_f32_t> weights;
 
-    /** @b [haystacks], what a round fills. */
-    unified_vector<sz_f32_t> scores;
+    /** @b [haystacks], what a round fills, on a device with memory of its own. */
+    std::optional<device_vector<sz_f32_t>> device_scores;
+
+    /** @b [haystacks], what the host checks. */
+    pinned_vector<sz_f32_t> scores;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
     substrings_bm25_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                            sz_sequence_t const &haystacks)
+                            sz_sequence_t const &haystacks,
+                            std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : engine(engine), scores_kernel(kernel), corpus(corpus), haystacks(haystacks), parameters {1.2f, 0.75f, 0},
           weights(engine.engine.needles_count, 1.0f, unified_alloc<sz_f32_t>(engine.engine.allocator, engine.stream)),
-          scores(corpus.views.size(), unified_alloc<sz_f32_t>(engine.engine.allocator, engine.stream)) {
+          runtime(runtime) {
         std::size_t const bytes = corpus.bytes();
         parameters.average_document_length = (sz_f32_t)bytes / (sz_f32_t)std::max<std::size_t>(corpus.views.size(), 1);
+        bool const separate = runtime && runtime->get().separate();
+        scores = pinned_vector<sz_f32_t>(
+            corpus.views.size(), 0.0f,
+            pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+        if (!separate) return;
+        device_scores.emplace(device_alloc<sz_f32_t>(runtime->get().device, engine.stream));
+        if (device_scores->resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the scores.");
     }
 
     call_result_t operator()(std::size_t) {
-        if (scores_kernel(&engine.engine, &haystacks, nullptr, &parameters, weights.data(), scores.data(), 1,
-                          engine.stream) != sz_success_k)
+        if (scores_kernel(&engine.engine, &haystacks, nullptr, &parameters, weights.data(),
+                          device_scores ? device_scores->data() : scores.data(), 1, engine.stream) != sz_success_k)
             throw std::runtime_error("The scoring round failed.");
+        if (device_scores &&
+            copy_device_to_host(*device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The scores would not come back.");
         engine.join();
         // Backends round their sums differently, so the check is which haystacks scored rather than how much.
         check_value_t scored = 0;

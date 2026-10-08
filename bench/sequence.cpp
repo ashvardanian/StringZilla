@@ -132,8 +132,8 @@ struct argsort_strings_via_qsort_t {
         sz_sequence_t array;
         array.count = input.size();
         array.handle = &input;
-        array.get_start = get_start;
-        array.get_length = get_length;
+        array.get_start = strings_get_start_;
+        array.get_length = strings_get_length_;
 #if STRINGZILLA_HAS_QSORT_R_
         qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
 #elif STRINGZILLA_HAS_QSORT_S_

@@ -47,18 +47,16 @@ static void bench_overlap_scores(environment_t const &env, corpus_t const &corpu
                                      width,
                                      resident.host_candidates(),
                                      resident.views};
-    std::string const serial_name = "sz_overlap_scores_serial:metal:" + std::to_string(runtime.selected.ordinal()) +
-                                    suffix,
-                      metal_name = "sz_overlap_scores_metal:" + std::to_string(runtime.selected.ordinal()) + suffix;
-    bool const serial_printed = env.settings.selects(serial_name);
-    // ? Timed under the Metal row's name, so a filter naming only that row still times its baseline
-    std::optional<row_t> base = bench_unary(env, corpus, serial_printed ? serial_name : metal_name, validator);
-    if (base) base->name = serial_name;
-    if (serial_printed) print(base);
+    std::string const device_suffix = ":metal:" + std::to_string(runtime.selected.ordinal());
+    std::string const metal_name = "sz_overlap_scores_metal:" + std::to_string(runtime.selected.ordinal()) + suffix;
+    auto dispatched = scores_from_sz {overlap_engine_init_cpu_,   sz_overlap_scores, query, width,
+                                      resident.host_candidates(), resident.views};
+    std::optional<double> const base = bench_baseline(env, corpus, "sz_overlap_scores" + device_suffix + suffix,
+                                                      {metal_name}, dispatched);
     print(bench_unary(env, corpus, metal_name, validator,
                       scores_from_sz {sz_overlap_engine_init_metal, sz_overlap_scores_metal, query, width,
                                       resident.candidates.sequence(), resident.views, std::cref(runtime)}),
-          baseline_of(base));
+          base);
 }
 
 #endif

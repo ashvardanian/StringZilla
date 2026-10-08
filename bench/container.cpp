@@ -52,22 +52,19 @@ void bench_associative_lookups_with_different_simd_backends(environment_t const 
     std::optional<row_t> base_map, base_umap;
     {
         auto callable_map = callable_for_associative_lookups<map_best_t>(corpus);
-        base_map = bench_unary(env, corpus, "map<sz_order_best>::find", callable_no_op_t(), callable_map,
-                               callable_map.preprocessor());
+        base_map = bench_unary(env, corpus, "map<sz_order_best>::find", callable_no_op_t(), callable_map);
         print(base_map);
         auto callable_umap = callable_for_associative_lookups<umap_best_t>(corpus);
         base_umap = bench_unary(env, corpus, "unordered_map<sz_hash_best, sz_equal_best>::find", callable_no_op_t(),
-                                callable_umap, callable_umap.preprocessor());
+                                callable_umap);
         print(base_umap);
     }
 
     {
         auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(corpus);
-        print(bench_unary(env, corpus, "map::find", callable_no_op_t(), callable_map, callable_map.preprocessor()),
-              baseline_of(base_map));
+        print(bench_unary(env, corpus, "map::find", callable_no_op_t(), callable_map), baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(corpus);
-        print(bench_unary(env, corpus, "unordered_map::find", callable_no_op_t(), callable_umap,
-                          callable_umap.preprocessor()),
+        print(bench_unary(env, corpus, "unordered_map::find", callable_no_op_t(), callable_umap),
               baseline_of(base_umap));
     }
 }
@@ -102,12 +99,11 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
     std::optional<row_t> base_map, base_umap;
     {
         auto callable_map = callable_for_associative_lookups<std::map<std::string_view, unsigned>>(corpus);
-        base_map = bench_unary(env, corpus, "map<std::string_view>::find", callable_no_op_t(), callable_map,
-                               callable_map.preprocessor());
+        base_map = bench_unary(env, corpus, "map<std::string_view>::find", callable_no_op_t(), callable_map);
         print(base_map);
         auto callable_umap = callable_for_associative_lookups<std::unordered_map<std::string_view, unsigned>>(corpus);
-        base_umap = bench_unary(env, corpus, "unordered_map<std::string_view>::find", callable_no_op_t(), callable_umap,
-                                callable_umap.preprocessor());
+        base_umap = bench_unary(env, corpus, "unordered_map<std::string_view>::find", callable_no_op_t(),
+                                callable_umap);
         print(base_umap);
     }
 
@@ -115,13 +111,11 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
     {
         auto callable_map = callable_for_associative_lookups<std::map<std::string, unsigned, less_through_std_t>>(
             corpus);
-        print(bench_unary(env, corpus, "map<std::string>::find", callable_no_op_t(), callable_map,
-                          callable_map.preprocessor()),
+        print(bench_unary(env, corpus, "map<std::string>::find", callable_no_op_t(), callable_map),
               baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
             std::unordered_map<std::string, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
-        print(bench_unary(env, corpus, "unordered_map<std::string>::find", callable_no_op_t(), callable_umap,
-                          callable_umap.preprocessor()),
+        print(bench_unary(env, corpus, "unordered_map<std::string>::find", callable_no_op_t(), callable_umap),
               baseline_of(base_umap));
     }
 
@@ -129,13 +123,11 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
     {
         auto callable_map = callable_for_associative_lookups<std::map<sz::string_view_t, unsigned, less_through_std_t>>(
             corpus);
-        print(bench_unary(env, corpus, "map<sz::string_view_t>::find", callable_no_op_t(), callable_map,
-                          callable_map.preprocessor()),
+        print(bench_unary(env, corpus, "map<sz::string_view_t>::find", callable_no_op_t(), callable_map),
               baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
             std::unordered_map<sz::string_view_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
-        print(bench_unary(env, corpus, "unordered_map<sz::string_view_t>::find", callable_no_op_t(), callable_umap,
-                          callable_umap.preprocessor()),
+        print(bench_unary(env, corpus, "unordered_map<sz::string_view_t>::find", callable_no_op_t(), callable_umap),
               baseline_of(base_umap));
     }
 
@@ -143,13 +135,11 @@ void bench_associative_lookups_with_different_key_classes(environment_t const &e
     {
         auto callable_map = callable_for_associative_lookups<std::map<sz::string_t, unsigned, less_through_std_t>>(
             corpus);
-        print(bench_unary(env, corpus, "map<sz::string_t>::find", callable_no_op_t(), callable_map,
-                          callable_map.preprocessor()),
+        print(bench_unary(env, corpus, "map<sz::string_t>::find", callable_no_op_t(), callable_map),
               baseline_of(base_map));
         auto callable_umap = callable_for_associative_lookups<
             std::unordered_map<sz::string_t, unsigned, hash_through_std_t, equal_to_through_std_t>>(corpus);
-        print(bench_unary(env, corpus, "unordered_map<sz::string_t>::find", callable_no_op_t(), callable_umap,
-                          callable_umap.preprocessor()),
+        print(bench_unary(env, corpus, "unordered_map<sz::string_t>::find", callable_no_op_t(), callable_umap),
               baseline_of(base_umap));
     }
 }

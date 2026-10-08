@@ -41,13 +41,6 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
-sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
-                                         sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                         sz_stream_t stream) {
-    return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), allocator, stream);
-}
-
 #pragma region One Pair
 
 /** One pair per call through a batch of one: the preparation and round a caller pays together. */

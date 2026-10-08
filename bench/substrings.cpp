@@ -41,16 +41,6 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
-sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
-                                        sz_substrings_case_sensitivity_t sensitivity,
-                                        sz_substrings_overlap_policy_t policy, sz_size_t hot_states,
-                                        sz_size_t matches_budget, sz_size_t haystacks_budget, sz_allocator_t *allocator,
-                                        sz_stream_t stream) {
-    return sz_substrings_engine_init(engine, needles, sensitivity, policy, hot_states, matches_budget, haystacks_budget,
-                                     sz::default_capabilities(), allocator, stream);
-}
-
 #pragma region Compilation
 
 /** Compiles the vocabulary from scratch: the cost a pipeline pays once rather than per haystack. */
@@ -126,9 +116,11 @@ void bench_substrings_slice(environment_t const &env, corpus_t const &corpus, su
 
 void bench_substrings(environment_t &env) {
     corpus_t const &corpus = env.corpora.multilingual_lines();
+    std::deque<substrings_vocabulary_t> const vocabularies = substrings_vocabularies(env, corpus, "");
+    if (vocabularies.empty()) return;
     substrings_corpus_t const staged(corpus);
     fmt::println("Starting multi-pattern search benchmarks...");
-    for (substrings_vocabulary_t const &vocabulary : substrings_vocabularies(env, corpus))
+    for (substrings_vocabulary_t const &vocabulary : vocabularies)
         bench_substrings_slice(env, corpus, staged, vocabulary);
 }
 

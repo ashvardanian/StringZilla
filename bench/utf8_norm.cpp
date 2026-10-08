@@ -41,7 +41,7 @@
 namespace ashvardanian::stringzilla::bench {
 
 void bench_utf8_normalize(environment_t const &env, corpus_t const &corpus) {
-    print(bench_unary(env, corpus, "sz_utf8_norm_best", utf8_norm_from_sz<cpu_best<sz_utf8_norm_best>> {corpus}));
+    print(bench_unary(env, corpus, "sz_utf8_norm_best", utf8_norm_from_sz {cpu_best<sz_utf8_norm_best>, corpus}));
 }
 
 void bench_utf8_find_denormalized(environment_t const &env, corpus_t const &corpus) {

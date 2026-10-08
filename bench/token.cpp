@@ -138,7 +138,7 @@ void bench_stream_hashing(environment_t const &env, corpus_t const &corpus) {
                                        cpu_best<sz_hash_state_digest_best>>;
     std::optional<row_t> const base = bench_unary(env, corpus, "sz_hash_stream_best", best_t {corpus});
     print(base);
-    print(bench_unary(env, corpus, "std::hash", hash_from_std_t {corpus}), baseline_of(base));
+    print(bench_unary(env, corpus, "std::hash:stream", hash_from_std_t {corpus}), baseline_of(base));
 }
 
 /** Baseline: digests a batch of tokens through independent single-state SHA256 calls. */

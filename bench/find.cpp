@@ -169,9 +169,9 @@ void bench_substring_search(environment_t const &env, corpus_t const &corpus) {
         corpus);
     std::optional<row_t> const base = bench_unary(env, corpus, "sz_find_best", base_call);
     print(base);
-    std::optional<row_t> const base_reverse = bench_unary(
-        env, corpus, "sz_rfind_best",
-        callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<cpu_best<sz_rfind_best>>>(corpus));
+    auto reverse_call =
+        callable_for_substring_search<sz::rfind_matches_view, matcher_from_sz_find<cpu_best<sz_rfind_best>>>(corpus);
+    std::optional<row_t> const base_reverse = bench_unary(env, corpus, "sz_rfind_best", reverse_call);
     print(base_reverse);
 
     // Include LibC functionality
@@ -197,13 +197,13 @@ void bench_substring_search(environment_t const &env, corpus_t const &corpus) {
     print(bench_unary(env, corpus, "find<std::boyer_moore>", base_call,
                       callable_for_substring_search<sz::find_matches_view, matcher_bm_t>(corpus)),
           baseline_of(base));
-    print(bench_unary(env, corpus, "rfind<std::boyer_moore>", base_call,
+    print(bench_unary(env, corpus, "rfind<std::boyer_moore>", reverse_call,
                       callable_for_substring_search<sz::rfind_matches_view, rmatcher_bm_t>(corpus)),
           baseline_of(base_reverse));
     print(bench_unary(env, corpus, "find<std::boyer_moore_horspool>", base_call,
                       callable_for_substring_search<sz::find_matches_view, matcher_bmh_t>(corpus)),
           baseline_of(base));
-    print(bench_unary(env, corpus, "rfind<std::boyer_moore_horspool>", base_call,
+    print(bench_unary(env, corpus, "rfind<std::boyer_moore_horspool>", reverse_call,
                       callable_for_substring_search<sz::rfind_matches_view, rmatcher_bmh_t>(corpus)),
           baseline_of(base_reverse));
 #endif

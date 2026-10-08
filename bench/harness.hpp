@@ -251,6 +251,10 @@ struct device_backend_t {
     std::optional<std::size_t> multiprocessors, threads_per_multiprocessor;
     sz_status_t (*copy)(void *, void const *, sz_size_t, sz_stream_t) = nullptr;
     sz_size_t (*free_bytes)(sz_stream_t) = nullptr;
+
+    /** Whether results live in the device's own memory and come back through @c pinned, as
+     *  Metal's don't. */
+    bool separate() const noexcept { return device.allocate && pinned.allocate && copy; }
 };
 
 struct stream_t {
@@ -397,7 +401,7 @@ template <typename value_type_>
 using device_vector = vector<value_type_, device_alloc<value_type_>>;
 
 /**
- *  @brief Queues a copy of a device-resident buffer into @p destination on the default stream,
+ *  @brief Queues a copy of a device-resident buffer into @p destination on the backend's stream,
  *      which the caller joins.
  *  @param[out] destination At least as many elements as @p source holds; only that prefix is set.
  */
@@ -1178,11 +1182,13 @@ void stress_check(environment_t const &env, corpus_t const &corpus, std::string_
  *  @param[in] baseline Optional serial analog to stress-test the accelerated function against.
  *  @param[in] callable Nullary function taking no arguments and returning a @b call_result_t.
  *  @param[in] check_validator Optional function to validate the results of the benchmark.
+ *
+ *  A @p baseline or @p callable with a @c preprocess() member prepares its data there, once the
+ *  filter keeps the row, so a filtered-out row pays no setup.
  */
 template <                                                        //
     typename callable_type_,                                      //
     typename baseline_type_ = callable_no_op_t,                   //
-    typename preprocessing_type_ = callable_no_op_t,              //
     typename check_validator_type_ = std::equal_to<check_value_t> //
     >
 std::optional<row_t> bench_nullary(                   //
@@ -1190,11 +1196,11 @@ std::optional<row_t> bench_nullary(                   //
     std::string_view name,                            //
     baseline_type_ &&baseline,                        //
     callable_type_ &&callable,                        //
-    preprocessing_type_ &&preprocessing = preprocessing_type_ {},
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
     if (!env.settings.selects(name)) return std::nullopt;
-    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
+    if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
+    if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
         if (env.settings.stress == stress_t::check_k)
             stress_check(env, corpus, name, callable, baseline, check_validator);
@@ -1217,15 +1223,15 @@ std::optional<row_t> bench_nullary(                   //
  *  @param[in] name Name of the benchmark, which the filter matches.
  *  @param[in] baseline Optional serial analog to stress-test the accelerated function against.
  *  @param[in] callable Unary function from a @c std::size_t token index to a @b call_result_t.
- *  @param[in] preprocessing Optional function to pre-process the data before the calls.
  *  @param[in] check_validator Optional function to validate the results of the benchmark.
  *
- *  The token index is the call index masked to the largest power of two of tokens.
+ *  The token index is the call index masked to the largest power of two of tokens. A @p baseline
+ *  or @p callable with a @c preprocess() member prepares its data there, once the filter keeps the
+ *  row, so a filtered-out row pays no setup.
  */
 template <                                                        //
     typename callable_type_,                                      //
     typename baseline_type_ = callable_no_op_t,                   //
-    typename preprocessing_type_ = callable_no_op_t,              //
     typename check_validator_type_ = std::equal_to<check_value_t> //
     >
 std::optional<row_t> bench_unary(                     //
@@ -1233,11 +1239,11 @@ std::optional<row_t> bench_unary(                     //
     std::string_view name,                            //
     baseline_type_ &&baseline,                        //
     callable_type_ &&callable,                        //
-    preprocessing_type_ &&preprocessing = preprocessing_type_ {},
     check_validator_type_ &&check_validator = check_validator_type_ {}) {
 
     if (!env.settings.selects(name)) return std::nullopt;
-    if constexpr (!is_same_type<preprocessing_type_, callable_no_op_t>::value) preprocessing();
+    if constexpr (requires { baseline.preprocess(); }) baseline.preprocess();
+    if constexpr (requires { callable.preprocess(); }) callable.preprocess();
     if constexpr (!is_same_type<baseline_type_, callable_no_op_t>::value)
         if (env.settings.stress == stress_t::check_k)
             stress_check(env, corpus, name, callable, baseline, check_validator);

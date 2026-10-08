@@ -40,7 +40,7 @@ namespace ashvardanian::stringzilla::bench {
 
 void bench_utf8_uncased_fold(environment_t const &env, corpus_t const &corpus) {
     print(bench_unary(env, corpus, "sz_utf8_uncased_fold_best",
-                      utf8_uncased_fold_from_sz<cpu_best<sz_utf8_uncased_fold_best>> {corpus}));
+                      utf8_uncased_fold_from_sz {cpu_best<sz_utf8_uncased_fold_best>, corpus}));
 }
 
 void bench_utf8_uncased_search(environment_t const &env, corpus_t const &corpus) {
