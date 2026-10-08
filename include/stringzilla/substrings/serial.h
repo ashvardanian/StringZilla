@@ -315,7 +315,7 @@ typedef struct sz_substrings_bm25_t {
 
 /** A state id no state ever takes, marking an empty slot, an absent child and an
  *  unplaced state alike. */
-#define STRINGZILLA_SUBSTRINGS_NO_STATE ((sz_u32_t)0xFFFFFFFFu)
+static sz_u32_t const sz_substrings_no_state_k = 0xFFFFFFFFu;
 
 /** Independent transition chains one counting walk keeps in flight, so their loads overlap. */
 enum { sz_substrings_chains_serial_k = 8 };
@@ -739,10 +739,10 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_folded_span(s
  */
 typedef struct sz_substrings_trie_node_t {
 
-    /** Lowest-numbered child, or @ref STRINGZILLA_SUBSTRINGS_NO_STATE. */
+    /** Lowest-numbered child, or @ref sz_substrings_no_state_k. */
     sz_u32_t first_child;
 
-    /** Next child of this node's own parent, or @ref STRINGZILLA_SUBSTRINGS_NO_STATE. */
+    /** Next child of this node's own parent, or @ref sz_substrings_no_state_k. */
     sz_u32_t next_sibling;
 
     /** Needle ending exactly here, heading a list threaded through @c needle_next. */
@@ -757,7 +757,7 @@ typedef struct sz_substrings_trie_node_t {
     /** The failure state, always strictly shallower, so depth order finishes it first. */
     sz_u32_t failure;
 
-    /** Published double-array slot, or @ref STRINGZILLA_SUBSTRINGS_NO_STATE before
+    /** Published double-array slot, or @ref sz_substrings_no_state_k before
      *  packing places it. */
     sz_u32_t published;
 
@@ -809,7 +809,7 @@ typedef struct sz_substrings_builder_t {
     /** Double-array arena: owner of each slot. */
     sz_u32_t *check;
 
-    /** Which trie state each published slot names, or @ref STRINGZILLA_SUBSTRINGS_NO_STATE. */
+    /** Which trie state each published slot names, or @ref sz_substrings_no_state_k. */
     sz_u32_t *state_of_slot;
 
     /** One bit per slot; the only record of what the packing search has claimed. */
@@ -900,7 +900,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_grow_nodes_(sz_substrings_b
     sz_size_t const new_capacity = old_capacity ? old_capacity * 2 : 1024;
     sz_substrings_trie_node_t *grown;
     if (builder->nodes_count < old_capacity) return sz_success_k;
-    if (new_capacity >= (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
+    if (new_capacity >= (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
 
     grown = (sz_substrings_trie_node_t *)allocator->allocate(new_capacity * sizeof(sz_substrings_trie_node_t),
                                                              allocator->handle, stream);
@@ -920,13 +920,13 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_mint_(sz_substrings_builder
     sz_status_t const grown = sz_substrings_builder_grow_nodes_(builder);
     if (grown != sz_success_k) return grown;
     node = builder->nodes + builder->nodes_count;
-    node->first_child = STRINGZILLA_SUBSTRINGS_NO_STATE;
-    node->next_sibling = STRINGZILLA_SUBSTRINGS_NO_STATE;
-    node->output_head = STRINGZILLA_SUBSTRINGS_NO_STATE;
+    node->first_child = sz_substrings_no_state_k;
+    node->next_sibling = sz_substrings_no_state_k;
+    node->output_head = sz_substrings_no_state_k;
     node->output_own_count = 0;
     node->output_total_count = 0;
     node->failure = 0;
-    node->published = STRINGZILLA_SUBSTRINGS_NO_STATE;
+    node->published = sz_substrings_no_state_k;
     node->parent_byte = 0;
     node->output_total_offset = 0;
     *minted = (sz_u32_t)builder->nodes_count;
@@ -935,15 +935,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_mint_(sz_substrings_builder
 }
 
 /** Child of @p parent on @p byte among its literal edges, or
- *  @ref STRINGZILLA_SUBSTRINGS_NO_STATE if none. */
+ *  @ref sz_substrings_no_state_k if none. */
 STRINGZILLA_INLINE sz_u32_t sz_substrings_builder_child_(sz_substrings_builder_t const *builder, sz_u32_t parent,
                                                          sz_u8_t byte) {
     sz_u32_t child = builder->nodes[parent].first_child;
-    while (child != STRINGZILLA_SUBSTRINGS_NO_STATE) {
+    while (child != sz_substrings_no_state_k) {
         if (builder->nodes[child].parent_byte == byte) return child;
         child = builder->nodes[child].next_sibling;
     }
-    return STRINGZILLA_SUBSTRINGS_NO_STATE;
+    return sz_substrings_no_state_k;
 }
 
 /** Follows @p parent's @p byte edge, minting a state and threading it onto the sibling
@@ -953,7 +953,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_follow_(sz_substrings_build
     sz_u32_t minted;
     sz_status_t status;
     sz_u32_t const existing = sz_substrings_builder_child_(builder, parent, byte);
-    if (existing != STRINGZILLA_SUBSTRINGS_NO_STATE) {
+    if (existing != sz_substrings_no_state_k) {
         *child = existing;
         return sz_success_k;
     }
@@ -984,10 +984,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_add_output_(sz_substrings_b
                                     : 1;
     sz_size_t const source_ceiling = folded_match_bytes * contraction;
     sz_size_t const source_floor = sz_size_divide_round_up(folded_match_bytes, expansion);
-    if (folded_match_bytes > (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
+    if (folded_match_bytes > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
     // A folded walk snaps both ends of a match outward to whole codepoints, so a reported source span
     // reaches one rune past this ceiling. Refusing that much earlier keeps every staged length in 32 bits.
-    if (source_ceiling + (sz_size_t)sz_rune_4bytes_k > (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE)
+    if (source_ceiling + (sz_size_t)sz_rune_4bytes_k > (sz_size_t)sz_substrings_no_state_k)
         return sz_overflow_risk_k;
 
     builder->needle_folded_bytes[needle_index] = (sz_u32_t)folded_match_bytes;
@@ -1061,7 +1061,7 @@ STRINGZILLA_INLINE void sz_substrings_builder_order_band_(sz_substrings_builder_
     for (index = band_first; index < band_last; ++index) {
         sz_u32_t child = builder->nodes[builder->order[index]].first_child;
         sz_size_t out_degree = 0;
-        for (; child != STRINGZILLA_SUBSTRINGS_NO_STATE; child = builder->nodes[child].next_sibling) ++out_degree;
+        for (; child != sz_substrings_no_state_k; child = builder->nodes[child].next_sibling) ++out_degree;
         ++histogram[out_degree];
     }
     // Suffix-summed, so the highest degree claims the lowest positions in the band.
@@ -1077,7 +1077,7 @@ STRINGZILLA_INLINE void sz_substrings_builder_order_band_(sz_substrings_builder_
         sz_u32_t const state = builder->order_scratch[index];
         sz_u32_t child = builder->nodes[state].first_child;
         sz_size_t out_degree = 0;
-        for (; child != STRINGZILLA_SUBSTRINGS_NO_STATE; child = builder->nodes[child].next_sibling) ++out_degree;
+        for (; child != sz_substrings_no_state_k; child = builder->nodes[child].next_sibling) ++out_degree;
         builder->order[histogram[out_degree]++] = state;
     }
 }
@@ -1090,7 +1090,7 @@ STRINGZILLA_INLINE sz_u32_t sz_substrings_builder_chase_(sz_substrings_builder_t
         sz_u32_t child;
         if (current == 0) return builder->root_row[byte];
         child = sz_substrings_builder_child_(builder, current, byte);
-        if (child != STRINGZILLA_SUBSTRINGS_NO_STATE) return child;
+        if (child != sz_substrings_no_state_k) return child;
         current = builder->nodes[current].failure;
     }
 }
@@ -1118,7 +1118,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substring
 
     // Every chase ends at the root's dense row, so it has to exist before the first of them.
     for (byte = 0; byte != STRINGZILLA_U8_MAX + 1; ++byte) builder->root_row[byte] = 0;
-    for (child = builder->nodes[0].first_child; child != STRINGZILLA_SUBSTRINGS_NO_STATE;
+    for (child = builder->nodes[0].first_child; child != sz_substrings_no_state_k;
          child = builder->nodes[child].next_sibling)
         builder->root_row[builder->nodes[child].parent_byte] = child;
 
@@ -1129,7 +1129,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_link_failures_(sz_substring
         for (index = band_first; index < band_last; ++index) {
             sz_u32_t const parent = builder->order[index];
             sz_u32_t const parent_failure = builder->nodes[parent].failure;
-            for (child = builder->nodes[parent].first_child; child != STRINGZILLA_SUBSTRINGS_NO_STATE;
+            for (child = builder->nodes[parent].first_child; child != sz_substrings_no_state_k;
                  child = builder->nodes[child].next_sibling) {
                 // A depth-one state fails to the root; anything deeper chases its parent's failure link.
                 builder->nodes[child].failure = parent == 0
@@ -1162,7 +1162,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
     sz_u64_t *occupied;
     sz_size_t slot, word;
     if (minimum <= old_capacity) return sz_success_k;
-    if (new_capacity >= (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
+    if (new_capacity >= (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
 
     base = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
     check = (sz_u32_t *)allocator->allocate(new_capacity * sizeof(sz_u32_t), allocator->handle, stream);
@@ -1190,8 +1190,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
     // The bitmap is the only record of what is claimed, so a stale set bit would hide a free slot.
     for (word = old_words; word < new_words; ++word) occupied[word] = 0;
     for (slot = old_capacity; slot < new_capacity; ++slot)
-        base[slot] = 0, check[slot] = STRINGZILLA_SUBSTRINGS_NO_STATE,
-        state_of_slot[slot] = STRINGZILLA_SUBSTRINGS_NO_STATE;
+        base[slot] = 0, check[slot] = sz_substrings_no_state_k,
+        state_of_slot[slot] = sz_substrings_no_state_k;
 
     builder->base = base, builder->check = check, builder->state_of_slot = state_of_slot;
     builder->occupied = occupied, builder->slots_capacity = new_capacity;
@@ -1255,11 +1255,11 @@ STRINGZILLA_INLINE sz_bool_t sz_substrings_builder_row_fits_(sz_substrings_build
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_hot_children_(sz_substrings_builder_t *builder,
                                                                         sz_u32_t parent) {
     sz_u32_t child;
-    for (child = builder->nodes[parent].first_child; child != STRINGZILLA_SUBSTRINGS_NO_STATE;
+    for (child = builder->nodes[parent].first_child; child != sz_substrings_no_state_k;
          child = builder->nodes[child].next_sibling) {
         sz_size_t assigned;
         sz_status_t status;
-        if (builder->nodes[child].published != STRINGZILLA_SUBSTRINGS_NO_STATE) continue;
+        if (builder->nodes[child].published != sz_substrings_no_state_k) continue;
         status = sz_substrings_builder_next_free_(builder, builder->lowest_free_cursor, &assigned);
         if (status != sz_success_k) return status;
         sz_substrings_builder_claim_(builder, assigned);
@@ -1289,10 +1289,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_cold_children_(sz_subs
     sz_size_t first_free, candidate, rejected = 0, quarter;
     sz_status_t status;
     sz_u32_t child = builder->nodes[parent].first_child;
-    if (child == STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_success_k;
+    if (child == sz_substrings_no_state_k) return sz_success_k;
 
     sz_byteset_init(&child_mask);
-    for (; child != STRINGZILLA_SUBSTRINGS_NO_STATE; child = builder->nodes[child].next_sibling) {
+    for (; child != sz_substrings_no_state_k; child = builder->nodes[child].next_sibling) {
         sz_byteset_add_u8(&child_mask, builder->nodes[child].parent_byte);
         child_of_byte[builder->nodes[child].parent_byte] = child;
     }
@@ -1337,7 +1337,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_cold_children_(sz_subs
                 builder->check[slot] = builder->nodes[parent].published;
                 builder->state_of_slot[slot] = placed;
                 // A tree gives every state exactly one parent edge, so no state is ever claimed twice.
-                sz_assert_(builder->nodes[placed].published == STRINGZILLA_SUBSTRINGS_NO_STATE &&
+                sz_assert_(builder->nodes[placed].published == sz_substrings_no_state_k &&
                            "One parent edge per state");
                 builder->nodes[placed].published = (sz_u32_t)slot;
             }
@@ -1402,7 +1402,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_size_outputs_(sz_substrings
         sz_substrings_trie_node_t *const node = builder->nodes + state;
         sz_size_t const inherited = state == 0 ? 0 : (sz_size_t)builder->nodes[node->failure].output_total_count;
         sz_size_t const total = (sz_size_t)node->output_own_count + inherited;
-        if (total > (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
+        if (total > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
         node->output_total_count = (sz_u32_t)total;
         node->output_total_offset = running;
         running += total;
@@ -1489,7 +1489,7 @@ STRINGZILLA_INLINE void sz_substrings_publish_outputs_(sz_substrings_builder_t c
         sz_size_t written = node->output_own_count, position;
         sz_u32_t needle = node->output_head;
         // The per-state list is most-recent-first, so filling it backwards restores insertion order.
-        for (; needle != STRINGZILLA_SUBSTRINGS_NO_STATE; needle = builder->needle_next[needle]) {
+        for (; needle != sz_substrings_no_state_k; needle = builder->needle_next[needle]) {
             --written;
             destination[written].needle_index = needle;
             destination[written].folded_match_bytes = builder->needle_folded_bytes[needle];
@@ -1543,7 +1543,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_bui
     if (builder->hot_count == 0) return sz_success_k;
 
     for (column = 0; column != builder->classes_count; ++column) hot_rows[column] = builder->nodes[0].published;
-    for (child = builder->nodes[0].first_child; child != STRINGZILLA_SUBSTRINGS_NO_STATE;
+    for (child = builder->nodes[0].first_child; child != sz_substrings_no_state_k;
          child = builder->nodes[child].next_sibling)
         hot_rows[builder->byte_to_class[builder->nodes[child].parent_byte]] = builder->nodes[child].published;
 
@@ -1559,7 +1559,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_publish_hot_rows_(sz_substrings_bui
         inherited = hot_rows + inherited_index * builder->classes_count;
         row = hot_rows + hot_index * builder->classes_count;
         for (column = 0; column != builder->classes_count; ++column) row[column] = inherited[column];
-        for (child = builder->nodes[state].first_child; child != STRINGZILLA_SUBSTRINGS_NO_STATE;
+        for (child = builder->nodes[state].first_child; child != sz_substrings_no_state_k;
              child = builder->nodes[child].next_sibling)
             row[builder->byte_to_class[builder->nodes[child].parent_byte]] = builder->nodes[child].published;
     }
@@ -1642,7 +1642,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
         if (!length) return sz_unexpected_dimensions_k;
         longest_needle = sz_max_of_two(longest_needle, length);
     }
-    if (needles->count > (sz_size_t)STRINGZILLA_SUBSTRINGS_NO_STATE) return sz_overflow_risk_k;
+    if (needles->count > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
 
     builder.needle_next = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle, stream);
     builder.needle_folded_bytes = (sz_u32_t *)allocator->allocate(needles->count * sizeof(sz_u32_t), allocator->handle,
@@ -1667,7 +1667,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
     for (needle_index = 0; needle_index != needles->count && status == sz_success_k; ++needle_index) {
         sz_cptr_t const start = needles->get_start(needles->handle, needle_index);
         sz_size_t const length = needles->get_length(needles->handle, needle_index);
-        builder.needle_next[needle_index] = STRINGZILLA_SUBSTRINGS_NO_STATE;
+        builder.needle_next[needle_index] = sz_substrings_no_state_k;
         builder.needle_folded_bytes[needle_index] = 0;
         status = case_sensitivity == sz_substrings_uncased_k
                      ? sz_substrings_builder_insert_uncased_(&builder, start, length, (sz_u32_t)needle_index)
@@ -1727,10 +1727,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
             // The packing arena can be narrower than the published bound, and every slot past it is free by
             // construction - no base, no owner, and a failure link back to the root.
             sz_u32_t const state = slot < builder.slots_capacity ? builder.state_of_slot[slot]
-                                                                 : STRINGZILLA_SUBSTRINGS_NO_STATE;
+                                                                 : sz_substrings_no_state_k;
             base[slot] = slot < builder.slots_capacity ? builder.base[slot] : 0;
-            check[slot] = slot < builder.slots_capacity ? builder.check[slot] : STRINGZILLA_SUBSTRINGS_NO_STATE;
-            if (state == STRINGZILLA_SUBSTRINGS_NO_STATE) {
+            check[slot] = slot < builder.slots_capacity ? builder.check[slot] : sz_substrings_no_state_k;
+            if (state == sz_substrings_no_state_k) {
                 outputs_counts[slot] = 0, outputs_offsets[slot] = 0;
                 fail[slot] = 0;
                 continue;

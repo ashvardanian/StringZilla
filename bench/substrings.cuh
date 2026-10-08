@@ -333,7 +333,7 @@ struct substrings_counts_from_sz {
     sz_sequence_t haystacks;
 
     /** @b [haystacks], what a round fills, on a device with memory of its own. */
-    std::optional<device_vector<sz_size_t>> device_counts;
+    device_vector<sz_size_t> device_counts;
 
     /** @b [haystacks], what the host checks. */
     pinned_vector<sz_size_t> counts;
@@ -348,17 +348,17 @@ struct substrings_counts_from_sz {
             corpus.views.size(), 0,
             pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
         if (!separate) return;
-        device_counts.emplace(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
-        if (device_counts->resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+        device_counts = device_vector<sz_size_t>(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
+        if (device_counts.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the counts.");
     }
 
     call_result_t operator()(std::size_t) {
-        if (counts_kernel(&engine.engine, &haystacks, device_counts ? device_counts->data() : counts.data(), 1,
+        if (counts_kernel(&engine.engine, &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(), 1,
                           engine.stream) != sz_success_k)
             throw std::runtime_error("The counting round failed.");
-        if (device_counts &&
-            copy_device_to_host(*device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
+        if (device_counts.size() != 0 &&
+            copy_device_to_host(device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
             throw std::runtime_error("The counts would not come back.");
         engine.join();
         check_value_t mixed = 0;
@@ -485,7 +485,7 @@ struct substrings_bm25_from_sz {
     unified_vector<sz_f32_t> weights;
 
     /** @b [haystacks], what a round fills, on a device with memory of its own. */
-    std::optional<device_vector<sz_f32_t>> device_scores;
+    device_vector<sz_f32_t> device_scores;
 
     /** @b [haystacks], what the host checks. */
     pinned_vector<sz_f32_t> scores;
@@ -504,17 +504,17 @@ struct substrings_bm25_from_sz {
             corpus.views.size(), 0.0f,
             pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
         if (!separate) return;
-        device_scores.emplace(device_alloc<sz_f32_t>(runtime->get().device, engine.stream));
-        if (device_scores->resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+        device_scores = device_vector<sz_f32_t>(device_alloc<sz_f32_t>(runtime->get().device, engine.stream));
+        if (device_scores.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the scores.");
     }
 
     call_result_t operator()(std::size_t) {
         if (scores_kernel(&engine.engine, &haystacks, nullptr, &parameters, weights.data(),
-                          device_scores ? device_scores->data() : scores.data(), 1, engine.stream) != sz_success_k)
+                          device_scores.size() == 0 ? scores.data() : device_scores.data(), 1, engine.stream) != sz_success_k)
             throw std::runtime_error("The scoring round failed.");
-        if (device_scores &&
-            copy_device_to_host(*device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
+        if (device_scores.size() != 0 &&
+            copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
             throw std::runtime_error("The scores would not come back.");
         engine.join();
         // Backends round their sums differently, so the check is which haystacks scored rather than how much.

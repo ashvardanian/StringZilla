@@ -1342,7 +1342,7 @@ struct levenshtein_distances_from_sz {
     /** Host lengths avoid migrating device tape offsets during the timed readback. */
     std::span<sz_string_view_t const> fixed_views;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
-    std::optional<device_vector<sz_size_t>> device_distances;
+    device_vector<sz_size_t> device_distances;
     pinned_vector<sz_size_t> answers;
     sz_kernel_levenshtein_engine_init_t init;
     sz_levenshtein_symbol_t symbol;
@@ -1366,7 +1366,11 @@ struct levenshtein_distances_from_sz {
                                   std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(levenshtein_check_value), source(candidates),
           query_views(queries.begin(), queries.end()), fixed_views(candidate_views), runtime(runtime), init(init),
-          symbol(symbol) {}
+          symbol(symbol) {
+        if (runtime)
+            device_distances = device_vector<sz_size_t>(
+                device_alloc<sz_size_t>(runtime->get().device, runtime->get().stream));
+    }
 
     ~levenshtein_distances_from_sz() noexcept {
         sz_levenshtein_engine_free(&engine, runtime ? runtime->get().stream : nullptr);
@@ -1388,11 +1392,11 @@ struct levenshtein_distances_from_sz {
         }
         else candidates = std::get<sz_sequence_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, runtime ? device_distances->data() : answers.data(), candidates.count,
+        if (function(&engine, &candidates, runtime ? device_distances.data() : answers.data(), candidates.count,
                      stream) != sz_success_k)
             throw std::runtime_error("The cross-product entry failed.");
         if (runtime) {
-            if (copy_device_to_host(*device_distances, std::span<sz_size_t>(answers), runtime->get()) != sz_success_k ||
+            if (copy_device_to_host(device_distances, std::span<sz_size_t>(answers), runtime->get()) != sz_success_k ||
                 sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
                 throw std::runtime_error("The answers would not come back.");
         }
@@ -1418,11 +1422,8 @@ struct levenshtein_distances_from_sz {
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
         answers = pinned_vector<sz_size_t>(
             count, 0, pinned_alloc<sz_size_t>(runtime ? runtime->get().pinned : allocator, stream));
-        if (runtime) {
-            device_distances.emplace(device_alloc<sz_size_t>(runtime->get().device, stream));
-            if (device_distances->resize_uninitialized(count) != sz::status_t::success_k)
-                throw std::runtime_error("The device would not hold the distances.");
-        }
+        if (runtime && device_distances.resize_uninitialized(count) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the distances.");
         sz_sequence_t queries {};
         sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
         if (init(&engine, &queries, symbol, &allocator, stream) != sz_success_k) {
@@ -1510,11 +1511,7 @@ struct overlap_corpus_t {
         sz_sequence_from_string_views(views.data(), views.size(), &result);
         return result;
     }
-    std::size_t bytes() const noexcept {
-        std::size_t total = 0;
-        for (sz_string_view_t const &view : views) total += view.length;
-        return total;
-    }
+    std::size_t bytes() const noexcept { return candidates.view().tape_total_bytes(); }
 };
 
 inline check_value_t overlap_check_value_bits_(std::span<sz_f32_t const> scores) {
@@ -1548,7 +1545,7 @@ struct scores_from_sz {
 
     /** Host lengths keep timed metrics from migrating device tape offsets. */
     std::span<sz_string_view_t const> fixed_views;
-    std::optional<device_vector<sz_f32_t>> device_scores;
+    device_vector<sz_f32_t> device_scores;
     pinned_vector<sz_f32_t> scores;
     std::size_t width;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
@@ -1566,7 +1563,11 @@ struct scores_from_sz {
                    std::size_t width, sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
                    std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(overlap_check_value_quantized_), source(candidates), fixed_views(candidate_views),
-          width(width), runtime(runtime), init(init), query(query) {}
+          width(width), runtime(runtime), init(init), query(query) {
+        if (runtime && runtime->get().separate())
+            device_scores = device_vector<sz_f32_t>(
+                device_alloc<sz_f32_t>(runtime->get().device, runtime->get().stream));
+    }
 
     ~scores_from_sz() noexcept { sz_overlap_engine_free(&engine, runtime ? runtime->get().stream : nullptr); }
     scores_from_sz(scores_from_sz const &) = delete;
@@ -1586,11 +1587,11 @@ struct scores_from_sz {
         }
         else candidates = std::get<sz_sequence_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, device_scores ? device_scores->data() : scores.data(), scores.size(), 1,
+        if (function(&engine, &candidates, device_scores.size() == 0 ? scores.data() : device_scores.data(), scores.size(), 1,
                      stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
-        if (device_scores &&
-            copy_device_to_host(*device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
+        if (device_scores.size() != 0 &&
+            copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
             throw std::runtime_error("The scores would not come back.");
         if (runtime && sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
             throw std::runtime_error("The GPU round did not finish.");
@@ -1620,11 +1621,8 @@ struct scores_from_sz {
         bool const separate = runtime && runtime->get().separate();
         scores = pinned_vector<sz_f32_t>(candidates, 0.0f,
                                          pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : allocator, stream));
-        if (separate) {
-            device_scores.emplace(device_alloc<sz_f32_t>(runtime->get().device, stream));
-            if (device_scores->resize_uninitialized(candidates) != sz::status_t::success_k)
-                throw std::runtime_error("The device would not hold the scores.");
-        }
+        if (separate && device_scores.resize_uninitialized(candidates) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the scores.");
         if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_sequence_t>(source).count : 0, &allocator,
                  stream) != sz_success_k) {
             sz_overlap_engine_free(&engine, stream);
@@ -1977,14 +1975,21 @@ inline sz_kernel_bytesum_t output_checksum_kernel() noexcept {
     return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
 }
 
+/** Gives the device buffers the allocators of @p backend, which they keep empty until staged. */
+inline void utf8_outputs_allocators_(device_backend_t const &backend, device_vector<char> &device_text,
+                                     device_vector<char> &device_output, device_vector<sz_size_t> &device_length) {
+    device_text = device_vector<char>(device_alloc<char>(backend.device, backend.stream));
+    device_output = device_vector<char>(device_alloc<char>(backend.device, backend.stream));
+    device_length = device_vector<sz_size_t>(device_alloc<sz_size_t>(backend.device, backend.stream));
+}
+
 /** Sizes @p output for @p growth times the longest token and, given a @p runtime, stages the corpus
  *  and the outputs in the device's own memory. */
 inline void utf8_outputs_prepare_(corpus_t const &corpus,
                                   std::optional<std::reference_wrapper<device_backend_t const>> runtime,
                                   std::size_t growth, pinned_vector<char> &output,
-                                  std::optional<device_vector<char>> &device_text,
-                                  std::optional<device_vector<char>> &device_output,
-                                  std::optional<device_vector<sz_size_t>> &device_length) {
+                                  device_vector<char> &device_text, device_vector<char> &device_output,
+                                  device_vector<sz_size_t> &device_length) {
     std::size_t longest = 0;
     for (token_view_t const &token : corpus.tokens) longest = std::max(longest, token.size());
     std::size_t const capacity = longest * growth;
@@ -1997,13 +2002,10 @@ inline void utf8_outputs_prepare_(corpus_t const &corpus,
     sz_stream_t const stream = backend ? backend->stream : nullptr;
     output = pinned_vector<char>(capacity, 0, pinned_alloc<char>(backend ? backend->pinned : heap, stream));
     if (!backend) return;
-    device_text.emplace(device_alloc<char>(backend->device, stream));
-    device_output.emplace(device_alloc<char>(backend->device, stream));
-    device_length.emplace(device_alloc<sz_size_t>(backend->device, stream));
-    if (device_text->resize_uninitialized(corpus.dataset.size()) != sz::status_t::success_k ||
-        device_output->resize_uninitialized(capacity) != sz::status_t::success_k ||
-        device_length->resize_uninitialized(1) != sz::status_t::success_k ||
-        backend->copy(device_text->data(), corpus.dataset.data(), corpus.dataset.size(), stream) != sz_success_k ||
+    if (device_text.resize_uninitialized(corpus.dataset.size()) != sz::status_t::success_k ||
+        device_output.resize_uninitialized(capacity) != sz::status_t::success_k ||
+        device_length.resize_uninitialized(1) != sz::status_t::success_k ||
+        backend->copy(device_text.data(), corpus.dataset.data(), corpus.dataset.size(), stream) != sz_success_k ||
         sz_stream_synchronize_best(backend->capabilities, stream) != sz_success_k)
         throw std::runtime_error("The device would not hold the corpus.");
 }
@@ -2029,8 +2031,8 @@ struct utf8_norm_from_sz {
     function_type_ function;
     corpus_t const &corpus;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
-    std::optional<device_vector<char>> device_text, device_output;
-    std::optional<device_vector<sz_size_t>> device_length;
+    device_vector<char> device_text, device_output;
+    device_vector<sz_size_t> device_length;
 
     /** Room for the worst single-codepoint decomposition, 18 times the longest token. */
     pinned_vector<char> output;
@@ -2038,26 +2040,28 @@ struct utf8_norm_from_sz {
 
     utf8_norm_from_sz(function_type_ function, corpus_t const &corpus,
                       std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
-        : function(function), corpus(corpus), runtime(runtime) {}
+        : function(function), corpus(corpus), runtime(runtime) {
+        if (runtime) utf8_outputs_allocators_(runtime->get(), device_text, device_output, device_length);
+    }
 
     /** Sizes the output and stages the corpus on the device, once the filter keeps the row. */
     void preprocess() {
-        if (!output.empty() || device_text) return;
+        if (!output.empty() || device_text.size() != 0) return;
         utf8_outputs_prepare_(corpus, runtime, 18, output, device_text, device_output, device_length);
     }
 
     call_result_t operator()(std::size_t token_index) {
         token_view_t const token = corpus.tokens[token_index];
-        sz_cptr_t const source = device_text ? device_text->data() + (token.data() - corpus.dataset.data())
-                                             : token.data();
+        sz_cptr_t const source = device_text.size() == 0 ? token.data()
+                                                     : device_text.data() + (token.data() - corpus.dataset.data());
         sz_size_t length = 0;
-        if (function(source, token.size(), sz_normal_form_nfc_k, device_output ? device_output->data() : output.data(),
-                     device_length ? device_length->data() : &length,
+        if (function(source, token.size(), sz_normal_form_nfc_k, device_output.size() == 0 ? output.data() : device_output.data(),
+                     device_length.size() == 0 ? &length : device_length.data(),
                      runtime ? runtime->get().stream : nullptr) != sz_success_k)
             throw std::runtime_error("The normalization failed.");
-        std::span<char const> const normalized = device_output ? utf8_outputs_fetch_(runtime->get(), *device_output,
-                                                                                     *device_length, output)
-                                                               : std::span<char const>(output.data(), length);
+        std::span<char const> const normalized =
+            device_output.size() == 0 ? std::span<char const>(output.data(), length)
+                                  : utf8_outputs_fetch_(runtime->get(), device_output, device_length, output);
         sz_u64_t sum = 0;
         checksum(normalized.data(), normalized.size(), &sum, nullptr);
         return {token.size(), static_cast<check_value_t>(sum)};
@@ -2117,8 +2121,8 @@ struct utf8_uncased_fold_from_sz {
     function_type_ function;
     corpus_t const &corpus;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
-    std::optional<device_vector<char>> device_text, device_output;
-    std::optional<device_vector<sz_size_t>> device_length;
+    device_vector<char> device_text, device_output;
+    device_vector<sz_size_t> device_length;
 
     /** Room for the widest fold, three times the longest token. */
     pinned_vector<char> output;
@@ -2126,26 +2130,28 @@ struct utf8_uncased_fold_from_sz {
 
     utf8_uncased_fold_from_sz(function_type_ function, corpus_t const &corpus,
                               std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
-        : function(function), corpus(corpus), runtime(runtime) {}
+        : function(function), corpus(corpus), runtime(runtime) {
+        if (runtime) utf8_outputs_allocators_(runtime->get(), device_text, device_output, device_length);
+    }
 
     /** Sizes the output and stages the corpus on the device, once the filter keeps the row. */
     void preprocess() {
-        if (!output.empty() || device_text) return;
+        if (!output.empty() || device_text.size() != 0) return;
         utf8_outputs_prepare_(corpus, runtime, 3, output, device_text, device_output, device_length);
     }
 
     call_result_t operator()(std::size_t token_index) {
         token_view_t const token = corpus.tokens[token_index];
-        sz_cptr_t const source = device_text ? device_text->data() + (token.data() - corpus.dataset.data())
-                                             : token.data();
+        sz_cptr_t const source = device_text.size() == 0 ? token.data()
+                                                     : device_text.data() + (token.data() - corpus.dataset.data());
         sz_size_t length = 0;
-        if (function(source, token.size(), device_output ? device_output->data() : output.data(),
-                     device_length ? device_length->data() : &length,
+        if (function(source, token.size(), device_output.size() == 0 ? output.data() : device_output.data(),
+                     device_length.size() == 0 ? &length : device_length.data(),
                      runtime ? runtime->get().stream : nullptr) != sz_success_k)
             throw std::runtime_error("The case folding failed.");
-        std::span<char const> const folded = device_output ? utf8_outputs_fetch_(runtime->get(), *device_output,
-                                                                                 *device_length, output)
-                                                           : std::span<char const>(output.data(), length);
+        std::span<char const> const folded =
+            device_output.size() == 0 ? std::span<char const>(output.data(), length)
+                                  : utf8_outputs_fetch_(runtime->get(), device_output, device_length, output);
         sz_u64_t sum = 0;
         checksum(folded.data(), folded.size(), &sum, nullptr);
         return {token.size(), static_cast<check_value_t>(sum)};
