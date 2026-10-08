@@ -24,6 +24,9 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
 #if STRINGZILLA_TARGET_NEON
         (sz_kernel_punned_t)&sz_substrings_engine_init_neon,
 #endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_engine_init_sve2,
+#endif
 #if STRINGZILLA_TARGET_RVV
         (sz_kernel_punned_t)&sz_substrings_engine_init_rvv,
 #endif
@@ -61,8 +64,9 @@ static sz_capability_kernels_t const *sz_substrings_engine_init_capabilities(voi
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
-             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
-             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -83,6 +87,9 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         (sz_kernel_punned_t)&sz_substrings_counts_neon,
+#endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_counts_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
         (sz_kernel_punned_t)&sz_substrings_counts_rvv,
@@ -121,8 +128,9 @@ static sz_capability_kernels_t const *sz_substrings_counts_capabilities(void) {
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
-             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
-             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -143,6 +151,9 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         (sz_kernel_punned_t)&sz_substrings_find_neon,
+#endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_find_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
         (sz_kernel_punned_t)&sz_substrings_find_rvv,
@@ -181,8 +192,9 @@ static sz_capability_kernels_t const *sz_substrings_find_capabilities(void) {
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
-             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
-             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -203,6 +215,9 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
 #endif
 #if STRINGZILLA_TARGET_NEON
         (sz_kernel_punned_t)&sz_substrings_replace_neon,
+#endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_replace_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
         (sz_kernel_punned_t)&sz_substrings_replace_rvv,
@@ -241,8 +256,9 @@ static sz_capability_kernels_t const *sz_substrings_replace_capabilities(void) {
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
-             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
-             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -263,6 +279,9 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
 #endif
 #if STRINGZILLA_TARGET_NEON
         (sz_kernel_punned_t)&sz_substrings_bm25_scores_neon,
+#endif
+#if STRINGZILLA_TARGET_SVE2
+        (sz_kernel_punned_t)&sz_substrings_bm25_scores_sve2,
 #endif
 #if STRINGZILLA_TARGET_RVV
         (sz_kernel_punned_t)&sz_substrings_bm25_scores_rvv,
@@ -301,8 +320,9 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON |
-             sz_cap_rvv_k * STRINGZILLA_TARGET_RVV | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
-             sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
+             sz_cap_sve2_k * STRINGZILLA_TARGET_SVE2 | sz_cap_rvv_k * STRINGZILLA_TARGET_RVV |
+             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_loongsonasx_k * STRINGZILLA_TARGET_LOONGSONASX |
+             sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA | sz_cap_hopper_k * STRINGZILLA_TARGET_HOPPER, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},

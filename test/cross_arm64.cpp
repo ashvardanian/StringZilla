@@ -258,6 +258,17 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_hash_equivalence_sve2",
           [](test_context_t &context) { check_bytesum_equivalence_(context, sz_bytesum_sve2); });
 
+    constexpr substrings_tier_t substrings_sve2 {
+        .init = sz_substrings_engine_init_sve2,
+        .counts = sz_substrings_counts_sve2,
+        .find = sz_substrings_find_sve2,
+        .replace = sz_substrings_replace_sve2,
+        .bm25_scores = sz_substrings_bm25_scores_sve2,
+    };
+    check("test_substrings_unit_sve2", [&] { check_substrings_unit_(substrings_sve2); });
+    check("test_substrings_equivalence_sve2",
+          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_sve2); });
+
     constexpr utf8_runes_backend_t utf8_runes_sve2 {"sve2", sz_utf8_count_sve2, sz_utf8_seek_sve2, sz_utf8_decode_sve2};
     check("test_utf8_runes_unit_sve2", [&] { check_utf8_runes_unit_(utf8_runes_sve2); });
     check("test_utf8_runes_safety_sve2",
