@@ -181,6 +181,18 @@ void test_find_unit() {
     verify(empty_string.rfind("") == 0);
     verify(empty_string.contains(""));
 
+    sz::string_view const bounded("abc");
+    for (std::size_t skip : {bounded.size() + 1, sz::string_view::npos, std::numeric_limits<std::size_t>::max()}) {
+        verify(bounded.find("", skip) == sz::string_view::npos);
+        verify(bounded.find("a", skip) == sz::string_view::npos);
+        verify(bounded.find('a', skip) == sz::string_view::npos);
+        verify(bounded.find("a", skip, 1) == sz::string_view::npos);
+        verify(bounded.find_first_of("a", skip) == sz::string_view::npos);
+        verify(bounded.find_first_not_of("a", skip) == sz::string_view::npos);
+    }
+    verify(bounded.find("", bounded.size()) == bounded.size());
+    verify(bounded.find('a', bounded.size()) == sz::string_view::npos);
+
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
