@@ -205,7 +205,9 @@ def cli_run_tests(project_dir: Optional[str] = None) -> None:
     subprocess.check_call([sys.executable, "-m", "pytest", *arguments])  # noqa: S603
 
 
-def cli_check_wheels(wheel_dir: str, required: List[str]) -> None:
+def cli_check_wheels(
+    wheel_dir: str, required: list[str], python_versions: list[str] | None = None, version: str | None = None
+) -> None:
     """Refuse a release that lost a core platform, while tolerating the long tail.
 
     The publish jobs run on `always()` so one flaky emulated leg cannot hold a release. That also
@@ -213,6 +215,7 @@ def cli_check_wheels(wheel_dir: str, required: List[str]) -> None:
 
     - Emulated arches, `musllinux` and Windows-on-Arm are expendable and may be missing.
     - Every glob in `required` must match at least one wheel filename, or this raises.
+    - With `python_versions`, require every Python ABI on every core platform at `version`.
 
     Globs rather than substrings because the platform tag carries a version the caller should not
     have to spell out: a `manylinux` x86 wheel is tagged `manylinux_2_17_x86_64`, so the pattern
@@ -220,6 +223,16 @@ def cli_check_wheels(wheel_dir: str, required: List[str]) -> None:
     """
     from fnmatch import fnmatch
 
+    if python_versions is not None:
+        if not python_versions:
+            raise ValueError("at least one Python version is required")
+        if not version:
+            raise ValueError("a release version is required when checking Python coverage")
+        required = [
+            f"stringzilla-{version}-cp{python_version.rstrip('t')}-cp{python_version}-{platform}"
+            for python_version in python_versions
+            for platform in required
+        ]
     wheels = sorted(Path(wheel_dir).glob("*.whl"))
     missing = []
     for pattern in required:
@@ -253,6 +266,8 @@ def _main(argv: List[str]) -> int:
     parser_sdists.add_argument("--outdir", default="dist", help="Output directory for sdists (default: dist)")
 
     parser_check = sub.add_parser("check-wheels", help="Fail if a core platform produced no wheel")
+    parser_check.add_argument("--python-versions", help="JSON array of CPython build identifiers")
+    parser_check.add_argument("--version", help="Release version whose wheels must be present")
     parser_check.add_argument("--wheel-dir", default="dist", help="Directory holding the wheels (default: dist)")
     parser_check.add_argument(
         "required", nargs="+", help="Globs a wheel filename must match, e.g. '*win_amd64*' (quote them)"
@@ -269,7 +284,10 @@ def _main(argv: List[str]) -> int:
         cli_build_sdists(namespace.outdir)
         return 0
     if namespace.cmd == "check-wheels":
-        cli_check_wheels(namespace.wheel_dir, namespace.required)
+        import json
+
+        python_versions = json.loads(namespace.python_versions) if namespace.python_versions else None
+        cli_check_wheels(namespace.wheel_dir, namespace.required, python_versions, namespace.version)
         return 0
     return 2
 
