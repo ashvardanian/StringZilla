@@ -181,6 +181,17 @@ void test_find_unit() {
     verify(empty_string.rfind("") == 0);
     verify(empty_string.contains(""));
 
+    sz::string_view const bounded("abcabc");
+    for (std::size_t until : {std::size_t(0), std::size_t(2), std::size_t(3), bounded.size(), bounded.size() + 1,
+                              sz::string_view::npos, std::numeric_limits<std::size_t>::max()}) {
+        verify(bounded.rfind("abc", until) == (until < 3 ? 0 : 3));
+        verify(bounded.rfind('c', until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.find_last_of("c", until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.find_last_not_of("ab", until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.rfind("", until) == std::min(until, bounded.size()));
+        verify(bounded.rfind("abcabcx", until) == sz::string_view::npos);
+    }
+
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
