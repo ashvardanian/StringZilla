@@ -280,6 +280,7 @@ class basic_byteset {
         }
     }
 
+#if !SZ_AVOID_STL
     template <std::size_t count_characters>
     explicit sz_constexpr_if_cpp14 basic_byteset(std::array<char_type, count_characters> const &chars) noexcept
         : basic_byteset() {
@@ -289,6 +290,7 @@ class basic_byteset {
             bitset_._u64s[sz_bitcast_(sz_u8_t, c) >> 6] |= (1ull << (sz_bitcast_(sz_u8_t, c) & 63u));
         }
     }
+#endif
 
     sz_constexpr_if_cpp14 basic_byteset(basic_byteset const &other) noexcept : bitset_(other.bitset_) {}
     sz_constexpr_if_cpp14 basic_byteset &operator=(basic_byteset const &other) noexcept {
@@ -358,9 +360,11 @@ class basic_look_up_table {
 
     basic_look_up_table() noexcept { memset(&lut_[0], 0, bytes_k); }
     explicit basic_look_up_table(char_type const (&chars)[size_k]) noexcept { memcpy(&lut_[0], chars, bytes_k); }
+#if !SZ_AVOID_STL
     basic_look_up_table(std::array<char_type, size_k> const &chars) noexcept {
         memcpy(&lut_[0], chars.data(), bytes_k);
     }
+#endif
 
     basic_look_up_table(basic_look_up_table const &other) noexcept { memcpy(&lut_[0], other.lut_, bytes_k); }
     basic_look_up_table &operator=(basic_look_up_table const &other) noexcept {
@@ -5307,6 +5311,7 @@ void fill_random(basic_string_slice<char_type_> string, sz_u64_t nonce) noexcept
     sz_fill_random(string.data(), string.size(), nonce);
 }
 
+#if !SZ_AVOID_LIBC
 /**
  *  @brief Overwrites the @p string slice with random bytes using `std::rand` for the nonce.
  *  @param string The string to overwrite.
@@ -5316,6 +5321,7 @@ template <typename char_type_>
 void fill_random(basic_string_slice<char_type_> string) noexcept {
     fill_random(string, std::rand());
 }
+#endif
 
 /**
  *  @brief Maps all characters in the @p source string into the @p target buffer using the provided lookup @p table.
