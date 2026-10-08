@@ -62,9 +62,9 @@ Every match of every needle, including nested ones, over text.
 
 | Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
 | :------------------------ | --------------: | ----------: | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |           348.1 |       732.5 |          269.5 |      593.8 |
+| Serial @ 1× Intel Xeon6   |           384.8 |       746.4 |          288.5 |      591.4 |
 | Haswell @ 1× Intel Xeon6  |           417.9 |     3,506.2 |          319.7 |    3,191.8 |
-| Ice Lake @ 1× Intel Xeon6 |           413.2 |     3,613.7 |          308.6 |    3,243.0 |
+| Ice Lake @ 1× Intel Xeon6 |           411.7 |     3,757.1 |          309.0 |    3,281.9 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
 | CUDA @ 18× Nvidia SM103   |        17,674.2 |    33,454.1 |        9,125.9 |   19,025.9 |
@@ -79,9 +79,9 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 
 | Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
 | :------------------------ | --------------: | ----------: | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |           226.0 |       500.4 |          225.3 |      507.5 |
+| Serial @ 1× Intel Xeon6   |           230.7 |       505.3 |          225.3 |      500.0 |
 | Haswell @ 1× Intel Xeon6  |           239.3 |     2,740.2 |          236.9 |    2,736.1 |
-| Ice Lake @ 1× Intel Xeon6 |           242.4 |     2,869.2 |          235.8 |    2,820.1 |
+| Ice Lake @ 1× Intel Xeon6 |           241.5 |     2,890.8 |          236.3 |    2,891.8 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
 | CUDA @ 18× Nvidia SM103   |         8,457.2 |    18,544.6 |        7,997.4 |   18,227.2 |
@@ -96,9 +96,9 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 
 | Backend                   | Replace, Frequent | Replace, Rare |
 | :------------------------ | ----------------: | ------------: |
-| Serial @ 1× Intel Xeon6   |             200.1 |         474.9 |
+| Serial @ 1× Intel Xeon6   |             200.4 |         481.8 |
 | Haswell @ 1× Intel Xeon6  |             205.3 |       2,263.0 |
-| Ice Lake @ 1× Intel Xeon6 |             203.0 |       2,275.3 |
+| Ice Lake @ 1× Intel Xeon6 |             204.2 |       2,338.8 |
 | NEON @ 1× AWS Graviton4   |                 … |             … |
 | CUDA @ Nvidia SM90        |                 … |             … |
 | CUDA @ 18× Nvidia SM103   |           5,529.6 |       9,059.3 |
@@ -115,9 +115,9 @@ Metal evaluates each term in `f32` before conversion to fixed point.
 
 | Backend                   | BM25, Frequent | BM25, Rare |
 | :------------------------ | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |          263.5 |      528.7 |
+| Serial @ 1× Intel Xeon6   |          269.3 |      594.6 |
 | Haswell @ 1× Intel Xeon6  |          303.1 |    2,808.8 |
-| Ice Lake @ 1× Intel Xeon6 |          265.9 |    2,710.5 |
+| Ice Lake @ 1× Intel Xeon6 |          264.6 |    2,751.5 |
 | NEON @ 1× AWS Graviton4   |              … |          … |
 | CUDA @ Nvidia SM90        |              … |          … |
 | CUDA @ 18× Nvidia SM103   |        3,530.8 |   12,748.8 |
@@ -138,7 +138,7 @@ Short needles over four letters match about 0.4 times per byte, so every column 
 | Ice Lake @ 1× Intel Xeon6 |    804.0 |   109.0 |            51.6 |   100.8 |
 | NEON @ 1× AWS Graviton4   |        … |       … |               … |       … |
 | CUDA @ Nvidia SM90        |        … |       … |               … |       … |
-| CUDA @ 18× Nvidia SM103   | 19,261.4 | 4,990.0 |         1,379.3 | 5,522.4 |
+| CUDA @ 18× Nvidia SM103   | 23,644.2 | 5,979.1 |         1,443.8 | 4,365.3 |
 | CUDA @ Nvidia SM120       | 22,732.8 | 1,566.7 |           908.2 | 7,833.6 |
 
 ## Case Folding

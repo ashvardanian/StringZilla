@@ -26,35 +26,37 @@ UTF-8 rows use the harness's byte-based cell-update count, rather than a count o
 
 ## Batches Over Byte Strings
 
-| Backend                   | Short Words |  Long Lines |
-| :------------------------ | ----------: | ----------: |
-| Serial @ 1× Intel Xeon6   |  0.36 GCUPS | 29.72 GCUPS |
-| Haswell @ 1× Intel Xeon6  |  0.79 GCUPS | 49.21 GCUPS |
-| Skylake @ 1× Intel Xeon6  |  0.60 GCUPS | 52.80 GCUPS |
-| Ice Lake @ 1× Intel Xeon6 |  0.76 GCUPS |           ↑ |
-| Serial @ 1× AWS Graviton4 |           … |           … |
-| Serial @ 1× Apple M5 Pro  |  1.25 GCUPS | 39.88 GCUPS |
-| NEON @ 1× Apple M5 Pro    |  1.78 GCUPS | 44.55 GCUPS |
-| Metal @ Apple M5 Pro      | 50.01 GCUPS | 1,309 GCUPS |
-| CUDA @ Nvidia SM90        |           … |           … |
-| CUDA @ 18× Nvidia SM103   | 27.87 GCUPS | 3,603 GCUPS |
-| CUDA @ Nvidia SM120       |  3.59 GCUPS |           … |
+| Backend                      | Short Words |  Long Lines |
+| :--------------------------- | ----------: | ----------: |
+| Serial @ 1× Intel Xeon6      |  0.36 GCUPS | 29.72 GCUPS |
+| Haswell @ 1× Intel Xeon6     |  0.79 GCUPS | 49.21 GCUPS |
+| Skylake @ 1× Intel Xeon6     |  0.60 GCUPS | 52.80 GCUPS |
+| Ice Lake @ 1× Intel Xeon6    |  0.76 GCUPS |           ↑ |
+| Serial @ 1× AWS Graviton4    |           … |           … |
+| Serial @ 1× Apple M5 Pro     |  1.25 GCUPS | 39.88 GCUPS |
+| NEON @ 1× Apple M5 Pro       |  1.78 GCUPS | 44.55 GCUPS |
+| Metal @ Apple M5 Pro         | 50.01 GCUPS | 1,309 GCUPS |
+| CUDA @ Nvidia SM90           |           … |           … |
+| CUDA @ 18× Nvidia SM103      | 27.87 GCUPS | 3,780 GCUPS |
+| Blackwell @ 18× Nvidia SM103 |           … | 3,621 GCUPS |
+| CUDA @ Nvidia SM120          |  3.59 GCUPS |           … |
 
 ## Batches Over UTF-8 Strings
 
-| Backend                   | Short Words |   Long Lines |
-| :------------------------ | ----------: | -----------: |
-| Serial @ 1× Intel Xeon6   |  0.29 GCUPS |  58.48 GCUPS |
-| Haswell @ 1× Intel Xeon6  |  0.37 GCUPS |  98.78 GCUPS |
-| Skylake @ 1× Intel Xeon6  |  0.32 GCUPS | 108.51 GCUPS |
-| Ice Lake @ 1× Intel Xeon6 |           ↑ |            ↑ |
-| Serial @ 1× AWS Graviton4 |           … |            … |
-| Serial @ 1× Apple M5 Pro  |  0.37 GCUPS |  73.66 GCUPS |
-| NEON @ 1× Apple M5 Pro    |  0.40 GCUPS |  92.13 GCUPS |
-| Metal @ Apple M5 Pro      | 44.05 GCUPS | 915.15 GCUPS |
-| CUDA @ Nvidia SM90        |           … |            … |
-| CUDA @ 18× Nvidia SM103   | 31.23 GCUPS |  4,264 GCUPS |
-| CUDA @ Nvidia SM120       |           … |            … |
+| Backend                      | Short Words |   Long Lines |
+| :--------------------------- | ----------: | -----------: |
+| Serial @ 1× Intel Xeon6      |  0.29 GCUPS |  58.48 GCUPS |
+| Haswell @ 1× Intel Xeon6     |  0.37 GCUPS |  98.78 GCUPS |
+| Skylake @ 1× Intel Xeon6     |  0.32 GCUPS | 108.51 GCUPS |
+| Ice Lake @ 1× Intel Xeon6    |           ↑ |            ↑ |
+| Serial @ 1× AWS Graviton4    |           … |            … |
+| Serial @ 1× Apple M5 Pro     |  0.37 GCUPS |  73.66 GCUPS |
+| NEON @ 1× Apple M5 Pro       |  0.40 GCUPS |  92.13 GCUPS |
+| Metal @ Apple M5 Pro         | 44.05 GCUPS | 915.15 GCUPS |
+| CUDA @ Nvidia SM90           |           … |            … |
+| CUDA @ 18× Nvidia SM103      | 31.23 GCUPS |  3,872 GCUPS |
+| Blackwell @ 18× Nvidia SM103 |           … |  3,576 GCUPS |
+| CUDA @ Nvidia SM120          |           … |            … |
 
 ## Long Byte Collections
 
