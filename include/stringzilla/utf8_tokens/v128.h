@@ -10,11 +10,13 @@
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_runes/v128.h"
+#include "stringzilla/utf8_tokens/tables.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -56,7 +58,6 @@ STRINGZILLA_INLINE void sz_utf8_iterate_peel_v128_(                            /
         {8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0},
         {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
     };
-    static sz_u8_t const popcount_lut[16] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
 
     sz_size_t scratch_offsets[16], scratch_lengths[16];
     sz_size_t filled = 0;
@@ -80,7 +81,7 @@ STRINGZILLA_INLINE void sz_utf8_iterate_peel_v128_(                            /
         v128_t const permutation_u8x16 = wasm_v128_load(compact_lut[submask]);
         wasm_v128_store(scratch_offsets + filled, wasm_i8x16_swizzle(candidate_offsets_u32x4, permutation_u8x16));
         wasm_v128_store(scratch_lengths + filled, wasm_i8x16_swizzle(candidate_lengths_u32x4, permutation_u8x16));
-        filled += popcount_lut[submask];
+        filled += sz_popcount4_lut_[submask];
     }
 
     for (sz_size_t emitted = 0; emitted < emit_count; ++emitted)
@@ -273,6 +274,249 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_whitespaces_v128_( //
 
 #pragma endregion Multistep newline and whitespace iteration
 
+#pragma region Membership
+
+/** Lookup in a 32-byte table, as two 16-byte swizzles; an index outside a half reads zero there. */
+STRINGZILLA_INLINE v128_t sz_delimiter_lookup32_v128_(sz_u8_t const *table, v128_t index_u8x16) {
+    v128_t const low_half_u8x16 = wasm_v128_load(table), high_half_u8x16 = wasm_v128_load(table + 16);
+    return wasm_v128_or(wasm_i8x16_swizzle(low_half_u8x16, index_u8x16),
+                        wasm_i8x16_swizzle(high_half_u8x16, wasm_i8x16_sub(index_u8x16, wasm_i8x16_splat(16))));
+}
+
+/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1`, returned as 0x00/0xFF lanes. */
+STRINGZILLA_INLINE v128_t sz_delimiter_test_bit_v128_(v128_t bitmap_byte_u8x16, v128_t low_u8x16) {
+    static sz_u8_t const bit_for_low3[16] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
+    v128_t const bit_mask_u8x16 = wasm_i8x16_swizzle(wasm_v128_load(bit_for_low3),
+                                                     wasm_v128_and(low_u8x16, wasm_i8x16_splat(0x07)));
+    return wasm_i8x16_ne(wasm_v128_and(bitmap_byte_u8x16, bit_mask_u8x16), wasm_i8x16_splat(0));
+}
+
+/** BMP delimiter membership of one quarter as 0x00/0xFF lanes, one distinct high byte per round. */
+STRINGZILLA_INLINE v128_t sz_delimiter_bmp_membership_v128_(v128_t window_u8x16, v128_t high_in_u8x16,
+                                                            v128_t low_in_u8x16) {
+    v128_t const is_ascii_u8x16 = wasm_u8x16_lt(window_u8x16, wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t const high_u8x16 = wasm_v128_andnot(high_in_u8x16, is_ascii_u8x16);
+    v128_t const low_u8x16 = wasm_v128_bitselect(window_u8x16, low_in_u8x16, is_ascii_u8x16);
+
+    v128_t const high_is_zero_u8x16 = wasm_i8x16_eq(high_u8x16, wasm_i8x16_splat(0));
+    v128_t const row0_byte_u8x16 = sz_delimiter_lookup32_v128_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                               wasm_u8x16_shr(low_u8x16, 3));
+    v128_t result_u8x16 = wasm_v128_and(sz_delimiter_test_bit_v128_(row0_byte_u8x16, low_u8x16), high_is_zero_u8x16);
+
+    v128_t const suspicious_byte_u8x16 = sz_delimiter_lookup32_v128_(sz_utf8_delimiter_bmp_suspicious_highs_,
+                                                                     wasm_u8x16_shr(high_u8x16, 3));
+    v128_t const is_continuation_u8x16 = wasm_i8x16_eq(wasm_v128_and(window_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                       wasm_i8x16_splat((sz_i8_t)0x80));
+    v128_t unresolved_u8x16 = wasm_v128_andnot(
+        wasm_v128_andnot(sz_delimiter_test_bit_v128_(suspicious_byte_u8x16, high_u8x16), high_is_zero_u8x16),
+        is_continuation_u8x16);
+    sz_u8_t high_bytes[16];
+    wasm_v128_store(high_bytes, high_u8x16);
+    while (wasm_v128_any_true(unresolved_u8x16)) {
+        sz_u8_t const shared_high = high_bytes[sz_u64_ctz(sz_utf8_movemask16_v128_(unresolved_u8x16))];
+        v128_t const same_u8x16 = wasm_v128_and(unresolved_u8x16,
+                                                wasm_i8x16_eq(high_u8x16, wasm_i8x16_splat((sz_i8_t)shared_high)));
+        v128_t const row_byte_u8x16 = sz_delimiter_lookup32_v128_(
+            sz_utf8_delimiter_bmp_bitmaps_ + (sz_size_t)sz_utf8_delimiter_bmp_block_[shared_high] * 32,
+            wasm_u8x16_shr(low_u8x16, 3));
+        result_u8x16 = wasm_v128_or(result_u8x16,
+                                    wasm_v128_and(sz_delimiter_test_bit_v128_(row_byte_u8x16, low_u8x16), same_u8x16));
+        unresolved_u8x16 = wasm_v128_andnot(unresolved_u8x16, same_u8x16);
+    }
+    return result_u8x16;
+}
+
+/** Astral delimiter membership for one quarter as 0x00/0xFF lanes, keyed on the
+ *  `(cp >> 16, (cp >> 8) & 0xFF)` pair of each four-byte lead. */
+STRINGZILLA_INLINE v128_t sz_delimiter_astral_membership_v128_(v128_t window_u8x16, v128_t next1_u8x16,
+                                                               v128_t next2_u8x16, v128_t next3_u8x16) {
+    v128_t const b0_u8x16 = wasm_v128_and(window_u8x16, wasm_i8x16_splat(0x07));
+    v128_t const b1_u8x16 = wasm_v128_and(next1_u8x16, wasm_i8x16_splat(0x3F));
+    v128_t const b2_u8x16 = wasm_v128_and(next2_u8x16, wasm_i8x16_splat(0x3F));
+    v128_t const b3_u8x16 = wasm_v128_and(next3_u8x16, wasm_i8x16_splat(0x3F));
+
+    v128_t const codepoint_high_u8x16 = wasm_v128_or(wasm_i8x16_shl(b0_u8x16, 2), wasm_u8x16_shr(b1_u8x16, 4));
+    v128_t const sub_u8x16 = wasm_v128_or(wasm_i8x16_shl(b1_u8x16, 4), wasm_u8x16_shr(b2_u8x16, 2));
+    v128_t const low8_u8x16 = wasm_v128_or(wasm_i8x16_shl(b2_u8x16, 6), b3_u8x16);
+
+    v128_t result_u8x16 = wasm_i8x16_splat(0);
+    v128_t remaining_u8x16 = wasm_v128_and(wasm_v128_and(wasm_u8x16_ge(window_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0)),
+                                                         wasm_u8x16_le(codepoint_high_u8x16, wasm_i8x16_splat(0x10))),
+                                           wasm_i8x16_ne(codepoint_high_u8x16, wasm_i8x16_splat(0)));
+    sz_u8_t codepoint_high_bytes[16], sub_bytes[16];
+    wasm_v128_store(codepoint_high_bytes, codepoint_high_u8x16);
+    wasm_v128_store(sub_bytes, sub_u8x16);
+    while (wasm_v128_any_true(remaining_u8x16)) {
+        int const lane = sz_u64_ctz(sz_utf8_movemask16_v128_(remaining_u8x16));
+        sz_u8_t const shared_plane = codepoint_high_bytes[lane], shared_sub = sub_bytes[lane];
+        sz_u8_t const *row =
+            sz_utf8_delimiter_astral_bitmaps_ +
+            (sz_size_t)sz_utf8_delimiter_astral_l2_[(sz_size_t)sz_utf8_delimiter_astral_l1_[shared_plane - 1] * 256 +
+                                                    shared_sub] *
+                32;
+        v128_t const same_u8x16 = wasm_v128_and(
+            remaining_u8x16, wasm_v128_and(wasm_i8x16_eq(codepoint_high_u8x16, wasm_i8x16_splat((sz_i8_t)shared_plane)),
+                                           wasm_i8x16_eq(sub_u8x16, wasm_i8x16_splat((sz_i8_t)shared_sub))));
+        v128_t const row_byte_u8x16 = sz_delimiter_lookup32_v128_(row, wasm_u8x16_shr(low8_u8x16, 3));
+        result_u8x16 = wasm_v128_or(result_u8x16,
+                                    wasm_v128_and(sz_delimiter_test_bit_v128_(row_byte_u8x16, low8_u8x16), same_u8x16));
+        remaining_u8x16 = wasm_v128_andnot(remaining_u8x16, same_u8x16);
+    }
+    return result_u8x16;
+}
+
+/** Per-lane UTF-8 validity of codepoint-start lanes, mirroring @ref sz_rune_decode. */
+STRINGZILLA_INLINE sz_u64_t sz_delimiter_valid_starts_v128_(sz_utf8_rune_window_v128_t const *decoded,
+                                                            v128_t const *next1_u8x16, v128_t const *next2_u8x16,
+                                                            v128_t const *next3_u8x16) {
+    v128_t const continuation_mask_u8x16 = wasm_i8x16_splat((sz_i8_t)0xC0),
+                 continuation_pattern_u8x16 = wasm_i8x16_splat((sz_i8_t)0x80);
+    v128_t valid_bool_u8x16[4];
+    for (int quarter = 0; quarter < 4; ++quarter) {
+        v128_t const here_u8x16 = decoded->window_u8x16s[quarter];
+        v128_t const n1_u8x16 = next1_u8x16[quarter];
+        v128_t const c1_ok_u8x16 = wasm_i8x16_eq(wasm_v128_and(n1_u8x16, continuation_mask_u8x16),
+                                                 continuation_pattern_u8x16);
+        v128_t const c2_ok_u8x16 = wasm_i8x16_eq(wasm_v128_and(next2_u8x16[quarter], continuation_mask_u8x16),
+                                                 continuation_pattern_u8x16);
+        v128_t const c3_ok_u8x16 = wasm_i8x16_eq(wasm_v128_and(next3_u8x16[quarter], continuation_mask_u8x16),
+                                                 continuation_pattern_u8x16);
+        v128_t const ascii_u8x16 = wasm_u8x16_lt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0x80));
+
+        v128_t const is_two_u8x16 = wasm_v128_and(wasm_u8x16_ge(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC0)),
+                                                  wasm_u8x16_lt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0)));
+        v128_t const is_three_u8x16 = wasm_v128_and(wasm_u8x16_ge(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0)),
+                                                    wasm_u8x16_lt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0)));
+        v128_t const is_four_u8x16 = wasm_u8x16_ge(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0));
+
+        v128_t const two_ok_u8x16 = wasm_v128_and(c1_ok_u8x16,
+                                                  wasm_u8x16_ge(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xC2)));
+
+        v128_t const lead_e0_u8x16 = wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xE0));
+        v128_t const lead_ed_u8x16 = wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xED));
+        v128_t const n1_lt_a0_u8x16 = wasm_u8x16_lt(n1_u8x16, wasm_i8x16_splat((sz_i8_t)0xA0));
+        v128_t const bad_three_u8x16 = wasm_v128_or(wasm_v128_and(lead_e0_u8x16, n1_lt_a0_u8x16),
+                                                    wasm_v128_andnot(lead_ed_u8x16, n1_lt_a0_u8x16));
+        v128_t const three_ok_u8x16 = wasm_v128_andnot(wasm_v128_and(c1_ok_u8x16, c2_ok_u8x16), bad_three_u8x16);
+
+        v128_t const lead_f0_u8x16 = wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF0));
+        v128_t const lead_f4_u8x16 = wasm_i8x16_eq(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4));
+        v128_t const n1_lt_90_u8x16 = wasm_u8x16_lt(n1_u8x16, wasm_i8x16_splat((sz_i8_t)0x90));
+        v128_t const bad_four_u8x16 = wasm_v128_or(wasm_u8x16_gt(here_u8x16, wasm_i8x16_splat((sz_i8_t)0xF4)),
+                                                   wasm_v128_or(wasm_v128_and(lead_f0_u8x16, n1_lt_90_u8x16),
+                                                                wasm_v128_andnot(lead_f4_u8x16, n1_lt_90_u8x16)));
+        v128_t const four_ok_u8x16 = wasm_v128_andnot(
+            wasm_v128_and(wasm_v128_and(c1_ok_u8x16, c2_ok_u8x16), c3_ok_u8x16), bad_four_u8x16);
+
+        valid_bool_u8x16[quarter] = wasm_v128_or(
+            wasm_v128_or(ascii_u8x16, wasm_v128_and(is_two_u8x16, two_ok_u8x16)),
+            wasm_v128_or(wasm_v128_and(is_three_u8x16, three_ok_u8x16), wasm_v128_and(is_four_u8x16, four_ok_u8x16)));
+    }
+    sz_u64_t const valid = sz_utf8_mask_combine_v128_(valid_bool_u8x16[0], valid_bool_u8x16[1], valid_bool_u8x16[2],
+                                                      valid_bool_u8x16[3]);
+
+    // A lead whose declared span runs past `loaded` is truncated and never valid.
+    // The serial path re-syncs one byte at a time.
+    sz_size_t const loaded = decoded->loaded;
+    sz_u64_t const truncated = (decoded->two_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 1 ? loaded - 1 : 0)) |
+                               (decoded->three_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 2 ? loaded - 2 : 0)) |
+                               (decoded->four_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 3 ? loaded - 3 : 0));
+    return valid & sz_u64_mask_until_serial_(loaded) & ~truncated;
+}
+
+#pragma endregion Membership
+
+#pragma region Forward driver
+
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_v128_(  //
+    sz_cptr_t text, sz_size_t length,                   //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
+
+    sz_size_t base = 0, count = 0;
+    while (base < length && count < matches_capacity) {
+        sz_utf8_rune_window_v128_t const decoded = sz_utf8_rune_decode_window_v128_(text_u8 + base, length - base);
+        sz_size_t const loaded = decoded.loaded;
+        sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
+
+        sz_size_t byte_span = loaded;
+        sz_u64_t hits;
+
+        // All-ASCII window: membership is one lookup into the first half of bitmap row 0.
+        int const all_ascii = decoded.codepoint_starts == loaded_mask &&
+                              !(decoded.two_byte_starts | decoded.three_byte_starts | decoded.four_byte_starts);
+        if (all_ascii) {
+            v128_t const row0_u8x16 = wasm_v128_load(sz_utf8_delimiter_bmp_bitmaps_);
+            v128_t member_bool_u8x16[4];
+            for (int quarter = 0; quarter < 4; ++quarter)
+                member_bool_u8x16[quarter] = sz_delimiter_test_bit_v128_(
+                    wasm_i8x16_swizzle(row0_u8x16, wasm_u8x16_shr(decoded.window_u8x16s[quarter], 3)),
+                    decoded.window_u8x16s[quarter]);
+            hits = sz_utf8_mask_combine_v128_(member_bool_u8x16[0], member_bool_u8x16[1], member_bool_u8x16[2],
+                                              member_bool_u8x16[3]) &
+                   loaded_mask;
+        }
+        else {
+            v128_t next1_u8x16[4], next2_u8x16[4], next3_u8x16[4];
+            sz_utf8_forward_neighbours_v128_(decoded.window_u8x16s, next1_u8x16, next2_u8x16, next3_u8x16);
+
+            // A multi-byte lead near the 64-byte edge whose span runs past `loaded`
+            // is deferred to the next window.
+            if (loaded >= 64)
+                byte_span = sz_utf8_delimiter_complete_span_(decoded.two_byte_starts, decoded.three_byte_starts,
+                                                             decoded.four_byte_starts, loaded);
+            sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
+
+            sz_u64_t const valid_starts = sz_delimiter_valid_starts_v128_(&decoded, next1_u8x16, next2_u8x16,
+                                                                          next3_u8x16) &
+                                          decoded.codepoint_starts & span_mask;
+
+            sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
+            sz_u64_t member = 0;
+            for (int quarter = 0; quarter < 4; ++quarter) {
+                v128_t const bmp_u8x16 = sz_delimiter_bmp_membership_v128_(decoded.window_u8x16s[quarter],
+                                                                           decoded.high_byte_u8x16s[quarter],
+                                                                           decoded.low_byte_u8x16s[quarter]);
+                member |= sz_utf8_movemask16_v128_(bmp_u8x16) << (16 * quarter);
+            }
+            if (four_byte) {
+                sz_u64_t astral_member = 0;
+                for (int quarter = 0; quarter < 4; ++quarter) {
+                    v128_t const astral_u8x16 = sz_delimiter_astral_membership_v128_(
+                        decoded.window_u8x16s[quarter], next1_u8x16[quarter], next2_u8x16[quarter],
+                        next3_u8x16[quarter]);
+                    astral_member |= sz_utf8_movemask16_v128_(astral_u8x16) << (16 * quarter);
+                }
+                member = (member & ~four_byte) | (astral_member & four_byte);
+            }
+
+            hits = member & valid_starts;
+        }
+        while (hits && count < matches_capacity) {
+            sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+            hits &= hits - 1;
+            sz_size_t length_at_lane = 1;
+            length_at_lane += (decoded.two_byte_starts >> lane) & 1;
+            length_at_lane += ((decoded.three_byte_starts >> lane) & 1) * 2;
+            length_at_lane += ((decoded.four_byte_starts >> lane) & 1) * 3;
+            match_offsets[count] = base + lane, match_lengths[count] = length_at_lane, ++count;
+        }
+        // Output buffer full: resume past the last emitted match, not at the window edge.
+        if (count == matches_capacity) {
+            base = match_offsets[count - 1] + match_lengths[count - 1];
+            if (bytes_consumed) *bytes_consumed = base;
+            return count;
+        }
+        base += byte_span ? byte_span : 1;
+    }
+
+    if (bytes_consumed) *bytes_consumed = base;
+    return count;
+}
+
+#pragma endregion Forward driver
+
 #if STRINGZILLA_TARGET_V128
 
 STRINGZILLA_API sz_status_t sz_utf8_newlines_v128(                                  //
@@ -295,12 +539,25 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_v128(                           
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_v128(                                //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_v128_(text, length, match_offsets, match_lengths, matches_capacity,
+                                              bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
+    return sz_success_k;
+}
+
 #endif // STRINGZILLA_TARGET_V128
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

@@ -271,6 +271,11 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_rvv(                            
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
+/** @copydoc sz_utf8_delimiters_best */
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_rvv(                                 //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_V128
@@ -281,6 +286,11 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_v128(                              
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 /** @copydoc sz_utf8_whitespaces_best */
 STRINGZILLA_API sz_status_t sz_utf8_whitespaces_v128(                               //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
+/** @copydoc sz_utf8_delimiters_best */
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_v128(                                //
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
@@ -297,6 +307,11 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_loongsonasx(                    
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
+/** @copydoc sz_utf8_delimiters_best */
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_loongsonasx(                         //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_POWERVSX
@@ -307,6 +322,11 @@ STRINGZILLA_API sz_status_t sz_utf8_newlines_powervsx(                          
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
 /** @copydoc sz_utf8_whitespaces_best */
 STRINGZILLA_API sz_status_t sz_utf8_whitespaces_powervsx(                           //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);
+/** @copydoc sz_utf8_delimiters_best */
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_powervsx(                            //
     sz_cptr_t text, sz_size_t length,                                               //
     sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
     sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream);

@@ -3379,7 +3379,14 @@ inline void check_utf8_delimiters_unit_(utf8_delimiters_backend_t const &backend
         {"ab\xE2\x80\x94", 5, 2, 3, 1},        // U+2014 EM DASH (Pd), 3 bytes at byte 2
         {"ab\xF0\x9F\x98\x80", 6, 2, 4, 1},    // U+1F600 GRINNING FACE (So), 4 bytes at byte 2
         {"a\xC3\x9F\xE4\xB8\xAD", 6, 0, 0, 0}, // a + U+00DF + U+4E2D, all letters
-        {"", 0, 0, 0, 0},                      // empty input
+        // U+FF0C FULLWIDTH COMMA, the last BMP block with delimiters
+        {"a\xEF\xBC\x8C", 4, 1, 3, 1},
+        // U+3000 IDEOGRAPHIC SPACE
+        {"a\xE3\x80\x80", 4, 1, 3, 1},
+        // U+FF21 FULLWIDTH LATIN CAPITAL LETTER A, next to the block of U+FF0C
+        {"a\xEF\xBC\xA1", 4, 0, 0, 0},
+        // empty input
+        {"", 0, 0, 0, 0},
     };
 
     // Capacity-limited resume: when the output fills before the input is exhausted,
@@ -3424,6 +3431,16 @@ inline void check_utf8_delimiters_unit_(utf8_delimiters_backend_t const &backend
             verify(lengths[0] == one.expected_length && "Delimiter length mismatch");
         }
     }
+    // A multi-byte delimiter straddling every vector window edge up to 128 bytes is found whole.
+    for (std::string const &delimiter : {std::string("\xE3\x80\x81"), std::string("\xF0\x9F\x98\x80")})
+        for (sz_size_t prefix = 0; prefix != 128; ++prefix) {
+            std::string text(prefix, 'a');
+            text += delimiter + "b";
+            drain_matches_(backend.finder, text.data(), (sz_size_t)text.size(), (sz_size_t)text.size() + 1, offsets,
+                           lengths);
+            verify(offsets.size() == 1 && offsets[0] == prefix && lengths[0] == delimiter.size() &&
+                   "Delimiter straddling a window edge was missed or split");
+        }
     for (resume_case_t const &one : resume_cases) {
         sz_size_t batch_offsets[4], batch_lengths[4], emitted = 0, consumed = 0;
         verify(one.capacity <= 4 && "Resume probe capacity outgrew its output buffers");

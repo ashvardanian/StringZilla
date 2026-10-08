@@ -96,6 +96,13 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_utf8_tokens_equivalence_powervsx",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_powervsx); });
 
+    constexpr utf8_delimiters_backend_t utf8_delimiters_powervsx {"powervsx", sz_utf8_delimiters_powervsx};
+    check("test_utf8_delimiters_unit_powervsx", [&] { check_utf8_delimiters_unit_(utf8_delimiters_powervsx); });
+    check("test_utf8_delimiters_safety_powervsx",
+          [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_powervsx); });
+    check("test_utf8_delimiters_equivalence_powervsx",
+          [&](test_context_t &context) { check_utf8_delimiters_equivalence_(context, utf8_delimiters_powervsx); });
+
     constexpr utf8_segment_backend_t utf8_wordbreaks_powervsx {"powervsx", sz_utf8_wordbreaks_powervsx};
     check("test_utf8_wordbreaks_unit_powervsx", [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_powervsx); });
     check("test_utf8_wordbreaks_rules_powervsx", [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_powervsx); });

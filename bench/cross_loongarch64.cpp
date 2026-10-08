@@ -19,6 +19,7 @@ void bench_cross_loongarch64([[maybe_unused]] environment_t &env) {
         bench_utf8_decode_kernels<sz_utf8_decode_loongsonasx>(env, "loongsonasx");
         bench_utf8_newlines_kernels<sz_utf8_newlines_loongsonasx>(env, "loongsonasx");
         bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_loongsonasx>(env, "loongsonasx");
+        bench_utf8_delimiters_kernels<sz_utf8_delimiters_loongsonasx>(env, "loongsonasx");
         bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_loongsonasx>(env, "loongsonasx");
         bench_utf8_norm_kernels<sz_utf8_norm_loongsonasx>(env, "loongsonasx");
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_loongsonasx>(env, "loongsonasx");

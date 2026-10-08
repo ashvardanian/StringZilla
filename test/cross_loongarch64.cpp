@@ -78,6 +78,13 @@ std::size_t test_cross_loongarch64(environment_t const &env) {
     check("test_utf8_tokens_equivalence_loongsonasx",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_loongsonasx); });
 
+    constexpr utf8_delimiters_backend_t utf8_delimiters_loongsonasx {"loongsonasx", sz_utf8_delimiters_loongsonasx};
+    check("test_utf8_delimiters_unit_loongsonasx", [&] { check_utf8_delimiters_unit_(utf8_delimiters_loongsonasx); });
+    check("test_utf8_delimiters_safety_loongsonasx",
+          [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_loongsonasx); });
+    check("test_utf8_delimiters_equivalence_loongsonasx",
+          [&](test_context_t &context) { check_utf8_delimiters_equivalence_(context, utf8_delimiters_loongsonasx); });
+
     constexpr utf8_segment_backend_t utf8_wordbreaks_loongsonasx {"loongsonasx", sz_utf8_wordbreaks_loongsonasx};
     check("test_utf8_wordbreaks_unit_loongsonasx", [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_loongsonasx); });
     check("test_utf8_wordbreaks_rules_loongsonasx", [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_loongsonasx); });

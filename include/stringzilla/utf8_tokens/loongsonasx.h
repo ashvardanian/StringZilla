@@ -15,6 +15,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_LOONGARCH64_
 #if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
@@ -32,14 +33,6 @@ STRINGZILLA_INLINE void sz_utf8_iterate_peel_loongsonasx_(                     /
     sz_size_t emit_count, sz_size_t position,                                  //
     sz_size_t *match_offsets, sz_size_t *match_lengths) {
 
-    // A copy of the AVX2 backend's left-pack table: row `[m]` holds the 8 dword indices gathering
-    // the `m`-selected u64 lanes (of 4, each a dword pair) to the front for `__lasx_xvperm_w`.
-    static sz_u32_t const compact_lut[16][8] = {
-        {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
-        {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
-        {6, 7, 0, 0, 0, 0, 0, 0}, {0, 1, 6, 7, 0, 0, 0, 0}, {2, 3, 6, 7, 0, 0, 0, 0}, {0, 1, 2, 3, 6, 7, 0, 0},
-        {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
-    };
     static sz_u64_t const lane_ramp[4] = {0, 1, 2, 3};
 
     __m256i const lane_ramp_u64x4 = __lasx_xvld(lane_ramp, 0);
@@ -65,7 +58,7 @@ STRINGZILLA_INLINE void sz_utf8_iterate_peel_loongsonasx_(                     /
                                                      lane_ramp_u64x4);
         __m256i const lengths_u64x4 = __lasx_vext2xv_du_bu(lengths_u8x32);
 
-        __m256i const permutation_u32x8 = __lasx_xvld(compact_lut[submask], 0);
+        __m256i const permutation_u32x8 = __lasx_xvld(sz_compact4_dword_indices_[submask], 0);
         __m256i const packed_offsets_u64x4 = __lasx_xvperm_w(offsets_u64x4, permutation_u32x8);
         __m256i const packed_lengths_u64x4 = __lasx_xvperm_w(lengths_u64x4, permutation_u32x8);
 
@@ -259,12 +252,284 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_loongsonasx(                    
 
 #pragma endregion Multistep newline and whitespace iteration
 
+#pragma region Membership
+
+/** Per-lane lookup into a 32-byte table at @p table indexed below 32, as NEON's @c vqtbl2q_u8:
+ *  @c xvshuf.b indexes within each 128-bit lane, so both table halves go to both lanes. */
+STRINGZILLA_INLINE __m256i sz_delimiter_lookup32_loongsonasx_(sz_u8_t const *table, __m256i index_u8x32) {
+    __m256i const table_u8x32 = __lasx_xvld(table, 0);
+    __m256i const low_half_u8x32 = __lasx_xvpermi_q(table_u8x32, table_u8x32, 0x00);
+    __m256i const high_half_u8x32 = __lasx_xvpermi_q(table_u8x32, table_u8x32, 0x11);
+    return __lasx_xvshuf_b(high_half_u8x32, low_half_u8x32, index_u8x32);
+}
+
+/** Per-lane single-bit test `(bitmap_byte >> (low & 7)) & 1`, as 0x00/0xFF lanes. */
+STRINGZILLA_INLINE __m256i sz_delimiter_test_bit_loongsonasx_(__m256i bitmap_byte_u8x32, __m256i low_u8x32) {
+    static sz_u8_t const bit_for_low3[32] = {1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0,
+                                             1, 2, 4, 8, 16, 32, 64, 128, 0, 0, 0, 0, 0, 0, 0, 0};
+    __m256i const bit_table_u8x32 = __lasx_xvld(bit_for_low3, 0);
+    __m256i const bit_mask_u8x32 = __lasx_xvshuf_b(bit_table_u8x32, bit_table_u8x32,
+                                                   __lasx_xvand_v(low_u8x32, __lasx_xvreplgr2vr_b(0x07)));
+    __m256i const is_clear_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(bitmap_byte_u8x32, bit_mask_u8x32),
+                                                  __lasx_xvreplgr2vr_b(0));
+    return __lasx_xvnor_v(is_clear_u8x32, is_clear_u8x32);
+}
+
+/** BMP (codepoint < 0x10000) delimiter membership for one 32-byte half, as 0x00/0xFF lanes.
+ *  Lanes below U+0100 read bitmap row 0; the rest survive a pre-filter over @p high_in_u8x32
+ *  and resolve one distinct high byte at a time, each round settling every lane carrying it. */
+STRINGZILLA_INLINE __m256i sz_delimiter_bmp_membership_loongsonasx_(__m256i window_u8x32, __m256i high_in_u8x32,
+                                                                    __m256i low_in_u8x32) {
+    __m256i const is_ascii_u8x32 = __lasx_xvslt_bu(window_u8x32, __lasx_xvreplgr2vr_b((char)0x80));
+    __m256i const high_u8x32 = __lasx_xvandn_v(is_ascii_u8x32, high_in_u8x32);
+    __m256i const low_u8x32 = __lasx_xvbitsel_v(low_in_u8x32, window_u8x32, is_ascii_u8x32);
+
+    __m256i const high_is_zero_u8x32 = __lasx_xvseq_b(high_u8x32, __lasx_xvreplgr2vr_b(0));
+    __m256i const row0_byte_u8x32 = sz_delimiter_lookup32_loongsonasx_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                                       __lasx_xvsrli_b(low_u8x32, 3));
+    __m256i result_u8x32 = __lasx_xvand_v(sz_delimiter_test_bit_loongsonasx_(row0_byte_u8x32, low_u8x32),
+                                          high_is_zero_u8x32);
+
+    __m256i const suspicious_byte_u8x32 = sz_delimiter_lookup32_loongsonasx_(sz_utf8_delimiter_bmp_suspicious_highs_,
+                                                                             __lasx_xvsrli_b(high_u8x32, 3));
+    __m256i const is_continuation_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(window_u8x32, __lasx_xvreplgr2vr_b((char)0xC0)),
+                                                         __lasx_xvreplgr2vr_b((char)0x80));
+    __m256i unresolved_u8x32 = __lasx_xvandn_v(__lasx_xvor_v(high_is_zero_u8x32, is_continuation_u8x32),
+                                               sz_delimiter_test_bit_loongsonasx_(suspicious_byte_u8x32, high_u8x32));
+    sz_u256_vec_t high_vec;
+    high_vec.lasx = high_u8x32;
+    for (sz_u32_t unresolved_bits = sz_xvmovemask_b_utf8_loongsonasx_(unresolved_u8x32); unresolved_bits;
+         unresolved_bits = sz_xvmovemask_b_utf8_loongsonasx_(unresolved_u8x32)) {
+        sz_u8_t const shared_high = high_vec.u8s[sz_u32_ctz(unresolved_bits)];
+        __m256i const same_u8x32 = __lasx_xvand_v(unresolved_u8x32,
+                                                  __lasx_xvseq_b(high_u8x32, __lasx_xvreplgr2vr_b((char)shared_high)));
+        __m256i const row_byte_u8x32 = sz_delimiter_lookup32_loongsonasx_(
+            sz_utf8_delimiter_bmp_bitmaps_ + (sz_size_t)sz_utf8_delimiter_bmp_block_[shared_high] * 32,
+            __lasx_xvsrli_b(low_u8x32, 3));
+        result_u8x32 = __lasx_xvor_v(
+            result_u8x32, __lasx_xvand_v(sz_delimiter_test_bit_loongsonasx_(row_byte_u8x32, low_u8x32), same_u8x32));
+        unresolved_u8x32 = __lasx_xvandn_v(same_u8x32, unresolved_u8x32);
+    }
+    return result_u8x32;
+}
+
+/** Astral (codepoint >= 0x10000) delimiter membership for one 32-byte half, as 0x00/0xFF lanes,
+ *  over the byte-domain parts of @c offset=cp-0x10000, as the NEON twin does: plane selects an L1
+ *  group, group and sub byte select a bitmap row, and @c low8&7 is the bit. */
+STRINGZILLA_INLINE __m256i sz_delimiter_astral_membership_loongsonasx_(__m256i window_u8x32, __m256i next1_u8x32,
+                                                                       __m256i next2_u8x32, __m256i next3_u8x32) {
+    __m256i const b0_u8x32 = __lasx_xvand_v(window_u8x32, __lasx_xvreplgr2vr_b(0x07));
+    __m256i const b1_u8x32 = __lasx_xvand_v(next1_u8x32, __lasx_xvreplgr2vr_b(0x3F));
+    __m256i const b2_u8x32 = __lasx_xvand_v(next2_u8x32, __lasx_xvreplgr2vr_b(0x3F));
+    __m256i const b3_u8x32 = __lasx_xvand_v(next3_u8x32, __lasx_xvreplgr2vr_b(0x3F));
+
+    __m256i const codepoint_high_u8x32 = __lasx_xvor_v(__lasx_xvslli_b(b0_u8x32, 2), __lasx_xvsrli_b(b1_u8x32, 4));
+    __m256i const sub_u8x32 = __lasx_xvor_v(__lasx_xvslli_b(b1_u8x32, 4), __lasx_xvsrli_b(b2_u8x32, 2));
+    __m256i const low8_u8x32 = __lasx_xvor_v(__lasx_xvslli_b(b2_u8x32, 6), b3_u8x32);
+
+    // Only planes 1..16 are addressable; a lane with a zero or over 0x10 high part is an invalid
+    // lead that the caller's validity mask rejects.
+    __m256i const codepoint_high_is_zero_u8x32 = __lasx_xvseq_b(codepoint_high_u8x32, __lasx_xvreplgr2vr_b(0));
+    __m256i remaining_u8x32 = __lasx_xvandn_v(
+        codepoint_high_is_zero_u8x32,
+        __lasx_xvand_v(__lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0xF0), window_u8x32),
+                       __lasx_xvsle_bu(codepoint_high_u8x32, __lasx_xvreplgr2vr_b(0x10))));
+    __m256i result_u8x32 = __lasx_xvreplgr2vr_b(0);
+    sz_u256_vec_t codepoint_high_vec, sub_vec;
+    codepoint_high_vec.lasx = codepoint_high_u8x32;
+    sub_vec.lasx = sub_u8x32;
+    for (sz_u32_t remaining_bits = sz_xvmovemask_b_utf8_loongsonasx_(remaining_u8x32); remaining_bits;
+         remaining_bits = sz_xvmovemask_b_utf8_loongsonasx_(remaining_u8x32)) {
+        sz_u32_t const first_lane = sz_u32_ctz(remaining_bits);
+        sz_u8_t const shared_plane = codepoint_high_vec.u8s[first_lane], shared_sub = sub_vec.u8s[first_lane];
+        sz_u8_t const *row =
+            sz_utf8_delimiter_astral_bitmaps_ +
+            (sz_size_t)sz_utf8_delimiter_astral_l2_[(sz_size_t)sz_utf8_delimiter_astral_l1_[shared_plane - 1] * 256 +
+                                                    shared_sub] *
+                32;
+        __m256i const same_u8x32 = __lasx_xvand_v(
+            remaining_u8x32,
+            __lasx_xvand_v(__lasx_xvseq_b(codepoint_high_u8x32, __lasx_xvreplgr2vr_b((char)shared_plane)),
+                           __lasx_xvseq_b(sub_u8x32, __lasx_xvreplgr2vr_b((char)shared_sub))));
+        __m256i const row_byte_u8x32 = sz_delimiter_lookup32_loongsonasx_(row, __lasx_xvsrli_b(low8_u8x32, 3));
+        result_u8x32 = __lasx_xvor_v(
+            result_u8x32, __lasx_xvand_v(sz_delimiter_test_bit_loongsonasx_(row_byte_u8x32, low8_u8x32), same_u8x32));
+        remaining_u8x32 = __lasx_xvandn_v(same_u8x32, remaining_u8x32);
+    }
+    return result_u8x32;
+}
+
+/** Per-lane UTF-8 validity for the 64 lanes of a decoded window, mirroring @ref sz_rune_decode: a
+ *  2/3/4-byte lead is valid only with well-formed continuations and no overlong, surrogate or
+ *  beyond-U+10FFFF form. A lead whose span runs past the loaded bytes is never valid. */
+STRINGZILLA_INLINE sz_u64_t sz_delimiter_valid_starts_loongsonasx_(sz_utf8_rune_window_loongsonasx_t const *decoded,
+                                                                   __m256i const *next1_u8x32,
+                                                                   __m256i const *next2_u8x32,
+                                                                   __m256i const *next3_u8x32) {
+    __m256i const continuation_mask_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0);
+    __m256i const continuation_pattern_u8x32 = __lasx_xvreplgr2vr_b((char)0x80);
+    __m256i const lead_c0_u8x32 = __lasx_xvreplgr2vr_b((char)0xC0), lead_e0_u8x32 = __lasx_xvreplgr2vr_b((char)0xE0),
+                  lead_f0_u8x32 = __lasx_xvreplgr2vr_b((char)0xF0);
+    __m256i valid_bool_u8x32[2];
+    for (int half = 0; half < 2; ++half) {
+        __m256i const here_u8x32 = half ? decoded->window_high_u8x32 : decoded->window_low_u8x32;
+        __m256i const n1_u8x32 = next1_u8x32[half];
+        __m256i const c1_ok_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(n1_u8x32, continuation_mask_u8x32),
+                                                   continuation_pattern_u8x32);
+        __m256i const c2_ok_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(next2_u8x32[half], continuation_mask_u8x32),
+                                                   continuation_pattern_u8x32);
+        __m256i const c3_ok_u8x32 = __lasx_xvseq_b(__lasx_xvand_v(next3_u8x32[half], continuation_mask_u8x32),
+                                                   continuation_pattern_u8x32);
+        __m256i const ascii_u8x32 = __lasx_xvslt_bu(here_u8x32, continuation_pattern_u8x32);
+
+        __m256i const is_two_u8x32 = __lasx_xvand_v(__lasx_xvsle_bu(lead_c0_u8x32, here_u8x32),
+                                                    __lasx_xvslt_bu(here_u8x32, lead_e0_u8x32));
+        __m256i const is_three_u8x32 = __lasx_xvand_v(__lasx_xvsle_bu(lead_e0_u8x32, here_u8x32),
+                                                      __lasx_xvslt_bu(here_u8x32, lead_f0_u8x32));
+        __m256i const is_four_u8x32 = __lasx_xvsle_bu(lead_f0_u8x32, here_u8x32);
+
+        __m256i const two_ok_u8x32 = __lasx_xvand_v(c1_ok_u8x32,
+                                                    __lasx_xvsle_bu(__lasx_xvreplgr2vr_b((char)0xC2), here_u8x32));
+
+        __m256i const lead_e0_match_u8x32 = __lasx_xvseq_b(here_u8x32, lead_e0_u8x32);
+        __m256i const lead_ed_u8x32 = __lasx_xvseq_b(here_u8x32, __lasx_xvreplgr2vr_b((char)0xED));
+        __m256i const n1_lt_a0_u8x32 = __lasx_xvslt_bu(n1_u8x32, __lasx_xvreplgr2vr_b((char)0xA0));
+        __m256i const bad_three_u8x32 = __lasx_xvor_v(__lasx_xvand_v(lead_e0_match_u8x32, n1_lt_a0_u8x32),
+                                                      __lasx_xvandn_v(n1_lt_a0_u8x32, lead_ed_u8x32));
+        __m256i const three_ok_u8x32 = __lasx_xvandn_v(bad_three_u8x32, __lasx_xvand_v(c1_ok_u8x32, c2_ok_u8x32));
+
+        __m256i const lead_f0_match_u8x32 = __lasx_xvseq_b(here_u8x32, lead_f0_u8x32);
+        __m256i const lead_f4_u8x32 = __lasx_xvseq_b(here_u8x32, __lasx_xvreplgr2vr_b((char)0xF4));
+        __m256i const n1_lt_90_u8x32 = __lasx_xvslt_bu(n1_u8x32, __lasx_xvreplgr2vr_b((char)0x90));
+        __m256i const bad_four_u8x32 = __lasx_xvor_v(__lasx_xvslt_bu(__lasx_xvreplgr2vr_b((char)0xF4), here_u8x32),
+                                                     __lasx_xvor_v(__lasx_xvand_v(lead_f0_match_u8x32, n1_lt_90_u8x32),
+                                                                   __lasx_xvandn_v(n1_lt_90_u8x32, lead_f4_u8x32)));
+        __m256i const four_ok_u8x32 = __lasx_xvandn_v(
+            bad_four_u8x32, __lasx_xvand_v(__lasx_xvand_v(c1_ok_u8x32, c2_ok_u8x32), c3_ok_u8x32));
+
+        valid_bool_u8x32[half] = __lasx_xvor_v(__lasx_xvor_v(ascii_u8x32, __lasx_xvand_v(is_two_u8x32, two_ok_u8x32)),
+                                               __lasx_xvor_v(__lasx_xvand_v(is_three_u8x32, three_ok_u8x32),
+                                                             __lasx_xvand_v(is_four_u8x32, four_ok_u8x32)));
+    }
+    sz_u64_t const valid = sz_utf8_mask_combine_loongsonasx_(valid_bool_u8x32[0], valid_bool_u8x32[1]);
+
+    sz_size_t const loaded = decoded->loaded;
+    sz_u64_t const truncated = (decoded->two_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 1 ? loaded - 1 : 0)) |
+                               (decoded->three_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 2 ? loaded - 2 : 0)) |
+                               (decoded->four_byte_starts & ~sz_u64_mask_until_serial_(loaded >= 3 ? loaded - 3 : 0));
+    return valid & sz_u64_mask_until_serial_(loaded) & ~truncated;
+}
+
+#pragma endregion Membership
+
+#pragma region Forward driver
+
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_loongsonasx_( //
+    sz_cptr_t text, sz_size_t length,                         //
+    sz_size_t *match_offsets, sz_size_t *match_lengths,       //
+    sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+    sz_u8_t const *const text_u8 = (sz_u8_t const *)text;
+
+    sz_size_t base = 0, count = 0;
+    while (base < length && count < matches_capacity) {
+        sz_utf8_rune_window_loongsonasx_t const decoded = sz_utf8_rune_decode_window_loongsonasx_(text_u8 + base,
+                                                                                                  length - base);
+        sz_size_t const loaded = decoded.loaded;
+        sz_u64_t const loaded_mask = sz_u64_mask_until_serial_(loaded);
+
+        sz_size_t byte_span = loaded;
+        sz_u64_t hits;
+
+        // All-ASCII window: one lookup over the first half of bitmap row 0 decides every lane.
+        int const all_ascii = decoded.codepoint_starts == loaded_mask &&
+                              !(decoded.two_byte_starts | decoded.three_byte_starts | decoded.four_byte_starts);
+        if (all_ascii) {
+            __m256i const low_member_u8x32 = sz_delimiter_test_bit_loongsonasx_(
+                sz_delimiter_lookup32_loongsonasx_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                   __lasx_xvsrli_b(decoded.window_low_u8x32, 3)),
+                decoded.window_low_u8x32);
+            __m256i const high_member_u8x32 = sz_delimiter_test_bit_loongsonasx_(
+                sz_delimiter_lookup32_loongsonasx_(sz_utf8_delimiter_bmp_bitmaps_,
+                                                   __lasx_xvsrli_b(decoded.window_high_u8x32, 3)),
+                decoded.window_high_u8x32);
+            hits = sz_utf8_mask_combine_loongsonasx_(low_member_u8x32, high_member_u8x32) & loaded_mask;
+        }
+        else {
+            __m256i next1_u8x32[2], next2_u8x32[2], next3_u8x32[2];
+            sz_utf8_forward_neighbours_loongsonasx_(decoded.window_low_u8x32, decoded.window_high_u8x32,
+                                                    &next1_u8x32[0], &next1_u8x32[1], &next2_u8x32[0], &next2_u8x32[1],
+                                                    &next3_u8x32[0], &next3_u8x32[1]);
+
+            // A multi-byte lead near the 64-byte edge whose span runs past `loaded`
+            // defers to the next window.
+            if (loaded >= 64)
+                byte_span = sz_utf8_delimiter_complete_span_(decoded.two_byte_starts, decoded.three_byte_starts,
+                                                             decoded.four_byte_starts, loaded);
+            sz_u64_t const span_mask = sz_u64_mask_until_serial_(byte_span);
+
+            sz_u64_t const valid_starts = sz_delimiter_valid_starts_loongsonasx_(&decoded, next1_u8x32, next2_u8x32,
+                                                                                 next3_u8x32) &
+                                          decoded.codepoint_starts & span_mask;
+
+            sz_u64_t const four_byte = decoded.four_byte_starts & span_mask;
+            sz_u64_t member = sz_utf8_mask_combine_loongsonasx_(
+                sz_delimiter_bmp_membership_loongsonasx_(decoded.window_low_u8x32, decoded.high_byte_low_u8x32,
+                                                         decoded.low_byte_low_u8x32),
+                sz_delimiter_bmp_membership_loongsonasx_(decoded.window_high_u8x32, decoded.high_byte_high_u8x32,
+                                                         decoded.low_byte_high_u8x32));
+            if (four_byte) {
+                sz_u64_t const astral_member = sz_utf8_mask_combine_loongsonasx_(
+                    sz_delimiter_astral_membership_loongsonasx_(decoded.window_low_u8x32, next1_u8x32[0],
+                                                                next2_u8x32[0], next3_u8x32[0]),
+                    sz_delimiter_astral_membership_loongsonasx_(decoded.window_high_u8x32, next1_u8x32[1],
+                                                                next2_u8x32[1], next3_u8x32[1]));
+                member = (member & ~four_byte) | (astral_member & four_byte);
+            }
+            hits = member & valid_starts;
+        }
+        while (hits && count < matches_capacity) {
+            sz_size_t const lane = (sz_size_t)sz_u64_ctz(hits);
+            hits &= hits - 1;
+            sz_size_t length_at_lane = 1;
+            length_at_lane += (decoded.two_byte_starts >> lane) & 1;
+            length_at_lane += ((decoded.three_byte_starts >> lane) & 1) * 2;
+            length_at_lane += ((decoded.four_byte_starts >> lane) & 1) * 3;
+            match_offsets[count] = base + lane, match_lengths[count] = length_at_lane, ++count;
+        }
+        // Output buffer full: resume past the last emitted match, never at the window edge.
+        if (count == matches_capacity) {
+            base = match_offsets[count - 1] + match_lengths[count - 1];
+            if (bytes_consumed) *bytes_consumed = base;
+            return count;
+        }
+        base += byte_span ? byte_span : 1;
+    }
+
+    if (bytes_consumed) *bytes_consumed = base;
+    return count;
+}
+
+#pragma endregion Forward driver
+
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_loongsonasx(                         //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_loongsonasx_(text, length, match_offsets, match_lengths, matches_capacity,
+                                                     bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
+    return sz_success_k;
+}
+
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #ifdef __cplusplus
 }

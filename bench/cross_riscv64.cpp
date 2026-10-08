@@ -19,6 +19,7 @@ void bench_cross_riscv64([[maybe_unused]] environment_t &env) {
         bench_utf8_decode_kernels<sz_utf8_decode_rvv>(env, "rvv");
         bench_utf8_newlines_kernels<sz_utf8_newlines_rvv>(env, "rvv");
         bench_utf8_whitespaces_kernels<sz_utf8_whitespaces_rvv>(env, "rvv");
+        bench_utf8_delimiters_kernels<sz_utf8_delimiters_rvv>(env, "rvv");
         bench_utf8_wordbreaks_kernels<sz_utf8_wordbreaks_rvv>(env, "rvv");
         bench_utf8_norm_kernels<sz_utf8_norm_rvv>(env, "rvv");
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_rvv>(env, "rvv");

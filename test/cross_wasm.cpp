@@ -96,6 +96,13 @@ std::size_t test_cross_wasm(environment_t const &env) {
     check("test_utf8_tokens_equivalence_v128",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_v128); });
 
+    constexpr utf8_delimiters_backend_t utf8_delimiters_v128 {"v128", sz_utf8_delimiters_v128};
+    check("test_utf8_delimiters_unit_v128", [&] { check_utf8_delimiters_unit_(utf8_delimiters_v128); });
+    check("test_utf8_delimiters_safety_v128",
+          [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_v128); });
+    check("test_utf8_delimiters_equivalence_v128",
+          [&](test_context_t &context) { check_utf8_delimiters_equivalence_(context, utf8_delimiters_v128); });
+
     constexpr utf8_segment_backend_t utf8_wordbreaks_v128 {"v128", sz_utf8_wordbreaks_v128};
     check("test_utf8_wordbreaks_unit_v128", [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_v128); });
     check("test_utf8_wordbreaks_rules_v128", [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_v128); });

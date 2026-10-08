@@ -79,6 +79,13 @@ std::size_t test_cross_riscv64(environment_t const &env) {
     check("test_utf8_tokens_equivalence_rvv",
           [&](test_context_t &context) { check_utf8_tokens_equivalence_(context, utf8_tokens_rvv); });
 
+    constexpr utf8_delimiters_backend_t utf8_delimiters_rvv {"rvv", sz_utf8_delimiters_rvv};
+    check("test_utf8_delimiters_unit_rvv", [&] { check_utf8_delimiters_unit_(utf8_delimiters_rvv); });
+    check("test_utf8_delimiters_safety_rvv",
+          [&](test_context_t &context) { check_utf8_delimiters_safety_(context, utf8_delimiters_rvv); });
+    check("test_utf8_delimiters_equivalence_rvv",
+          [&](test_context_t &context) { check_utf8_delimiters_equivalence_(context, utf8_delimiters_rvv); });
+
     constexpr utf8_segment_backend_t utf8_wordbreaks_rvv {"rvv", sz_utf8_wordbreaks_rvv};
     check("test_utf8_wordbreaks_unit_rvv", [&] { check_utf8_wordbreaks_unit_(utf8_wordbreaks_rvv); });
     check("test_utf8_wordbreaks_rules_rvv", [&] { check_utf8_wordbreaks_rules_(utf8_wordbreaks_rvv); });

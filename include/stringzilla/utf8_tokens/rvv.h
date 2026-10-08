@@ -18,6 +18,7 @@ extern "C" {
 
 /*  Cap the logical tile so a @c u16 iota addresses every lane. RVV 1.0 allows @c VLEN up to 64 Kib,
  *  so @c e8m4 @c VLMAX reaches at most 32768, well within a @c u16 index. */
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -208,6 +209,178 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_iterate_multistep_rvv_( //
     return count;
 }
 
+/*  Per-lane test of bit `low & 7` in the gathered bitmap byte. */
+STRINGZILLA_INLINE vbool2_t sz_delimiter_test_bit_rvv_(vuint8m4_t bitmap_byte_u8m4, vuint8m4_t low_u8m4,
+                                                       sz_size_t vector_length) {
+    vuint8m4_t shift_u8m4 = __riscv_vand_vx_u8m4(low_u8m4, 7, vector_length);
+    vuint8m4_t bit_u8m4 = __riscv_vand_vx_u8m4(__riscv_vsrl_vv_u8m4(bitmap_byte_u8m4, shift_u8m4, vector_length), 1,
+                                               vector_length);
+    return __riscv_vmsne_vx_u8m4_b2(bit_u8m4, 0, vector_length);
+}
+
+/*  BMP membership from each lane's high and low codepoint bytes: block id by @c vluxei8,
+ *  then the block's bitmap byte by @c vluxei16, as the bitmaps span 1664 bytes. */
+STRINGZILLA_INLINE vbool2_t sz_delimiter_bmp_membership_rvv_(vuint8m4_t high_u8m4, vuint8m4_t low_u8m4,
+                                                             sz_size_t vector_length) {
+    vuint8m4_t block_u8m4 = __riscv_vluxei8_v_u8m4(sz_utf8_delimiter_bmp_block_, high_u8m4, vector_length);
+    vuint16m8_t row_u16m8 = __riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(block_u8m4, vector_length), 5, vector_length);
+    vuint16m8_t column_u16m8 = __riscv_vzext_vf2_u16m8(__riscv_vsrl_vx_u8m4(low_u8m4, 3, vector_length), vector_length);
+    vuint8m4_t byte_u8m4 = __riscv_vluxei16_v_u8m4(
+        sz_utf8_delimiter_bmp_bitmaps_, __riscv_vadd_vv_u16m8(row_u16m8, column_u16m8, vector_length), vector_length);
+    return sz_delimiter_test_bit_rvv_(byte_u8m4, low_u8m4, vector_length);
+}
+
+/*  Astral membership over the lanes in @p four_byte_b2, the only ones whose gathers are enabled:
+ *  plane group by @c vluxei8, bitmap row by @c vluxei16 over the 512-entry level two,
+ *  then the bitmap byte. */
+STRINGZILLA_INLINE vbool2_t sz_delimiter_astral_membership_rvv_(vbool2_t four_byte_b2, vuint8m4_t lead_u8m4,
+                                                                vuint8m4_t next1_u8m4, vuint8m4_t next2_u8m4,
+                                                                vuint8m4_t next3_u8m4, sz_size_t vector_length) {
+    vuint8m4_t b1_u8m4 = __riscv_vand_vx_u8m4(next1_u8m4, 0x3F, vector_length);
+    vuint8m4_t b2_u8m4 = __riscv_vand_vx_u8m4(next2_u8m4, 0x3F, vector_length);
+    vuint8m4_t plane_u8m4 = __riscv_vor_vv_u8m4(
+        __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(lead_u8m4, 0x07, vector_length), 2, vector_length),
+        __riscv_vsrl_vx_u8m4(b1_u8m4, 4, vector_length), vector_length);
+    vuint8m4_t sub_u8m4 = __riscv_vor_vv_u8m4(__riscv_vsll_vx_u8m4(b1_u8m4, 4, vector_length),
+                                              __riscv_vsrl_vx_u8m4(b2_u8m4, 2, vector_length), vector_length);
+    vuint8m4_t low_u8m4 = __riscv_vor_vv_u8m4(__riscv_vsll_vx_u8m4(b2_u8m4, 6, vector_length),
+                                              __riscv_vand_vx_u8m4(next3_u8m4, 0x3F, vector_length), vector_length);
+
+    // A well-formed four-byte lead has `plane` in [1, 16]; the other lanes never touch memory.
+    vuint8m4_t group_u8m4 = __riscv_vluxei8_v_u8m4_m(four_byte_b2, sz_utf8_delimiter_astral_l1_,
+                                                     __riscv_vsub_vx_u8m4(plane_u8m4, 1, vector_length), vector_length);
+    vuint16m8_t level_two_u16m8 = __riscv_vadd_vv_u16m8(
+        __riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(group_u8m4, vector_length), 8, vector_length),
+        __riscv_vzext_vf2_u16m8(sub_u8m4, vector_length), vector_length);
+    vuint8m4_t block_u8m4 = __riscv_vluxei16_v_u8m4_m(four_byte_b2, sz_utf8_delimiter_astral_l2_, level_two_u16m8,
+                                                      vector_length);
+    vuint16m8_t row_u16m8 = __riscv_vsll_vx_u16m8(__riscv_vzext_vf2_u16m8(block_u8m4, vector_length), 5, vector_length);
+    vuint16m8_t column_u16m8 = __riscv_vzext_vf2_u16m8(__riscv_vsrl_vx_u8m4(low_u8m4, 3, vector_length), vector_length);
+    vuint8m4_t byte_u8m4 = __riscv_vluxei16_v_u8m4_m(four_byte_b2, sz_utf8_delimiter_astral_bitmaps_,
+                                                     __riscv_vadd_vv_u16m8(row_u16m8, column_u16m8, vector_length),
+                                                     vector_length);
+    return __riscv_vmand_mm_b2(four_byte_b2, sz_delimiter_test_bit_rvv_(byte_u8m4, low_u8m4, vector_length),
+                               vector_length);
+}
+
+/*  Delimiter codepoints, matching @ref sz_utf8_delimiters_serial_ lane by lane: a lane reports
+ *  only when a well-formed sequence starts there, so the three bytes after every lane come from
+ *  the buffer via @c vslide1down carries, and a truncated tail reads zeros, which are never
+ *  continuation bytes. Lanes are independent, hence the whole tile is trusted and a match may
+ *  run past its tile edge. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_delimiters_rvv_( //
+    sz_cptr_t text, sz_size_t length,                 //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, sz_size_t *bytes_consumed) {
+
+    sz_u8_t const *text_u8 = (sz_u8_t const *)text;
+    sz_size_t count = 0, position = 0;
+
+    while (position < length && count < matches_capacity) {
+        sz_size_t vector_length = __riscv_vsetvl_e8m4(length - position);
+        vuint8m4_t lead_u8m4 = __riscv_vle8_v_u8m4(text_u8 + position, vector_length);
+        sz_u8_t carry[3] = {0, 0, 0};
+        for (sz_size_t offset = 0; offset != 3; ++offset)
+            if (position + vector_length + offset < length) carry[offset] = text_u8[position + vector_length + offset];
+        vuint8m4_t next1_u8m4 = __riscv_vslide1down_vx_u8m4(lead_u8m4, carry[0], vector_length);
+        vuint8m4_t next2_u8m4 = __riscv_vslide1down_vx_u8m4(next1_u8m4, carry[1], vector_length);
+        vuint8m4_t next3_u8m4 = __riscv_vslide1down_vx_u8m4(next2_u8m4, carry[2], vector_length);
+
+        vbool2_t continues1_b2 = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(next1_u8m4, 0xC0, vector_length), 0x80,
+                                                          vector_length);
+        vbool2_t continues2_b2 = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(next2_u8m4, 0xC0, vector_length), 0x80,
+                                                          vector_length);
+        vbool2_t continues3_b2 = __riscv_vmseq_vx_u8m4_b2(__riscv_vand_vx_u8m4(next3_u8m4, 0xC0, vector_length), 0x80,
+                                                          vector_length);
+        vbool2_t is_ascii_b2 = __riscv_vmsltu_vx_u8m4_b2(lead_u8m4, 0x80, vector_length);
+
+        // Two-byte leads skip the overlong C0/C1.
+        vbool2_t two_byte_b2 = __riscv_vmand_mm_b2(
+            __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(lead_u8m4, 0xC2, vector_length), 0x1E, vector_length),
+            continues1_b2, vector_length);
+
+        // Three-byte leads skip overlong E0 80..9F and the surrogates ED A0..BF.
+        vbool2_t lead_e0_b2 = __riscv_vmseq_vx_u8m4_b2(lead_u8m4, 0xE0, vector_length);
+        vbool2_t lead_ed_b2 = __riscv_vmseq_vx_u8m4_b2(lead_u8m4, 0xED, vector_length);
+        vbool2_t next1_below_a0_b2 = __riscv_vmsltu_vx_u8m4_b2(next1_u8m4, 0xA0, vector_length);
+        vbool2_t bad_three_b2 = __riscv_vmor_mm_b2(__riscv_vmand_mm_b2(lead_e0_b2, next1_below_a0_b2, vector_length),
+                                                   __riscv_vmandn_mm_b2(lead_ed_b2, next1_below_a0_b2, vector_length),
+                                                   vector_length);
+        vbool2_t three_byte_b2 = __riscv_vmandn_mm_b2(
+            __riscv_vmand_mm_b2(
+                __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(lead_u8m4, 0xE0, vector_length), 0x10, vector_length),
+                __riscv_vmand_mm_b2(continues1_b2, continues2_b2, vector_length), vector_length),
+            bad_three_b2, vector_length);
+
+        // Four-byte leads run F0..F4, skipping overlong F0 80..8F and anything past U+10FFFF,
+        // which is F4 90 and above.
+        vbool2_t lead_f0_b2 = __riscv_vmseq_vx_u8m4_b2(lead_u8m4, 0xF0, vector_length);
+        vbool2_t lead_f4_b2 = __riscv_vmseq_vx_u8m4_b2(lead_u8m4, 0xF4, vector_length);
+        vbool2_t next1_below_90_b2 = __riscv_vmsltu_vx_u8m4_b2(next1_u8m4, 0x90, vector_length);
+        vbool2_t bad_four_b2 = __riscv_vmor_mm_b2(__riscv_vmand_mm_b2(lead_f0_b2, next1_below_90_b2, vector_length),
+                                                  __riscv_vmandn_mm_b2(lead_f4_b2, next1_below_90_b2, vector_length),
+                                                  vector_length);
+        vbool2_t four_byte_b2 = __riscv_vmandn_mm_b2(
+            __riscv_vmand_mm_b2(
+                __riscv_vmsltu_vx_u8m4_b2(__riscv_vsub_vx_u8m4(lead_u8m4, 0xF0, vector_length), 5, vector_length),
+                __riscv_vmand_mm_b2(__riscv_vmand_mm_b2(continues1_b2, continues2_b2, vector_length), continues3_b2,
+                                    vector_length),
+                vector_length),
+            bad_four_b2, vector_length);
+
+        // Rebuild the high and low bytes of each BMP codepoint:
+        // ASCII is `0:byte`, then the 2- and 3-byte forms.
+        vuint8m4_t b1_u8m4 = __riscv_vand_vx_u8m4(next1_u8m4, 0x3F, vector_length);
+        vuint8m4_t b2_u8m4 = __riscv_vand_vx_u8m4(next2_u8m4, 0x3F, vector_length);
+        vuint8m4_t high_two_u8m4 = __riscv_vsrl_vx_u8m4(__riscv_vand_vx_u8m4(lead_u8m4, 0x1F, vector_length), 2,
+                                                        vector_length);
+        vuint8m4_t low_two_u8m4 = __riscv_vor_vv_u8m4(
+            __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(lead_u8m4, 0x03, vector_length), 6, vector_length), b1_u8m4,
+            vector_length);
+        vuint8m4_t high_three_u8m4 = __riscv_vor_vv_u8m4(
+            __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(lead_u8m4, 0x0F, vector_length), 4, vector_length),
+            __riscv_vsrl_vx_u8m4(b1_u8m4, 2, vector_length), vector_length);
+        vuint8m4_t low_three_u8m4 = __riscv_vor_vv_u8m4(
+            __riscv_vsll_vx_u8m4(__riscv_vand_vx_u8m4(next1_u8m4, 0x03, vector_length), 6, vector_length), b2_u8m4,
+            vector_length);
+        vuint8m4_t high_u8m4 = __riscv_vmv_v_x_u8m4(0, vector_length);
+        high_u8m4 = __riscv_vmerge_vvm_u8m4(high_u8m4, high_two_u8m4, two_byte_b2, vector_length);
+        high_u8m4 = __riscv_vmerge_vvm_u8m4(high_u8m4, high_three_u8m4, three_byte_b2, vector_length);
+        vuint8m4_t low_u8m4 = __riscv_vmerge_vvm_u8m4(lead_u8m4, low_two_u8m4, two_byte_b2, vector_length);
+        low_u8m4 = __riscv_vmerge_vvm_u8m4(low_u8m4, low_three_u8m4, three_byte_b2, vector_length);
+
+        vbool2_t bmp_b2 = __riscv_vmor_mm_b2(__riscv_vmor_mm_b2(is_ascii_b2, two_byte_b2, vector_length), three_byte_b2,
+                                             vector_length);
+        vbool2_t member_b2 = __riscv_vmand_mm_b2(
+            bmp_b2, sz_delimiter_bmp_membership_rvv_(high_u8m4, low_u8m4, vector_length), vector_length);
+        if (__riscv_vfirst_m_b2(four_byte_b2, vector_length) >= 0)
+            member_b2 = __riscv_vmor_mm_b2(member_b2,
+                                           sz_delimiter_astral_membership_rvv_(four_byte_b2, lead_u8m4, next1_u8m4,
+                                                                               next2_u8m4, next3_u8m4, vector_length),
+                                           vector_length);
+
+        // Byte length per lane: 1, plus 1 on a two-byte, 2 on a three-byte
+        // and 3 on a four-byte start.
+        vuint8m4_t length_u8m4 = __riscv_vmv_v_x_u8m4(1, vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 2, two_byte_b2, vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 3, three_byte_b2, vector_length);
+        length_u8m4 = __riscv_vmerge_vxm_u8m4(length_u8m4, 4, four_byte_b2, vector_length);
+
+        sz_size_t window_matches = (sz_size_t)__riscv_vcpop_m_b2(member_b2, vector_length);
+        sz_size_t emit_count = sz_min_of_two(window_matches, matches_capacity - count);
+        sz_utf8_iterate_peel_tile_rvv_(length_u8m4, member_b2, position, vector_length, emit_count,
+                                       match_offsets + count, match_lengths + count);
+        count += emit_count;
+        if (count == matches_capacity) { // output buffer full: resume past the last emitted match
+            position = match_offsets[count - 1] + match_lengths[count - 1];
+            break;
+        }
+        position += vector_length;
+    }
+
+    if (bytes_consumed) *bytes_consumed = position;
+    return count;
+}
+
 /*  UAX-29 word-boundary detection (TR29 Word_Break), byte-identical to the serial reference.
  *
  *  An outer window driver, either the @c _rvv_ or the @c _rfind_ one, slides an @c e8m4 window
@@ -240,6 +413,18 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_rvv(                            
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_utf8_delimiters_rvv(                                 //
+    sz_cptr_t text, sz_size_t length,                                               //
+    sz_size_t *match_offsets, sz_size_t *match_lengths, sz_size_t matches_capacity, //
+    sz_size_t *matches_count, sz_size_t *bytes_consumed, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    *matches_count = sz_utf8_delimiters_rvv_(text, length, match_offsets, match_lengths, matches_capacity,
+                                             bytes_consumed);
+    sz_assert_(sz_utf8_batch_consistent_(length, matches_capacity, *matches_count,
+                                         bytes_consumed ? *bytes_consumed : length, match_offsets, match_lengths));
+    return sz_success_k;
+}
+
 #endif // STRINGZILLA_TARGET_RVV
 
 #if defined(__clang__)
@@ -248,6 +433,7 @@ STRINGZILLA_API sz_status_t sz_utf8_whitespaces_rvv(                            
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }
