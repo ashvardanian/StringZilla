@@ -7,32 +7,32 @@ Each operation has a serial baseline plus per-ISA SIMD backends, like `haswell` 
 
 ## Methodology
 
-`bench/utf8_segment.cpp` measures throughput over the first 64 MiB of the multilingual `xlsum.csv` corpus by default.
+`bench/utf8_segment.cpp` measures throughput over the first 64 MB of the multilingual `xlsum.csv` corpus by default.
 `STRINGWARS_BYTES` controls the input size; `STRINGWARS_TOKENS` selects words, lines, or the file as one input.
 Results are split into a Short Words workload (whitespace-delimited tokens averaging a few bytes) and a Long Lines workload (full text lines) to expose how each kernel scales with token length.
 
 ## Short Words
 
-| Backend          | `sz_utf8_linebreaks_best` |
-| :--------------- | ------------------------: |
-| Serial @ Xeon4   |                 19.9 MB/s |
-| Haswell @ Xeon4  |                  9.3 MB/s |
-| Ice Lake @ Xeon4 |                 38.0 MB/s |
-| Serial @ M5 Pro  |                46.8 MiB/s |
-| NEON @ M5 Pro    |                37.7 MiB/s |
-| NEON @ Graviton4 |                         … |
-| SVE2 @ Graviton4 |                         … |
-| SVE @ Graviton3  |                         … |
+| Backend                   | `sz_utf8_linebreaks_best` |
+| :------------------------ | ------------------------: |
+| Serial @ 1× Intel Xeon6   |                 23.6 MB/s |
+| Haswell @ 1× Intel Xeon6  |                 32.2 MB/s |
+| Ice Lake @ 1× Intel Xeon6 |                 43.8 MB/s |
+| Serial @ 1× Apple M5 Pro  |                 46.8 MB/s |
+| NEON @ 1× Apple M5 Pro    |                 37.7 MB/s |
+| NEON @ 1× AWS Graviton4   |                         … |
+| SVE2 @ 1× AWS Graviton4   |                         … |
+| SVE @ 1× AWS Graviton3    |                         … |
 
 ## Long Lines
 
-| Backend          | `sz_utf8_linebreaks_best` |
-| :--------------- | ------------------------: |
-| Serial @ Xeon4   |                  2.4 MB/s |
-| Haswell @ Xeon4  |                 24.1 MB/s |
-| Ice Lake @ Xeon4 |                 88.5 MB/s |
-| Serial @ M5 Pro  |                37.5 MiB/s |
-| NEON @ M5 Pro    |               209.6 MiB/s |
-| NEON @ Graviton4 |                         … |
-| SVE2 @ Graviton4 |                         … |
-| SVE @ Graviton3  |                         … |
+| Backend                   | `sz_utf8_linebreaks_best` |
+| :------------------------ | ------------------------: |
+| Serial @ 1× Intel Xeon6   |                 19.4 MB/s |
+| Haswell @ 1× Intel Xeon6  |                173.2 MB/s |
+| Ice Lake @ 1× Intel Xeon6 |                230.0 MB/s |
+| Serial @ 1× Apple M5 Pro  |                 37.5 MB/s |
+| NEON @ 1× Apple M5 Pro    |                209.6 MB/s |
+| NEON @ 1× AWS Graviton4   |                         … |
+| SVE2 @ 1× AWS Graviton4   |                         … |
+| SVE @ 1× AWS Graviton3    |                         … |

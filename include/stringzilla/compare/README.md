@@ -13,24 +13,24 @@ Comparison is decided in the first differing bytes, so a Short Words table (toke
 
 ## Short Words
 
-| Backend          | `sz_equal_best` | `sz_order_best` |
-| :--------------- | --------------: | --------------: |
-| Standard @ Xeon4 |       0.37 GB/s |       0.33 GB/s |
-| Serial @ Xeon4   |       0.53 GB/s |       0.49 GB/s |
-| Haswell @ Xeon4  |       0.24 GB/s |       0.47 GB/s |
-| Skylake @ Xeon4  |       0.44 GB/s |       0.32 GB/s |
-| Ice Lake @ Xeon4 |               ↑ |               ↑ |
-| NEON @ Graviton4 |               … |               … |
-| SVE @ Graviton3  |               … |               … |
+| Backend                   | `sz_equal_best` | `sz_order_best` |
+| :------------------------ | --------------: | --------------: |
+| Standard @ 1× Intel Xeon6 |       1.32 GB/s |       1.32 GB/s |
+| Serial @ 1× Intel Xeon6   |       0.34 GB/s |       0.37 GB/s |
+| Haswell @ 1× Intel Xeon6  |       0.44 GB/s |       0.38 GB/s |
+| Skylake @ 1× Intel Xeon6  |       1.19 GB/s |       0.89 GB/s |
+| Ice Lake @ 1× Intel Xeon6 |               ↑ |               ↑ |
+| NEON @ 1× AWS Graviton4   |               … |               … |
+| SVE @ 1× AWS Graviton3    |               … |               … |
 
 ## Long Lines
 
-| Backend          | `sz_equal_best` | `sz_order_best` |
-| :--------------- | --------------: | --------------: |
-| Standard @ Xeon4 |       6.92 GB/s |       6.89 GB/s |
-| Serial @ Xeon4   |      12.49 GB/s |      11.46 GB/s |
-| Haswell @ Xeon4  |       5.38 GB/s |      12.94 GB/s |
-| Skylake @ Xeon4  |       7.19 GB/s |       5.37 GB/s |
-| Ice Lake @ Xeon4 |               ↑ |               ↑ |
-| NEON @ Graviton4 |               … |               … |
-| SVE @ Graviton3  |               … |               … |
+| Backend                   | `sz_equal_best` | `sz_order_best` |
+| :------------------------ | --------------: | --------------: |
+| Standard @ 1× Intel Xeon6 |      12.69 GB/s |      13.38 GB/s |
+| Serial @ 1× Intel Xeon6   |       5.10 GB/s |       5.37 GB/s |
+| Haswell @ 1× Intel Xeon6  |       9.47 GB/s |       5.37 GB/s |
+| Skylake @ 1× Intel Xeon6  |      12.35 GB/s |      10.33 GB/s |
+| Ice Lake @ 1× Intel Xeon6 |               ↑ |               ↑ |
+| NEON @ 1× AWS Graviton4   |               … |               … |
+| SVE @ 1× AWS Graviton3    |               … |               … |

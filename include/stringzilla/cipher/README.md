@@ -13,20 +13,20 @@ A `…` cell is not measured yet.
 
 ## Counter Mode
 
-| Backend          |     256 B |      1 KB |      4 KB |     16 KB |
-| :--------------- | --------: | --------: | --------: | --------: |
-| Serial @ Xeon4   | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s |
-| Westmere @ Xeon4 | 4.18 GB/s | 5.48 GB/s | 5.76 GB/s | 6.06 GB/s |
-| Ice Lake @ Xeon4 | 7.62 GB/s | 11.4 GB/s | 13.6 GB/s | 13.8 GB/s |
-| NEON @ Graviton4 |         … |         … |         … |         … |
-| SVE2 @ Graviton4 |         … |         … |         … |         … |
+| Backend                   |     256 B |      1 KB |      4 KB |     16 KB |
+| :------------------------ | --------: | --------: | --------: | --------: |
+| Serial @ 1× Intel Xeon6   | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s | 0.04 GB/s |
+| Westmere @ 1× Intel Xeon6 | 5.20 GB/s | 5.38 GB/s | 5.56 GB/s | 5.57 GB/s |
+| Ice Lake @ 1× Intel Xeon6 | 12.0 GB/s | 13.2 GB/s | 13.3 GB/s | 13.3 GB/s |
+| NEON @ 1× AWS Graviton4   |         … |         … |         … |         … |
+| SVE2 @ 1× AWS Graviton4   |         … |         … |         … |         … |
 
 ## Galois/Counter Mode
 
-| Backend          |      256 B |       1 KB |       4 KB |      16 KB |
-| :--------------- | ---------: | ---------: | ---------: | ---------: |
-| Serial @ Xeon4   | 0.004 GB/s | 0.004 GB/s | 0.004 GB/s | 0.004 GB/s |
-| Westmere @ Xeon4 |  2.26 GB/s |  2.98 GB/s |  3.02 GB/s |  3.00 GB/s |
-| Ice Lake @ Xeon4 |  3.19 GB/s |  5.93 GB/s |  7.07 GB/s |  7.74 GB/s |
-| NEON @ Graviton4 |          … |          … |          … |          … |
-| SVE2 @ Graviton4 |          … |          … |          … |          … |
+| Backend                   |      256 B |       1 KB |       4 KB |      16 KB |
+| :------------------------ | ---------: | ---------: | ---------: | ---------: |
+| Serial @ 1× Intel Xeon6   | 0.007 GB/s | 0.007 GB/s | 0.007 GB/s | 0.006 GB/s |
+| Westmere @ 1× Intel Xeon6 |  1.91 GB/s |  2.44 GB/s |  2.62 GB/s |  2.59 GB/s |
+| Ice Lake @ 1× Intel Xeon6 |  4.11 GB/s |  6.02 GB/s |  6.87 GB/s |  7.04 GB/s |
+| NEON @ 1× AWS Graviton4   |          … |          … |          … |          … |
+| SVE2 @ 1× AWS Graviton4   |          … |          … |          … |          … |

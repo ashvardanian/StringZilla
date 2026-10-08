@@ -13,18 +13,18 @@ An empty cell or `…` is not measured yet.
 
 ## Short Words
 
-| Backend              | `sz_sequence_intersect_best` |
-| :------------------- | ---------------------------: |
-| Standard @ Xeon4     |                     5 Mcmp/s |
-| Serial @ Xeon4       |                    31 Mcmp/s |
-| Ice Lake @ Xeon4     |                    24 Mcmp/s |
-| NEON AES @ Graviton4 |                            … |
+| Backend                     | `sz_sequence_intersect_best` |
+| :-------------------------- | ---------------------------: |
+| Standard @ 1× Intel Xeon6   |                     9 Mcmp/s |
+| Serial @ 1× Intel Xeon6     |                     7 Mcmp/s |
+| Ice Lake @ 1× Intel Xeon6   |                    18 Mcmp/s |
+| NEON AES @ 1× AWS Graviton4 |                            … |
 
 ## Long Lines
 
-| Backend              | `sz_sequence_intersect_best` |
-| :------------------- | ---------------------------: |
-| Standard @ Xeon4     |                     3 Mcmp/s |
-| Serial @ Xeon4       |                    10 Mcmp/s |
-| Ice Lake @ Xeon4     |                    10 Mcmp/s |
-| NEON AES @ Graviton4 |                            … |
+| Backend                     | `sz_sequence_intersect_best` |
+| :-------------------------- | ---------------------------: |
+| Standard @ 1× Intel Xeon6   |                     6 Mcmp/s |
+| Serial @ 1× Intel Xeon6     |                     2 Mcmp/s |
+| Ice Lake @ 1× Intel Xeon6   |                    13 Mcmp/s |
+| NEON AES @ 1× AWS Graviton4 |                            … |

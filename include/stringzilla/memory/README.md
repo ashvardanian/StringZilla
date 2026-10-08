@@ -14,12 +14,12 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 
 ## Memory
 
-| Backend          | `sz_copy_best` | `sz_move_best` | `sz_fill_best` | `sz_lookup_best` |
-| :--------------- | -------------: | -------------: | -------------: | ---------------: |
-| Standard @ Xeon4 |      14.8 GB/s |      24.0 GB/s |      25.9 GB/s |         3.0 GB/s |
-| Serial @ Xeon4   |       7.3 GB/s |      17.8 GB/s |      13.2 GB/s |         3.0 GB/s |
-| Haswell @ Xeon4  |       4.8 GB/s |      23.2 GB/s |      14.7 GB/s |         6.8 GB/s |
-| Skylake @ Xeon4  |      15.0 GB/s |      23.5 GB/s |      18.3 GB/s |                ↑ |
-| Ice Lake @ Xeon4 |              ↑ |              ↑ |              ↑ |         7.7 GB/s |
-| NEON @ Graviton4 |              … |              … |              … |                … |
-| SVE @ Graviton3  |              … |              … |              … |                … |
+| Backend                   | `sz_copy_best` | `sz_move_best` | `sz_fill_best` | `sz_lookup_best` |
+| :------------------------ | -------------: | -------------: | -------------: | ---------------: |
+| Standard @ 1× Intel Xeon6 |      11.2 GB/s |      16.6 GB/s |      11.8 GB/s |         2.6 GB/s |
+| Serial @ 1× Intel Xeon6   |       4.1 GB/s |       5.6 GB/s |       4.0 GB/s |         2.5 GB/s |
+| Haswell @ 1× Intel Xeon6  |       3.7 GB/s |       5.6 GB/s |       3.1 GB/s |         2.3 GB/s |
+| Skylake @ 1× Intel Xeon6  |       9.2 GB/s |      13.3 GB/s |      10.2 GB/s |                ↑ |
+| Ice Lake @ 1× Intel Xeon6 |              ↑ |              ↑ |              ↑ |         4.1 GB/s |
+| NEON @ 1× AWS Graviton4   |              … |              … |              … |                … |
+| SVE @ 1× AWS Graviton3    |              … |              … |              … |                … |

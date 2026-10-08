@@ -20,41 +20,41 @@ Each backend also exports its building blocks: a `state` per register of candida
 Cells are GCUPS, billions of cell updates per second, over words and lines from `xlsum.csv`.
 A `↑` cell reuses the kernel of the tier above, and a `…` cell is not measured yet.
 
-The benchmark reads the first 64 MiB of `xlsum.csv` by default; `STRINGWARS_BYTES` controls the input size.
+The benchmark reads the whole `xlsum.csv` by default; `STRINGWARS_BYTES` controls the input size.
 That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with median query byte limits of 6 and 3,460 respectively.
 UTF-8 rows use the harness's byte-based cell-update count, rather than a count of decoded rune pairs.
 
 ## Batches Over Byte Strings
 
-| Backend            | Short Words |  Long Lines |
-| :----------------- | ----------: | ----------: |
-| Serial @ Xeon6     |  0.58 GCUPS | 29.72 GCUPS |
-| Haswell @ Xeon6    |  1.07 GCUPS | 49.21 GCUPS |
-| Skylake @ Xeon6    |  0.79 GCUPS | 52.80 GCUPS |
-| Ice Lake @ Xeon6   |  1.04 GCUPS |           ↑ |
-| Serial @ Graviton4 |           … |           … |
-| Serial @ M5 Pro    |  1.25 GCUPS | 39.88 GCUPS |
-| NEON @ M5 Pro      |  1.78 GCUPS | 44.55 GCUPS |
-| Metal @ M5 Pro     | 50.01 GCUPS | 1,309 GCUPS |
-| CUDA @ SM90        |           … |           … |
-| CUDA @ SM103 MIG   | 33.88 GCUPS | 3,603 GCUPS |
-| CUDA @ SM120       |  3.59 GCUPS |           … |
+| Backend                   | Short Words |  Long Lines |
+| :------------------------ | ----------: | ----------: |
+| Serial @ 1× Intel Xeon6   |  0.36 GCUPS | 29.72 GCUPS |
+| Haswell @ 1× Intel Xeon6  |  0.79 GCUPS | 49.21 GCUPS |
+| Skylake @ 1× Intel Xeon6  |  0.60 GCUPS | 52.80 GCUPS |
+| Ice Lake @ 1× Intel Xeon6 |  0.76 GCUPS |           ↑ |
+| Serial @ 1× AWS Graviton4 |           … |           … |
+| Serial @ 1× Apple M5 Pro  |  1.25 GCUPS | 39.88 GCUPS |
+| NEON @ 1× Apple M5 Pro    |  1.78 GCUPS | 44.55 GCUPS |
+| Metal @ Apple M5 Pro      | 50.01 GCUPS | 1,309 GCUPS |
+| CUDA @ Nvidia SM90        |           … |           … |
+| CUDA @ 18× Nvidia SM103   | 27.87 GCUPS | 3,603 GCUPS |
+| CUDA @ Nvidia SM120       |  3.59 GCUPS |           … |
 
 ## Batches Over UTF-8 Strings
 
-| Backend            | Short Words |   Long Lines |
-| :----------------- | ----------: | -----------: |
-| Serial @ Xeon6     |  0.19 GCUPS |  58.48 GCUPS |
-| Haswell @ Xeon6    |  0.23 GCUPS |  98.78 GCUPS |
-| Skylake @ Xeon6    |  0.27 GCUPS | 108.51 GCUPS |
-| Ice Lake @ Xeon6   |           ↑ |            ↑ |
-| Serial @ Graviton4 |           … |            … |
-| Serial @ M5 Pro    |  0.37 GCUPS |  73.66 GCUPS |
-| NEON @ M5 Pro      |  0.40 GCUPS |  92.13 GCUPS |
-| Metal @ M5 Pro     | 44.05 GCUPS | 915.15 GCUPS |
-| CUDA @ SM90        |           … |            … |
-| CUDA @ SM103 MIG   | 36.72 GCUPS |  4,264 GCUPS |
-| CUDA @ SM120       |           … |            … |
+| Backend                   | Short Words |   Long Lines |
+| :------------------------ | ----------: | -----------: |
+| Serial @ 1× Intel Xeon6   |  0.29 GCUPS |  58.48 GCUPS |
+| Haswell @ 1× Intel Xeon6  |  0.37 GCUPS |  98.78 GCUPS |
+| Skylake @ 1× Intel Xeon6  |  0.32 GCUPS | 108.51 GCUPS |
+| Ice Lake @ 1× Intel Xeon6 |           ↑ |            ↑ |
+| Serial @ 1× AWS Graviton4 |           … |            … |
+| Serial @ 1× Apple M5 Pro  |  0.37 GCUPS |  73.66 GCUPS |
+| NEON @ 1× Apple M5 Pro    |  0.40 GCUPS |  92.13 GCUPS |
+| Metal @ Apple M5 Pro      | 44.05 GCUPS | 915.15 GCUPS |
+| CUDA @ Nvidia SM90        |           … |            … |
+| CUDA @ 18× Nvidia SM103   | 31.23 GCUPS |  4,264 GCUPS |
+| CUDA @ Nvidia SM120       |           … |            … |
 
 ## Long Byte Collections
 
@@ -62,9 +62,9 @@ The internal tiled path uses a wavefront recurrence for long byte pairs within a
 Each measurement below submits a 1 × 1 cross-product through `sz_levenshtein_distances`.
 Cells are milliseconds for equal-length strings over four byte values, reporting the median of seven runs and including device queue synchronization.
 
-| Backend         | 16,384 Bytes | 32,768 Bytes |
-| :-------------- | -----------: | -----------: |
-| Serial @ M5 Pro |         8.40 |        27.50 |
-| Metal @ M5 Pro  |         7.43 |        15.01 |
+| Backend                  | 16,384 Bytes | 32,768 Bytes |
+| :----------------------- | -----------: | -----------: |
+| Serial @ 1× Apple M5 Pro |         8.40 |        27.50 |
+| Metal @ Apple M5 Pro     |         7.43 |        15.01 |
 
 The collection keeps short pairs on the Myers kernels because tiled launch costs outweigh their parallelism at shorter lengths.

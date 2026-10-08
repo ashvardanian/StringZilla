@@ -52,7 +52,7 @@ Case-insensitive Metal walks reuse the folding tables shared with CUDA and ROCm 
 
 ## Methodology
 
-Cells are haystack MB/s over `xlsum.csv` text and random `ACGT` in 4,096-byte lines.
+Cells are haystack MB/s over the first 64 MB of `xlsum.csv` text and of random `ACGT` in 4,096-byte lines, set with `STRINGWARS_BYTES=64MB`.
 Vocabularies are the Frequent and Rare one percent of the corpus's words, and 1,000 Sampled substrings of 4 to 16 bytes.
 A `…` cell is not measured yet.
 
@@ -60,52 +60,52 @@ A `…` cell is not measured yet.
 
 Every match of every needle, including nested ones, over text.
 
-| Backend               | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
-| :-------------------- | --------------: | ----------: | -------------: | ---------: |
-| Serial @ Xeon 6776P   |           386.4 |       792.5 |          309.5 |      597.4 |
-| Haswell @ Xeon 6776P  |           422.6 |     3,092.5 |          322.5 |    2,775.0 |
-| Ice Lake @ Xeon 6776P |           397.1 |     3,235.8 |          340.1 |    2,795.5 |
-| NEON @ Graviton4      |               … |           … |              … |          … |
-| CUDA @ SM90           |               … |           … |              … |          … |
-| CUDA @ SM103 MIG      |         8,735.0 |    15,440.0 |        4,895.0 |   11,020.0 |
-| CUDA @ SM120          |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
-| Serial @ M5 Pro       |           905.2 |     1,421.4 |          695.9 |    1,152.0 |
-| NEON @ M5 Pro         |           894.2 |     7,010.1 |          692.9 |    6,233.3 |
-| Metal @ M5 Pro        |        18,086.8 |    33,734.4 |        8,220.8 |   17,799.2 |
+| Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
+| :------------------------ | --------------: | ----------: | -------------: | ---------: |
+| Serial @ 1× Intel Xeon6   |           388.8 |       761.9 |          312.4 |      621.3 |
+| Haswell @ 1× Intel Xeon6  |           417.9 |     3,506.2 |          319.7 |    3,191.8 |
+| Ice Lake @ 1× Intel Xeon6 |           414.4 |     3,638.3 |          313.9 |    3,236.9 |
+| NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
+| CUDA @ Nvidia SM90        |               … |           … |              … |          … |
+| CUDA @ 18× Nvidia SM103   |        10,885.1 |    22,825.0 |        5,336.1 |   11,315.2 |
+| CUDA @ Nvidia SM120       |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
+| Serial @ 1× Apple M5 Pro  |           905.2 |     1,421.4 |          695.9 |    1,152.0 |
+| NEON @ 1× Apple M5 Pro    |           894.2 |     7,010.1 |          692.9 |    6,233.3 |
+| Metal @ Apple M5 Pro      |        18,086.8 |    33,734.4 |        8,220.8 |   17,799.2 |
 
 ## Leftmost Cover
 
 Matches sharing no bytes, under the leftmost-longest policy, over text.
 
-| Backend               | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
-| :-------------------- | --------------: | ----------: | -------------: | ---------: |
-| Serial @ Xeon 6776P   |           273.9 |       659.0 |          271.8 |      650.7 |
-| Haswell @ Xeon 6776P  |           284.1 |     2,652.2 |          263.8 |    2,631.7 |
-| Ice Lake @ Xeon 6776P |           273.7 |     2,723.8 |          276.1 |    2,744.3 |
-| NEON @ Graviton4      |               … |           … |              … |          … |
-| CUDA @ SM90           |               … |           … |              … |          … |
-| CUDA @ SM103 MIG      |         4,468.0 |     9,405.0 |        4,688.0 |    9,413.0 |
-| CUDA @ SM120          |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
-| Serial @ M5 Pro       |           524.5 |     1,284.9 |          519.8 |    1,295.2 |
-| NEON @ M5 Pro         |           520.9 |     5,498.2 |          516.7 |    5,461.8 |
-| Metal @ M5 Pro        |         7,761.8 |    17,952.5 |        7,525.6 |   17,737.4 |
+| Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
+| :------------------------ | --------------: | ----------: | -------------: | ---------: |
+| Serial @ 1× Intel Xeon6   |           236.7 |       510.5 |          233.8 |      511.4 |
+| Haswell @ 1× Intel Xeon6  |           239.3 |     2,740.2 |          236.9 |    2,736.1 |
+| Ice Lake @ 1× Intel Xeon6 |           230.2 |     2,721.8 |          227.3 |    2,713.6 |
+| NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
+| CUDA @ Nvidia SM90        |               … |           … |              … |          … |
+| CUDA @ 18× Nvidia SM103   |         5,089.3 |    11,397.1 |        4,937.7 |   11,089.9 |
+| CUDA @ Nvidia SM120       |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
+| Serial @ 1× Apple M5 Pro  |           524.5 |     1,284.9 |          519.8 |    1,295.2 |
+| NEON @ 1× Apple M5 Pro    |           520.9 |     5,498.2 |          516.7 |    5,461.8 |
+| Metal @ Apple M5 Pro      |         7,761.8 |    17,952.5 |        7,525.6 |   17,737.4 |
 
 ## Rewriting
 
 One replacement per needle, substituted over the leftmost-longest cover; an overlapping policy admits no rewrite.
 
-| Backend               | Replace, Frequent | Replace, Rare |
-| :-------------------- | ----------------: | ------------: |
-| Serial @ Xeon 6776P   |             237.7 |         599.2 |
-| Haswell @ Xeon 6776P  |             243.5 |       2,068.5 |
-| Ice Lake @ Xeon 6776P |             239.3 |       2,109.4 |
-| NEON @ Graviton4      |                 … |             … |
-| CUDA @ SM90           |                 … |             … |
-| CUDA @ SM103 MIG      |           3,276.0 |       4,152.0 |
-| CUDA @ SM120          |           7,024.6 |      15,923.2 |
-| Serial @ M5 Pro       |             461.5 |       1,244.7 |
-| NEON @ M5 Pro         |             444.3 |       4,818.3 |
-| Metal @ M5 Pro        |           5,386.3 |      12,808.1 |
+| Backend                   | Replace, Frequent | Replace, Rare |
+| :------------------------ | ----------------: | ------------: |
+| Serial @ 1× Intel Xeon6   |             204.5 |         494.7 |
+| Haswell @ 1× Intel Xeon6  |             205.3 |       2,263.0 |
+| Ice Lake @ 1× Intel Xeon6 |             198.7 |       2,251.8 |
+| NEON @ 1× AWS Graviton4   |                 … |             … |
+| CUDA @ Nvidia SM90        |                 … |             … |
+| CUDA @ 18× Nvidia SM103   |           3,871.7 |       6,835.2 |
+| CUDA @ Nvidia SM120       |           7,024.6 |      15,923.2 |
+| Serial @ 1× Apple M5 Pro  |             461.5 |       1,244.7 |
+| NEON @ 1× Apple M5 Pro    |             444.3 |       4,818.3 |
+| Metal @ Apple M5 Pro      |           5,386.3 |      12,808.1 |
 
 ## Scoring
 
@@ -113,57 +113,57 @@ BM25 with the vocabulary as the query, one score per haystack, over raw overlapp
 A CPU sums each haystack's terms in ascending needle order, while device backends accumulate in fixed point.
 Metal evaluates each term in `f32` before conversion to fixed point.
 
-| Backend               | BM25, Frequent | BM25, Rare |
-| :-------------------- | -------------: | ---------: |
-| Serial @ Xeon 6776P   |          308.0 |      606.2 |
-| Haswell @ Xeon 6776P  |          320.3 |    2,488.3 |
-| Ice Lake @ Xeon 6776P |          319.7 |    2,416.6 |
-| NEON @ Graviton4      |              … |          … |
-| CUDA @ SM90           |              … |          … |
-| CUDA @ SM103 MIG      |        2,728.0 |   10,460.0 |
-| CUDA @ SM120          |        8,140.8 |   31,037.4 |
-| Serial @ M5 Pro       |          640.3 |    1,104.2 |
-| NEON @ M5 Pro         |          637.2 |    4,989.1 |
-| Metal @ M5 Pro        |        7,404.1 |   18,186.1 |
+| Backend                   | BM25, Frequent | BM25, Rare |
+| :------------------------ | -------------: | ---------: |
+| Serial @ 1× Intel Xeon6   |          294.7 |      610.4 |
+| Haswell @ 1× Intel Xeon6  |          303.1 |    2,808.8 |
+| Ice Lake @ 1× Intel Xeon6 |          297.4 |    2,832.4 |
+| NEON @ 1× AWS Graviton4   |              … |          … |
+| CUDA @ Nvidia SM90        |              … |          … |
+| CUDA @ 18× Nvidia SM103   |        3,508.2 |   12,544.0 |
+| CUDA @ Nvidia SM120       |        8,140.8 |   31,037.4 |
+| Serial @ 1× Apple M5 Pro  |          640.3 |    1,104.2 |
+| NEON @ 1× Apple M5 Pro    |          637.2 |    4,989.1 |
+| Metal @ Apple M5 Pro      |        7,404.1 |   18,186.1 |
 
 ## Nucleotides
 
 The sampled slice over uniform `ACGT`, where rows are five classes wide and the whole automaton is hot.
 Short needles over four letters match about 0.4 times per byte, so every column past the count is bound by reporting rather than by the walk.
 
-| Backend               |    Count |    Find | Count, Leftmost |    BM25 |
-| :-------------------- | -------: | ------: | --------------: | ------: |
-| Serial @ Xeon 6776P   |    796.5 |   116.7 |            58.3 |   113.9 |
-| Haswell @ Xeon 6776P  |    835.0 |   120.7 |            62.4 |   117.4 |
-| Ice Lake @ Xeon 6776P |    878.1 |   121.7 |            64.2 |   112.0 |
-| NEON @ Graviton4      |        … |       … |               … |       … |
-| CUDA @ SM90           |        … |       … |               … |       … |
-| CUDA @ SM103 MIG      | 12,300.0 | 4,861.0 |         1,337.0 | 5,171.0 |
-| CUDA @ SM120          | 22,732.8 | 1,566.7 |           908.2 | 7,833.6 |
+| Backend                   |    Count |    Find | Count, Leftmost |    BM25 |
+| :------------------------ | -------: | ------: | --------------: | ------: |
+| Serial @ 1× Intel Xeon6   |    767.9 |   108.4 |            50.7 |    97.2 |
+| Haswell @ 1× Intel Xeon6  |    801.2 |   109.3 |            50.8 |    97.1 |
+| Ice Lake @ 1× Intel Xeon6 |    804.0 |   109.0 |            51.6 |   100.8 |
+| NEON @ 1× AWS Graviton4   |        … |       … |               … |       … |
+| CUDA @ Nvidia SM90        |        … |       … |               … |       … |
+| CUDA @ 18× Nvidia SM103   | 19,261.4 | 4,990.0 |         1,379.3 | 5,522.4 |
+| CUDA @ Nvidia SM120       | 22,732.8 | 1,566.7 |           908.2 | 7,833.6 |
 
 ## Case Folding
 
 The frequent slice with both sides folded, which is the cost of matching a vocabulary against text that does not share its case.
 
-| Backend               |   Count |    Find | Replace |
-| :-------------------- | ------: | ------: | ------: |
-| Serial @ Xeon 6776P   |   123.6 |   123.5 |   115.2 |
-| Haswell @ Xeon 6776P  |   126.9 |   124.1 |   115.6 |
-| Ice Lake @ Xeon 6776P |   135.9 |   124.1 |   118.3 |
-| Serial @ M5 Pro       |   314.7 |   317.3 |   264.4 |
-| NEON @ M5 Pro         |   314.8 |   314.0 |   263.7 |
-| Metal @ M5 Pro        | 5,558.3 | 2,812.8 | 2,259.4 |
-| NEON @ Graviton4      |       … |       … |       … |
-| CUDA @ SM90           |       … |       … |       … |
-| CUDA @ SM103 MIG      | 2,955.0 | 1,528.0 | 1,212.0 |
-| CUDA @ SM120          | 9,523.2 | 4,587.5 | 3,215.4 |
+| Backend                   |   Count |    Find | Replace |
+| :------------------------ | ------: | ------: | ------: |
+| Serial @ 1× Intel Xeon6   |   138.6 |   144.3 |   120.1 |
+| Haswell @ 1× Intel Xeon6  |   143.2 |   139.4 |   119.2 |
+| Ice Lake @ 1× Intel Xeon6 |   143.0 |   148.3 |   117.4 |
+| Serial @ 1× Apple M5 Pro  |   314.7 |   317.3 |   264.4 |
+| NEON @ 1× Apple M5 Pro    |   314.8 |   314.0 |   263.7 |
+| Metal @ Apple M5 Pro      | 5,558.3 | 2,812.8 | 2,259.4 |
+| NEON @ 1× AWS Graviton4   |       … |       … |       … |
+| CUDA @ Nvidia SM90        |       … |       … |       … |
+| CUDA @ 18× Nvidia SM103   | 3,533.8 | 1,734.7 | 1,504.3 |
+| CUDA @ Nvidia SM120       | 9,523.2 | 4,587.5 | 3,215.4 |
 
 ## Compilation
 
 Building the engine is its own cost, paid once per vocabulary, and it is reported separately because a pipeline that rebuilds per query is bound by this rather than by the walk.
 Cells are needle bytes per second in MB/s, over 3,462 needles per word slice and 1,000 per sampled slice.
 
-| Backend             | Cased, Frequent | Cased, Rare | Folded, Frequent | Sampled, Text | Sampled, Nucleotides |
-| :------------------ | --------------: | ----------: | ---------------: | ------------: | -------------------: |
-| Serial @ Xeon 6776P |           10.85 |       17.46 |            10.26 |          8.45 |                21.36 |
-| Serial @ Graviton4  |               … |           … |                … |             … |                    … |
+| Backend                   | Cased, Frequent | Cased, Rare | Folded, Frequent | Sampled, Text | Sampled, Nucleotides |
+| :------------------------ | --------------: | ----------: | ---------------: | ------------: | -------------------: |
+| Serial @ 1× Intel Xeon6   |           11.99 |       20.31 |            11.93 |         11.04 |                25.89 |
+| Serial @ 1× AWS Graviton4 |               … |           … |                … |             … |                    … |

@@ -14,22 +14,22 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so the dispat
 
 ## Short Words
 
-| Backend          | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
-| :--------------- | -------------------------: | ---------------------------------: |
-| Standard @ Xeon4 |                  22 Mcmp/s |                          27 Mcmp/s |
-| Serial @ Xeon4   |                  96 Mcmp/s |                          28 Mcmp/s |
-| Haswell @ Xeon4  |                 140 Mcmp/s |                          57 Mcmp/s |
-| Skylake @ Xeon4  |                 114 Mcmp/s |                          64 Mcmp/s |
-| NEON @ Graviton4 |                          … |                                  … |
-| SVE @ Graviton3  |                          … |                                  … |
+| Backend                   | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
+| :------------------------ | -------------------------: | ---------------------------------: |
+| Standard @ 1× Intel Xeon6 |                  63 Mcmp/s |                          29 Mcmp/s |
+| Serial @ 1× Intel Xeon6   |                 172 Mcmp/s |                         104 Mcmp/s |
+| Haswell @ 1× Intel Xeon6  |                 230 Mcmp/s |                         125 Mcmp/s |
+| Skylake @ 1× Intel Xeon6  |                 238 Mcmp/s |                         130 Mcmp/s |
+| NEON @ 1× AWS Graviton4   |                          … |                                  … |
+| SVE @ 1× AWS Graviton3    |                          … |                                  … |
 
 ## Long Lines
 
-| Backend          | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
-| :--------------- | -------------------------: | ---------------------------------: |
-| Standard @ Xeon4 |                  64 Mcmp/s |                          70 Mcmp/s |
-| Serial @ Xeon4   |                 148 Mcmp/s |                          30 Mcmp/s |
-| Haswell @ Xeon4  |                 169 Mcmp/s |                          30 Mcmp/s |
-| Skylake @ Xeon4  |                 165 Mcmp/s |                          34 Mcmp/s |
-| NEON @ Graviton4 |                          … |                                  … |
-| SVE @ Graviton3  |                          … |                                  … |
+| Backend                   | `sz_sequence_argsort_best` | `sz_sequence_argsort_uncased_best` |
+| :------------------------ | -------------------------: | ---------------------------------: |
+| Standard @ 1× Intel Xeon6 |                  53 Mcmp/s |                          16 Mcmp/s |
+| Serial @ 1× Intel Xeon6   |                 136 Mcmp/s |                          55 Mcmp/s |
+| Haswell @ 1× Intel Xeon6  |                 181 Mcmp/s |                          60 Mcmp/s |
+| Skylake @ 1× Intel Xeon6  |                 200 Mcmp/s |                          62 Mcmp/s |
+| NEON @ 1× AWS Graviton4   |                          … |                                  … |
+| SVE @ 1× AWS Graviton3    |                          … |                                  … |

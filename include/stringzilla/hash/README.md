@@ -33,28 +33,28 @@ An empty cell is genuinely-missing data.
 
 ## Short Words
 
-| Backend          |               Byte Sum |                   Hash |         Multi-seed Hash |               SHA-256 |    Multi-state SHA-256 |
-| :--------------- | ---------------------: | ---------------------: | ----------------------: | --------------------: | ---------------------: |
-| Standard @ Xeon4 | 0.19 GB/s · 38 Mhash/s | 0.17 GB/s · 35 Mhash/s |                       … |                     … |                      … |
-| Serial @ Xeon4   | 0.18 GB/s · 36 Mhash/s |  0.03 GB/s · 6 Mhash/s |  0.03 GB/s ·  6 Mhash/s | 0.02 GB/s · 3 Mhash/s |  0.02 GB/s · 3 Mhash/s |
-| Westmere @ Xeon4 |                      ↑ | 0.17 GB/s · 35 Mhash/s | 0.85 GB/s · 175 Mhash/s |                     ↑ |                      ↑ |
-| Goldmont @ Xeon4 |                      ↑ |                      ↑ |                       ↑ | 0.05 GB/s · 9 Mhash/s | 0.06 GB/s · 11 Mhash/s |
-| Haswell @ Xeon4  | 0.17 GB/s · 34 Mhash/s |                      ↑ |                       ↑ |                     ↑ | 0.07 GB/s · 14 Mhash/s |
-| Skylake @ Xeon4  | 0.34 GB/s · 71 Mhash/s | 0.32 GB/s · 65 Mhash/s |                       ↑ |                     ↑ | 0.13 GB/s · 26 Mhash/s |
-| Ice Lake @ Xeon4 | 0.34 GB/s · 71 Mhash/s | 0.33 GB/s · 68 Mhash/s | 1.88 GB/s · 391 Mhash/s |                     ↑ |                      ↑ |
-| NEON @ Graviton4 |                      … |                      … |                       … |                     … |                      … |
-| SVE @ Graviton3  |                      … |                      … |                       … |                     … |                      … |
+| Backend                   |                Byte Sum |                    Hash |         Multi-seed Hash |                SHA-256 |    Multi-state SHA-256 |
+| :------------------------ | ----------------------: | ----------------------: | ----------------------: | ---------------------: | ---------------------: |
+| Standard @ 1× Intel Xeon6 |  0.30 GB/s · 64 Mhash/s |  0.28 GB/s · 59 Mhash/s |                       … |                      … |                      … |
+| Serial @ 1× Intel Xeon6   |  0.31 GB/s · 64 Mhash/s |  0.06 GB/s · 13 Mhash/s |  0.08 GB/s · 16 Mhash/s |  0.02 GB/s · 4 Mhash/s |  0.02 GB/s · 4 Mhash/s |
+| Westmere @ 1× Intel Xeon6 |                       ↑ |  0.29 GB/s · 61 Mhash/s | 1.24 GB/s · 260 Mhash/s |                      ↑ |                      ↑ |
+| Goldmont @ 1× Intel Xeon6 |                       ↑ |                       ↑ |                       ↑ | 0.06 GB/s · 13 Mhash/s | 0.06 GB/s · 13 Mhash/s |
+| Haswell @ 1× Intel Xeon6  |  0.28 GB/s · 60 Mhash/s |                       ↑ |                       ↑ |                      ↑ |  0.04 GB/s · 9 Mhash/s |
+| Skylake @ 1× Intel Xeon6  | 1.98 GB/s · 415 Mhash/s | 1.72 GB/s · 361 Mhash/s |                       ↑ |                      ↑ | 0.13 GB/s · 26 Mhash/s |
+| Ice Lake @ 1× Intel Xeon6 | 2.02 GB/s · 424 Mhash/s | 1.62 GB/s · 341 Mhash/s | 3.37 GB/s · 707 Mhash/s |                      ↑ |                      ↑ |
+| NEON @ 1× AWS Graviton4   |                       … |                       … |                       … |                      … |                      … |
+| SVE @ 1× AWS Graviton3    |                       … |                       … |                       … |                      … |                      … |
 
 ## Long Lines
 
-| Backend          |               Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |    Multi-state SHA-256 |
-| :--------------- | ---------------------: | ---------------------: | -----------------------: | --------------------: | ---------------------: |
-| Standard @ Xeon4 | 2.55 GB/s · 21 Mhash/s | 2.79 GB/s · 23 Mhash/s |                        … |                     … |                      … |
-| Serial @ Xeon4   | 1.81 GB/s · 15 Mhash/s |  0.16 GB/s · 1 Mhash/s |   0.17 GB/s ·  1 Mhash/s | 0.17 GB/s · 1 Mhash/s |  0.17 GB/s · 1 Mhash/s |
-| Westmere @ Xeon4 |                      ↑ | 2.74 GB/s · 23 Mhash/s |   5.92 GB/s · 49 Mhash/s |                     ↑ |                      ↑ |
-| Goldmont @ Xeon4 |                      ↑ |                      ↑ |                        ↑ | 0.66 GB/s · 5 Mhash/s |  0.75 GB/s · 6 Mhash/s |
-| Haswell @ Xeon4  | 2.61 GB/s · 22 Mhash/s |                      ↑ |                        ↑ |                     ↑ |  0.52 GB/s · 4 Mhash/s |
-| Skylake @ Xeon4  | 4.23 GB/s · 35 Mhash/s | 2.68 GB/s · 22 Mhash/s |                        ↑ |                     ↑ | 0.950 GB/s · 8 Mhash/s |
-| Ice Lake @ Xeon4 | 4.20 GB/s · 35 Mhash/s | 4.51 GB/s · 37 Mhash/s | 12.62 GB/s · 104 Mhash/s |                     ↑ |                      ↑ |
-| NEON @ Graviton4 |                      … |                      … |                        … |                     … |                      … |
-| SVE @ Graviton3  |                      … |                      … |                        … |                     … |                      … |
+| Backend                   |                Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |   Multi-state SHA-256 |
+| :------------------------ | ----------------------: | ---------------------: | -----------------------: | --------------------: | --------------------: |
+| Standard @ 1× Intel Xeon6 |  4.49 GB/s · 37 Mhash/s | 4.10 GB/s · 34 Mhash/s |                        … |                     … |                     … |
+| Serial @ 1× Intel Xeon6   |  2.38 GB/s · 20 Mhash/s |  0.31 GB/s · 3 Mhash/s |    0.32 GB/s · 3 Mhash/s | 0.18 GB/s · 2 Mhash/s | 0.18 GB/s · 2 Mhash/s |
+| Westmere @ 1× Intel Xeon6 |                       ↑ | 3.16 GB/s · 26 Mhash/s |   3.66 GB/s · 31 Mhash/s |                     ↑ |                     ↑ |
+| Goldmont @ 1× Intel Xeon6 |                       ↑ |                      ↑ |                        ↑ | 0.81 GB/s · 7 Mhash/s | 0.85 GB/s · 7 Mhash/s |
+| Haswell @ 1× Intel Xeon6  |  3.96 GB/s · 33 Mhash/s |                      ↑ |                        ↑ |                     ↑ | 0.38 GB/s · 3 Mhash/s |
+| Skylake @ 1× Intel Xeon6  | 10.29 GB/s · 86 Mhash/s | 3.20 GB/s · 27 Mhash/s |                        ↑ |                     ↑ | 0.99 GB/s · 8 Mhash/s |
+| Ice Lake @ 1× Intel Xeon6 |  8.72 GB/s · 73 Mhash/s | 8.16 GB/s · 68 Mhash/s | 16.16 GB/s · 135 Mhash/s |                     ↑ |                     ↑ |
+| NEON @ 1× AWS Graviton4   |                       … |                      … |                        … |                     … |                     … |
+| SVE @ 1× AWS Graviton3    |                       … |                      … |                        … |                     … |                     … |
