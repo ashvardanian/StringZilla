@@ -526,7 +526,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
         return sz_device_memory_mismatch_k;
     }
     staged_bytes = (sz_size_t)sz_substrings_walk_rows_cuda_(engine) * engine->classes_count * sizeof(sz_u32_t);
-    engine->chunk_budget = sz_substrings_resident_threads_cuda_(sz_substrings_walk_kernel_cuda_(engine), staged_bytes);
+    engine->chunk_budget = sz_substrings_resident_threads_cuda_(sz_substrings_walk_kernel_cuda_(engine), staged_bytes) *
+                           sz_substrings_chunks_per_thread_simt_k;
     engine->haystacks_budget = haystacks_budget;
     status = sz_substrings_arena_reserve_cuda_(engine, stream);
     if (status != sz_success_k) sz_substrings_engine_free_(engine, stream);

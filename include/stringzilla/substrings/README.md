@@ -67,7 +67,7 @@ Every match of every needle, including nested ones, over text.
 | Ice Lake @ 1× Intel Xeon6 |           414.4 |     3,638.3 |          313.9 |    3,236.9 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
-| CUDA @ 18× Nvidia SM103   |        10,885.1 |    22,825.0 |        5,336.1 |   11,315.2 |
+| CUDA @ 18× Nvidia SM103   |        17,674.2 |    33,454.1 |        9,125.9 |   19,025.9 |
 | CUDA @ Nvidia SM120       |        22,077.4 |    26,101.8 |       13,240.3 |   25,569.3 |
 | Serial @ 1× Apple M5 Pro  |           905.2 |     1,421.4 |          695.9 |    1,152.0 |
 | NEON @ 1× Apple M5 Pro    |           894.2 |     7,010.1 |          692.9 |    6,233.3 |
@@ -84,7 +84,7 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 | Ice Lake @ 1× Intel Xeon6 |           230.2 |     2,721.8 |          227.3 |    2,713.6 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
-| CUDA @ 18× Nvidia SM103   |         5,089.3 |    11,397.1 |        4,937.7 |   11,089.9 |
+| CUDA @ 18× Nvidia SM103   |         8,457.2 |    18,544.6 |        7,997.4 |   18,227.2 |
 | CUDA @ Nvidia SM120       |         7,936.0 |    16,332.8 |        8,151.0 |   23,808.0 |
 | Serial @ 1× Apple M5 Pro  |           524.5 |     1,284.9 |          519.8 |    1,295.2 |
 | NEON @ 1× Apple M5 Pro    |           520.9 |     5,498.2 |          516.7 |    5,461.8 |
@@ -101,7 +101,7 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 | Ice Lake @ 1× Intel Xeon6 |             198.7 |       2,251.8 |
 | NEON @ 1× AWS Graviton4   |                 … |             … |
 | CUDA @ Nvidia SM90        |                 … |             … |
-| CUDA @ 18× Nvidia SM103   |           3,871.7 |       6,835.2 |
+| CUDA @ 18× Nvidia SM103   |           5,529.6 |       9,059.3 |
 | CUDA @ Nvidia SM120       |           7,024.6 |      15,923.2 |
 | Serial @ 1× Apple M5 Pro  |             461.5 |       1,244.7 |
 | NEON @ 1× Apple M5 Pro    |             444.3 |       4,818.3 |
@@ -120,7 +120,7 @@ Metal evaluates each term in `f32` before conversion to fixed point.
 | Ice Lake @ 1× Intel Xeon6 |          297.4 |    2,832.4 |
 | NEON @ 1× AWS Graviton4   |              … |          … |
 | CUDA @ Nvidia SM90        |              … |          … |
-| CUDA @ 18× Nvidia SM103   |        3,508.2 |   12,544.0 |
+| CUDA @ 18× Nvidia SM103   |        3,530.8 |   12,748.8 |
 | CUDA @ Nvidia SM120       |        8,140.8 |   31,037.4 |
 | Serial @ 1× Apple M5 Pro  |          640.3 |    1,104.2 |
 | NEON @ 1× Apple M5 Pro    |          637.2 |    4,989.1 |
@@ -155,7 +155,7 @@ The frequent slice with both sides folded, which is the cost of matching a vocab
 | Metal @ Apple M5 Pro      | 5,558.3 | 2,812.8 | 2,259.4 |
 | NEON @ 1× AWS Graviton4   |       … |       … |       … |
 | CUDA @ Nvidia SM90        |       … |       … |       … |
-| CUDA @ 18× Nvidia SM103   | 3,533.8 | 1,734.7 | 1,504.3 |
+| CUDA @ 18× Nvidia SM103   | 5,289.0 | 2,628.6 | 2,120.7 |
 | CUDA @ Nvidia SM120       | 9,523.2 | 4,587.5 | 3,215.4 |
 
 ## Compilation

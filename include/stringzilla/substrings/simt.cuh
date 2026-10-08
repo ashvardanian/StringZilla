@@ -34,7 +34,7 @@
 #include "stringzilla/substrings/serial.h"
 #include "stringzilla/utf8_uncased_fold/simt.cuh" // `sz_unicode_fold_image_simt_`
 
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 #ifdef __cplusplus
 extern "C" {
@@ -99,15 +99,10 @@ typedef struct sz_substrings_tally_simt_t {
 
 #pragma region Device Helpers
 
-/** Four haystack bytes as one load; the address is peeled to its own alignment by the caller. */
+/** Four haystack bytes as one read-only load; the address is peeled to its own alignment by the
+ *  caller. */
 STRINGZILLA_DEVICE sz_u32_t sz_substrings_load_quad_simt_(sz_u8_t const *pointer) {
-#if defined(__HIP__)
-    return *(sz_u32_t const *)pointer;
-#else
-    sz_u32_t loaded;
-    asm("ld.global.u32 %0, [%1];" : "=r"(loaded) : "l"(pointer));
-    return loaded;
-#endif
+    return __ldg((unsigned int const *)pointer);
 }
 
 /**
@@ -144,8 +139,9 @@ STRINGZILLA_DEVICE sz_u32_t sz_substrings_step_simt_(sz_substrings_engine_t cons
                                                      sz_substrings_staged_simt_t const *staged, sz_u32_t state,
                                                      sz_u8_t byte) {
     sz_u32_t const byte_class = staged->classes[byte];
-    if (state < staged->rows_count) return staged->rows[(sz_size_t)state * engine->classes_count + byte_class];
+    // Asked on every chase step, so a failure link into the staged head stays in shared memory.
     for (;;) {
+        if (state < staged->rows_count) return staged->rows[(sz_size_t)state * engine->classes_count + byte_class];
         if (state < engine->hot_count)
             return __ldg(engine->hot_rows + (sz_size_t)state * engine->classes_count + byte_class);
         sz_size_t const candidate = (sz_size_t)__ldg(engine->base + state) + byte;
@@ -235,51 +231,37 @@ STRINGZILLA_DEVICE void sz_substrings_tally_simt_(sz_substrings_tally_simt_t con
 
 #pragma region Scan Kernels
 
-/** Reduces one block's own contiguous tile into @p tile_sums at @c blockIdx.x. */
-static __global__ void sz_substrings_scan_reduce_simt_kernel_(sz_size_t const *values, sz_size_t count,
-                                                              sz_size_t elements_per_tile, sz_size_t *tile_sums) {
+/**
+ *  @brief Scans one ticket's own tile in place, seeded by the totals the tiles before it chained
+ *      through @p chain, so a whole scan is one launch.
+ *  @param[in] live How many leading values the device wrote, scanned with one more slot for their
+ *      total, or @c STRINGZILLA_NULL to scan all @p count.
+ *  @return Whether this block scanned the last tile, whose values are final once it returns.
+ *
+ *  The chain slot starts zeroed and the last tile zeroes it again, so every scan of a round reuses
+ *  the one slot the round's clear zeroed. Only blocks with values to scan take a ticket, so the
+ *  last ticket is the slot's last touch however few of the launched blocks are live.
+ */
+STRINGZILLA_DEVICE sz_bool_t sz_substrings_scan_tile_simt_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
+                                                           sz_size_t elements_per_tile, sz_size_t *chain) {
     __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
-    sz_size_t const begin = (sz_size_t)blockIdx.x * elements_per_tile;
-    sz_size_t const end = sz_min_of_two(begin + elements_per_tile, count);
-    sz_size_t running = 0, first;
+    // A live count past the buffer means its producer outran it and wrote none of it.
+    sz_size_t const counted = !live ? count : *live < count ? *live + 1 : 0;
+    sz_size_t const tiles = sz_size_divide_round_up(counted, elements_per_tile);
+    sz_size_t tile, begin, end, running = 0, first;
+    if (blockIdx.x >= tiles) return sz_false_k;
+    tile = sz_chain_ticket_simt_(chain);
+    begin = tile * elements_per_tile;
+    end = sz_min_of_two(begin + elements_per_tile, counted);
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
-        sz_size_t const value = index < end ? values[index] : 0;
         sz_size_t total = 0;
-        sz_block_scan_simt_(value, shared, &total);
-        if (threadIdx.x == 0) running += total;
+        sz_block_scan_simt_(index < end ? values[index] : 0, shared, &total);
+        running += total;
         __syncthreads();
     }
-    if (threadIdx.x == 0) tile_sums[blockIdx.x] = running;
-}
-
-/** Scans @p tile_sums in place, on one block, carrying a running offset across as many tiles
- *  as it takes. */
-static __global__ void sz_substrings_scan_carry_simt_kernel_(sz_size_t *tile_sums, sz_size_t count) {
-    __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
-    __shared__ sz_size_t carry;
-    sz_size_t first;
-    if (threadIdx.x == 0) carry = 0;
-    __syncthreads();
-    for (first = 0; first < count; first += blockDim.x) {
-        sz_size_t const index = first + threadIdx.x;
-        sz_size_t const value = index < count ? tile_sums[index] : 0;
-        sz_size_t total = 0;
-        sz_size_t const exclusive = sz_block_scan_simt_(value, shared, &total);
-        if (index < count) tile_sums[index] = carry + exclusive;
-        __syncthreads();
-        if (threadIdx.x == 0) carry += total;
-        __syncthreads();
-    }
-}
-
-/** Scans one block's own tile in place, seeded by the base the carry settled for it. */
-static __global__ void sz_substrings_scan_apply_simt_kernel_(sz_size_t *values, sz_size_t count,
-                                                             sz_size_t elements_per_tile, sz_size_t const *tile_sums) {
-    __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
-    sz_size_t const begin = (sz_size_t)blockIdx.x * elements_per_tile;
-    sz_size_t const end = sz_min_of_two(begin + elements_per_tile, count);
-    sz_size_t running = tile_sums[blockIdx.x], first;
+    running = sz_chain_offset_simt_(chain, tile, tiles, running);
+    if (tile + 1 == tiles && threadIdx.x == 0) *chain = 0;
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
         sz_size_t const value = index < end ? values[index] : 0;
@@ -289,54 +271,67 @@ static __global__ void sz_substrings_scan_apply_simt_kernel_(sz_size_t *values, 
         running += total;
         __syncthreads();
     }
+    return tile + 1 == tiles ? sz_true_k : sz_false_k;
+}
+
+static __global__ void sz_substrings_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
+                                                       sz_size_t elements_per_tile, sz_size_t *chain) {
+    sz_substrings_scan_tile_simt_(values, count, live, elements_per_tile, chain);
+}
+
+/**
+ *  @brief Scans the sizing walk's chunk slots, then publishes from the last tile what the walk
+ *      found, which is the one place a round learns whether it fit.
+ *  @param[in] emitting Whether the round reads the matches themselves, since a count that never
+ *      does cannot overrun a match budget however many matches the corpus holds.
+ */
+static __global__ void sz_substrings_scan_sized_simt_kernel_(sz_size_t *chunk_slots, sz_size_t count,
+                                                             sz_size_t elements_per_tile, sz_size_t *chain,
+                                                             sz_size_t matches_budget, sz_bool_t emitting,
+                                                             sz_substrings_report_t *report) {
+    sz_size_t emitted;
+    if (!sz_substrings_scan_tile_simt_(chunk_slots, count, STRINGZILLA_NULL, elements_per_tile, chain) ||
+        threadIdx.x != 0)
+        return;
+    // The last slot carries the total through every trailing zero.
+    emitted = chunk_slots[count - 1];
+    report->matches_emitted = emitted;
+    report->matches_stored = emitted;
+    report->target_length = 0;
+    report->shortfall = emitting && emitted > matches_budget ? emitted - matches_budget : 0;
 }
 
 #pragma endregion Scan Kernels
 
 #pragma region Walk Kernels
 
-/** Sums the haystacks' lengths, so the host can size a chunk without reaching a
- *  device accessor itself. */
-static __global__ void sz_substrings_total_bytes_simt_kernel_(sz_sequence_t haystacks, sz_size_t *total) {
-    __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
-    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
-    sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_size_t mine = 0, block_total = 0;
-    for (; index < haystacks.count; index += stride) mine += sz_sequence_tape_length_simt_(haystacks.handle, index);
-    sz_block_scan_simt_(mine, shared, &block_total);
-    if (threadIdx.x == 0) atomicAdd((unsigned long long *)total, (unsigned long long)block_total);
-}
-
 /**
- *  @brief Derives this round's chunk width from the corpus the device just summed.
- *
- *  @param[in] chunk_budget Chunks the arena holds beyond one per haystack, which is what
- *      fixes the width.
- *  @param[in] floor_bytes Four times the longest match, so a warm-up never outgrows a quarter
- *      of a chunk.
+ *  @brief This round's chunk width: the tape's bytes over the engine's chunk budget, and at least
+ *      four times the longest match, so a warm-up never outgrows a quarter of a chunk.
  *
  *  There is no ceiling on the width, and that is what makes the budget a bound rather than a hope:
  *  a chunk holds at least @c total/budget bytes, so the corpus contributes at most @c budget
  *  chunks, and each haystack's own remainder contributes at most one more. A ceiling would let a
  *  large corpus outrun any fixed budget, which is the readback this inversion exists to remove.
  */
-static __global__ void sz_substrings_chunk_bytes_simt_kernel_(sz_size_t const *total_bytes, sz_size_t chunk_budget,
-                                                              sz_size_t floor_bytes, sz_size_t *chunk_bytes) {
-    sz_size_t const budget = chunk_budget ? chunk_budget : 1;
-    sz_size_t const share = sz_size_divide_round_up(*total_bytes, budget);
-    if (blockIdx.x || threadIdx.x) return;
-    *chunk_bytes = sz_max_of_two(sz_max_of_two(share, floor_bytes), (sz_size_t)1);
+STRINGZILLA_DEVICE sz_size_t sz_substrings_chunk_bytes_simt_(sz_substrings_engine_t const *engine,
+                                                             sz_sequence_t haystacks) {
+    sz_u64_t const *offsets = (sz_u64_t const *)haystacks.handle;
+    sz_size_t const budget = engine->chunk_budget ? engine->chunk_budget : 1;
+    sz_size_t const share = sz_size_divide_round_up((sz_size_t)(offsets[haystacks.count] - offsets[0]), budget);
+    return sz_max_of_two(sz_max_of_two(share, 4 * (sz_size_t)engine->max_source_match_bytes), (sz_size_t)1);
 }
 
 /** Writes how many chunks each haystack is cut into, which the scan then turns into
  *  its chunk range. */
-static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_sequence_t haystacks, sz_size_t const *chunk_bytes,
+static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
                                                                sz_size_t *chunk_offsets) {
+    sz_size_t const chunk_bytes = sz_substrings_chunk_bytes_simt_(&engine, haystacks);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     for (; index < haystacks.count; index += stride)
         chunk_offsets[index] = sz_substrings_chunks_for_simt_(sz_sequence_tape_length_simt_(haystacks.handle, index),
-                                                              *chunk_bytes);
+                                                              chunk_bytes);
 }
 
 /**
@@ -354,10 +349,13 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t con
     sz_size_t output_offset, found = 0, index;
     sz_u32_t output_count;
     if (!sz_substrings_accepts_simt_(staged, state)) return 0;
-    output_count = engine->outputs_counts[state];
-    output_offset = engine->outputs_offsets[state];
+    output_count = __ldg(engine->outputs_counts + state);
+    output_offset = (sz_size_t)__ldg((unsigned long long const *)engine->outputs_offsets + state);
     for (index = 0; index != output_count; ++index) {
-        sz_substrings_output_t const output = engine->outputs[output_offset + index];
+        sz_substrings_output_t const *const stored = engine->outputs + output_offset + index;
+        sz_substrings_output_t output;
+        output.needle_index = __ldg(&stored->needle_index);
+        output.folded_match_bytes = __ldg(&stored->folded_match_bytes);
         // `walk_begin` is clamped to the haystack's own start, so underflowing the walk and underflowing
         // the haystack are the same test.
         if (delta + 1 < output.folded_match_bytes) continue;
@@ -426,6 +424,64 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_cased_simt_(
 }
 
 /**
+ *  @brief The device twin of @c sz_substrings_folded_span, stepping back one folded codepoint at a
+ *      time through the fold tables, as @c sz_substrings_resolve_match_metal_ does.
+ *
+ *  A byte that ends no well-formed codepoint passes through as itself and steps back by one, which
+ *  keeps the backward byte stream the exact reverse of the forward walk's.
+ */
+STRINGZILLA_DEVICE sz_substrings_resolved_match_t
+sz_substrings_folded_span_simt_(sz_cptr_t haystack, sz_substrings_folded_byte_t const *step, sz_size_t folded,
+                                sz_size_t last_break_folded_end, sz_size_t folded_match_bytes) {
+    sz_u8_t const *const haystack_bytes = (sz_u8_t const *)haystack;
+    sz_size_t const trailing = step->trailing, shift = step->shift;
+    sz_size_t const wanted = folded_match_bytes + shift;
+    sz_size_t position = step->codepoint_end, stepped;
+    sz_size_t start_here = STRINGZILLA_SIZE_MAX, start_earlier = STRINGZILLA_SIZE_MAX;
+    sz_utf8_folded_image_t image;
+    sz_u64_t ring = 0;
+    sz_u8_t pending = 0;
+    sz_bool_t periodic = (sz_bool_t)(shift != 0);
+    sz_substrings_resolved_match_t resolved;
+    resolved.source_offset = step->codepoint_end - folded_match_bytes;
+    resolved.repeats = sz_false_k;
+    if (folded - folded_match_bytes >= last_break_folded_end) return resolved;
+
+    for (stepped = 0; stepped < trailing + wanted; ++stepped) {
+        sz_u8_t byte;
+        sz_size_t taken;
+        if (!pending) {
+            sz_size_t candidate, source_bytes;
+            if (!position) break;
+            candidate = position - 1;
+            for (int back = 0; back != 3 && candidate && (haystack_bytes[candidate] & 0xC0) == 0x80; ++back)
+                --candidate;
+            source_bytes = sz_utf8_fold_next_simt_(haystack_bytes + candidate, haystack_bytes + position, &image);
+            if (!image.rune_ends || candidate + source_bytes != position)
+                image.bytes = haystack_bytes[--position], image.length = 1;
+            else position = candidate;
+            pending = image.length;
+        }
+        byte = (sz_u8_t)(image.bytes >> (8 * --pending));
+        if (stepped < trailing) continue; // ? Folded bytes of the ending codepoint past the match's own end
+
+        taken = stepped - trailing + 1;
+        // A shift stays within one codepoint's image of at most six bytes, so eight ring bytes do.
+        if (shift) {
+            if (taken > shift && (sz_u8_t)(ring >> (8 * ((taken - shift) & 7))) != byte) periodic = sz_false_k;
+            ring = (ring & ~(0xFFull << (8 * (taken & 7)))) | ((sz_u64_t)byte << (8 * (taken & 7)));
+        }
+        if (taken == folded_match_bytes) start_here = position;
+        if (taken == wanted) start_earlier = position;
+        if (!periodic && taken >= folded_match_bytes) break;
+    }
+
+    resolved.source_offset = start_here != STRINGZILLA_SIZE_MAX ? start_here : step->codepoint_end;
+    resolved.repeats = (sz_bool_t)(periodic && start_here != STRINGZILLA_SIZE_MAX && start_here == start_earlier);
+    return resolved;
+}
+
+/**
  *  @brief Walks one chunk as folded bytes, the case-insensitive twin of the walk above.
  *
  *  Folding makes a walk restart-safe only at a codepoint start, so the warm-up snaps back to one
@@ -446,6 +502,9 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
     sz_size_t folded = 0, last_break_folded_end = 0, found = 0, position;
     sz_u8_t image_index = 0, previous_rune_end = 0;
     sz_bool_t breaks_boundary = sz_false_k;
+    // The aligned word under the cursor, so an ASCII run costs one load per four bytes.
+    sz_u8_t const *loaded_word = STRINGZILLA_NULL;
+    sz_u32_t loaded_quad = 0;
 
     // A fold is only restartable on a lead byte, so the walk snaps outward to one - never inward, which
     // would drop a match whose needle began mid-codepoint.
@@ -460,7 +519,13 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
         if (image_index == image.length) {
             sz_size_t source_bytes;
             if (position >= length) break;
-            source_bytes = sz_utf8_fold_next_simt_(haystack_bytes + position, haystack_bytes + length, &image);
+            // An aligned word holding a haystack byte lies in a page the device may read whole.
+            sz_u8_t const *const word = (sz_u8_t const *)((sz_size_t)(haystack_bytes + position) & ~(sz_size_t)3);
+            if (word != loaded_word) loaded_word = word, loaded_quad = sz_substrings_load_quad_simt_(word);
+            sz_u8_t const lead = (sz_u8_t)(loaded_quad >> (((sz_size_t)(haystack_bytes + position) & 3u) * 8));
+            if (lead < 0x80)
+                image.bytes = sz_ascii_fold_(lead), image.length = 1, image.rune_ends = 1, source_bytes = 1;
+            else source_bytes = sz_utf8_fold_next_simt_(haystack_bytes + position, haystack_bytes + length, &image);
             breaks_boundary = (sz_bool_t)(__popc(image.rune_ends) != 1 || image.length != source_bytes);
             position += source_bytes;
             step.codepoint_end = position - walk_begin;
@@ -491,8 +556,8 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
             sz_size_t const folded_length = output.folded_match_bytes;
             sz_substrings_resolved_match_t resolved;
             if (folded < folded_length) continue;
-            resolved = sz_substrings_folded_span(haystack + walk_begin, &step, folded, last_break_folded_end,
-                                                 folded_length);
+            resolved = sz_substrings_folded_span_simt_(haystack + walk_begin, &step, folded, last_break_folded_end,
+                                                       folded_length);
             if (resolved.repeats) continue;
             if (pass == sz_substrings_gpu_writing_k) {
                 matches_at_chunk[found].haystack_index = haystack_index;
@@ -507,6 +572,11 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
     return found;
 }
 
+/** Chunks the engine's budget cuts a round into per resident thread. A walk's cost follows its
+ *  chunk's matches and failure chases, so more, smaller chunks spread a heavy region over more
+ *  threads and leave the slowest thread less to finish alone. */
+enum { sz_substrings_chunks_per_thread_simt_k = 8 };
+
 /**
  *  @brief Walks every chunk of every haystack, one thread per chunk, in whichever pass
  *      @p pass names.
@@ -519,13 +589,13 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
 STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t const *engine,
                                                         sz_substrings_case_sensitivity_t case_sensitivity,
                                                         sz_u32_t staged_count, sz_sequence_t haystacks,
-                                                        sz_size_t const *chunk_offsets, sz_size_t const *chunk_bytes_at,
+                                                        sz_size_t const *chunk_offsets,
                                                         sz_substrings_report_t const *report, sz_size_t *chunk_slots,
                                                         sz_substrings_match_t *matches, sz_substrings_gpu_pass_t pass) {
     extern __shared__ sz_u32_t sz_substrings_staged_simt_[];
     __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
     sz_size_t const chunk_count = chunk_offsets[haystacks.count];
-    sz_size_t const chunk_bytes = *chunk_bytes_at;
+    sz_size_t const chunk_bytes = sz_substrings_chunk_bytes_simt_(engine, haystacks);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk_index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_substrings_staged_simt_t staged;
@@ -562,22 +632,20 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
 
 static __global__ void sz_substrings_walk_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
                                                              sz_sequence_t haystacks, sz_size_t const *chunk_offsets,
-                                                             sz_size_t const *chunk_bytes_at,
                                                              sz_substrings_report_t const *report,
                                                              sz_size_t *chunk_slots, sz_substrings_match_t *matches,
                                                              sz_substrings_gpu_pass_t pass) {
-    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_cased_k, staged_count, haystacks, chunk_offsets,
-                                    chunk_bytes_at, report, chunk_slots, matches, pass);
+    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_cased_k, staged_count, haystacks, chunk_offsets, report,
+                                    chunk_slots, matches, pass);
 }
 
 static __global__ void sz_substrings_walk_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
                                                                sz_sequence_t haystacks, sz_size_t const *chunk_offsets,
-                                                               sz_size_t const *chunk_bytes_at,
                                                                sz_substrings_report_t const *report,
                                                                sz_size_t *chunk_slots, sz_substrings_match_t *matches,
                                                                sz_substrings_gpu_pass_t pass) {
-    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_uncased_k, staged_count, haystacks, chunk_offsets,
-                                    chunk_bytes_at, report, chunk_slots, matches, pass);
+    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_uncased_k, staged_count, haystacks, chunk_offsets, report,
+                                    chunk_slots, matches, pass);
 }
 
 #pragma endregion Walk Kernels
@@ -650,19 +718,76 @@ STRINGZILLA_DEVICE void sz_substrings_bm25_score_simt_(sz_substrings_tally_simt_
     __syncthreads();
 }
 
+/** What a scoring block keeps in its shared memory, which @ref sz_substrings_bm25_prepare_simt_
+ *  lays out. */
+typedef struct sz_substrings_bm25_block_simt_t {
+
+    /** The block's own tally, zeroed. */
+    sz_substrings_tally_simt_t tally;
+
+    /** The class map, acceptance words and hot rows the block reads in place of the engine's. */
+    sz_substrings_staged_simt_t staged;
+
+    /** The block's fixed-point sum of one haystack's terms, zeroed. */
+    unsigned long long *sum;
+} sz_substrings_bm25_block_simt_t;
+
+/**
+ *  @brief Lays one scoring block's tally and staged rows out in its shared memory, zeroed and
+ *      staged; every thread calls it, and it ends in a barrier.
+ *  @param[in] overflow_rows The launch's spill rows, one per block, or @c STRINGZILLA_NULL for a
+ *      vocabulary a block's own table holds.
+ *  @param[in] staged_accepts_words Acceptance words staged in shared memory, all of them or zero.
+ *  @param[in] staged_count Hot rows staged after them, a prefix of the tier.
+ *
+ *  Dynamic shared memory holds the counts, the keys when hashed, then the staged acceptance words
+ *  and hot rows, in that order.
+ */
+STRINGZILLA_DEVICE sz_substrings_bm25_block_simt_t
+sz_substrings_bm25_prepare_simt_(sz_substrings_engine_t const *engine, sz_u32_t *overflow_rows,
+                                 sz_u32_t staged_accepts_words, sz_u32_t staged_count) {
+    extern __shared__ sz_u32_t sz_substrings_scoring_simt_[];
+    __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
+    __shared__ sz_u32_t overflowed;
+    __shared__ unsigned long long block_sum;
+    sz_size_t const needles_count = engine->needles_count;
+    sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(needles_count);
+    sz_substrings_bm25_block_simt_t block;
+    sz_u32_t *staged_accepts, *staged_rows;
+    sz_size_t slot;
+    block.tally.layout = needles_count <= sz_substrings_tally_slots_simt_k ? sz_substrings_tally_direct_simt_k
+                                                                           : sz_substrings_tally_hashed_simt_k;
+    block.tally.counts = sz_substrings_scoring_simt_;
+    block.tally.keys = block.tally.layout == sz_substrings_tally_hashed_simt_k ? block.tally.counts + table_slots
+                                                                               : STRINGZILLA_NULL;
+    block.tally.overflowed = &overflowed;
+    block.tally.overflow = overflow_rows ? overflow_rows + (sz_size_t)blockIdx.x * needles_count : STRINGZILLA_NULL;
+    block.sum = &block_sum;
+    staged_accepts = block.tally.counts + (block.tally.keys ? 2 : 1) * table_slots;
+    staged_rows = staged_accepts + staged_accepts_words;
+
+    for (slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
+        block.tally.counts[slot] = 0;
+        if (block.tally.keys) block.tally.keys[slot] = 0;
+    }
+    for (slot = threadIdx.x; slot < staged_accepts_words; slot += blockDim.x)
+        staged_accepts[slot] = engine->accepts_words[slot];
+    if (threadIdx.x == 0) overflowed = 0, block_sum = 0;
+    sz_substrings_stage_simt_(engine, staged_classes, staged_rows,
+                              staged_count); // ! Ends in the barrier the zeroing needs.
+    block.staged.classes = staged_classes, block.staged.rows = staged_rows, block.staged.rows_count = staged_count;
+    block.staged.accepts_words = staged_accepts_words ? staged_accepts : engine->accepts_words;
+    return block;
+}
+
 /**
  *  @brief Scores one haystack per block: its threads walk contiguous chunks into one shared tally,
  *      then sum the tallied terms in fixed point.
  *  @param[in] scores_stride Entries from one haystack's score to the next, so one launch
  *      writes one column.
- *  @param[in] staged_accepts_words Acceptance words staged in shared memory, all of them or zero.
- *  @param[in] staged_count Hot rows staged after them, a prefix of the tier.
  *
- *  Dynamic shared memory holds the counts, the keys when hashed, then the staged acceptance bitmap
- *  and rows. A block rather than a grid per haystack keeps the tally in shared memory.
- *
- *  Launched in clusters, a batch of fewer haystacks than clusters walks each of them with a whole
- *  cluster, every count landing in the first block's tally, which only that block then scores.
+ *  A block rather than a grid per haystack keeps the tally in shared memory. Where a batch holds
+ *  too few haystacks to fill the device, Hopper's tier walks each with a cluster of blocks instead.
  */
 static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
                                                        sz_f32_t const *document_lengths,
@@ -670,70 +795,21 @@ static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t en
                                                        sz_u32_t *overflow_rows, sz_f32_t *scores,
                                                        sz_size_t scores_stride, sz_u32_t staged_accepts_words,
                                                        sz_u32_t staged_count) {
-    extern __shared__ sz_u32_t sz_substrings_scoring_simt_[];
-    __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
-    __shared__ sz_u32_t overflowed;
-    __shared__ unsigned long long block_sum;
-    sz_size_t const needles_count = engine.needles_count;
-    sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(needles_count);
-    sz_u32_t const cluster_rank = sz_cluster_rank_simt_(), cluster_blocks = sz_cluster_size_simt_();
-    sz_size_t const cluster_threads = (sz_size_t)cluster_blocks * blockDim.x;
-    sz_size_t const clusters = gridDim.x / cluster_blocks;
-    sz_substrings_tally_simt_t tally, leader;
-    sz_substrings_staged_simt_t staged;
-    sz_u32_t *staged_accepts, *staged_rows;
-    sz_size_t haystack_index, slot;
-    tally.layout = needles_count <= sz_substrings_tally_slots_simt_k ? sz_substrings_tally_direct_simt_k
-                                                                     : sz_substrings_tally_hashed_simt_k;
-    tally.counts = sz_substrings_scoring_simt_;
-    tally.keys = tally.layout == sz_substrings_tally_hashed_simt_k ? tally.counts + table_slots : STRINGZILLA_NULL;
-    tally.overflowed = &overflowed;
-    tally.overflow = overflow_rows ? overflow_rows + (sz_size_t)blockIdx.x * needles_count : STRINGZILLA_NULL;
-    staged_accepts = tally.counts + (tally.keys ? 2 : 1) * table_slots;
-    staged_rows = staged_accepts + staged_accepts_words;
-    // A cluster counts into its first block's tally, which a block alone is to itself.
-    leader.layout = tally.layout;
-    leader.counts = (sz_u32_t *)sz_cluster_map_simt_(tally.counts, 0);
-    leader.keys = tally.keys ? (sz_u32_t *)sz_cluster_map_simt_(tally.keys, 0) : STRINGZILLA_NULL;
-    leader.overflowed = (sz_u32_t *)sz_cluster_map_simt_(&overflowed, 0);
-    leader.overflow = overflow_rows ? tally.overflow - (sz_size_t)cluster_rank * needles_count : STRINGZILLA_NULL;
-
-    for (slot = threadIdx.x; slot < table_slots; slot += blockDim.x) {
-        tally.counts[slot] = 0;
-        if (tally.keys) tally.keys[slot] = 0;
-    }
-    for (slot = threadIdx.x; slot < staged_accepts_words; slot += blockDim.x)
-        staged_accepts[slot] = engine.accepts_words[slot];
-    if (threadIdx.x == 0) overflowed = 0, block_sum = 0;
-    sz_substrings_stage_simt_(&engine, staged_classes, staged_rows,
-                              staged_count); // ! Ends in the barrier the zeroing needs.
-    staged.classes = staged_classes, staged.rows = staged_rows, staged.rows_count = staged_count;
-    staged.accepts_words = staged_accepts_words ? staged_accepts : engine.accepts_words;
-
-    for (haystack_index = blockIdx.x / cluster_blocks; haystack_index < haystacks.count; haystack_index += clusters) {
+    sz_substrings_bm25_block_simt_t const block = sz_substrings_bm25_prepare_simt_(&engine, overflow_rows,
+                                                                                   staged_accepts_words, staged_count);
+    sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(engine.needles_count);
+    sz_size_t haystack_index;
+    for (haystack_index = blockIdx.x; haystack_index < haystacks.count; haystack_index += gridDim.x) {
         sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
         sz_size_t const length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
         sz_f64_t const norm = sz_substrings_bm25_norm(
             &parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
-        // The cluster's first tally is clear before its blocks count into it, and every count lands
-        // before that block reads them; a block alone names its own tally to keep shared atomics.
-        if (cluster_blocks > 1) {
-            sz_cluster_sync_simt_();
-            sz_substrings_bm25_walk_simt_(&engine, &staged, haystack, length, haystack_index,
-                                          (sz_size_t)cluster_rank * blockDim.x + threadIdx.x, cluster_threads, &leader);
-            sz_cluster_sync_simt_();
-        }
-        else {
-            sz_substrings_bm25_walk_simt_(&engine, &staged, haystack, length, haystack_index, threadIdx.x, blockDim.x,
-                                          &tally);
-            __syncthreads();
-        }
-        if (cluster_rank == 0)
-            sz_substrings_bm25_score_simt_(&tally, table_slots, needles_count, &parameters, norm, needle_weights,
-                                           &block_sum, scores + haystack_index * scores_stride);
+        sz_substrings_bm25_walk_simt_(&engine, &block.staged, haystack, length, haystack_index, threadIdx.x, blockDim.x,
+                                      &block.tally);
+        __syncthreads();
+        sz_substrings_bm25_score_simt_(&block.tally, table_slots, engine.needles_count, &parameters, norm,
+                                       needle_weights, block.sum, scores + haystack_index * scores_stride);
     }
-    // A block's shared memory outlives every count another block of its cluster sends into it.
-    if (cluster_blocks > 1) sz_cluster_sync_simt_();
 }
 
 #pragma endregion Scoring Kernels
@@ -829,7 +905,8 @@ static __global__ void sz_substrings_cover_simt_kernel_(sz_substrings_match_t co
 }
 
 /**
- *  @brief Gathers the surviving matches into their scanned slots, order preserved.
+ *  @brief Gathers the surviving matches into their scanned slots, order preserved, and publishes
+ *      how many survived, which is what every later boundary is read against.
  *  @param[in] keep_offsets The scanned keep flags, one longer than @p count so the last
  *      has a successor.
  *
@@ -837,41 +914,15 @@ static __global__ void sz_substrings_cover_simt_kernel_(sz_substrings_match_t co
  *  exactly when the scan steps across it.
  */
 static __global__ void sz_substrings_compact_simt_kernel_(sz_substrings_match_t const *matches,
-                                                          sz_substrings_report_t const *report,
-                                                          sz_size_t const *keep_offsets,
+                                                          sz_substrings_report_t *report, sz_size_t const *keep_offsets,
                                                           sz_substrings_match_t *survivors) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (report->shortfall) return;
+    if (index == 0) report->matches_stored = keep_offsets[count];
     for (; index < count; index += stride)
         if (keep_offsets[index + 1] > keep_offsets[index]) survivors[keep_offsets[index]] = matches[index];
-}
-
-/**
- *  @brief Publishes what the sizing walk found, which is the one place a round learns
- *      whether it fit.
- *  @param[in] emitted_at The last entry of the scanned chunk slots, which every
- *      trailing zero carries.
- *  @param[in] emitting Whether the round reads the matches themselves, since a count that never
- *      does cannot overrun a match budget however many matches the corpus holds.
- */
-static __global__ void sz_substrings_sized_simt_kernel_(sz_size_t const *emitted_at, sz_size_t matches_budget,
-                                                        sz_bool_t emitting, sz_substrings_report_t *report) {
-    sz_size_t const emitted = *emitted_at;
-    if (blockIdx.x || threadIdx.x) return;
-    report->matches_emitted = emitted;
-    report->matches_stored = emitted;
-    report->target_length = 0;
-    report->shortfall = emitting && emitted > matches_budget ? emitted - matches_budget : 0;
-}
-
-/** Publishes how many matches the cover kept, which is what every later boundary
- *  is read against. */
-static __global__ void sz_substrings_covered_simt_kernel_(sz_size_t const *kept_at, sz_substrings_report_t *report) {
-    sz_size_t const kept = *kept_at;
-    if (blockIdx.x || threadIdx.x) return;
-    if (!report->shortfall) report->matches_stored = kept;
 }
 
 /** Maps each haystack's match range onto the boundaries its reported matches occupy. */
@@ -1084,5 +1135,5 @@ static __global__ void sz_substrings_target_simt_kernel_(sz_size_t const *rewrit
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_SUBSTRINGS_SIMT_CUH_

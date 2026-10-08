@@ -582,7 +582,8 @@ inline void bench_substrings_slice(simt_backend_t const &backend, environment_t 
                                   matches_budget, resident.views.size(), backend.runtime.stream);
         fmt::println("Vocabulary {} holds {} needles over {} states, {} of them hot.", suffix.c_str(),
                      dictionary.needles.size(), probe.engine.state_count, probe.engine.hot_count);
-        if (!substrings_fills_a_wave(probe.engine, resident)) return;
+        if (!substrings_fills_a_wave(probe.engine, resident, resident_candidates_per_call(env, backend.runtime)))
+            return;
         // A benchmark round must keep every match it finds, whatever the default budget.
         std::size_t const emitted = substrings_matches_emitted(backend, probe.engine, resident, device_haystacks);
         if (emitted > probe.engine.matches_budget) matches_budget = emitted;
