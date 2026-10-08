@@ -12,7 +12,7 @@
  *  would need, and makes the edge count follow the state count instead of being bounded separately.
  *
  *  The walk is one data-dependent load per byte, so a single chain leaves the load ports idle for
- *  that whole latency. Byte-exact walks therefore step @ref STRINGZILLA_SUBSTRINGS_CHAINS disjoint
+ *  that whole latency. Byte-exact walks therefore step @ref sz_substrings_chains_serial_k disjoint
  *  slices at once, each primed by the bytes before it; a walk reporting in haystack order does so
  *  in rounds of windows whose matches it buffers and flushes in window order. A SIMD tier replaces
  *  the stages in @ref sz_substrings_walks_t and inherits the verb drivers.
@@ -318,15 +318,15 @@ typedef struct sz_substrings_bm25_t {
 #define STRINGZILLA_SUBSTRINGS_NO_STATE ((sz_u32_t)0xFFFFFFFFu)
 
 /** Independent transition chains one counting walk keeps in flight, so their loads overlap. */
-#define STRINGZILLA_SUBSTRINGS_CHAINS (8)
+enum { sz_substrings_chains_serial_k = 8 };
 
 /** Interior vacancies one double-array row may reject before it settles on the
  *  arena frontier instead. */
-#define STRINGZILLA_SUBSTRINGS_MAX_INTERIOR_PROBES (256)
+enum { sz_substrings_interior_probes_max_k = 256 };
 
 /** Bytes of hot rows an automaton keeps when the caller names no count, which is the last-level
  *  cache it assumes; a caller that can measure its own host passes @c hot_states instead. */
-#define STRINGZILLA_SUBSTRINGS_HOT_BYTES_DEFAULT (4u << 20)
+enum { sz_substrings_hot_bytes_default_k = 4 << 20 };
 
 /**
  *  @brief Whether a walk's reports arrive in the order the haystack spells them, or in any
@@ -455,7 +455,7 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_substrings_step_counting(sz_substrings_engine_
 #pragma region Folding Filter
 
 /** Most folded bytes one source codepoint can produce: three runes of three bytes each. */
-#define STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX (9)
+enum { sz_substrings_folded_image_max_k = 9 };
 
 /** One folded byte, and everything a walk needs about the codepoint it came from. */
 typedef struct sz_substrings_folded_byte_t {
@@ -502,7 +502,7 @@ typedef struct sz_substrings_folded_cursor_t {
     sz_cptr_t origin;
 
     /** One codepoint's folded bytes, which is the widest image a fold can produce. */
-    sz_u8_t image[STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX];
+    sz_u8_t image[sz_substrings_folded_image_max_k];
 
     /** Bit @c index marks the byte at @c index as ending a folded rune. */
     sz_u16_t rune_end_mask;
@@ -658,7 +658,7 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_resolve_match
     sz_utf8_folded_reverse_iter_t iterator;
     sz_substrings_resolved_match_t resolved;
     sz_u8_t pending[4];
-    sz_u8_t ring[STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX];
+    sz_u8_t ring[sz_substrings_folded_image_max_k];
     sz_size_t pending_count = 0, stepped, index;
     sz_cptr_t codepoint_begin = haystack + source_end;
     sz_cptr_t start_here = STRINGZILLA_NULL, start_earlier = STRINGZILLA_NULL;
@@ -668,7 +668,7 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_resolve_match
     sz_utf8_folded_reverse_iter_init_(&iterator, haystack, haystack + source_end);
     resolved.source_offset = source_end;
     resolved.repeats = sz_false_k;
-    for (index = 0; index != STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX; ++index) ring[index] = 0;
+    for (index = 0; index != sz_substrings_folded_image_max_k; ++index) ring[index] = 0;
 
     for (stepped = 0; stepped < trailing + wanted; ++stepped) {
         sz_u8_t byte;
@@ -688,9 +688,9 @@ STRINGZILLA_CONSTEXPR sz_substrings_resolved_match_t sz_substrings_resolve_match
 
         taken = stepped - trailing + 1;
         if (shift != 0) {
-            if (taken > shift && ring[(taken - shift) % STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX] != byte)
+            if (taken > shift && ring[(taken - shift) % sz_substrings_folded_image_max_k] != byte)
                 periodic = sz_false_k;
-            ring[taken % STRINGZILLA_SUBSTRINGS_FOLDED_IMAGE_MAX] = byte;
+            ring[taken % sz_substrings_folded_image_max_k] = byte;
         }
         if (taken == folded_match_bytes) start_here = codepoint_begin;
         if (taken == wanted) start_earlier = codepoint_begin;
@@ -1276,7 +1276,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_hot_children_(sz_subst
  *
  *  Candidates are scanned out of the occupancy bitmap anchored on the parent's smallest child
  *  byte, and the whole row is tested at once rather than probed child by child. After
- *  @ref STRINGZILLA_SUBSTRINGS_MAX_INTERIOR_PROBES rejections the row settles on the arena frontier
+ *  @ref sz_substrings_interior_probes_max_k rejections the row settles on the arena frontier
  *  instead: the vacancies a packed arena leaves behind are mostly singletons no multi-byte row
  *  can ever cover, and a search that keeps re-walking them is quadratic in the states it places
  *  rather than linear.
@@ -1321,7 +1321,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_cold_children_(sz_subs
         if (!sz_substrings_builder_row_fits_(builder, candidate_base, &child_mask)) {
             // Landing on the frontier itself, rather than an anchor byte past it, is what keeps the fallback
             // free: every slot from there up is unclaimed, so the row strands nothing behind it.
-            if (++rejected >= STRINGZILLA_SUBSTRINGS_MAX_INTERIOR_PROBES) candidate = builder->arena_frontier;
+            if (++rejected >= sz_substrings_interior_probes_max_k) candidate = builder->arena_frontier;
             else ++candidate;
             continue;
         }
@@ -1682,7 +1682,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
 
     sz_substrings_builder_classify_(&builder);
     builder.hot_count = hot_states == STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO
-                            ? STRINGZILLA_SUBSTRINGS_HOT_BYTES_DEFAULT / (builder.classes_count * sizeof(sz_u32_t))
+                            ? sz_substrings_hot_bytes_default_k / (builder.classes_count * sizeof(sz_u32_t))
                             : hot_states;
     builder.hot_count = sz_min_of_two(builder.hot_count, builder.nodes_count);
 
@@ -1801,7 +1801,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
 #pragma region Matching
 
 /** Bytes one chain of an ordered walk covers per round, so its buffered ends fit on the stack. */
-#define STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW (256)
+enum { sz_substrings_ordered_window_serial_k = 256 };
 
 /** Bytes a byte-exact walk primes a slice with, which is one short of the longest match. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_bytes_warm_up_(sz_substrings_engine_t const *engine) {
@@ -1811,10 +1811,10 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_bytes_warm_up_(sz_substrings_engin
 STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_serial_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                                sz_size_t length) {
     sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
-    sz_size_t const share = length / STRINGZILLA_SUBSTRINGS_CHAINS, remainder = length % STRINGZILLA_SUBSTRINGS_CHAINS;
+    sz_size_t const share = length / sz_substrings_chains_serial_k, remainder = length % sz_substrings_chains_serial_k;
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
-    sz_u8_t const *slices[STRINGZILLA_SUBSTRINGS_CHAINS];
-    sz_u32_t states[STRINGZILLA_SUBSTRINGS_CHAINS];
+    sz_u8_t const *slices[sz_substrings_chains_serial_k];
+    sz_u32_t states[sz_substrings_chains_serial_k];
     sz_size_t total = 0, chain, delta, primed;
 
     if (share <= warm_up) {
@@ -1824,18 +1824,18 @@ STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_serial_(sz_substrings_eng
     }
 
     // The fair split hands the first slices one byte more than the last ones, and never two.
-    for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) {
+    for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain) {
         sz_size_t const first = chain * share + sz_min_of_two(chain, remainder);
         slices[chain] = bytes + first, states[chain] = engine->root;
     }
     // Priming reports nothing, so once it ends the report test is gone from the round rather than being
     // re-asked per byte. The first slice starts where a whole-haystack walk starts and primes nothing.
     for (primed = 0; primed != warm_up; ++primed)
-        for (chain = 1; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain)
+        for (chain = 1; chain != sz_substrings_chains_serial_k; ++chain)
             states[chain] = sz_substrings_step(engine, states[chain], *(slices[chain] - warm_up + primed));
 
     for (delta = 0; delta != share; ++delta)
-        for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain)
+        for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain)
             total += sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
     for (chain = 0; chain != remainder; ++chain)
         total += sz_substrings_step_counting(engine, states + chain, slices[chain][share]);
@@ -1846,7 +1846,7 @@ STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_serial_(sz_substrings_eng
  *  @brief Counts every match in @p haystack, byte for byte, without enumerating a
  *      single output run.
  *
- *  The counts ride the transitions, so no output is ever read. @ref STRINGZILLA_SUBSTRINGS_CHAINS
+ *  The counts ride the transitions, so no output is ever read. @ref sz_substrings_chains_serial_k
  *  disjoint slices step at once, each primed by the bytes before it: a state is the longest suffix
  *  read so far that spells a needle prefix, so once the longest match is behind it a chain cannot
  *  remember anything earlier, and the byte it first reports on is one of them. A haystack whose
@@ -1891,7 +1891,7 @@ typedef struct sz_substrings_pending_end_t {
  *  @brief Reports every match in @p haystack in ascending end order, stepping several
  *      chains at once.
  *
- *  Each round cuts @ref STRINGZILLA_SUBSTRINGS_CHAINS consecutive windows, primes every chain from
+ *  Each round cuts @ref sz_substrings_chains_serial_k consecutive windows, primes every chain from
  *  the bytes before its window, and buffers the positions where it accepts. Windows are disjoint
  *  and each match belongs to the window its end falls in, so flushing the buffers in window order
  *  reproduces one chain's stream. The last chain ends exactly where the next round begins, so the
@@ -1901,11 +1901,11 @@ STRINGZILLA_INLINE void sz_substrings_find_ascending_(sz_substrings_engine_t con
                                                       sz_size_t length, sz_substrings_reporter_t reporter,
                                                       void *context) {
     sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
-    sz_size_t const round_bytes = STRINGZILLA_SUBSTRINGS_CHAINS * STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW;
+    sz_size_t const round_bytes = (sz_size_t)sz_substrings_chains_serial_k * sz_substrings_ordered_window_serial_k;
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
-    sz_substrings_pending_end_t pending[STRINGZILLA_SUBSTRINGS_CHAINS][STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW];
-    sz_size_t pending_counts[STRINGZILLA_SUBSTRINGS_CHAINS];
-    sz_u32_t states[STRINGZILLA_SUBSTRINGS_CHAINS];
+    sz_substrings_pending_end_t pending[sz_substrings_chains_serial_k][sz_substrings_ordered_window_serial_k];
+    sz_size_t pending_counts[sz_substrings_chains_serial_k];
+    sz_u32_t states[sz_substrings_chains_serial_k];
     sz_u32_t state = engine->root;
     sz_size_t round = 0, chain, delta, primed, index;
 
@@ -1913,32 +1913,32 @@ STRINGZILLA_INLINE void sz_substrings_find_ascending_(sz_substrings_engine_t con
         sz_u8_t const *const first = bytes + round;
         // Chain zero continues from the state the previous round's last chain ended on, so it primes nothing.
         states[0] = state;
-        for (chain = 1; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) states[chain] = engine->root;
+        for (chain = 1; chain != sz_substrings_chains_serial_k; ++chain) states[chain] = engine->root;
         for (primed = 0; primed != warm_up; ++primed)
-            for (chain = 1; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain)
+            for (chain = 1; chain != sz_substrings_chains_serial_k; ++chain)
                 states[chain] = sz_substrings_step(
-                    engine, states[chain], first[chain * STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW - warm_up + primed]);
+                    engine, states[chain], first[chain * sz_substrings_ordered_window_serial_k - warm_up + primed]);
 
-        for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) pending_counts[chain] = 0;
-        for (delta = 0; delta != STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW; ++delta)
-            for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) {
+        for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain) pending_counts[chain] = 0;
+        for (delta = 0; delta != sz_substrings_ordered_window_serial_k; ++delta)
+            for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain) {
                 sz_u32_t const output_count = sz_substrings_step_counting(
-                    engine, states + chain, first[chain * STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW + delta]);
+                    engine, states + chain, first[chain * sz_substrings_ordered_window_serial_k + delta]);
                 if (output_count == 0) continue;
                 pending[chain][pending_counts[chain]].state = states[chain];
                 pending[chain][pending_counts[chain]].delta = (sz_u32_t)delta;
                 ++pending_counts[chain];
             }
 
-        for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain)
+        for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain)
             for (index = 0; index != pending_counts[chain]; ++index) {
                 sz_substrings_pending_end_t const end = pending[chain][index];
-                sz_size_t const end_offset = round + chain * STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW + end.delta;
+                sz_size_t const end_offset = round + chain * sz_substrings_ordered_window_serial_k + end.delta;
                 if (sz_substrings_report_outputs_(engine, end.state, engine->outputs_counts[end.state], end_offset,
                                                   reporter, context) == sz_substrings_stop_k)
                     return;
             }
-        state = states[STRINGZILLA_SUBSTRINGS_CHAINS - 1];
+        state = states[sz_substrings_chains_serial_k - 1];
     }
 
     for (delta = round; delta != length; ++delta) {
@@ -1955,18 +1955,18 @@ STRINGZILLA_OUTLINED_ void sz_substrings_find_bytes_serial_(sz_substrings_engine
                                                             sz_substrings_reporter_t reporter, void *context) {
     sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
-    sz_u8_t const *slices[STRINGZILLA_SUBSTRINGS_CHAINS];
-    sz_u32_t states[STRINGZILLA_SUBSTRINGS_CHAINS];
+    sz_u8_t const *slices[sz_substrings_chains_serial_k];
+    sz_u32_t states[sz_substrings_chains_serial_k];
     sz_size_t share, remainder, chain, delta, primed;
 
     // Rounds re-prime every window, which pays only while the priming is a small share of it.
-    if (order == sz_substrings_ascending_ends_k && warm_up * 4 <= STRINGZILLA_SUBSTRINGS_ORDERED_WINDOW) {
+    if (order == sz_substrings_ascending_ends_k && warm_up * 4 <= sz_substrings_ordered_window_serial_k) {
         sz_substrings_find_ascending_(engine, haystack, length, reporter, context);
         return;
     }
 
     // One chain keeps its state in a register, which an array indexed by a runtime chain count cannot.
-    if (order == sz_substrings_ascending_ends_k || length / STRINGZILLA_SUBSTRINGS_CHAINS <= warm_up) {
+    if (order == sz_substrings_ascending_ends_k || length / sz_substrings_chains_serial_k <= warm_up) {
         sz_u32_t state = engine->root;
         for (delta = 0; delta != length; ++delta) {
             sz_u32_t const output_count = sz_substrings_step_counting(engine, &state, bytes[delta]);
@@ -1979,19 +1979,19 @@ STRINGZILLA_OUTLINED_ void sz_substrings_find_bytes_serial_(sz_substrings_engine
     }
 
     // The fair split hands the first slices one byte more than the last ones, and never two.
-    share = length / STRINGZILLA_SUBSTRINGS_CHAINS, remainder = length % STRINGZILLA_SUBSTRINGS_CHAINS;
-    for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) {
+    share = length / sz_substrings_chains_serial_k, remainder = length % sz_substrings_chains_serial_k;
+    for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain) {
         sz_size_t const first = chain * share + sz_min_of_two(chain, remainder);
         slices[chain] = bytes + first, states[chain] = engine->root;
     }
     // Priming reports nothing, so once it ends the report test is gone from the round rather than being
     // re-asked per byte. The first slice starts where a whole-haystack walk starts and primes nothing.
     for (primed = 0; primed != warm_up; ++primed)
-        for (chain = 1; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain)
+        for (chain = 1; chain != sz_substrings_chains_serial_k; ++chain)
             states[chain] = sz_substrings_step(engine, states[chain], *(slices[chain] - warm_up + primed));
 
     for (delta = 0; delta != share; ++delta)
-        for (chain = 0; chain != STRINGZILLA_SUBSTRINGS_CHAINS; ++chain) {
+        for (chain = 0; chain != sz_substrings_chains_serial_k; ++chain) {
             sz_u32_t const output_count = sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
             if (output_count == 0) continue;
             if (sz_substrings_report_outputs_(engine, states[chain], output_count,
@@ -2013,7 +2013,7 @@ STRINGZILLA_OUTLINED_ void sz_substrings_find_bytes_serial_(sz_substrings_engine
  *  @brief Reports every match in @p haystack, byte for byte, in whichever order @p order asks for.
  *
  *  A transition is one data-dependent load, so a single chain leaves the load ports idle for
- *  that whole latency. An unordered consumer gets @ref STRINGZILLA_SUBSTRINGS_CHAINS disjoint
+ *  that whole latency. An unordered consumer gets @ref sz_substrings_chains_serial_k disjoint
  *  slices stepped at once, each primed by the bytes before it; an ordered one gets them in
  *  rounds of windows it can buffer. Either way a haystack too short to amortize the priming
  *  walks on one chain.

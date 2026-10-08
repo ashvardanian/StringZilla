@@ -6,8 +6,9 @@
  *      VBMI2 byte-set search.
  *
  *  The transition stays scalar: a data-dependent chase has no vector form that beats eight scalar
- *  chains. This tier replaces the text-side stages around it, through @ref sz_substrings_walks_t,
- *  and inherits every other stage from the serial one.
+ *  chains. What vectorizes is the byte-class lookup beside it: VBMI resolves 64 bytes of every
+ *  chain's slice at once, so each step issues one load fewer. This tier replaces the text-side
+ *  stages through @ref sz_substrings_walks_t and inherits every other stage from the serial one.
  *
  *  @sa include/stringzilla/substrings.h
  */
@@ -41,11 +42,88 @@ extern "C" {
 
 #pragma region Ice Lake
 
+/** Independent transition chains the Ice Lake walks keep in flight, so their loads overlap. */
+enum { sz_substrings_chains_icelake_k = 8 };
+
+/** Bytes one chain of the ordered Ice Lake walk covers per round, a whole number of 64-byte class
+ *  windows, so its buffered ends fit on the stack. */
+enum { sz_substrings_ordered_window_icelake_k = 256 };
+
+/** Each of 64 bytes' hot-row columns, from the 256-entry class map held in four registers. */
+STRINGZILLA_INLINE __m512i sz_substrings_classes_icelake_(__m512i const classes_map_u8x64[4], __m512i text_u8x64) {
+    __m512i const low_classes_u8x64 = _mm512_permutex2var_epi8(classes_map_u8x64[0], text_u8x64, classes_map_u8x64[1]);
+    __m512i const high_classes_u8x64 = _mm512_permutex2var_epi8(classes_map_u8x64[2], text_u8x64, classes_map_u8x64[3]);
+    return _mm512_mask_blend_epi8(_mm512_movepi8_mask(text_u8x64), low_classes_u8x64, high_classes_u8x64);
+}
+
+/** Classes of the 64 bytes at @p delta of every chain's slice, chain by chain @p stride apart. */
+STRINGZILLA_INLINE void sz_substrings_classify_icelake_(__m512i const classes_map_u8x64[4],
+                                                        sz_u8_t const *const slices[sz_substrings_chains_icelake_k],
+                                                        sz_size_t delta, sz_u8_t *classes, sz_size_t stride) {
+    for (sz_size_t chain = 0; chain != sz_substrings_chains_icelake_k; ++chain)
+        _mm512_storeu_si512(
+            classes + chain * stride + delta % stride,
+            sz_substrings_classes_icelake_(classes_map_u8x64, _mm512_loadu_si512(slices[chain] + delta)));
+}
+
+/** @ref sz_substrings_step with the hot row's column already known. */
+STRINGZILLA_INLINE sz_u32_t sz_substrings_step_classed_icelake_(sz_substrings_engine_t const *engine, sz_u32_t state,
+                                                                sz_u8_t byte_class, sz_u8_t byte) {
+    if (state < engine->hot_count) return engine->hot_rows[(sz_size_t)state * engine->classes_count + byte_class];
+    return sz_substrings_step(engine, state, byte);
+}
+
+/** The serial eight-chain split, primed and positioned; false when the slices are too short. */
+STRINGZILLA_INLINE sz_bool_t sz_substrings_split_icelake_(sz_substrings_engine_t const *engine, sz_u8_t const *bytes,
+                                                          sz_size_t length,
+                                                          sz_u8_t const *slices[sz_substrings_chains_icelake_k],
+                                                          sz_u32_t states[sz_substrings_chains_icelake_k]) {
+    sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
+    sz_size_t const share = length / sz_substrings_chains_icelake_k,
+                    remainder = length % sz_substrings_chains_icelake_k;
+    sz_size_t chain, primed;
+    if (share <= warm_up) return sz_false_k;
+    for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain)
+        slices[chain] = bytes + chain * share + sz_min_of_two(chain, remainder), states[chain] = engine->root;
+    for (primed = 0; primed != warm_up; ++primed)
+        for (chain = 1; chain != sz_substrings_chains_icelake_k; ++chain)
+            states[chain] = sz_substrings_step(engine, states[chain], *(slices[chain] - warm_up + primed));
+    return sz_true_k;
+}
+
 STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_icelake_(sz_substrings_engine_t const *engine,
                                                                 sz_cptr_t haystack, sz_size_t length) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_size_t const share = length / sz_substrings_chains_icelake_k,
+                    remainder = length % sz_substrings_chains_icelake_k;
+    sz_u8_t const *slices[sz_substrings_chains_icelake_k];
+    sz_u32_t states[sz_substrings_chains_icelake_k];
+    sz_u8_t classes[sz_substrings_chains_icelake_k][64];
+    __m512i classes_map_u8x64[4];
+    sz_size_t total = 0, chain, delta = 0, offset;
+
     if (sz_substrings_skipping_pays_(engine, haystack, length))
         return sz_substrings_count_skipping_(engine, haystack, length, &sz_find_byteset_icelake_);
-    return sz_substrings_count_bytes_serial_(engine, haystack, length);
+    if (!sz_substrings_split_icelake_(engine, bytes, length, slices, states))
+        return sz_substrings_count_bytes_serial_(engine, haystack, length);
+
+    for (offset = 0; offset != 4; ++offset)
+        classes_map_u8x64[offset] = _mm512_loadu_si512(engine->byte_to_class + 64 * offset);
+    for (; delta + 64 <= share; delta += 64) {
+        sz_substrings_classify_icelake_(classes_map_u8x64, slices, delta, &classes[0][0], 64);
+        for (offset = 0; offset != 64; ++offset)
+            for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) {
+                states[chain] = sz_substrings_step_classed_icelake_(engine, states[chain], classes[chain][offset],
+                                                                    slices[chain][delta + offset]);
+                total += engine->outputs_counts[states[chain]];
+            }
+    }
+    for (; delta != share; ++delta)
+        for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain)
+            total += sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
+    for (chain = 0; chain != remainder; ++chain)
+        total += sz_substrings_step_counting(engine, states + chain, slices[chain][share]);
+    return total;
 }
 
 /** Overlapping count of one haystack, skipping from the root wherever live bytes are sparse. */
@@ -54,13 +132,132 @@ STRINGZILLA_INLINE sz_size_t sz_substrings_count_bytes_icelake(sz_substrings_eng
     return sz_substrings_count_bytes_icelake_(engine, haystack, length);
 }
 
+/** @ref sz_substrings_find_ascending_ with each round's classes resolved before its walk. */
+STRINGZILLA_INLINE void sz_substrings_find_ascending_icelake_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
+                                                              sz_size_t length, sz_substrings_reporter_t reporter,
+                                                              void *context) {
+    sz_size_t const warm_up = sz_substrings_bytes_warm_up_(engine);
+    sz_size_t const window = sz_substrings_ordered_window_icelake_k;
+    sz_size_t const round_bytes = sz_substrings_chains_icelake_k * window;
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_substrings_pending_end_t pending[sz_substrings_chains_icelake_k][sz_substrings_ordered_window_icelake_k];
+    sz_size_t pending_counts[sz_substrings_chains_icelake_k];
+    sz_u8_t classes[sz_substrings_chains_icelake_k][sz_substrings_ordered_window_icelake_k];
+    sz_u8_t const *windows[sz_substrings_chains_icelake_k];
+    sz_u32_t states[sz_substrings_chains_icelake_k];
+    __m512i classes_map_u8x64[4];
+    sz_u32_t state = engine->root;
+    sz_size_t round = 0, chain, delta, primed, index;
+
+    for (delta = 0; delta != 4; ++delta)
+        classes_map_u8x64[delta] = _mm512_loadu_si512(engine->byte_to_class + 64 * delta);
+    for (; round + round_bytes <= length; round += round_bytes) {
+        sz_u8_t const *const first = bytes + round;
+        states[0] = state;
+        for (chain = 1; chain != sz_substrings_chains_icelake_k; ++chain) states[chain] = engine->root;
+        for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) windows[chain] = first + chain * window;
+        for (primed = 0; primed != warm_up; ++primed)
+            for (chain = 1; chain != sz_substrings_chains_icelake_k; ++chain)
+                states[chain] = sz_substrings_step(engine, states[chain], *(windows[chain] - warm_up + primed));
+        for (delta = 0; delta != window; delta += 64)
+            sz_substrings_classify_icelake_(classes_map_u8x64, windows, delta, &classes[0][0], window);
+
+        for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) pending_counts[chain] = 0;
+        for (delta = 0; delta != window; ++delta)
+            for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) {
+                states[chain] = sz_substrings_step_classed_icelake_(engine, states[chain], classes[chain][delta],
+                                                                    windows[chain][delta]);
+                if (engine->outputs_counts[states[chain]] == 0) continue;
+                pending[chain][pending_counts[chain]].state = states[chain];
+                pending[chain][pending_counts[chain]].delta = (sz_u32_t)delta;
+                ++pending_counts[chain];
+            }
+
+        for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain)
+            for (index = 0; index != pending_counts[chain]; ++index) {
+                sz_substrings_pending_end_t const end = pending[chain][index];
+                if (sz_substrings_report_outputs_(engine, end.state, engine->outputs_counts[end.state],
+                                                  round + chain * window + end.delta, reporter,
+                                                  context) == sz_substrings_stop_k)
+                    return;
+            }
+        state = states[sz_substrings_chains_icelake_k - 1];
+    }
+
+    for (delta = round; delta != length; ++delta) {
+        sz_u32_t const output_count = sz_substrings_step_counting(engine, &state, bytes[delta]);
+        if (output_count == 0) continue;
+        if (sz_substrings_report_outputs_(engine, state, output_count, delta, reporter, context) ==
+            sz_substrings_stop_k)
+            return;
+    }
+}
+
+/** Unordered reports over the eight-chain split, with classes resolved 64 bytes ahead. */
+STRINGZILLA_INLINE void sz_substrings_find_unordered_icelake_(sz_substrings_engine_t const *engine,
+                                                              sz_u8_t const *bytes, sz_size_t length,
+                                                              sz_u8_t const *slices[sz_substrings_chains_icelake_k],
+                                                              sz_u32_t states[sz_substrings_chains_icelake_k],
+                                                              sz_substrings_reporter_t reporter, void *context) {
+    sz_size_t const share = length / sz_substrings_chains_icelake_k,
+                    remainder = length % sz_substrings_chains_icelake_k;
+    sz_u8_t classes[sz_substrings_chains_icelake_k][64];
+    __m512i classes_map_u8x64[4];
+    sz_size_t chain, delta = 0, offset;
+
+    for (offset = 0; offset != 4; ++offset)
+        classes_map_u8x64[offset] = _mm512_loadu_si512(engine->byte_to_class + 64 * offset);
+    for (; delta + 64 <= share; delta += 64) {
+        sz_substrings_classify_icelake_(classes_map_u8x64, slices, delta, &classes[0][0], 64);
+        for (offset = 0; offset != 64; ++offset)
+            for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) {
+                sz_u32_t output_count;
+                states[chain] = sz_substrings_step_classed_icelake_(engine, states[chain], classes[chain][offset],
+                                                                    slices[chain][delta + offset]);
+                output_count = engine->outputs_counts[states[chain]];
+                if (output_count == 0) continue;
+                if (sz_substrings_report_outputs_(engine, states[chain], output_count,
+                                                  (sz_size_t)(slices[chain] - bytes) + delta + offset, reporter,
+                                                  context) == sz_substrings_stop_k)
+                    return;
+            }
+    }
+    for (; delta != share; ++delta)
+        for (chain = 0; chain != sz_substrings_chains_icelake_k; ++chain) {
+            sz_u32_t const output_count = sz_substrings_step_counting(engine, states + chain, slices[chain][delta]);
+            if (output_count == 0) continue;
+            if (sz_substrings_report_outputs_(engine, states[chain], output_count,
+                                              (sz_size_t)(slices[chain] - bytes) + delta, reporter,
+                                              context) == sz_substrings_stop_k)
+                return;
+        }
+    for (chain = 0; chain != remainder; ++chain) {
+        sz_u32_t const output_count = sz_substrings_step_counting(engine, states + chain, slices[chain][share]);
+        if (output_count == 0) continue;
+        if (sz_substrings_report_outputs_(engine, states[chain], output_count,
+                                          (sz_size_t)(slices[chain] - bytes) + share, reporter,
+                                          context) == sz_substrings_stop_k)
+            return;
+    }
+}
+
 STRINGZILLA_INLINE void sz_substrings_find_bytes_icelake_(sz_substrings_engine_t const *engine, sz_cptr_t haystack,
                                                           sz_size_t length, sz_substrings_report_order_t order,
                                                           sz_substrings_reporter_t reporter, void *context) {
+    sz_u8_t const *slices[sz_substrings_chains_icelake_k];
+    sz_u32_t states[sz_substrings_chains_icelake_k];
     // One chain reports in ascending end order, which satisfies either order a consumer asks for.
     if (sz_substrings_skipping_pays_(engine, haystack, length))
         sz_substrings_find_skipping_(engine, haystack, length, reporter, context, &sz_find_byteset_icelake_);
-    else sz_substrings_find_bytes_serial_(engine, haystack, length, order, reporter, context);
+    else if (order == sz_substrings_ascending_ends_k &&
+             sz_substrings_bytes_warm_up_(engine) * 4 <= sz_substrings_ordered_window_icelake_k)
+        sz_substrings_find_ascending_icelake_(engine, haystack, length, reporter, context);
+    else if (order == sz_substrings_ascending_ends_k ||
+             !sz_substrings_split_icelake_(engine, (sz_u8_t const *)haystack, length, slices, states))
+        sz_substrings_find_bytes_serial_(engine, haystack, length, order, reporter, context);
+    else
+        sz_substrings_find_unordered_icelake_(engine, (sz_u8_t const *)haystack, length, slices, states, reporter,
+                                              context);
 }
 
 /** Overlapping reports of one haystack, skipping from the root wherever live bytes are sparse. */

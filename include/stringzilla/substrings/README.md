@@ -62,9 +62,9 @@ Every match of every needle, including nested ones, over text.
 
 | Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
 | :------------------------ | --------------: | ----------: | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |           388.8 |       761.9 |          312.4 |      621.3 |
+| Serial @ 1× Intel Xeon6   |           348.1 |       732.5 |          269.5 |      593.8 |
 | Haswell @ 1× Intel Xeon6  |           417.9 |     3,506.2 |          319.7 |    3,191.8 |
-| Ice Lake @ 1× Intel Xeon6 |           414.4 |     3,638.3 |          313.9 |    3,236.9 |
+| Ice Lake @ 1× Intel Xeon6 |           413.2 |     3,613.7 |          308.6 |    3,243.0 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
 | CUDA @ 18× Nvidia SM103   |        17,674.2 |    33,454.1 |        9,125.9 |   19,025.9 |
@@ -79,9 +79,9 @@ Matches sharing no bytes, under the leftmost-longest policy, over text.
 
 | Backend                   | Count, Frequent | Count, Rare | Find, Frequent | Find, Rare |
 | :------------------------ | --------------: | ----------: | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |           236.7 |       510.5 |          233.8 |      511.4 |
+| Serial @ 1× Intel Xeon6   |           226.0 |       500.4 |          225.3 |      507.5 |
 | Haswell @ 1× Intel Xeon6  |           239.3 |     2,740.2 |          236.9 |    2,736.1 |
-| Ice Lake @ 1× Intel Xeon6 |           230.2 |     2,721.8 |          227.3 |    2,713.6 |
+| Ice Lake @ 1× Intel Xeon6 |           242.4 |     2,869.2 |          235.8 |    2,820.1 |
 | NEON @ 1× AWS Graviton4   |               … |           … |              … |          … |
 | CUDA @ Nvidia SM90        |               … |           … |              … |          … |
 | CUDA @ 18× Nvidia SM103   |         8,457.2 |    18,544.6 |        7,997.4 |   18,227.2 |
@@ -96,9 +96,9 @@ One replacement per needle, substituted over the leftmost-longest cover; an over
 
 | Backend                   | Replace, Frequent | Replace, Rare |
 | :------------------------ | ----------------: | ------------: |
-| Serial @ 1× Intel Xeon6   |             204.5 |         494.7 |
+| Serial @ 1× Intel Xeon6   |             200.1 |         474.9 |
 | Haswell @ 1× Intel Xeon6  |             205.3 |       2,263.0 |
-| Ice Lake @ 1× Intel Xeon6 |             198.7 |       2,251.8 |
+| Ice Lake @ 1× Intel Xeon6 |             203.0 |       2,275.3 |
 | NEON @ 1× AWS Graviton4   |                 … |             … |
 | CUDA @ Nvidia SM90        |                 … |             … |
 | CUDA @ 18× Nvidia SM103   |           5,529.6 |       9,059.3 |
@@ -115,9 +115,9 @@ Metal evaluates each term in `f32` before conversion to fixed point.
 
 | Backend                   | BM25, Frequent | BM25, Rare |
 | :------------------------ | -------------: | ---------: |
-| Serial @ 1× Intel Xeon6   |          294.7 |      610.4 |
+| Serial @ 1× Intel Xeon6   |          263.5 |      528.7 |
 | Haswell @ 1× Intel Xeon6  |          303.1 |    2,808.8 |
-| Ice Lake @ 1× Intel Xeon6 |          297.4 |    2,832.4 |
+| Ice Lake @ 1× Intel Xeon6 |          265.9 |    2,710.5 |
 | NEON @ 1× AWS Graviton4   |              … |          … |
 | CUDA @ Nvidia SM90        |              … |          … |
 | CUDA @ 18× Nvidia SM103   |        3,530.8 |   12,748.8 |
