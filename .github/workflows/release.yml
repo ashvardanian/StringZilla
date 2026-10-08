@@ -19,6 +19,8 @@ permissions:
 jobs:
   versioning:
     name: Update Version
+    outputs:
+      python-versions: '["310", "311", "312", "313", "314", "314t"]'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -101,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314", "314t"]
+        python-version: ${{ fromJSON(needs.versioning.outputs.python-versions) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -135,7 +137,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314", "314t"]
+        python-version: ${{ fromJSON(needs.versioning.outputs.python-versions) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -252,7 +254,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314", "314t"]
+        python-version: ${{ fromJSON(needs.versioning.outputs.python-versions) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -287,7 +289,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["310", "311", "312", "313", "314", "314t"]
+        python-version: ${{ fromJSON(needs.versioning.outputs.python-versions) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -714,6 +716,7 @@ jobs:
     name: Publish StringZilla to PyPI
     needs:
       [
+        versioning,
         build_wheels_stringzilla_linux_x86,
         build_wheels_stringzilla_linux_arm,
         build_wheels_stringzilla_linux_emulated,
@@ -753,7 +756,11 @@ jobs:
 
       # The long tail may go missing; losing a core platform must not degrade this to sdist-only.
       - name: Require wheels for the core platforms
-        run: python build_backend.py check-wheels '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*' '*win_amd64*'
+        run: >-
+          python build_backend.py check-wheels
+          --python-versions '${{ needs.versioning.outputs.python-versions }}'
+          --version "$(cat VERSION)"
+          '*manylinux*_x86_64*' '*manylinux*_aarch64*' '*macosx_*_x86_64*' '*macosx_*_arm64*' '*win_amd64*'
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
