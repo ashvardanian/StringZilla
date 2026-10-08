@@ -2614,6 +2614,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept {
+        if (other.empty()) return skip;
         auto ptr = sz_find(start_ + skip, length_ - skip, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
@@ -2644,6 +2645,7 @@ class basic_string_slice {
      *  @return `size()` for an @b empty `other`.
      */
     size_type rfind(string_view other) const noexcept {
+        if (other.empty()) return length_;
         auto ptr = sz_rfind(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
