@@ -2614,6 +2614,7 @@ class basic_string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(string_view other, size_type skip = 0) const noexcept {
+        if (other.empty()) return skip;
         auto ptr = sz_find(start_ + skip, length_ - skip, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
@@ -2644,6 +2645,7 @@ class basic_string_slice {
      *  @return `size()` for an @b empty `other`.
      */
     size_type rfind(string_view other) const noexcept {
+        if (other.empty()) return length_;
         auto ptr = sz_rfind(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
@@ -2654,7 +2656,8 @@ class basic_string_slice {
      *  @return For an @b empty `other`, `min(until, size())`.
      */
     size_type rfind(string_view other, size_type until) const noexcept(false) {
-        return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
+        return other.size() < length_ && until < length_ - other.size() ? substr(0, until + other.size()).rfind(other)
+                                                                        : rfind(other);
     }
 
     /**
@@ -2773,7 +2776,7 @@ class basic_string_slice {
      *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(byteset set, size_type until) const noexcept {
-        auto len = sz_min_of_two(until + 1, length_);
+        auto len = until < length_ ? until + 1 : length_;
         auto ptr = sz_rfind_byteset(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }

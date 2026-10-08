@@ -161,6 +161,37 @@ static void check_find_unit_(                      //
 void test_find_unit() {
     std::printf("  - testing search & comparison known-answer vectors...\n");
 
+    // Empty needles match at the requested boundary, including a default-constructed view.
+    sz::string_view const empty_views[] = {sz::string_view(), sz::string_view("")};
+    for (auto const &empty_view : empty_views) {
+        verify(empty_view.find(sz::string_view()) == 0);
+        verify(empty_view.find("") == 0);
+        verify(empty_view.rfind(sz::string_view()) == 0);
+        verify(empty_view.rfind("") == 0);
+        verify(empty_view.rfind("", sz::string_view::npos) == 0);
+        verify(empty_view.contains(""));
+        verify(empty_view.find("a") == sz::string_view::npos);
+    }
+    sz::string_span empty_span;
+    verify(empty_span.find("") == 0);
+    verify(empty_span.rfind("") == 0);
+    verify(empty_span.contains(""));
+    sz::string empty_string;
+    verify(empty_string.find("") == 0);
+    verify(empty_string.rfind("") == 0);
+    verify(empty_string.contains(""));
+
+    sz::string_view const bounded("abcabc");
+    for (std::size_t until : {std::size_t(0), std::size_t(2), std::size_t(3), bounded.size(), bounded.size() + 1,
+                              sz::string_view::npos, std::numeric_limits<std::size_t>::max()}) {
+        verify(bounded.rfind("abc", until) == (until < 3 ? 0 : 3));
+        verify(bounded.rfind('c', until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.find_last_of("c", until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.find_last_not_of("ab", until) == (until < 2 ? sz::string_view::npos : until < 5 ? 2 : 5));
+        verify(bounded.rfind("", until) == std::min(until, bounded.size()));
+        verify(bounded.rfind("abcabcx", until) == sz::string_view::npos);
+    }
+
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
