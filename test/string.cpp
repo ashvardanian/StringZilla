@@ -835,6 +835,8 @@ void test_stl_reads_unit() {
     verify(str("hello").rfind('l', 1) == str::npos);
 
     // Substring search in normal and reverse directions.
+    verify(str().find("") == 0);
+    verify(str().rfind("") == 0);
     verify(str("hello").find("ell") == 1);
     verify(str("hello").find("ell", 1) == 1);
     verify(str("hello").find("ell", 2) == str::npos);
@@ -938,6 +940,9 @@ void test_stl_reads_unit() {
     }
 
     // Boundary conditions.
+    auto const max_pos = std::numeric_limits<std::size_t>::max();
+    verify(str("hello").rfind("ell", max_pos) == 1);
+    verify(str("hello").find_last_of("le", max_pos) == 3);
     verify(str("hello").find_first_of("ox", 4) == 4);
     verify(str("hello").find_first_of("ox", 5) == str::npos);
     verify(str("hello").find_last_of("ox", 4) == 4);
