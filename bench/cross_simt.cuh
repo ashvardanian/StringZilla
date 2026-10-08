@@ -75,6 +75,8 @@ struct simt_backend_t {
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
     sz_kernel_utf8_uncased_fold_t utf8_uncased_fold;
     sz_kernel_utf8_norm_t utf8_norm;
+    sz_kernel_sha256_multistate_update_t sha256_multistate_update;
+    sz_kernel_sha256_multistate_digest_t sha256_multistate_digest;
 };
 
 inline std::string simt_arm(simt_backend_t const &backend, char const *verb) {
@@ -755,6 +757,60 @@ inline void bench_utf8_norm_and_fold(simt_backend_t const &backend, environment_
 
 #pragma endregion UTF8 Norm and Fold
 
+#pragma region SHA256
+
+/** Multi-state SHA-256 of every token at once on the device, one call per pass over the corpus,
+ *  as a batch of millions of messages is the shape a GPU is for. */
+struct sha256_multistate_tape_from_sz_t {
+    corpus_t const &corpus;
+    sz_kernel_sha256_multistate_update_t update;
+    sz_kernel_sha256_multistate_digest_t digest;
+    device_backend_t const &runtime;
+    tape_t texts;
+    unified_vector<sz_sha256_state_t> states;
+    unified_vector<sz_u8_t> digests;
+
+    sha256_multistate_tape_from_sz_t(corpus_t const &corpus, sz_kernel_sha256_multistate_update_t update,
+                                     sz_kernel_sha256_multistate_digest_t digest, device_backend_t const &runtime)
+        : corpus(corpus), update(update), digest(digest), runtime(runtime),
+          texts(unified_alloc<char>(runtime.unified, runtime.stream)),
+          states(unified_alloc<sz_sha256_state_t>(runtime.unified, runtime.stream)),
+          digests(unified_alloc<sz_u8_t>(runtime.unified, runtime.stream)) {}
+
+    /** Stages the corpus as one tape and its fresh states, once the filter keeps the row. */
+    void preprocess() {
+        if (!states.empty()) return;
+        std::vector<sz_string_view_t> views(corpus.tokens.size());
+        for (std::size_t index = 0; index != views.size(); ++index)
+            views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
+        if (texts.assign(views) != status_t::success_k) throw std::runtime_error("The tape could not be staged.");
+        states.resize(views.size());
+        digests.resize(views.size() * STRINGZILLA_SHA256_DIGEST_LENGTH);
+        for (sz_sha256_state_t &state : states) sz_sha256_state_init_serial(&state, nullptr);
+    }
+
+    call_result_t operator()(std::size_t) {
+        sz_sequence_t const sequence = texts.sequence();
+        if (update(states.data(), &sequence, runtime.stream) != sz_success_k ||
+            digest(states.data(), states.size(), digests.data(), runtime.stream) != sz_success_k ||
+            sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
+            throw std::runtime_error("The multi-state SHA-256 failed.");
+        // Packed offsets bracket every message, so the last minus the first is all the bytes.
+        sz_u64_t const *offsets = static_cast<sz_u64_t const *>(sequence.handle);
+        return {static_cast<std::size_t>(offsets[sequence.count] - offsets[0]), digests[0], sequence.count};
+    }
+};
+
+inline void bench_sha256_multistate_simt(simt_backend_t const &backend, environment_t &env) {
+    std::string const name = simt_arm(backend, "sz_sha256_multistate");
+    for (corpus_t const *corpus : {&env.corpora.words(), &env.corpora.lines()})
+        print(bench_unary(env, *corpus, name + (corpus == &env.corpora.words() ? ":words" : ":lines"),
+                          sha256_multistate_tape_from_sz_t {*corpus, backend.sha256_multistate_update,
+                                                            backend.sha256_multistate_digest, backend.runtime}));
+}
+
+#pragma endregion SHA256
+
 #pragma region Drivers
 
 /** Every family's rows over the multilingual lines, each on a corpus it keeps resident; a build
@@ -767,6 +823,7 @@ inline int bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
         bench_substrings_simt(backend, env, corpus);
         fmt::println("Starting UTF-8 normalization and case folding benchmarks...");
         bench_utf8_norm_and_fold(backend, env, env.corpora.multilingual_slice());
+        bench_sha256_multistate_simt(backend, env);
     }
     catch (std::exception const &e) {
         fmt::println(stderr, "Failed with: {}", e.what());

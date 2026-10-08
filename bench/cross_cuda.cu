@@ -56,7 +56,9 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                   sz_substrings_replace_cuda,
                                   sz_substrings_bm25_scores_cuda,
                                   sz_utf8_uncased_fold_cuda,
-                                  sz_utf8_norm_cuda};
+                                  sz_utf8_norm_cuda,
+                                  sz_sha256_multistate_update_cuda,
+                                  sz_sha256_multistate_digest_cuda};
     int result = bench_cross_simt(env, backend);
 #if STRINGZILLA_TARGET_HOPPER
     if (runtime.capabilities & sz_cap_hopper_k) {
@@ -72,7 +74,9 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                      sz_substrings_replace_hopper,
                                      sz_substrings_bm25_scores_hopper,
                                      sz_utf8_uncased_fold_cuda,
-                                     sz_utf8_norm_cuda};
+                                     sz_utf8_norm_cuda,
+                                     sz_sha256_multistate_update_cuda,
+                                     sz_sha256_multistate_digest_cuda};
         result += bench_cross_simt_substrings(env, hopper);
     }
 #endif
@@ -90,7 +94,9 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                         sz_substrings_replace_cuda,
                                         sz_substrings_bm25_scores_cuda,
                                         sz_utf8_uncased_fold_cuda,
-                                        sz_utf8_norm_cuda};
+                                        sz_utf8_norm_cuda,
+                                        sz_sha256_multistate_update_cuda,
+                                        sz_sha256_multistate_digest_cuda};
         result += bench_cross_simt_levenshtein_overlap(env, blackwell);
     }
 #endif

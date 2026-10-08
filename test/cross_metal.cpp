@@ -44,6 +44,8 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
         sz_substrings_bm25_scores_metal,
         sz_utf8_uncased_fold_metal,
         sz_utf8_norm_metal,
+        nullptr,
+        nullptr,
     };
     cross_section_t check(env);
     check.detected = runtime.capabilities;

@@ -10,6 +10,8 @@ Each `_best` dispatch point runs the best kernel among the capabilities its call
 Hashing one message is a serial dependency chain: every block feeds the next, so no amount of vector width makes a single digest faster, which is why the single-message column tops out at whatever the SHA-NI instructions deliver.
 Independent messages have no such dependency between them.
 `sz_sha256_multistate_update_best` takes one message per lane and runs the ordinary SHA-256 arithmetic across sixteen of them at once on AVX-512, or eight on AVX2, holding the state word-major so each vector register carries the same hash word from every lane.
+On CUDA every message gets its own thread, so a batch of millions of messages, kept as one tape in device memory, fills every SM.
+The CUDA rows hash the whole corpus per call, digests included, where the CPU rows hash sixteen messages per call.
 
 Lanes are grouped by vector width, and a group advances one block per turn until its longest member is done.
 Shorter lanes retire as they finish and are simply left out of the remaining turns, so a batch of ragged lengths is correct and stays vectorized throughout — but a group still costs as much as its longest message, and a lane that retires early leaves its slot idle.
@@ -33,28 +35,30 @@ An empty cell is genuinely-missing data.
 
 ## Short Words
 
-| Backend                   |                Byte Sum |                    Hash |         Multi-seed Hash |                SHA-256 |    Multi-state SHA-256 |
-| :------------------------ | ----------------------: | ----------------------: | ----------------------: | ---------------------: | ---------------------: |
-| Standard @ 1× Intel Xeon6 |  0.30 GB/s · 64 Mhash/s |  0.28 GB/s · 59 Mhash/s |                       … |                      … |                      … |
-| Serial @ 1× Intel Xeon6   |  0.31 GB/s · 64 Mhash/s |  0.06 GB/s · 13 Mhash/s |  0.08 GB/s · 16 Mhash/s |  0.02 GB/s · 4 Mhash/s |  0.02 GB/s · 4 Mhash/s |
-| Westmere @ 1× Intel Xeon6 |                       ↑ |  0.29 GB/s · 61 Mhash/s | 1.24 GB/s · 260 Mhash/s |                      ↑ |                      ↑ |
-| Goldmont @ 1× Intel Xeon6 |                       ↑ |                       ↑ |                       ↑ | 0.06 GB/s · 13 Mhash/s | 0.06 GB/s · 13 Mhash/s |
-| Haswell @ 1× Intel Xeon6  |  0.28 GB/s · 60 Mhash/s |                       ↑ |                       ↑ |                      ↑ |  0.04 GB/s · 9 Mhash/s |
-| Skylake @ 1× Intel Xeon6  | 1.98 GB/s · 415 Mhash/s | 1.72 GB/s · 361 Mhash/s |                       ↑ |                      ↑ | 0.13 GB/s · 26 Mhash/s |
-| Ice Lake @ 1× Intel Xeon6 | 2.02 GB/s · 424 Mhash/s | 1.62 GB/s · 341 Mhash/s | 3.37 GB/s · 707 Mhash/s |                      ↑ |                      ↑ |
-| NEON @ 1× AWS Graviton4   |                       … |                       … |                       … |                      … |                      … |
-| SVE @ 1× AWS Graviton3    |                       … |                       … |                       … |                      … |                      … |
+| Backend                   |                Byte Sum |                    Hash |         Multi-seed Hash |                SHA-256 |     Multi-state SHA-256 |
+| :------------------------ | ----------------------: | ----------------------: | ----------------------: | ---------------------: | ----------------------: |
+| Standard @ 1× Intel Xeon6 |  0.30 GB/s · 64 Mhash/s |  0.28 GB/s · 59 Mhash/s |                       … |                      … |                       … |
+| Serial @ 1× Intel Xeon6   |  0.31 GB/s · 64 Mhash/s |  0.06 GB/s · 13 Mhash/s |  0.08 GB/s · 16 Mhash/s |  0.02 GB/s · 4 Mhash/s |   0.02 GB/s · 4 Mhash/s |
+| Westmere @ 1× Intel Xeon6 |                       ↑ |  0.29 GB/s · 61 Mhash/s | 1.24 GB/s · 260 Mhash/s |                      ↑ |                       ↑ |
+| Goldmont @ 1× Intel Xeon6 |                       ↑ |                       ↑ |                       ↑ | 0.06 GB/s · 13 Mhash/s |  0.06 GB/s · 13 Mhash/s |
+| Haswell @ 1× Intel Xeon6  |  0.28 GB/s · 60 Mhash/s |                       ↑ |                       ↑ |                      ↑ |   0.04 GB/s · 9 Mhash/s |
+| Skylake @ 1× Intel Xeon6  | 1.98 GB/s · 415 Mhash/s | 1.72 GB/s · 361 Mhash/s |                       ↑ |                      ↑ |  0.13 GB/s · 26 Mhash/s |
+| Ice Lake @ 1× Intel Xeon6 | 2.02 GB/s · 424 Mhash/s | 1.62 GB/s · 341 Mhash/s | 3.37 GB/s · 707 Mhash/s |                      ↑ |                       ↑ |
+| NEON @ 1× AWS Graviton4   |                       … |                       … |                       … |                      … |                       … |
+| SVE @ 1× AWS Graviton3    |                       … |                       … |                       … |                      … |                       … |
+| CUDA @ 18× Nvidia SM103   |                       … |                       … |                       … |                      … | 2.36 GB/s · 496 Mhash/s |
 
 ## Long Lines
 
-| Backend                   |                Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |   Multi-state SHA-256 |
-| :------------------------ | ----------------------: | ---------------------: | -----------------------: | --------------------: | --------------------: |
-| Standard @ 1× Intel Xeon6 |  4.49 GB/s · 37 Mhash/s | 4.10 GB/s · 34 Mhash/s |                        … |                     … |                     … |
-| Serial @ 1× Intel Xeon6   |  2.38 GB/s · 20 Mhash/s |  0.31 GB/s · 3 Mhash/s |    0.32 GB/s · 3 Mhash/s | 0.18 GB/s · 2 Mhash/s | 0.18 GB/s · 2 Mhash/s |
-| Westmere @ 1× Intel Xeon6 |                       ↑ | 3.16 GB/s · 26 Mhash/s |   3.66 GB/s · 31 Mhash/s |                     ↑ |                     ↑ |
-| Goldmont @ 1× Intel Xeon6 |                       ↑ |                      ↑ |                        ↑ | 0.81 GB/s · 7 Mhash/s | 0.85 GB/s · 7 Mhash/s |
-| Haswell @ 1× Intel Xeon6  |  3.96 GB/s · 33 Mhash/s |                      ↑ |                        ↑ |                     ↑ | 0.38 GB/s · 3 Mhash/s |
-| Skylake @ 1× Intel Xeon6  | 10.29 GB/s · 86 Mhash/s | 3.20 GB/s · 27 Mhash/s |                        ↑ |                     ↑ | 0.99 GB/s · 8 Mhash/s |
-| Ice Lake @ 1× Intel Xeon6 |  8.72 GB/s · 73 Mhash/s | 8.16 GB/s · 68 Mhash/s | 16.16 GB/s · 135 Mhash/s |                     ↑ |                     ↑ |
-| NEON @ 1× AWS Graviton4   |                       … |                      … |                        … |                     … |                     … |
-| SVE @ 1× AWS Graviton3    |                       … |                      … |                        … |                     … |                     … |
+| Backend                   |                Byte Sum |                   Hash |          Multi-seed Hash |               SHA-256 |      Multi-state SHA-256 |
+| :------------------------ | ----------------------: | ---------------------: | -----------------------: | --------------------: | -----------------------: |
+| Standard @ 1× Intel Xeon6 |  4.49 GB/s · 37 Mhash/s | 4.10 GB/s · 34 Mhash/s |                        … |                     … |                        … |
+| Serial @ 1× Intel Xeon6   |  2.38 GB/s · 20 Mhash/s |  0.31 GB/s · 3 Mhash/s |    0.32 GB/s · 3 Mhash/s | 0.18 GB/s · 2 Mhash/s |    0.18 GB/s · 2 Mhash/s |
+| Westmere @ 1× Intel Xeon6 |                       ↑ | 3.16 GB/s · 26 Mhash/s |   3.66 GB/s · 31 Mhash/s |                     ↑ |                        ↑ |
+| Goldmont @ 1× Intel Xeon6 |                       ↑ |                      ↑ |                        ↑ | 0.81 GB/s · 7 Mhash/s |    0.85 GB/s · 7 Mhash/s |
+| Haswell @ 1× Intel Xeon6  |  3.96 GB/s · 33 Mhash/s |                      ↑ |                        ↑ |                     ↑ |    0.38 GB/s · 3 Mhash/s |
+| Skylake @ 1× Intel Xeon6  | 10.29 GB/s · 86 Mhash/s | 3.20 GB/s · 27 Mhash/s |                        ↑ |                     ↑ |    0.99 GB/s · 8 Mhash/s |
+| Ice Lake @ 1× Intel Xeon6 |  8.72 GB/s · 73 Mhash/s | 8.16 GB/s · 68 Mhash/s | 16.16 GB/s · 135 Mhash/s |                     ↑ |                        ↑ |
+| NEON @ 1× AWS Graviton4   |                       … |                      … |                        … |                     … |                        … |
+| SVE @ 1× AWS Graviton3    |                       … |                      … |                        … |                     … |                        … |
+| CUDA @ 18× Nvidia SM103   |                       … |                      … |                        … |                     … | 17.87 GB/s · 149 Mhash/s |

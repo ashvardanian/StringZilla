@@ -55,6 +55,8 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         sz_substrings_bm25_scores_cuda,
         sz_utf8_uncased_fold_cuda,
         sz_utf8_norm_cuda,
+        sz_sha256_multistate_update_cuda,
+        sz_sha256_multistate_digest_cuda,
     };
     check.section("Cross CUDA", sz_cap_cuda_k);
     check_device_kernels_(check, cuda);
@@ -73,6 +75,8 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         sz_substrings_bm25_scores_hopper,
         sz_utf8_uncased_fold_cuda,
         sz_utf8_norm_cuda,
+        sz_sha256_multistate_update_cuda,
+        sz_sha256_multistate_digest_cuda,
     };
     check.section("Cross Hopper", sz_cap_hopper_k);
     check_device_substrings_(check, hopper);
@@ -91,6 +95,8 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
         sz_substrings_bm25_scores_cuda,
         sz_utf8_uncased_fold_cuda,
         sz_utf8_norm_cuda,
+        sz_sha256_multistate_update_cuda,
+        sz_sha256_multistate_digest_cuda,
     };
     check.section("Cross Blackwell", sz_cap_blackwell_k);
     check_device_levenshtein_(check, blackwell);

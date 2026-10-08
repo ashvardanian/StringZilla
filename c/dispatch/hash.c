@@ -492,12 +492,24 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
         (sz_kernel_punned_t)&sz_sha256_multistate_update_skylake,
 #endif
     };
+    static sz_kernel_punned_t const cuda[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_CUDA
+        (sz_kernel_punned_t)&sz_sha256_multistate_update_cuda,
+#endif
+    };
+    static sz_kernel_punned_t const rocm[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_ROCM
+        (sz_kernel_punned_t)&sz_sha256_multistate_update_rocm,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
              sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
          cpu},
-        {0, sz_no_kernels_},
-        {0, sz_no_kernels_},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {0, sz_no_kernels_},
     };
     return lists;
@@ -517,12 +529,24 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
         (sz_kernel_punned_t)&sz_sha256_multistate_digest_skylake,
 #endif
     };
+    static sz_kernel_punned_t const cuda[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_CUDA
+        (sz_kernel_punned_t)&sz_sha256_multistate_digest_cuda,
+#endif
+    };
+    static sz_kernel_punned_t const rocm[] = {
+        STRINGZILLA_NULL,
+#if STRINGZILLA_TARGET_ROCM
+        (sz_kernel_punned_t)&sz_sha256_multistate_digest_rocm,
+#endif
+    };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
              sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
          cpu},
-        {0, sz_no_kernels_},
-        {0, sz_no_kernels_},
+        {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
+        {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
         {0, sz_no_kernels_},
     };
     return lists;

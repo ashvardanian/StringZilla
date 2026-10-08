@@ -9,12 +9,14 @@
 #undef STRINGZILLA_TARGET_BLACKWELL
 #define STRINGZILLA_TARGET_BLACKWELL 0
 #include "stringzilla/memory.h"
+#include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/utf8_uncased_fold.h"
 #include "stringzilla/utf8_norm.h"
 
+#include "stringzilla/hash/cuda.cuh"
 #include "stringzilla/levenshtein/cuda.cuh"
 #include "stringzilla/overlap/cuda.cuh"
 #include "stringzilla/substrings/cuda.cuh"

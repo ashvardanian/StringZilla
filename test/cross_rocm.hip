@@ -33,6 +33,9 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
     verify(sz_allocator_init_unified_rocm(&runtime.unified) == sz_success_k);
     runtime.init = sz_stream_init_rocm;
     runtime.free = sz_stream_free_rocm;
+    cross_section_t check(env);
+    check.detected = runtime.capabilities;
+#if STRINGZILLA_TARGET_ROCM
     device_kernels const rocm {
         "rocm",
         runtime,
@@ -44,11 +47,12 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
         sz_substrings_bm25_scores_rocm,
         sz_utf8_uncased_fold_rocm,
         sz_utf8_norm_rocm,
+        sz_sha256_multistate_update_rocm,
+        sz_sha256_multistate_digest_rocm,
     };
-    cross_section_t check(env);
-    check.detected = runtime.capabilities;
     check.section("Cross ROCm", sz_cap_rocm_k);
     check_device_kernels_(check, rocm);
+#endif
     auto const failures = capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
     return failures;
 #else

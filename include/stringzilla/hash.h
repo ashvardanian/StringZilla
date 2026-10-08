@@ -889,6 +889,30 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
 
 #endif
 
+#if STRINGZILLA_TARGET_CUDA
+
+/** @copydoc sz_sha256_multistate_update_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_cuda(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                             sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_digest_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_cuda(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                             sz_u8_t *digests, sz_stream_t stream);
+
+#endif
+
+#if STRINGZILLA_TARGET_ROCM
+
+/** @copydoc sz_sha256_multistate_update_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rocm(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                             sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_digest_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_rocm(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                             sz_u8_t *digests, sz_stream_t stream);
+
+#endif
+
 /**
  *  @brief Finds the hashing kernel of @p kind, from the best of @p capabilities.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
@@ -934,6 +958,8 @@ STRINGZILLA_INLINE sz_bool_t sz_hash_state_equal(sz_hash_state_t const *lhs, sz_
 #include "stringzilla/hash/rvvcrypto.h"
 #include "stringzilla/hash/loongsonasx.h"
 #include "stringzilla/hash/powervsx.h"
+#include "stringzilla/hash/cuda.cuh"
+#include "stringzilla/hash/rocm.cuh"
 #endif // STRINGZILLA_HEADER_ONLY
 
 #pragma region Dispatch

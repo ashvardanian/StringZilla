@@ -11,12 +11,13 @@
 #include <cmath>   // `std::fabs`, `std::exp`, `std::log`
 #include <cstddef> // `std::size_t`
 
-#include <algorithm> // `std::sort`, `std::copy`, `std::min`
-#include <array>     // `std::array`
-#include <random>    // `std::mt19937`, `std::uniform_real_distribution`
-#include <span>      // `std::span`
-#include <string>    // `std::string`
-#include <vector>    // `std::vector`
+#include <algorithm>   // `std::sort`, `std::copy`, `std::min`
+#include <array>       // `std::array`
+#include <random>      // `std::mt19937`, `std::uniform_real_distribution`
+#include <type_traits> // `std::is_null_pointer_v`
+#include <span>        // `std::span`
+#include <string>      // `std::string`
+#include <vector>      // `std::vector`
 
 #include <stringzilla/stringzilla.h> // Primary C API
 
@@ -27,7 +28,7 @@ namespace ashvardanian::stringzilla::test {
 
 /** One vendor's engine kernels, or the dispatch points in their place, which take the same
  *  arguments: a device engine records its capability, so a verb reaches that vendor's kernel. */
-template <typename fold_type_, typename norm_type_>
+template <typename fold_type_, typename norm_type_, typename sha256_update_type_, typename sha256_digest_type_>
 struct device_kernels {
 
     /** The spelling @ref fail_backend_ and the test names carry. */
@@ -42,6 +43,10 @@ struct device_kernels {
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
     fold_type_ utf8_uncased_fold;
     norm_type_ utf8_norm;
+
+    /** Null where the vendor has no multi-state SHA-256, as Metal has none. */
+    sha256_update_type_ sha256_multistate_update;
+    sha256_digest_type_ sha256_multistate_digest;
 };
 
 /** Binds the dispatch point to the device's enabled capabilities. */
@@ -1681,6 +1686,71 @@ inline void check_device_substrings_(cross_section_t &check, auto const &backend
     check("test_substrings_safety_" + suffix, [&] { test_substrings_device_safety(backend); });
 }
 
+/** Multi-state SHA-256 on the device against serial, with half the lanes carrying a buffered prefix
+ *  from an earlier call, so the head, body and tail paths all run. */
+inline void check_sha256_multistate_device_equivalence_(test_context_t &context, auto const &backend) {
+    device_backend_t const &runtime = backend.runtime;
+    std::mt19937 &generator = context.generator;
+    sz_size_t const lanes_count = (sz_size_t)context.iterations(4096);
+    fuzzy_config_t config;
+    config.batch_size = (std::size_t)lanes_count;
+    config.min_string_length = 0;
+    config.max_string_length = 4 * STRINGZILLA_SHA256_BLOCK_LENGTH + 3;
+    std::vector<std::string> messages, prefixes;
+    randomize_strings(generator, config, messages);
+    config.max_string_length = STRINGZILLA_SHA256_BLOCK_LENGTH - 1;
+    randomize_strings(generator, config, prefixes);
+
+    tape_t texts {unified_alloc<char>(runtime.unified, runtime.stream)};
+    std::vector<sz_string_view_t> views(lanes_count);
+    for (sz_size_t lane = 0; lane != lanes_count; ++lane) views[lane] = {messages[lane].data(), messages[lane].size()};
+    verify(texts.assign(views) == status_t::success_k);
+    unified_vector<sz_sha256_state_t> states(lanes_count,
+                                             unified_alloc<sz_sha256_state_t>(runtime.unified, runtime.stream));
+    unified_vector<sz_u8_t> digests(lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH,
+                                    unified_alloc<sz_u8_t>(runtime.unified, runtime.stream));
+    std::vector<sz_sha256_state_t> expected(lanes_count);
+    std::vector<sz_u8_t> expected_digests(lanes_count * STRINGZILLA_SHA256_DIGEST_LENGTH);
+    for (sz_size_t lane = 0; lane != lanes_count; ++lane) {
+        verify(sz_sha256_state_init_serial(&expected[lane], nullptr) == sz_success_k);
+        if (lane % 2)
+            verify(sz_sha256_state_update_serial(&expected[lane], prefixes[lane].data(), prefixes[lane].size(),
+                                                 nullptr) == sz_success_k);
+        states[lane] = expected[lane];
+    }
+
+    sz_sequence_t const sequence = texts.sequence();
+    verify(backend.sha256_multistate_update(states.data(), &sequence, runtime.stream) == sz_success_k);
+    verify(backend.sha256_multistate_digest(states.data(), lanes_count, digests.data(), runtime.stream) ==
+           sz_success_k);
+    verify(sz_stream_synchronize_best(runtime.capabilities, runtime.stream) == sz_success_k);
+    for (sz_size_t lane = 0; lane != lanes_count; ++lane)
+        verify(sz_sha256_state_update_serial(&expected[lane], messages[lane].data(), messages[lane].size(), nullptr) ==
+               sz_success_k);
+    verify(sz_sha256_multistate_digest_serial(expected.data(), lanes_count, expected_digests.data(), nullptr) ==
+           sz_success_k);
+    verify(std::memcmp(digests.data(), expected_digests.data(), expected_digests.size()) == 0 &&
+           "Device multi-state SHA-256 disagreed with serial");
+}
+
+/** An empty batch is a no-op, and a sequence the device cannot address is refused, not read. */
+inline void check_sha256_multistate_device_safety_(auto const &backend) {
+    sz_stream_t const stream = backend.runtime.stream;
+    sz_sequence_t empty {};
+    sz_sequence_from_string_views(nullptr, 0, &empty);
+    verify(backend.sha256_multistate_update(nullptr, &empty, stream) == sz_success_k);
+    verify(backend.sha256_multistate_digest(nullptr, 0, nullptr, stream) == sz_success_k);
+
+    std::array<sz_string_view_t, 2> const views {sz_string_view_t {"abc", 3}, {"", 0}};
+    sz_sequence_t host {};
+    sz_sequence_from_string_views(views.data(), views.size(), &host);
+    std::array<sz_sha256_state_t, 2> states {};
+    std::array<sz_u8_t, 2 * STRINGZILLA_SHA256_DIGEST_LENGTH> digests {};
+    verify(backend.sha256_multistate_update(states.data(), &host, stream) == sz_device_memory_mismatch_k);
+    verify(backend.sha256_multistate_digest(states.data(), states.size(), digests.data(), stream) ==
+           sz_device_memory_mismatch_k);
+}
+
 /** Registers every check of one vendor's kernels, or of the dispatch points, in @p check. */
 inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
     std::string const suffix = backend.name;
@@ -1695,6 +1765,11 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
           [&](test_context_t &context) { check_utf8_norm_device_equivalence_(context, backend); });
     check("test_utf8_norm_safety_" + suffix,
           [&](test_context_t &context) { check_utf8_norm_device_safety_(context, backend); });
+    if constexpr (!std::is_null_pointer_v<decltype(backend.sha256_multistate_update)>) {
+        check("test_sha256_multistate_equivalence_" + suffix,
+              [&](test_context_t &context) { check_sha256_multistate_device_equivalence_(context, backend); });
+        check("test_sha256_multistate_safety_" + suffix, [&] { check_sha256_multistate_device_safety_(backend); });
+    }
 }
 
 /** A copy lands every string in one unified tape, and copying that tape again only re-points it. */
@@ -1741,7 +1816,9 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
                                      sz_substrings_replace,
                                      sz_substrings_bm25_scores,
                                      gpu_best<sz_utf8_uncased_fold_best>(capabilities),
-                                     gpu_best<sz_utf8_norm_best>(capabilities)};
+                                     gpu_best<sz_utf8_norm_best>(capabilities),
+                                     gpu_best<sz_sha256_multistate_update_best>(capabilities),
+                                     gpu_best<sz_sha256_multistate_digest_best>(capabilities)};
     cross_section_t check(env);
     check.detected = runtime.capabilities;
     check.section("Cross Dispatch", runtime.capabilities);

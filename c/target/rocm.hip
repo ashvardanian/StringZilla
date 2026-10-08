@@ -5,12 +5,14 @@
  *  @brief The @c rocm kernels and the ROCm device exports, defined once for the library.
  */
 #include "stringzilla/memory.h"
+#include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/utf8_uncased_fold.h"
 #include "stringzilla/utf8_norm.h"
 
+#include "stringzilla/hash/rocm.cuh"
 #include "stringzilla/levenshtein/rocm.cuh"
 #include "stringzilla/overlap/rocm.cuh"
 #include "stringzilla/substrings/rocm.cuh"
