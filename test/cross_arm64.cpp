@@ -189,8 +189,14 @@ std::size_t test_cross_arm64(environment_t const &env) {
         .update_kernel = sz_sha256_state_update_neonsha,
         .digest_kernel = sz_sha256_state_digest_neonsha,
     };
-    check("test_hash_equivalence_neonsha",
-          [&](test_context_t &context) { check_sha256_equivalence_(context, sha256_neonsha); });
+    constexpr sha256_multistate_backend_t sha256_multistate_neonsha {
+        .update_kernel = sz_sha256_multistate_update_neonsha,
+        .digest_kernel = sz_sha256_multistate_digest_neonsha,
+    };
+    check("test_hash_equivalence_neonsha", [&](test_context_t &context) {
+        check_sha256_equivalence_(context, sha256_neonsha);
+        check_sha256_multistate_equivalence_(context, sha256_multistate_neonsha);
+    });
 #endif // STRINGZILLA_TARGET_NEONSHA
 
 #if STRINGZILLA_TARGET_SVE

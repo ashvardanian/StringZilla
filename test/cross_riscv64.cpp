@@ -64,6 +64,17 @@ std::size_t test_cross_riscv64(environment_t const &env) {
     check("test_sort_equivalence_rvv", [&](test_context_t &context) { check_sort_equivalence_(context, sort_rvv); });
     check("test_sort_safety_rvv", [&] { check_sort_safety_(sort_rvv); });
 
+    constexpr substrings_tier_t substrings_rvv {
+        .init = sz_substrings_engine_init_rvv,
+        .counts = sz_substrings_counts_rvv,
+        .find = sz_substrings_find_rvv,
+        .replace = sz_substrings_replace_rvv,
+        .bm25_scores = sz_substrings_bm25_scores_rvv,
+    };
+    check("test_substrings_unit_rvv", [&] { check_substrings_unit_(substrings_rvv); });
+    check("test_substrings_equivalence_rvv",
+          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_rvv); });
+
     constexpr utf8_runes_backend_t utf8_runes_rvv {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv};
     check("test_utf8_runes_unit_rvv", [&] { check_utf8_runes_unit_(utf8_runes_rvv); });
     check("test_utf8_runes_safety_rvv",
@@ -124,10 +135,18 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         .update_kernel = sz_sha256_state_update_rvvcrypto,
         .digest_kernel = sz_sha256_state_digest_rvvcrypto,
     };
+    check("test_hash_multiseed_equivalence_rvvcrypto", [](test_context_t &context) {
+        check_hash_multiseed_equivalence_(context, {sz_hash_multiseed_rvvcrypto, sz_hash_rvvcrypto});
+    });
+    constexpr sha256_multistate_backend_t sha256_multistate_rvvcrypto {
+        .update_kernel = sz_sha256_multistate_update_rvvcrypto,
+        .digest_kernel = sz_sha256_multistate_digest_rvvcrypto,
+    };
     check("test_hash_equivalence_rvvcrypto", [&](test_context_t &context) {
         check_hash_equivalence_(context, hash_rvvcrypto);
         check_fill_random_equivalence_(context, sz_fill_random_rvvcrypto);
         check_sha256_equivalence_(context, sha256_rvvcrypto);
+        check_sha256_multistate_equivalence_(context, sha256_multistate_rvvcrypto);
     });
 
     constexpr ctr_backend_t ctr_rvvcrypto {"rvvcrypto", sz_aes256_key_init_rvvcrypto, sz_aes256_ctr_xor_rvvcrypto};

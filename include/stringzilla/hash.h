@@ -200,7 +200,8 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
  *
  *  @note Biggest speedups are for @p length ≤ 64; above that only the input load is shared.
  *  @sa sz_hash_multiseed_serial, sz_hash_multiseed_westmere, sz_hash_multiseed_icelake,
- *      sz_hash_multiseed_neonaes, sz_hash_multiseed_v128, sz_hash_multiseed_v128relaxed
+ *      sz_hash_multiseed_neonaes, sz_hash_multiseed_rvvcrypto, sz_hash_multiseed_v128,
+ *      sz_hash_multiseed_v128relaxed, sz_hash_multiseed_powervsx
  */
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
@@ -370,7 +371,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *
  *  @note Every lane is correct whatever its length, but throughput is best sorted by length.
  *  @sa sz_sha256_multistate_update_serial, sz_sha256_multistate_update_goldmont,
- *      sz_sha256_multistate_update_haswell, sz_sha256_multistate_update_skylake
+ *      sz_sha256_multistate_update_haswell, sz_sha256_multistate_update_skylake,
+ *      sz_sha256_multistate_update_neonsha, sz_sha256_multistate_update_rvvcrypto
  *
  *  Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
  *  longest member. Inputs sorted by length put similar lengths in the same group, and
@@ -628,6 +630,14 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_neonsha(sz_sha256_state_t *st
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
+/** @copydoc sz_sha256_multistate_update_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_neonsha(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                                sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_digest_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_neonsha(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                                sz_u8_t *digests, sz_stream_t stream);
+
 #endif
 
 #if STRINGZILLA_TARGET_SVE
@@ -735,6 +745,19 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_rvvcrypto(sz_sha256_state_t *
 /** @copydoc sz_sha256_state_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvvcrypto(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_update_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                                  sz_stream_t stream);
+
+/** @copydoc sz_sha256_multistate_digest_best */
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_rvvcrypto(sz_sha256_state_t const *states,
+                                                                  sz_size_t states_count, sz_u8_t *digests,
+                                                                  sz_stream_t stream);
+
+/** @copydoc sz_hash_multiseed_best */
+STRINGZILLA_API sz_status_t sz_hash_multiseed_rvvcrypto(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                        sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 #endif
 
@@ -875,6 +898,10 @@ STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *state
 /** @copydoc sz_hash_state_digest_best */
 STRINGZILLA_API sz_status_t sz_hash_state_digest_powervsx(sz_hash_state_t const *state, sz_u64_t *hash,
                                                           sz_stream_t stream);
+
+/** @copydoc sz_hash_multiseed_best */
+STRINGZILLA_API sz_status_t sz_hash_multiseed_powervsx(sz_cptr_t text, sz_size_t length, sz_u64_t const *seeds,
+                                                       sz_size_t seeds_count, sz_u64_t *hashes, sz_stream_t stream);
 
 /** @copydoc sz_sha256_state_init_best */
 STRINGZILLA_API sz_status_t sz_sha256_state_init_powervsx(sz_sha256_state_t *state, sz_stream_t stream);

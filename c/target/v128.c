@@ -11,6 +11,7 @@
 #include "stringzilla/hash/v128.h"
 #include "stringzilla/cipher/v128.h"
 #include "stringzilla/find/v128.h"
+#include "stringzilla/substrings/v128.h"
 #include "stringzilla/utf8_runes/v128.h"
 #include "stringzilla/utf8_tokens/v128.h"
 #include "stringzilla/utf8_wordbreaks/v128.h"

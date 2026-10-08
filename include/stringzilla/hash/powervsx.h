@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_PPC64_
 #if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -347,6 +348,139 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_powervsx(sz_
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_hash_multiseed_powervsx(sz_cptr_t text, sz_size_t length,             //
+                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                       sz_u64_t *hashes, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Long inputs share no normalization to amortize, and each runs four independent AES lanes.
+    if (length > 64 || seeds_count < 2) {
+        for (sz_size_t seed_index = 0; seed_index < seeds_count; ++seed_index)
+            hashes[seed_index] = sz_hash_powervsx_(text, length, seeds[seed_index]);
+        return sz_success_k;
+    }
+
+    // An x86 `aesenc` is a byte-reversed `vcipher`, and the round key XOR commutes with the
+    // reversal, so the AES chains live in the reversed domain: every round is one `vcipher`
+    // keyed by a text-lane reversed once up front.
+    __vector unsigned char const reverse_u8x16 = sz_aes_byte_reverse_mask_powervsx_();
+    __vector unsigned char const shuffle_u8x16 = vec_xl(0, (unsigned char const *)sz_hash_u8x16x4_shuffle_());
+    sz_u64_t const *pi_constants = sz_hash_pi_constants_();
+    __vector unsigned long long const aes_pi_u64x2 = vec_xl(0, (unsigned long long const *)&pi_constants[0]);
+    __vector unsigned long long const sum_pi_u64x2 = vec_xl(0, (unsigned long long const *)&pi_constants[8]);
+    __vector unsigned long long const length_u64x2 = {(unsigned long long)length, 0};
+
+    // Empty inputs still absorb a single zero lane, and the last partial lane is zero-padded.
+    __vector unsigned long long text_lanes_u64x2[4];
+    __vector unsigned char reversed_lanes_u8x16[4];
+    sz_size_t const text_lanes_count = length <= 16 ? 1 : sz_size_divide_round_up(length, 16);
+    for (sz_size_t lane_index = 0; lane_index != text_lanes_count; ++lane_index) {
+        sz_size_t const lane_offset = lane_index * 16;
+        sz_size_t const lane_length = sz_min_of_two(length - lane_offset, (sz_size_t)16);
+        sz_u128_vec_t lane_vec;
+        lane_vec.vsx_u64 = vec_splats((unsigned long long)0);
+        for (sz_size_t byte_index = 0; byte_index != lane_length; ++byte_index)
+            lane_vec.u8s[byte_index] = (sz_u8_t)text[lane_offset + byte_index];
+        __vector unsigned char const lane_u8x16 = lane_vec.vsx_u8;
+        text_lanes_u64x2[lane_index] = (__vector unsigned long long)lane_u8x16;
+        reversed_lanes_u8x16[lane_index] = vec_perm(lane_u8x16, lane_u8x16, reverse_u8x16);
+    }
+
+    // Four seeds per pass keep four `vcipher` chains in flight; a short last pass repeats a seed.
+    sz_size_t const last_seed_index = seeds_count - 1;
+    for (sz_size_t seed_index = 0; seed_index < seeds_count; seed_index += 4) {
+        sz_u64_t const seed0 = seeds[seed_index];
+        sz_u64_t const seed1 = seeds[sz_min_of_two(seed_index + 1, last_seed_index)];
+        sz_u64_t const seed2 = seeds[sz_min_of_two(seed_index + 2, last_seed_index)];
+        sz_u64_t const seed3 = seeds[sz_min_of_two(seed_index + 3, last_seed_index)];
+        __vector unsigned long long const seed0_u64x2 = vec_splats((unsigned long long)seed0);
+        __vector unsigned long long const seed1_u64x2 = vec_splats((unsigned long long)seed1);
+        __vector unsigned long long const seed2_u64x2 = vec_splats((unsigned long long)seed2);
+        __vector unsigned long long const seed3_u64x2 = vec_splats((unsigned long long)seed3);
+        __vector unsigned char aes0_u8x16 = (__vector unsigned char)vec_xor(seed0_u64x2, aes_pi_u64x2);
+        __vector unsigned char aes1_u8x16 = (__vector unsigned char)vec_xor(seed1_u64x2, aes_pi_u64x2);
+        __vector unsigned char aes2_u8x16 = (__vector unsigned char)vec_xor(seed2_u64x2, aes_pi_u64x2);
+        __vector unsigned char aes3_u8x16 = (__vector unsigned char)vec_xor(seed3_u64x2, aes_pi_u64x2);
+        aes0_u8x16 = vec_perm(aes0_u8x16, aes0_u8x16, reverse_u8x16);
+        aes1_u8x16 = vec_perm(aes1_u8x16, aes1_u8x16, reverse_u8x16);
+        aes2_u8x16 = vec_perm(aes2_u8x16, aes2_u8x16, reverse_u8x16);
+        aes3_u8x16 = vec_perm(aes3_u8x16, aes3_u8x16, reverse_u8x16);
+        __vector unsigned long long sum0_u64x2 = vec_xor(seed0_u64x2, sum_pi_u64x2);
+        __vector unsigned long long sum1_u64x2 = vec_xor(seed1_u64x2, sum_pi_u64x2);
+        __vector unsigned long long sum2_u64x2 = vec_xor(seed2_u64x2, sum_pi_u64x2);
+        __vector unsigned long long sum3_u64x2 = vec_xor(seed3_u64x2, sum_pi_u64x2);
+
+        for (sz_size_t lane_index = 0; lane_index != text_lanes_count; ++lane_index) {
+            __vector unsigned char const reversed_lane_u8x16 = reversed_lanes_u8x16[lane_index];
+            __vector unsigned long long const text_lane_u64x2 = text_lanes_u64x2[lane_index];
+            aes0_u8x16 = vec_cipher_be(aes0_u8x16, reversed_lane_u8x16);
+            aes1_u8x16 = vec_cipher_be(aes1_u8x16, reversed_lane_u8x16);
+            aes2_u8x16 = vec_cipher_be(aes2_u8x16, reversed_lane_u8x16);
+            aes3_u8x16 = vec_cipher_be(aes3_u8x16, reversed_lane_u8x16);
+            sum0_u64x2 = vec_add(
+                (__vector unsigned long long)vec_perm((__vector unsigned char)sum0_u64x2,
+                                                      (__vector unsigned char)sum0_u64x2, shuffle_u8x16),
+                text_lane_u64x2);
+            sum1_u64x2 = vec_add(
+                (__vector unsigned long long)vec_perm((__vector unsigned char)sum1_u64x2,
+                                                      (__vector unsigned char)sum1_u64x2, shuffle_u8x16),
+                text_lane_u64x2);
+            sum2_u64x2 = vec_add(
+                (__vector unsigned long long)vec_perm((__vector unsigned char)sum2_u64x2,
+                                                      (__vector unsigned char)sum2_u64x2, shuffle_u8x16),
+                text_lane_u64x2);
+            sum3_u64x2 = vec_add(
+                (__vector unsigned long long)vec_perm((__vector unsigned char)sum3_u64x2,
+                                                      (__vector unsigned char)sum3_u64x2, shuffle_u8x16),
+                text_lane_u64x2);
+        }
+
+        // Finalization is `aesenc(aesenc(mixed, key + length), mixed)` over
+        // `mixed = aesenc(sum, aes)`, once the sum and the length-salted key are reversed
+        // into the AES domain.
+        __vector unsigned char const key0_u8x16 = (__vector unsigned char)vec_add(seed0_u64x2, length_u64x2);
+        __vector unsigned char const key1_u8x16 = (__vector unsigned char)vec_add(seed1_u64x2, length_u64x2);
+        __vector unsigned char const key2_u8x16 = (__vector unsigned char)vec_add(seed2_u64x2, length_u64x2);
+        __vector unsigned char const key3_u8x16 = (__vector unsigned char)vec_add(seed3_u64x2, length_u64x2);
+        __vector unsigned char const mixed0_u8x16 = vec_cipher_be(
+            vec_perm((__vector unsigned char)sum0_u64x2, (__vector unsigned char)sum0_u64x2, reverse_u8x16),
+            aes0_u8x16);
+        __vector unsigned char const mixed1_u8x16 = vec_cipher_be(
+            vec_perm((__vector unsigned char)sum1_u64x2, (__vector unsigned char)sum1_u64x2, reverse_u8x16),
+            aes1_u8x16);
+        __vector unsigned char const mixed2_u8x16 = vec_cipher_be(
+            vec_perm((__vector unsigned char)sum2_u64x2, (__vector unsigned char)sum2_u64x2, reverse_u8x16),
+            aes2_u8x16);
+        __vector unsigned char const mixed3_u8x16 = vec_cipher_be(
+            vec_perm((__vector unsigned char)sum3_u64x2, (__vector unsigned char)sum3_u64x2, reverse_u8x16),
+            aes3_u8x16);
+        __vector unsigned char const keyed0_u8x16 = vec_cipher_be(mixed0_u8x16,
+                                                                  vec_perm(key0_u8x16, key0_u8x16, reverse_u8x16));
+        __vector unsigned char const keyed1_u8x16 = vec_cipher_be(mixed1_u8x16,
+                                                                  vec_perm(key1_u8x16, key1_u8x16, reverse_u8x16));
+        __vector unsigned char const keyed2_u8x16 = vec_cipher_be(mixed2_u8x16,
+                                                                  vec_perm(key2_u8x16, key2_u8x16, reverse_u8x16));
+        __vector unsigned char const keyed3_u8x16 = vec_cipher_be(mixed3_u8x16,
+                                                                  vec_perm(key3_u8x16, key3_u8x16, reverse_u8x16));
+        __vector unsigned char const folded0_u8x16 = vec_cipher_be(keyed0_u8x16, mixed0_u8x16);
+        __vector unsigned char const folded1_u8x16 = vec_cipher_be(keyed1_u8x16, mixed1_u8x16);
+        __vector unsigned char const folded2_u8x16 = vec_cipher_be(keyed2_u8x16, mixed2_u8x16);
+        __vector unsigned char const folded3_u8x16 = vec_cipher_be(keyed3_u8x16, mixed3_u8x16);
+        __vector unsigned long long const hash0_u64x2 = (__vector unsigned long long)vec_perm(
+            folded0_u8x16, folded0_u8x16, reverse_u8x16);
+        __vector unsigned long long const hash1_u64x2 = (__vector unsigned long long)vec_perm(
+            folded1_u8x16, folded1_u8x16, reverse_u8x16);
+        __vector unsigned long long const hash2_u64x2 = (__vector unsigned long long)vec_perm(
+            folded2_u8x16, folded2_u8x16, reverse_u8x16);
+        __vector unsigned long long const hash3_u64x2 = (__vector unsigned long long)vec_perm(
+            folded3_u8x16, folded3_u8x16, reverse_u8x16);
+        hashes[seed_index] = hash0_u64x2[0];
+        if (seed_index + 1 < seeds_count) hashes[seed_index + 1] = hash1_u64x2[0];
+        if (seed_index + 2 < seeds_count) hashes[seed_index + 2] = hash2_u64x2[0];
+        if (seed_index + 3 < seeds_count) hashes[seed_index + 3] = hash3_u64x2[0];
+    }
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_hash_state_update_powervsx(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
                                                           sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -445,6 +579,13 @@ STRINGZILLA_API sz_status_t sz_hash_powervsx(sz_cptr_t start, sz_size_t length, 
     return sz_success_k;
 }
 
+/** Big-endian Power stub: delegates to @c sz_hash_multiseed_serial. */
+STRINGZILLA_API sz_status_t sz_hash_multiseed_powervsx(sz_cptr_t text, sz_size_t length,             //
+                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
+                                                       sz_u64_t *hashes, sz_stream_t stream) {
+    return sz_hash_multiseed_serial(text, length, seeds, seeds_count, hashes, stream);
+}
+
 /** Big-endian Power stub: delegates to @c sz_hash_state_init_serial. */
 STRINGZILLA_API sz_status_t sz_hash_state_init_powervsx(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -512,6 +653,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_POWERVSX
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #ifdef __cplusplus
 }

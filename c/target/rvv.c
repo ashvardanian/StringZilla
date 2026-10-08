@@ -11,6 +11,7 @@
 #include "stringzilla/hash/rvv.h"
 #include "stringzilla/find/rvv.h"
 #include "stringzilla/sort/rvv.h"
+#include "stringzilla/substrings/rvv.h"
 #include "stringzilla/utf8_runes/rvv.h"
 #include "stringzilla/utf8_tokens/rvv.h"
 #include "stringzilla/utf8_wordbreaks/rvv.h"

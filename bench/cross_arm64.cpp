@@ -67,6 +67,8 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
     if (section(env, "Cross NEON SHA", sz_cap_neonsha_k)) {
         bench_sha256_kernels<sz_sha256_state_init_neonsha, sz_sha256_state_update_neonsha,
                              sz_sha256_state_digest_neonsha>(env, "neonsha");
+        bench_sha256_multistate_kernels<sz_sha256_multistate_update_neonsha, sz_sha256_multistate_digest_neonsha>(
+            env, "neonsha");
     }
 #endif // STRINGZILLA_TARGET_NEONSHA
 #if STRINGZILLA_TARGET_SVE
@@ -102,6 +104,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_sve2>(env, "sve2");
         bench_utf8_uncased_fold_kernels<sz_utf8_uncased_fold_sve2>(env, "sve2");
         bench_utf8_uncased_search_kernels<sz_utf8_uncased_search_sve2>(env, "sve2");
+        bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_sve2>(env, "sve2");
         bench_bytesum_kernels<sz_bytesum_sve2>(env, "sve2");
     }
 #endif // STRINGZILLA_TARGET_SVE2

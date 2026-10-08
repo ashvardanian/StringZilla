@@ -128,17 +128,24 @@ static sz_capability_kernels_t const *sz_hash_multiseed_capabilities(void) {
         (sz_kernel_punned_t)&sz_hash_multiseed_neonaes,
 #endif
     // No SVE2 AES kernel: a scalable batch needs a keyed substrate the Z/Q bridge makes slow.
+#if STRINGZILLA_TARGET_RVVCRYPTO
+        (sz_kernel_punned_t)&sz_hash_multiseed_rvvcrypto,
+#endif
 #if STRINGZILLA_TARGET_V128
         (sz_kernel_punned_t)&sz_hash_multiseed_v128,
 #endif
 #if STRINGZILLA_TARGET_V128RELAXED
         (sz_kernel_punned_t)&sz_hash_multiseed_v128relaxed,
 #endif
+#if STRINGZILLA_TARGET_POWERVSX
+        (sz_kernel_punned_t)&sz_hash_multiseed_powervsx,
+#endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_westmere_k * STRINGZILLA_TARGET_WESTMERE |
              sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES |
-             sz_cap_v128_k * STRINGZILLA_TARGET_V128 | sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED,
+             sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO | sz_cap_v128_k * STRINGZILLA_TARGET_V128 |
+             sz_cap_v128relaxed_k * STRINGZILLA_TARGET_V128RELAXED | sz_cap_powervsx_k * STRINGZILLA_TARGET_POWERVSX,
          cpu},
         {0, sz_no_kernels_},
         {0, sz_no_kernels_},
@@ -491,6 +498,12 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
 #if STRINGZILLA_TARGET_SKYLAKE
         (sz_kernel_punned_t)&sz_sha256_multistate_update_skylake,
 #endif
+#if STRINGZILLA_TARGET_NEONSHA
+        (sz_kernel_punned_t)&sz_sha256_multistate_update_neonsha,
+#endif
+#if STRINGZILLA_TARGET_RVVCRYPTO
+        (sz_kernel_punned_t)&sz_sha256_multistate_update_rvvcrypto,
+#endif
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -506,7 +519,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_update_capabilities(v
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
-             sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
+             sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
+             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},
@@ -528,6 +542,12 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
 #if STRINGZILLA_TARGET_SKYLAKE
         (sz_kernel_punned_t)&sz_sha256_multistate_digest_skylake,
 #endif
+#if STRINGZILLA_TARGET_NEONSHA
+        (sz_kernel_punned_t)&sz_sha256_multistate_digest_neonsha,
+#endif
+#if STRINGZILLA_TARGET_RVVCRYPTO
+        (sz_kernel_punned_t)&sz_sha256_multistate_digest_rvvcrypto,
+#endif
     };
     static sz_kernel_punned_t const cuda[] = {
         STRINGZILLA_NULL,
@@ -543,7 +563,8 @@ static sz_capability_kernels_t const *sz_sha256_multistate_digest_capabilities(v
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
         {sz_cap_serial_k | sz_cap_goldmont_k * STRINGZILLA_TARGET_GOLDMONT |
-             sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE,
+             sz_cap_haswell_k * STRINGZILLA_TARGET_HASWELL | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE |
+             sz_cap_neonsha_k * STRINGZILLA_TARGET_NEONSHA | sz_cap_rvvcrypto_k * STRINGZILLA_TARGET_RVVCRYPTO,
          cpu},
         {sz_cap_cuda_k * STRINGZILLA_TARGET_CUDA, cuda},
         {sz_cap_rocm_k * STRINGZILLA_TARGET_ROCM, rocm},

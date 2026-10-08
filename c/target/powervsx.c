@@ -11,6 +11,7 @@
 #include "stringzilla/hash/powervsx.h"
 #include "stringzilla/cipher/powervsx.h"
 #include "stringzilla/find/powervsx.h"
+#include "stringzilla/substrings/powervsx.h"
 #include "stringzilla/utf8_runes/powervsx.h"
 #include "stringzilla/utf8_tokens/powervsx.h"
 #include "stringzilla/utf8_wordbreaks/powervsx.h"

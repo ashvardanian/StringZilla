@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_TARGET_NEONSHA
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+sha2"))), apply_to = function)
@@ -263,10 +264,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_update_neonsha(sz_sha256_state_t *st
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
-    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
-    sz_stream_t stream) {
-    sz_assert_(stream == STRINGZILLA_NULL);
+STRINGZILLA_INLINE void sz_sha256_state_digest_neonsha_(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)]) {
     // Create a copy of the state for padding
     sz_sha256_state_t local_state = *state;
 
@@ -318,6 +317,250 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
         digest[lane_index * 4 + 2] = (sz_u8_t)(local_state.hash[lane_index] >> 8);
         digest[lane_index * 4 + 3] = (sz_u8_t)(local_state.hash[lane_index] >> 0);
     }
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
+    sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)],
+    sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_sha256_state_digest_neonsha_(state, digest);
+    return sz_success_k;
+}
+
+/** Runs four SHA-256 rounds of one lane over the next four schedule words. */
+STRINGZILLA_INLINE void sz_sha256_quad_round_neonsha_(uint32x4_t *abcd_u32x4, uint32x4_t *efgh_u32x4,
+                                                      uint32x4_t schedule_u32x4, uint32x4_t constants_u32x4) {
+    uint32x4_t const words_u32x4 = vaddq_u32(schedule_u32x4, constants_u32x4);
+    uint32x4_t const abcd_before_u32x4 = *abcd_u32x4;
+    *abcd_u32x4 = vsha256hq_u32(abcd_before_u32x4, *efgh_u32x4, words_u32x4);
+    *efgh_u32x4 = vsha256h2q_u32(*efgh_u32x4, abcd_before_u32x4, words_u32x4);
+}
+
+/** Derives the next four message schedule words from the previous sixteen, oldest quarter first. */
+STRINGZILLA_INLINE uint32x4_t sz_sha256_extend_neonsha_(uint32x4_t oldest_words_u32x4, uint32x4_t next_words_u32x4,
+                                                        uint32x4_t ninth_words_u32x4, uint32x4_t newest_words_u32x4) {
+    return vsha256su1q_u32(vsha256su0q_u32(oldest_words_u32x4, next_words_u32x4), ninth_words_u32x4,
+                           newest_words_u32x4);
+}
+
+/**
+ *  @brief Compresses one 64-byte block in each of four independent lanes.
+ *  @param[inout] hashes_u32x4 Lane k keeps @c abcd at index 2k and @c efgh at 2k + 1.
+ *  @param[in] lane_blocks One 64-byte block per lane.
+ *  @param[in] active_bitmask Lanes whose result lands; the rest keep their hash bit-for-bit.
+ *
+ *  Every @c SHA256H waits on the one before it, so a single lane leaves the crypto pipes idle for
+ *  most of each quad-round; issuing the four lanes' quad-rounds back to back fills that latency
+ *  with independent work from the other lanes.
+ */
+STRINGZILLA_INLINE void sz_sha256_compress_x4_neonsha_(uint32x4_t hashes_u32x4[8], sz_u8_t const *const lane_blocks[4],
+                                                       sz_u32_t active_bitmask) {
+    sz_u32_t const *round_constants = sz_sha256_round_constants_();
+    uint32x4_t abcd0_u32x4 = hashes_u32x4[0], efgh0_u32x4 = hashes_u32x4[1];
+    uint32x4_t abcd1_u32x4 = hashes_u32x4[2], efgh1_u32x4 = hashes_u32x4[3];
+    uint32x4_t abcd2_u32x4 = hashes_u32x4[4], efgh2_u32x4 = hashes_u32x4[5];
+    uint32x4_t abcd3_u32x4 = hashes_u32x4[6], efgh3_u32x4 = hashes_u32x4[7];
+    uint32x4_t schedule0_u32x4[4], schedule1_u32x4[4], schedule2_u32x4[4], schedule3_u32x4[4];
+    uint32x4_t constants_u32x4;
+
+    for (sz_size_t quarter_index = 0; quarter_index != 4; ++quarter_index) {
+        schedule0_u32x4[quarter_index] = vreinterpretq_u32_u8(
+            vrev32q_u8(vld1q_u8(lane_blocks[0] + quarter_index * 16)));
+        schedule1_u32x4[quarter_index] = vreinterpretq_u32_u8(
+            vrev32q_u8(vld1q_u8(lane_blocks[1] + quarter_index * 16)));
+        schedule2_u32x4[quarter_index] = vreinterpretq_u32_u8(
+            vrev32q_u8(vld1q_u8(lane_blocks[2] + quarter_index * 16)));
+        schedule3_u32x4[quarter_index] = vreinterpretq_u32_u8(
+            vrev32q_u8(vld1q_u8(lane_blocks[3] + quarter_index * 16)));
+    }
+
+    for (sz_size_t quarter_index = 0; quarter_index != 4; ++quarter_index) {
+        constants_u32x4 = vld1q_u32(round_constants + quarter_index * 4);
+        sz_sha256_quad_round_neonsha_(&abcd0_u32x4, &efgh0_u32x4, schedule0_u32x4[quarter_index], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd1_u32x4, &efgh1_u32x4, schedule1_u32x4[quarter_index], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd2_u32x4, &efgh2_u32x4, schedule2_u32x4[quarter_index], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd3_u32x4, &efgh3_u32x4, schedule3_u32x4[quarter_index], constants_u32x4);
+    }
+
+    for (sz_size_t turn_index = 1; turn_index != 4; ++turn_index) {
+        sz_u32_t const *turn_constants = round_constants + turn_index * 16;
+
+        constants_u32x4 = vld1q_u32(turn_constants + 0);
+        schedule0_u32x4[0] = sz_sha256_extend_neonsha_(schedule0_u32x4[0], schedule0_u32x4[1], schedule0_u32x4[2],
+                                                       schedule0_u32x4[3]);
+        schedule1_u32x4[0] = sz_sha256_extend_neonsha_(schedule1_u32x4[0], schedule1_u32x4[1], schedule1_u32x4[2],
+                                                       schedule1_u32x4[3]);
+        schedule2_u32x4[0] = sz_sha256_extend_neonsha_(schedule2_u32x4[0], schedule2_u32x4[1], schedule2_u32x4[2],
+                                                       schedule2_u32x4[3]);
+        schedule3_u32x4[0] = sz_sha256_extend_neonsha_(schedule3_u32x4[0], schedule3_u32x4[1], schedule3_u32x4[2],
+                                                       schedule3_u32x4[3]);
+        sz_sha256_quad_round_neonsha_(&abcd0_u32x4, &efgh0_u32x4, schedule0_u32x4[0], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd1_u32x4, &efgh1_u32x4, schedule1_u32x4[0], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd2_u32x4, &efgh2_u32x4, schedule2_u32x4[0], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd3_u32x4, &efgh3_u32x4, schedule3_u32x4[0], constants_u32x4);
+
+        constants_u32x4 = vld1q_u32(turn_constants + 4);
+        schedule0_u32x4[1] = sz_sha256_extend_neonsha_(schedule0_u32x4[1], schedule0_u32x4[2], schedule0_u32x4[3],
+                                                       schedule0_u32x4[0]);
+        schedule1_u32x4[1] = sz_sha256_extend_neonsha_(schedule1_u32x4[1], schedule1_u32x4[2], schedule1_u32x4[3],
+                                                       schedule1_u32x4[0]);
+        schedule2_u32x4[1] = sz_sha256_extend_neonsha_(schedule2_u32x4[1], schedule2_u32x4[2], schedule2_u32x4[3],
+                                                       schedule2_u32x4[0]);
+        schedule3_u32x4[1] = sz_sha256_extend_neonsha_(schedule3_u32x4[1], schedule3_u32x4[2], schedule3_u32x4[3],
+                                                       schedule3_u32x4[0]);
+        sz_sha256_quad_round_neonsha_(&abcd0_u32x4, &efgh0_u32x4, schedule0_u32x4[1], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd1_u32x4, &efgh1_u32x4, schedule1_u32x4[1], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd2_u32x4, &efgh2_u32x4, schedule2_u32x4[1], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd3_u32x4, &efgh3_u32x4, schedule3_u32x4[1], constants_u32x4);
+
+        constants_u32x4 = vld1q_u32(turn_constants + 8);
+        schedule0_u32x4[2] = sz_sha256_extend_neonsha_(schedule0_u32x4[2], schedule0_u32x4[3], schedule0_u32x4[0],
+                                                       schedule0_u32x4[1]);
+        schedule1_u32x4[2] = sz_sha256_extend_neonsha_(schedule1_u32x4[2], schedule1_u32x4[3], schedule1_u32x4[0],
+                                                       schedule1_u32x4[1]);
+        schedule2_u32x4[2] = sz_sha256_extend_neonsha_(schedule2_u32x4[2], schedule2_u32x4[3], schedule2_u32x4[0],
+                                                       schedule2_u32x4[1]);
+        schedule3_u32x4[2] = sz_sha256_extend_neonsha_(schedule3_u32x4[2], schedule3_u32x4[3], schedule3_u32x4[0],
+                                                       schedule3_u32x4[1]);
+        sz_sha256_quad_round_neonsha_(&abcd0_u32x4, &efgh0_u32x4, schedule0_u32x4[2], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd1_u32x4, &efgh1_u32x4, schedule1_u32x4[2], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd2_u32x4, &efgh2_u32x4, schedule2_u32x4[2], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd3_u32x4, &efgh3_u32x4, schedule3_u32x4[2], constants_u32x4);
+
+        constants_u32x4 = vld1q_u32(turn_constants + 12);
+        schedule0_u32x4[3] = sz_sha256_extend_neonsha_(schedule0_u32x4[3], schedule0_u32x4[0], schedule0_u32x4[1],
+                                                       schedule0_u32x4[2]);
+        schedule1_u32x4[3] = sz_sha256_extend_neonsha_(schedule1_u32x4[3], schedule1_u32x4[0], schedule1_u32x4[1],
+                                                       schedule1_u32x4[2]);
+        schedule2_u32x4[3] = sz_sha256_extend_neonsha_(schedule2_u32x4[3], schedule2_u32x4[0], schedule2_u32x4[1],
+                                                       schedule2_u32x4[2]);
+        schedule3_u32x4[3] = sz_sha256_extend_neonsha_(schedule3_u32x4[3], schedule3_u32x4[0], schedule3_u32x4[1],
+                                                       schedule3_u32x4[2]);
+        sz_sha256_quad_round_neonsha_(&abcd0_u32x4, &efgh0_u32x4, schedule0_u32x4[3], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd1_u32x4, &efgh1_u32x4, schedule1_u32x4[3], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd2_u32x4, &efgh2_u32x4, schedule2_u32x4[3], constants_u32x4);
+        sz_sha256_quad_round_neonsha_(&abcd3_u32x4, &efgh3_u32x4, schedule3_u32x4[3], constants_u32x4);
+    }
+
+    uint32x4_t const active0_u32x4 = vdupq_n_u32(0u - ((active_bitmask >> 0) & 1u));
+    uint32x4_t const active1_u32x4 = vdupq_n_u32(0u - ((active_bitmask >> 1) & 1u));
+    uint32x4_t const active2_u32x4 = vdupq_n_u32(0u - ((active_bitmask >> 2) & 1u));
+    uint32x4_t const active3_u32x4 = vdupq_n_u32(0u - ((active_bitmask >> 3) & 1u));
+    hashes_u32x4[0] = vbslq_u32(active0_u32x4, vaddq_u32(hashes_u32x4[0], abcd0_u32x4), hashes_u32x4[0]);
+    hashes_u32x4[1] = vbslq_u32(active0_u32x4, vaddq_u32(hashes_u32x4[1], efgh0_u32x4), hashes_u32x4[1]);
+    hashes_u32x4[2] = vbslq_u32(active1_u32x4, vaddq_u32(hashes_u32x4[2], abcd1_u32x4), hashes_u32x4[2]);
+    hashes_u32x4[3] = vbslq_u32(active1_u32x4, vaddq_u32(hashes_u32x4[3], efgh1_u32x4), hashes_u32x4[3]);
+    hashes_u32x4[4] = vbslq_u32(active2_u32x4, vaddq_u32(hashes_u32x4[4], abcd2_u32x4), hashes_u32x4[4]);
+    hashes_u32x4[5] = vbslq_u32(active2_u32x4, vaddq_u32(hashes_u32x4[5], efgh2_u32x4), hashes_u32x4[5]);
+    hashes_u32x4[6] = vbslq_u32(active3_u32x4, vaddq_u32(hashes_u32x4[6], abcd3_u32x4), hashes_u32x4[6]);
+    hashes_u32x4[7] = vbslq_u32(active3_u32x4, vaddq_u32(hashes_u32x4[7], efgh3_u32x4), hashes_u32x4[7]);
+}
+
+/**
+ *  @brief Compresses each of up to four lanes' own run of whole blocks, plus an optional buffered
+ *      block ahead of them.
+ *  @param[inout] states The lane states, whose hash words are loaded on entry and stored on exit.
+ *  @param[in] active_lanes_count Lanes owning a state, 1 to 4; others borrow lane zero.
+ *  @param[in] buffered_bitmask Lanes whose @c block the caller filled to 64 bytes, first.
+ *  @param[inout] cursors Per-lane read positions, advanced past every block consumed.
+ *  @param[in] blocks_per_lane Whole 64-byte blocks each lane owns; the loop runs to the largest.
+ *
+ *  A retiring lane parks on its last full block instead of stepping onto its short tail, so every
+ *  read stays in bounds, and its result is masked off. A lane owning no blocks reads its own
+ *  @c block buffer, which is always 64 valid bytes.
+ */
+STRINGZILLA_INLINE void sz_sha256_multistate_blocks_neonsha_(sz_sha256_state_t *states, sz_size_t active_lanes_count,
+                                                             sz_u32_t buffered_bitmask, sz_u8_t const **cursors,
+                                                             sz_size_t const *blocks_per_lane) {
+    uint32x4_t hashes_u32x4[8];
+    sz_u8_t const *sources[4];
+    sz_size_t blocks_left[4];
+    sz_size_t largest_blocks_count = 0;
+
+    for (sz_size_t lane_index = 0; lane_index != 4; ++lane_index) {
+        sz_size_t const source_lane = lane_index < active_lanes_count ? lane_index : 0;
+        blocks_left[lane_index] = lane_index < active_lanes_count ? blocks_per_lane[lane_index] : 0;
+        sources[lane_index] = states[source_lane].block;
+        hashes_u32x4[lane_index * 2 + 0] = vld1q_u32(&states[source_lane].hash[0]);
+        hashes_u32x4[lane_index * 2 + 1] = vld1q_u32(&states[source_lane].hash[4]);
+        if (blocks_left[lane_index] > largest_blocks_count) largest_blocks_count = blocks_left[lane_index];
+    }
+    if (buffered_bitmask == 0 && largest_blocks_count == 0) return;
+
+    if (buffered_bitmask) sz_sha256_compress_x4_neonsha_(hashes_u32x4, sources, buffered_bitmask);
+    for (sz_size_t lane_index = 0; lane_index != 4; ++lane_index)
+        if (blocks_left[lane_index] != 0) sources[lane_index] = cursors[lane_index];
+
+    for (sz_size_t block_index = 0; block_index != largest_blocks_count; ++block_index) {
+        sz_u32_t active_bitmask = 0;
+        for (sz_size_t lane_index = 0; lane_index != 4; ++lane_index)
+            active_bitmask |= (sz_u32_t)(blocks_left[lane_index] != 0) << lane_index;
+        sz_sha256_compress_x4_neonsha_(hashes_u32x4, sources, active_bitmask);
+        for (sz_size_t lane_index = 0; lane_index != 4; ++lane_index) {
+            sources[lane_index] += (blocks_left[lane_index] > 1) * STRINGZILLA_SHA256_BLOCK_LENGTH;
+            blocks_left[lane_index] -= blocks_left[lane_index] != 0;
+        }
+    }
+
+    for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+        vst1q_u32(&states[lane_index].hash[0], hashes_u32x4[lane_index * 2 + 0]);
+        vst1q_u32(&states[lane_index].hash[4], hashes_u32x4[lane_index * 2 + 1]);
+        cursors[lane_index] += blocks_per_lane[lane_index] * STRINGZILLA_SHA256_BLOCK_LENGTH;
+    }
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_neonsha(sz_sha256_state_t *states, sz_sequence_t const *texts,
+                                                                sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t const lanes_count = texts->count;
+
+    for (sz_size_t first_lane_index = 0; first_lane_index < lanes_count; first_lane_index += 4) {
+        sz_size_t const lanes_left = lanes_count - first_lane_index;
+        sz_size_t const active_lanes_count = lanes_left < 4 ? lanes_left : 4;
+        sz_u8_t const *cursors[4];
+        sz_size_t remaining[4], blocks_per_lane[4];
+        sz_u32_t buffered_bitmask = 0;
+
+        // Top up any buffered partial block into the state's own 64-byte buffer, which then serves
+        // as that lane's first block source; the whole chunk is charged to `total_length` once.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
+            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+            state->total_length += remaining[lane_index];
+            if (state->block_length != 0) {
+                sz_size_t const missing = STRINGZILLA_SHA256_BLOCK_LENGTH - state->block_length;
+                if (remaining[lane_index] >= missing) {
+                    for (sz_size_t byte_index = 0; byte_index != missing; ++byte_index)
+                        state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+                    buffered_bitmask |= (sz_u32_t)1 << lane_index;
+                    state->block_length = 0;
+                    cursors[lane_index] += missing, remaining[lane_index] -= missing;
+                }
+            }
+            blocks_per_lane[lane_index] = remaining[lane_index] / STRINGZILLA_SHA256_BLOCK_LENGTH;
+        }
+
+        sz_sha256_multistate_blocks_neonsha_(&states[first_lane_index], active_lanes_count, buffered_bitmask, cursors,
+                                             blocks_per_lane);
+
+        // Whatever is left cannot fill a block, so it only ever buffers.
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
+            sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
+            sz_size_t const tail_length = remaining[lane_index] % STRINGZILLA_SHA256_BLOCK_LENGTH;
+            for (sz_size_t byte_index = 0; byte_index != tail_length; ++byte_index)
+                state->block[state->block_length + byte_index] = cursors[lane_index][byte_index];
+            state->block_length += tail_length;
+        }
+    }
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_neonsha(sz_sha256_state_t const *states, sz_size_t states_count,
+                                                                sz_u8_t *digests, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    for (sz_size_t lane_index = 0; lane_index != states_count; ++lane_index)
+        sz_sha256_state_digest_neonsha_(&states[lane_index], &digests[lane_index * STRINGZILLA_SHA256_DIGEST_LENGTH]);
     return sz_success_k;
 }
 
@@ -327,6 +570,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_NEONSHA
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

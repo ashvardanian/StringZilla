@@ -81,6 +81,17 @@ std::size_t test_cross_wasm(environment_t const &env) {
     check("test_cipher_equivalence_v128",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_v128, gcm_v128); });
 
+    constexpr substrings_tier_t substrings_v128 {
+        .init = sz_substrings_engine_init_v128,
+        .counts = sz_substrings_counts_v128,
+        .find = sz_substrings_find_v128,
+        .replace = sz_substrings_replace_v128,
+        .bm25_scores = sz_substrings_bm25_scores_v128,
+    };
+    check("test_substrings_unit_v128", [&] { check_substrings_unit_(substrings_v128); });
+    check("test_substrings_equivalence_v128",
+          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_v128); });
+
     constexpr utf8_runes_backend_t utf8_runes_v128 {"v128", sz_utf8_count_v128, sz_utf8_seek_v128, sz_utf8_decode_v128};
     check("test_utf8_runes_unit_v128", [&] { check_utf8_runes_unit_(utf8_runes_v128); });
     check("test_utf8_runes_safety_v128",

@@ -61,6 +61,10 @@ std::size_t test_cross_ppc64(environment_t const &env) {
         check_sha256_equivalence_(context, sha256_powervsx);
     });
 
+    check("test_hash_multiseed_equivalence_powervsx", [](test_context_t &context) {
+        check_hash_multiseed_equivalence_(context, {sz_hash_multiseed_powervsx, sz_hash_powervsx});
+    });
+
     constexpr ctr_backend_t ctr_powervsx {"powervsx", sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx};
     constexpr gcm_backend_t gcm_powervsx {
         .name = "powervsx",
@@ -79,6 +83,17 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_cipher_unit_powervsx", [&] { check_cipher_unit_(ctr_powervsx, gcm_powervsx); });
     check("test_cipher_equivalence_powervsx",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_powervsx, gcm_powervsx); });
+
+    constexpr substrings_tier_t substrings_powervsx {
+        .init = sz_substrings_engine_init_powervsx,
+        .counts = sz_substrings_counts_powervsx,
+        .find = sz_substrings_find_powervsx,
+        .replace = sz_substrings_replace_powervsx,
+        .bm25_scores = sz_substrings_bm25_scores_powervsx,
+    };
+    check("test_substrings_unit_powervsx", [&] { check_substrings_unit_(substrings_powervsx); });
+    check("test_substrings_equivalence_powervsx",
+          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_powervsx); });
 
     constexpr utf8_runes_backend_t utf8_runes_powervsx {"powervsx", sz_utf8_count_powervsx, sz_utf8_seek_powervsx,
                                                         sz_utf8_decode_powervsx};

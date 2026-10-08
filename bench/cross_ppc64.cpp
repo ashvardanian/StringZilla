@@ -28,6 +28,7 @@ void bench_cross_ppc64([[maybe_unused]] environment_t &env) {
         bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_powervsx>(env, "powervsx");
         bench_bytesum_kernels<sz_bytesum_powervsx>(env, "powervsx");
         bench_hash_kernels<sz_hash_powervsx>(env, "powervsx");
+        bench_hash_multiseed_kernels<sz_hash_multiseed_powervsx>(env, "powervsx");
         bench_hash_stream_kernels<sz_hash_state_init_powervsx, sz_hash_state_update_powervsx,
                                   sz_hash_state_digest_powervsx>(env, "powervsx");
         bench_sha256_kernels<sz_sha256_state_init_powervsx, sz_sha256_state_update_powervsx,

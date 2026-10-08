@@ -62,6 +62,17 @@ std::size_t test_cross_loongarch64(environment_t const &env) {
         check_sha256_equivalence_(context, sha256_loongsonasx);
     });
 
+    constexpr substrings_tier_t substrings_loongsonasx {
+        .init = sz_substrings_engine_init_loongsonasx,
+        .counts = sz_substrings_counts_loongsonasx,
+        .find = sz_substrings_find_loongsonasx,
+        .replace = sz_substrings_replace_loongsonasx,
+        .bm25_scores = sz_substrings_bm25_scores_loongsonasx,
+    };
+    check("test_substrings_unit_loongsonasx", [&] { check_substrings_unit_(substrings_loongsonasx); });
+    check("test_substrings_equivalence_loongsonasx",
+          [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_loongsonasx); });
+
     constexpr utf8_runes_backend_t utf8_runes_loongsonasx {"loongsonasx", sz_utf8_count_loongsonasx,
                                                            sz_utf8_seek_loongsonasx, sz_utf8_decode_loongsonasx};
     check("test_utf8_runes_unit_loongsonasx", [&] { check_utf8_runes_unit_(utf8_runes_loongsonasx); });
