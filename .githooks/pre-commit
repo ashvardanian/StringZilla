@@ -2040,6 +2040,44 @@ check_type_suffixes() {
         }' || true)
     [ -z "$templates" ] || reject_with_reason "$templates" \
         "$staged_path suffixes a class template with '_t' - the template stays bare and the alias that materializes it carries the suffix:"
+    local unsuffixed
+    unsuffixed=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        function check_enumerators(body, line_number, line,    items, total, item, name) {
+            total = split(body, items, ",")
+            for (item = 1; item <= total; ++item) {
+                name = items[item]
+                sub(/=.*$/, "", name); gsub(/[[:space:]{}]/, "", name)
+                if (name != "" && name ~ /^[A-Za-z_][A-Za-z0-9_]*$/ && name !~ /_k$/ && (line_number in added))
+                    printf "line %d: %s\n", line_number, line
+            }
+        }
+        /^[[:space:]]*#/ { next }
+        {
+            code = $0
+            gsub(/"([^"\\]|\\.)*"/, "", code)
+            if (in_enum) {
+                body = code; closing = index(body, "}")
+                if (closing) { body = substr(body, 1, closing - 1); in_enum = 0 }
+                check_enumerators(body, NR, $0)
+            }
+            else if (match(code, /(^|[^A-Za-z0-9_])enum([[:space:]]+(class|struct))?([[:space:]]+[A-Za-z_][A-Za-z0-9_]*)?([[:space:]]*:[^{]*)?[[:space:]]*\{/)) {
+                body = substr(code, RSTART + RLENGTH); closing = index(body, "}")
+                if (closing) body = substr(body, 1, closing - 1)
+                else in_enum = 1
+                check_enumerators(body, NR, $0)
+            }
+            else if ((NR in added) && previous !~ /(^|[^A-Za-z0-9_])template[[:space:]]*</ &&
+                     code !~ /(^|[^A-Za-z0-9_])template[[:space:]]*</ &&
+                     match(code, /^[[:space:]]*(typedef[[:space:]]+)?(struct|class)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(final[[:space:]]*)?(\{|:[^:])/)) {
+                name = code; sub(/^[[:space:]]*(typedef[[:space:]]+)?(struct|class)[[:space:]]+/, "", name); sub(/[^A-Za-z0-9_].*$/, "", name)
+                if (name !~ /_t$/) printf "line %d: %s\n", NR, $0
+            }
+            if (code ~ /[^[:space:]]/) previous = code
+        }' || true)
+    [ -z "$unsuffixed" ] || reject_with_reason "$unsuffixed" \
+        "$staged_path names a type without '_t' or a constant without '_k' - a materialized struct or class ends in '_t', and every enumerator in '_k':"
 }
 
 # A header's @date is when the file was created, not when it was last touched. Git records every edit

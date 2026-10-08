@@ -1403,6 +1403,35 @@ template <typename type_> struct probe;
 using probe_t = probe<int>;
 FIXTURE
 
+assert_rejects "materialized struct without its suffix" "names a type without '_t'" include/probe.hpp <<'FIXTURE'
+struct probe {
+    int value;
+};
+FIXTURE
+
+assert_rejects "enumerator without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
+enum { probe_threads_per_block = 256 };
+FIXTURE
+
+assert_rejects "enumerator of a multiline enum without its suffix" "names a type without '_t'" include/probe.h <<'FIXTURE'
+enum {
+    probe_first_k = 1,
+    probe_second = 2,
+};
+FIXTURE
+
+assert_accepts "suffixed struct, class template and enumerators" include/probe.hpp <<'FIXTURE'
+struct probe_t {
+    int value;
+};
+template <typename type_>
+struct probe_tape {
+    type_ value;
+};
+enum { probe_threads_per_block_k = 256 };
+enum class probe_order_t : int { shuffled_k, sorted_k };
+FIXTURE
+
 stage_fixture_with_header include/probe.hpp <<'FIXTURE'
 template <typename type_>
 struct probe;
