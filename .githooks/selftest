@@ -37,18 +37,29 @@ create_fixture_repository() {
     git -C "$fixture_directory" commit --quiet --allow-empty -m "Chore: Seed the fixture"
 }
 
-# Stages stdin at the path, behind the file header every C-family source carries.
+# Stages stdin at the path, behind the file header every C-family source carries. A Haswell header opening
+# no guard of its own gets its shape's, so only the guard fixtures test the guards.
 stage_fixture_with_header() { # stage_fixture_with_header <relative-path> <<< content
     create_fixture_repository
-    local fixture_path="$fixture_directory/$1"
+    local fixture_path="$fixture_directory/$1" content guards=""
     mkdir -p "$(dirname "$fixture_path")"
     case "$1" in
     *.h | *.hpp | *.c | *.cpp | *.cu | *.cuh | *.hip | *.metal)
+        content=$(cat)
+        case "$1" in
+        include/stringzilla/*/haswell.h)
+            printf '%s\n' "$content" | grep -qE '^#if STRINGZILLA_(ARCH|TARGET)_' ||
+                guards=$'STRINGZILLA_ARCH_X8664_\nSTRINGZILLA_ARCH_X8664_HASWELL_'
+            ;;
+        esac
         {
             printf '/**\n *  @file %s\n *  @author Selftest\n *  @date January 1, 2026\n' "$1"
             printf ' *  @brief One staged fixture for one rule.\n *\n *  The case under test follows.\n */\n'
             printf '#pragma once\n\n'
-            cat
+            [ -z "$guards" ] || printf '%s\n' "$guards" | awk '{ print "#if " $0 } END { print "" }'
+            printf '%s\n' "$content"
+            [ -z "$guards" ] || printf '%s\n' "$guards" |
+                awk '{ guards[NR] = $0 } END { print ""; for (index_ = NR; index_ > 0; --index_) print "#endif // " guards[index_] }'
         } > "$fixture_path"
         ;;
     *.go)
@@ -2684,6 +2695,30 @@ FIXTURE
 assert_accepts "CPython tuple packed by hand, and prose naming Py_BuildValue" python/probe.c <<'FIXTURE'
 /* Built by hand rather than with Py_BuildValue("(nn)", ...). */
 static PyObject *probe(PyObject *type, PyObject *width) { return PyObject_CallFunctionObjArgs(type, width, NULL); }
+FIXTURE
+
+assert_accepts "leaf and base capability guards" include/stringzilla/probe/powervsx.h <<'FIXTURE'
+#include "stringzilla/types.h"
+
+#if STRINGZILLA_ARCH_PPC64_
+#if STRINGZILLA_TARGET_POWERVSX
+STRINGZILLA_PUBLIC int sz_probe_powervsx(int value) { return value; }
+#endif // STRINGZILLA_TARGET_POWERVSX
+#endif // STRINGZILLA_ARCH_PPC64_
+FIXTURE
+
+assert_rejects "capability without its architecture" "breaks the guards of a leaf" include/stringzilla/probe/powervsx.h <<'FIXTURE'
+#if STRINGZILLA_TARGET_POWERVSX
+STRINGZILLA_PUBLIC int sz_probe_powervsx(int value) { return value; }
+#endif // STRINGZILLA_TARGET_POWERVSX
+FIXTURE
+
+assert_rejects "guard closed without its name" "breaks the guards of a base" include/stringzilla/probe/haswell.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_HASWELL_
+STRINGZILLA_PUBLIC int sz_probe_haswell(int value) { return value; }
+#endif
+#endif // STRINGZILLA_ARCH_X8664_
 FIXTURE
 
 # endregion StringZilla Fixtures

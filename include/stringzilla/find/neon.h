@@ -20,6 +20,7 @@ extern "C" {
 /*  Implementation of the string search algorithms using the Arm NEON instruction set, available on
  *  64-bit Arm processors. Covers billions of mobile CPUs worldwide, including Apple's A-series,
  *  and Qualcomm's Snapdragon. */
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -319,6 +320,7 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_neon(sz_cptr_t haystack, sz_size_t 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

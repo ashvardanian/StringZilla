@@ -22,6 +22,7 @@ extern "C" {
  *  is a small constant-lane switch; the 8..15 case loads the low 8 with @c load64_zero and folds
  *  the remaining bytes in with one constant `i8x16.shuffle`. Other @c v128 backends `#include` this
  *  header to reuse these (hash short-string loads, @c fill_random tails, …). */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -237,6 +238,7 @@ STRINGZILLA_API sz_status_t sz_lookup_v128(sz_ptr_t target, sz_cptr_t source, sz
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

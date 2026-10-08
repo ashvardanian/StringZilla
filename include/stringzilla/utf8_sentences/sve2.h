@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -179,6 +180,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_sve2_( //
     // No NEON redirect at 128 bits: compact, store and one multiply still beat the software
     // pext/pdep that NEON needs by about 1.5x.
     sz_size_t sentences = 0;
+    if (length < 64) return sz_utf8_sentences_serial_(text, length, sentence_lengths, sentences_capacity);
     if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -360,6 +362,7 @@ STRINGZILLA_API sz_status_t sz_utf8_sentences_sve2(sz_cptr_t text, sz_size_t len
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

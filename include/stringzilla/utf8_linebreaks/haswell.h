@@ -32,6 +32,7 @@ extern "C" {
  *  @c vpgatherdd issues on the load ports and leaves the shuffle port to the decode.
  *  Gathers pay off on multi-KB tables in general, as less_slow.cpp v0.3.0 "Gather and
  *  Scatter" shows: https://github.com/ashvardanian/less_slow.cpp/releases/tag/v0.3.0 */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
@@ -682,6 +683,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_haswell_( //
     sz_cptr_t text, sz_size_t length,                     //
     sz_size_t *lengths, sz_size_t capacity) {
 
+    if (length < 64) return sz_utf8_linebreaks_serial_(text, length, lengths, capacity);
     if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *bytes = (sz_u8_t const *)text;
     sz_size_t produced = 0;
@@ -737,6 +739,7 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_haswell(sz_cptr_t text, sz_size_t
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

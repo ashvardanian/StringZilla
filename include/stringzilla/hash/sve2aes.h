@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_TARGET_SVE2AES
 /* `+crypto` matches `hash/neonaes.h`, so its always-inline helpers inline into these kernels. */
 #if defined(__clang__)
@@ -125,6 +126,7 @@ STRINGZILLA_API sz_status_t sz_fill_random_sve2aes(sz_ptr_t target, sz_size_t le
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_SVE2AES
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

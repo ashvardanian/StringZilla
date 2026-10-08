@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_PPC64_
 #if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -344,6 +345,7 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_siz
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_POWERVSX
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #ifdef __cplusplus
 }

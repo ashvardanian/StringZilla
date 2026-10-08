@@ -31,11 +31,11 @@
  *  leaf_ids, leaf = dedup([descriptor(0x10000 + high * 16 + low) for low in range(16)] for high in range(0x10000))
  *  stage2_ids, stage2 = dedup(leaf_ids[i * 16:i * 16 + 16] for i in range(0x1000))  # group by (offset >> 4) & 0xF
  *  stage1_ids, stage1 = dedup(stage2_ids[i * 16:i * 16 + 16] for i in range(0x100))  # group by (offset >> 8) & 0xF
- *  astral_s0 = stage1_ids  # one stage-1 block id per (offset >> 12)
- *  astral_s1 = [value for row in stage1 for value in row]
+ *  astral_stage1 = stage1_ids  # one stage-1 block id per (offset >> 12)
+ *  astral_stage2_low = [value for row in stage1 for value in row]
  *  astral_s2 = [value for row in stage2 for value in row]
  *  astral_leaf = [value for row in leaf for value in row]  # descriptor indexed by (offset & 0xF)
- *  # Every table the Ice Lake cascade loads (stage_hi/mid/sub, id_to_desc, ascii_desc, astral_s0/s1/s2/leaf) is
+ *  # Every table the Ice Lake cascade loads (stage_hi/mid/sub, id_to_desc, ascii_desc, astral_stage1/stage2_low/s2/leaf) is
  *  # stored `sz_align_(64)` and zero-padded to a multiple of 64 bytes, so the classifier reads each 64-byte tile
  *  # straight from `.rodata` with an aligned `_mm512_load_si512` (no per-call table materialization), and the final
  *  # tile never overruns the array:
@@ -503,24 +503,6 @@ sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_page_0800_[2048] = {
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  36, 36, 36,
     36, 36, 36, 36, 36, 36, 0,  0,  0,  0,  0,  0,  0,  0,  0,  36, 0,  0};
-sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_s0_[256] = {
-    0, 1, 2, 3, 2, 2, 4, 2, 2, 2, 2, 5, 6, 7, 8, 9, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-};
-sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_s1_[192] = {
-    0,  1,  2,  3,  0,  0,  0,  0,  0,  0,  4,  0,  0,  5,  6,  7, 8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,  24, 0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  0,  25, 0,  0,  0,  0,  0,  0, 0,  0,  26, 27, 0,  28, 0,  29, 0,  0,  0,  0,
-    0,  0,  0,  0,  0,  0,  0,  0,  30, 0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  31,
-    0,  32, 33, 0,  0,  0,  0,  0,  0,  0,  34, 0,  0,  0,  0,  0, 35, 27, 36, 0,  37, 38, 39, 0,  40, 41, 0,  0,
-    0,  0,  0,  0,  42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 0, 53, 53, 53, 54, 55, 56, 57, 57, 57, 57, 57, 57,
-    57, 57, 57, 57, 57, 57, 57, 57, 0,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,
-};
 sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_s2_[960] = {
     0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
     0,   0,   0,   0,   0,   0,   0,   0,   1,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
@@ -708,7 +690,7 @@ enum {
     sz_utf8_grapheme_break_astral_stage3_high_count_k = 928,
     sz_utf8_grapheme_break_astral_leaf_groups_k = 11,
 };
-static const sz_u8_t sz_utf8_grapheme_break_astral_stage1_[256] = {
+sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_stage1_[256] = {
     0, 1, 2, 3, 2, 2, 4, 2, 2, 2, 2, 5, 6, 7, 8, 9, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -717,7 +699,7 @@ static const sz_u8_t sz_utf8_grapheme_break_astral_stage1_[256] = {
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
     2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,  2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
 };
-static const sz_u8_t sz_utf8_grapheme_break_astral_stage2_low_[192] = {
+sz_align_(64) static const sz_u8_t sz_utf8_grapheme_break_astral_stage2_low_[192] = {
     0,  1,  2,  3,  0,  0,  0,  0,  0,  0,  4,  0,  0,  5,  6,  7, 8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     20, 21, 22, 23, 0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 0,  0,  0,  0,  0,  0,  0,  0,  24, 0,  0,  0,
     0,  0,  0,  0,  0,  0,  0,  0,  0,  25, 0,  0,  0,  0,  0,  0, 0,  0,  26, 27, 0,  28, 0,  29, 0,  0,  0,  0,

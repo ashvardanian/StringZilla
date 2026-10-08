@@ -105,7 +105,7 @@ static sz_u8_t const sz_utf8_fold_lead_families_lut_[64] = {
  *  values as the Ice Lake @c c4_deltas_lut, but in ascending index order: @c vqtbl4q_u8 reads its
  *  table in memory order, whereas @c _mm512_set_epi8 lists lanes 0x3F → 0x00. Generated from
  *  Unicode full case folding; verified against the serial reference in tests. */
-static sz_u8_t const sz_utf8_fold_c4_deltas_lut_[64] = {
+static sz_u8_t const sz_utf8_fold_c456_deltas_lut_[192] = {
     // clang-format off
 
     // Latin Ext-A U+0100-013F: 'Ā'-'Ŀ'
@@ -116,10 +116,6 @@ static sz_u8_t const sz_utf8_fold_c4_deltas_lut_[64] = {
     // to 'ŀ' (U+0140, C5 80) - the +1 crosses into the next lead byte, so neither can fold in place
     // and both are flagged irregular; 'ĸ' (U+0138) is caseless, parity flips after.
     0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80,
-    // clang-format on
-};
-static sz_u8_t const sz_utf8_fold_c5_deltas_lut_[64] = {
-    // clang-format off
 
     // Latin Ext-A U+0140-017F: 'ŀ'-'ſ'
     0, 1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, // 0x00-0x0F: odd head, 'ŉ' (U+0149) irregular
@@ -128,10 +124,6 @@ static sz_u8_t const sz_utf8_fold_c5_deltas_lut_[64] = {
     // 0x30-0x3F: 'Ÿ' (U+0178) folds down to 'ÿ' (U+00FF) and 'ſ' (U+017F) folds down to 's' -
     // both cross blocks, so both are flagged irregular.
     1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, 0x80,
-    // clang-format on
-};
-static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
-    // clang-format off
 
     // Latin Ext-B U+0180-01BF: 'ƀ'-'ƿ'
     //
@@ -143,6 +135,9 @@ static sz_u8_t const sz_utf8_fold_c6_deltas_lut_[64] = {
     0, 0x80, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0, 0, 1, 0, 0, 0, // 0x30-0x3F
     // clang-format on
 };
+static sz_u8_t const *const sz_utf8_fold_c4_deltas_lut_ = sz_utf8_fold_c456_deltas_lut_ + 0;
+static sz_u8_t const *const sz_utf8_fold_c5_deltas_lut_ = sz_utf8_fold_c456_deltas_lut_ + 64;
+static sz_u8_t const *const sz_utf8_fold_c6_deltas_lut_ = sz_utf8_fold_c456_deltas_lut_ + 128;
 
 /** Character boundary of the first stop lane in a 64-byte superchunk: takes the lowest set bit of
  *  @p stop_lanes and walks back over continuation bytes so the consumed prefix ends on a boundary.

@@ -31,6 +31,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt,lzcnt"))), apply_to = function)
@@ -297,6 +298,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_haswell_( //
     sz_size_t *sentence_lengths, sz_size_t sentences_capacity) {
 
     sz_size_t sentences = 0;
+    if (length < 64) return sz_utf8_sentences_serial_(text, length, sentence_lengths, sentences_capacity);
     if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -475,6 +477,7 @@ STRINGZILLA_API sz_status_t sz_utf8_sentences_haswell(sz_cptr_t text, sz_size_t 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

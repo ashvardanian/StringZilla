@@ -28,6 +28,7 @@ extern "C" {
  *  @c sz_line_break_classify_astral_neon_ cascade and its 62-entry palette, a different index
  *  space, so its resolved bytes blend over the valid 4-byte lanes after the expansion,
  *  bit-identical to the icelake and haswell blend. */
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -597,6 +598,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_neon_( //
     sz_cptr_t text, sz_size_t length,                  //
     sz_size_t *lengths, sz_size_t capacity) {
 
+    if (length < 64) return sz_utf8_linebreaks_serial_(text, length, lengths, capacity);
     if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *bytes = (sz_u8_t const *)text;
     sz_size_t produced = 0;
@@ -652,6 +654,7 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_neon(sz_cptr_t text, sz_size_t le
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

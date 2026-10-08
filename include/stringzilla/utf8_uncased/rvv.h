@@ -11,7 +11,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/find/rvv.h"              // `sz_find_rvv_`
-#include "stringzilla/utf8_uncased_fold/rvv.h" // `sz_utf8_fold_latin_c4_deltas_rvv_` & co
+#include "stringzilla/utf8_uncased_fold/rvv.h" // `sz_utf8_fold_c456_deltas_lut_`
 #include "stringzilla/utf8_uncased/serial.h"
 
 #ifdef __cplusplus
@@ -23,6 +23,7 @@ extern "C" {
  *  dropping matches, so they are @c STRINGZILLA_OUTLINED_ to keep their out-of-line shape.
  *  Toolchain artifact: -O1 still drops matches even out-of-line; -O0, -O2, and -O3 are byte-exact
  *  with serial, and StringZilla ships -O2 or -O3. */
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -203,8 +204,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_central_europe_strip_rvv_(sz_u8_
                                                        vector_length);
     vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
     vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
-                                           lut_index_u8m8, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_c456_deltas_lut_, lut_index_u8m8,
+                                           vector_length);
     // Clear the 0x80 irregular flag (alarm already routed those positions away): keep only the +1 bit.
     delta_u8m8 = __riscv_vand_vx_u8m8(delta_u8m8, 0x01, vector_length);
     folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, delta_u8m8, vector_length);
@@ -248,38 +249,6 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_cyrillic_strip_rvv_(sz_u8_t cons
     __riscv_vse8_v_u8m8(destination_ptr, folded_u8m8, vector_length);
 }
 
-/**
- *  @brief Monotonic-Greek second-byte fold metadata after a CE lead, indexed by `text & 0x3F`.
- *
- *  The values match the NEON Greek fold. The delta window at offset 0 and the CE → CF lead-promote
- *  window at offset 64 are laid out contiguously in one 128-byte table, so a single indexed memory
- *  load, @c vluxei8 keyed by `family_base + low6` with a @c family_base of 0 for the delta and 64
- *  for the promote flag, covers both in one gather.
- *
- *  Deltas: 'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A) +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20,
- *  'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB) −0x20. 'Ό' (8C) keeps its byte, as only its lead changes. Promote flags
- *  (CE → CF +1) mark the classes whose lowercase lands in the CF block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F),
- *  'Π'-'Ω'/'Ϊ'/'Ϋ' (A0-AB). 'Α'-'Ο' (91-9F) stay under CE.
- */
-static sz_u8_t const sz_utf8_uncased_greek_ce_table_rvv_[128] = {
-    0,    0,    0,    0,    0,    0,    0x26, 0,
-    0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
-    0,    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
-    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, // CE 90-9F
-    0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0,
-    0xE0, 0xE0, 0xE0, 0xE0, 0,    0,    0,    0, // CE A0-AF
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    1,    0,    1,    1, // CE 80-8F: 8C, 8E, 8F promote
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0, // CE 90-9F: stay under CE
-    1,    1,    1,    1,    1,    1,    1,    1,
-    1,    1,    1,    1,    0,    0,    0,    0, // CE A0-AB promote
-    0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF
-};
-
 /** Greek: monotonic CE/CF and the micro sign. Second-byte deltas after CE come from the combined CE
  *  table, one indexed load over the delta window; the CE → CF lead promotion comes from the same
  *  table's promote window carried one lane back; final sigma 'ς' (CF 82) gets +1, and 'µ' (C2 B5) →
@@ -307,11 +276,11 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_greek_strip_rvv_(sz_u8_t const *
     // (continuation-gated to avoid aliasing): the delta window at low6, the promote window at 64 + low6.
     vuint8m8_t low6_u8m8 = __riscv_vand_vx_u8m8(source_u8m8, 0x3F, vector_length);
     vuint8m8_t ce_delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-    ce_delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_ce_cont_b1, ce_delta_u8m8, sz_utf8_uncased_greek_ce_table_rvv_,
-                                              low6_u8m8, vector_length);
+    ce_delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_ce_cont_b1, ce_delta_u8m8, sz_utf8_uncased_greek_ce_lut_, low6_u8m8,
+                                              vector_length);
     vuint8m8_t promote_second_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
     promote_second_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_ce_cont_b1, promote_second_u8m8,
-                                                    sz_utf8_uncased_greek_ce_table_rvv_,
+                                                    sz_utf8_uncased_greek_ce_lut_,
                                                     __riscv_vadd_vx_u8m8(low6_u8m8, 64, vector_length), vector_length);
     folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, ce_delta_u8m8, vector_length);
 
@@ -421,8 +390,8 @@ STRINGZILLA_OUTLINED_ void sz_utf8_uncased_fold_vietnamese_strip_rvv_(sz_u8_t co
                                                        vector_length);
     vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
     vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
-                                           lut_index_u8m8, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_c456_deltas_lut_, lut_index_u8m8,
+                                           vector_length);
     delta_u8m8 = __riscv_vand_vx_u8m8(delta_u8m8, 0x01, vector_length);
     folded_u8m8 = __riscv_vadd_vv_u8m8(folded_u8m8, delta_u8m8, vector_length);
 
@@ -707,8 +676,8 @@ STRINGZILLA_OUTLINED_ long sz_utf8_uncased_alarm_vietnamese_strip_rvv_(sz_u8_t c
                                                        vector_length);
     vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
     vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_c456_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
-                                           lut_index_u8m8, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(after_c456_b1, delta_u8m8, sz_utf8_fold_c456_deltas_lut_, lut_index_u8m8,
+                                           vector_length);
     vuint8m8_t irregular_u8m8 = sz_utf8_uncased_eq_byte_(__riscv_vand_vx_u8m8(delta_u8m8, 0x80, vector_length), 0x80,
                                                          vector_length);
     danger_u8m8 = __riscv_vor_vv_u8m8(danger_u8m8, irregular_u8m8, vector_length);
@@ -1073,6 +1042,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_rvv(sz_cptr_t text, sz_size_t len
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }

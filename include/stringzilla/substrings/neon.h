@@ -22,6 +22,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -128,6 +129,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_neon(sz_substrings_engine_
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

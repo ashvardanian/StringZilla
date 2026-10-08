@@ -25,6 +25,7 @@ extern "C" {
  *  is one @c svext; and tail chunks load through predicated @c svld1, with no zero-padded stack
  *  buffers at all. Candidate masks lower once per chunk through the predicate bridge and iterate
  *  through the shared serial candidate pop. */
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -779,6 +780,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_sve2(sz_cptr_t text, sz_size_t le
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

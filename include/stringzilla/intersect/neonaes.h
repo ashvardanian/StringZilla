@@ -19,6 +19,8 @@ extern "C" {
 
 /*  Only a kernel lives here, so the whole body follows the kernel's own target: a region with no
  *  function in it would leave the target attribute unused. */
+#if STRINGZILLA_ARCH_ARM64_
+#if STRINGZILLA_ARCH_ARM64_NEONAES_
 #if STRINGZILLA_TARGET_NEONAES
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
@@ -43,6 +45,8 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_neonaes(                     /
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_NEONAES
+#endif // STRINGZILLA_ARCH_ARM64_NEONAES_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

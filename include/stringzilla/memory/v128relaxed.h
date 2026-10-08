@@ -19,6 +19,7 @@ extern "C" {
 
 /*  @c copy, @c move, and @c fill are pure load/store streams with no shuffle or arithmetic, so
  *  relaxed-simd offers nothing — delegate to the baseline SIMD128 kernels. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -129,6 +130,7 @@ STRINGZILLA_API sz_status_t sz_lookup_v128relaxed(sz_ptr_t target, sz_cptr_t sou
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

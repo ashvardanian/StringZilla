@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -327,6 +328,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_neon_( //
     sz_size_t *sentence_lengths, sz_size_t sentences_capacity) {
 
     sz_size_t sentences = 0;
+    if (length < 64) return sz_utf8_sentences_serial_(text, length, sentence_lengths, sentences_capacity);
     if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -496,6 +498,7 @@ STRINGZILLA_API sz_status_t sz_utf8_sentences_neon(sz_cptr_t text, sz_size_t len
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEON_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

@@ -39,6 +39,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_PPC64_
 #if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -488,6 +489,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_powervsx_( //
     sz_cptr_t text, sz_size_t length,                      //
     sz_size_t *word_lengths, sz_size_t words_capacity) {
 
+    if (length < 64) return sz_utf8_wordbreaks_serial_(text, length, word_lengths, words_capacity);
     if (length == 0 || words_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
@@ -625,6 +627,7 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_powervsx(sz_cptr_t text, sz_size_
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_POWERVSX
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #ifdef __cplusplus
 }

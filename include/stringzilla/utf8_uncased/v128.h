@@ -31,6 +31,7 @@ extern "C" {
  *  have seen. Matches the Ice Lake, NEON, and RVV SIMD backends exactly; those may differ from the
  *  serial folded-rune scanner on a few expanding-needle ties, a cross-backend property that is not
  *  specific to WebAssembly. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -808,6 +809,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_v128(sz_cptr_t text, sz_size_t le
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

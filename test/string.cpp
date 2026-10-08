@@ -541,6 +541,19 @@ void test_memory_unit() {
     check_memory_unit_(memory_dispatched);
     check_lookup_unit_(lookup_dispatched);
 
+    // The case tables follow the Latin-1 letter rule, keeping × and ÷ and ÿ as is.
+    {
+        char upper_table[256], lower_table[256];
+        sz_lookup_init_upper(upper_table);
+        sz_lookup_init_lower(lower_table);
+        for (int byte = 0; byte != 256; ++byte) {
+            bool const is_lower_letter = (byte >= 'a' && byte <= 'z') || (byte >= 0xE0 && byte <= 0xFE && byte != 0xF7);
+            bool const is_upper_letter = (byte >= 'A' && byte <= 'Z') || (byte >= 0xC0 && byte <= 0xDE && byte != 0xD7);
+            verify((unsigned char)upper_table[byte] == (is_lower_letter ? byte - 32 : byte));
+            verify((unsigned char)lower_table[byte] == (is_upper_letter ? byte + 32 : byte));
+        }
+    }
+
     // C++ wrapper sanity: a couple of `sz::string_t` / `sz::string_view_t` known-answer reads alongside the C API.
     {
         sz::string_view_t const view = "Hello, World!"_sv;

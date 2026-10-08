@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE2_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2"))), apply_to = function)
@@ -183,6 +184,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_linebreaks_sve2_( //
     // Graviton 5: the scalable front only outruns NEON with wider-than-NEON registers.
     if (svcntb() <= 16) return sz_utf8_linebreaks_neon_(text, length, lengths, capacity);
 
+    if (length < 64) return sz_utf8_linebreaks_serial_(text, length, lengths, capacity);
     if (length == 0 || capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     sz_size_t const vector_bytes = svcntb();
@@ -495,6 +497,7 @@ STRINGZILLA_API sz_status_t sz_utf8_linebreaks_sve2(sz_cptr_t text, sz_size_t le
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_SVE2_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

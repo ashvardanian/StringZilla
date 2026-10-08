@@ -11,6 +11,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEON_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd"))), apply_to = function)
@@ -297,14 +298,15 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, 
     return sz_success_k;
 }
 
-#endif
+#endif // STRINGZILLA_TARGET_NEON
 
 #if defined(__clang__)
 #pragma clang attribute pop
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif
+#endif // STRINGZILLA_ARCH_ARM64_NEON_
+#endif // STRINGZILLA_ARCH_ARM64_
 #ifdef __cplusplus
 }
 #endif

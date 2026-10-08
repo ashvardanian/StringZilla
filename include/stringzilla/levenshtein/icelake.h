@@ -21,8 +21,9 @@
 extern "C" {
 #endif
 
-#pragma region Ice Lake Implementation
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_ICELAKE
+#pragma region Ice Lake Implementation
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                        \
     __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
@@ -368,8 +369,9 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
 #elif defined(__GNUC__)
 #pragma GCC pop_options
 #endif
-#endif // STRINGZILLA_TARGET_ICELAKE
 #pragma endregion Ice Lake Implementation
+#endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

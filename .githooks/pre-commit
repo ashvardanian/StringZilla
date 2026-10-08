@@ -3046,6 +3046,114 @@ check_cpython_format_shortcuts_absent() {
         "            build tuples with PyTuple_Pack and PyLong_From*, and call with PyObject_CallOneArg:"
 }
 
+# Every CPU capability include/stringzilla/types.h detects, as `<capability> <ARCH> [<closure>]` lines: its
+# force-off clause names the architecture, and a `STRINGZILLA_ARCH_<ARCH>_<CAPABILITY>_` closure marks a base
+# capability. Read from the staged copy, else the one beside this hook, as fixtures have none.
+capability_architectures=$({ { [ $# -eq 0 ] && git show :include/stringzilla/types.h 2> /dev/null; } || cat "$(dirname "$0")/../include/stringzilla/types.h"; } |
+    awk '
+        match($0, /STRINGZILLA_TARGET_[A-Z0-9]+ && !\(?STRINGZILLA_ARCH_[A-Z0-9]+_/) {
+            split(substr($0, RSTART + 19, RLENGTH - 20), names, / && !\(?STRINGZILLA_ARCH_/)
+            architecture[tolower(names[1])] = names[2]
+        }
+        match($0, /^#define STRINGZILLA_ARCH_[A-Z0-9]+_[A-Z0-9]+_[[:space:]]/) {
+            name = substr($0, 9, RLENGTH - 9)
+            split(name, parts, "_")
+            closure[tolower(parts[4])] = name
+        }
+        END { for (capability in architecture) print capability, architecture[capability], closure[capability] }')
+
+# Rejects a CPU capability header whose platform guards break its shape, because they decide where its helpers and
+# kernels compile. Before any code but its includes, a base capability opens its architecture and then its closure,
+# and a leaf its architecture and then its target. A base keeps its kernels in one `#if STRINGZILLA_TARGET_` block,
+# each guard's #endif names it, and no other condition tests an architecture or target.
+check_capability_guards_shaped() {
+    local capability upper architecture closure shape opening violations
+    capability=${staged_path##*/}
+    capability=${capability%.*}
+    upper=$(printf '%s' "$capability" | tr '[:lower:]' '[:upper:]')
+    read -r architecture closure <<< "$(printf '%s\n' "$capability_architectures" |
+        awk -v name="$capability" '$1 == name { print $2, $3 }')"
+    if [ -z "$architecture" ]; then
+        reject_with_reason "$staged_path" "$staged_path is named after no capability include/stringzilla/types.h detects:"
+        return
+    fi
+    if [ -n "$closure" ]; then
+        shape=base opening=STRINGZILLA_ARCH_${architecture}_$'\n'$closure
+    else
+        shape=leaf opening=STRINGZILLA_ARCH_${architecture}_$'\n'STRINGZILLA_TARGET_$upper
+    fi
+    violations=$(blank_c_comments_preserving_columns < "$staged_text_path" |
+        opening=$opening inner=STRINGZILLA_TARGET_$upper raw_path=$staged_text_path awk '
+        BEGIN { opening_count = split(ENVIRON["opening"], opening, "\n"); inner = ENVIRON["inner"] }
+        function condition(text) {
+            sub(/^[[:space:]]*#[[:space:]]*[a-z]+[[:space:]]*/, "", text); gsub(/[[:space:]]+/, " ", text); sub(/ $/, "", text)
+            return text
+        }
+        function allowed(text, alternatives,    count, index_, names) {
+            count = split(alternatives, names, "|")
+            for (index_ = 1; index_ <= count; ++index_) if (text == names[index_]) return 1
+            return 0
+        }
+        function report(problem) { printf "line %d: %s\n", line, problem }
+        {
+            line = FNR; text = $0
+            getline raw < ENVIRON["raw_path"]
+            while (text ~ /^[[:space:]]*#.*\\[[:space:]]*$/ && (getline continuation) > 0) {
+                getline continuation_raw < ENVIRON["raw_path"]
+                sub(/\\[[:space:]]*$/, " ", text); text = text continuation
+            }
+            if (text ~ /^[[:space:]]*$/) next
+            directive = ""
+            if (match(text, /^[[:space:]]*#[[:space:]]*[a-z]+/)) { directive = substr(text, RSTART, RLENGTH); gsub(/[[:space:]#]/, "", directive) }
+            platform = directive ~ /^(if|ifdef|ifndef|elif)$/ && text ~ /STRINGZILLA_(TARGET_|ARCH_(X8664|ARM64|RISCV64|LOONGARCH64|PPC64|WASM)_)/
+        }
+        stage == 0 && directive == "ifndef" && !platform { kind[++depth] = "include"; outer_depth = depth; stage = 1; next }
+        stage == 0 && directive == "pragma" && text ~ /once/ { stage = 2; next }
+        stage == 1 && directive == "define" { stage = 2; next }
+        { stage = 2 }
+        directive == "if" && opened < opening_count && depth == outer_depth + opened && allowed(condition(text), opening[opened + 1]) {
+            kind[++depth] = "open"; guard[depth] = condition(text); ++opened; ++open_alive
+            next
+        }
+        directive ~ /^if(def|ndef)?$/ {
+            guard[++depth] = condition(text); kind[depth] = "plain"
+            if (!platform) next
+            directly_inside = opened == opening_count && open_alive == opening_count && kind[depth - 1] == "open"
+            if (directive == "if" && guard[depth] == inner && directly_inside) {
+                kind[depth] = "inner"
+                if (++inner_count > 1) report("repeats #if " inner "; group the helpers ahead of one block of kernels")
+                next
+            }
+            report("tests " guard[depth] ", which its shape does not allow")
+            next
+        }
+        directive ~ /^el(if|se)$/ {
+            if (platform) report("tests " condition(text) ", which its shape does not allow")
+            else if (kind[depth] == "open" || kind[depth] == "inner") report("branches its guard " guard[depth] " with #" directive)
+            next
+        }
+        directive == "endif" {
+            if (kind[depth] == "open" || kind[depth] == "inner") {
+                comment = raw
+                if (!sub(/^[^\/]*\/\/[[:space:]]*/, "", comment)) comment = ""
+                gsub(/[[:space:]]+/, " ", comment); sub(/ $/, "", comment)
+                if (comment != guard[depth]) report("closes " guard[depth] " without naming it in a // comment")
+                if (kind[depth] == "open") --open_alive
+            }
+            kind[depth--] = ""
+            next
+        }
+        opened == 1 && open_alive == 1 && !between_reported { report("holds code between its architecture and its second guard"); between_reported = 1 }
+        opened == opening_count && open_alive < opening_count && text !~ /^[[:space:]]*}/ && !outside_reported {
+            report("sits outside its guards, which hold everything after the includes"); outside_reported = 1
+        }
+        END { if (opened < opening_count) { line = FNR; report("never opens its guards, " ENVIRON["opening"]) } }
+        ')
+    [ -z "$violations" ] || reject_with_reason "$violations" \
+        "$staged_path breaks the guards of a $shape capability header, which opens #if ${opening//$'\n'/, then #if } before its code;" \
+        "            no other condition tests STRINGZILLA_ARCH_ or STRINGZILLA_TARGET_, and each #endif names its guard:"
+}
+
 # Routes one staged file through the checks only StringZilla has.
 run_project_checks() {
     case "$staged_path" in
@@ -3082,6 +3190,14 @@ run_project_checks() {
         sve.* | sve2.* | sve2aes.* | simt.* | metal.* | blackwell.* | rocm.* | cdna.* | \
         loongsonasx.* | powervsx.* | rvv.* | rvvcrypto.* | v128.* | v128relaxed.*)
         case "$staged_path" in include/stringzilla/*/*) check_copydoc_absent_in_backends ;; esac
+        ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*/westmere.h | include/stringzilla/*/goldmont.h | include/stringzilla/*/haswell.h | \
+        include/stringzilla/*/skylake.h | include/stringzilla/*/icelake.h | include/stringzilla/*/neon*.h | \
+        include/stringzilla/*/sve*.h | include/stringzilla/*/rvv*.h | include/stringzilla/*/v128*.h | \
+        include/stringzilla/*/loongsonasx.h | include/stringzilla/*/powervsx.h)
+        check_capability_guards_shaped
         ;;
     esac
     case "$staged_path" in

@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                       \
@@ -657,6 +658,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

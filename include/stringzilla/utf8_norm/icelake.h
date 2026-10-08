@@ -24,6 +24,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                  \
@@ -75,6 +76,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_icelake(sz_cptr_t source, 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -655,6 +656,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_v128(sz_sha256_state_t const 
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

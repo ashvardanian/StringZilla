@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #pragma region Haswell Implementation
 #if defined(__clang__)
@@ -371,6 +372,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_haswell(sz_levenshtein_engi
 #endif
 #pragma endregion Haswell Implementation
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

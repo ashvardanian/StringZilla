@@ -27,6 +27,7 @@ extern "C" {
  *  run a strip at @c e8m8. The three `sz_utf8_fold_latin_c{4,5,6}_deltas_rvv_` names alias the
  *  matching 64-byte windows so the @c utf8_uncased strips can keep loading a single family with one
  *  @c vle8. */
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -34,26 +35,6 @@ extern "C" {
 #pragma GCC push_options
 #pragma GCC target("arch=+v")
 #endif
-
-static sz_u8_t const sz_utf8_fold_latin_c456_deltas_rvv_[192] = {
-    // C4 80-BF
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
-    0x80, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0x80, //
-    // C5 80-BF
-    0, 1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0,    //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
-    1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,       //
-    1, 0, 1, 0, 1, 0, 1, 0, 0x80, 1, 0, 1, 0, 1, 0, 0x80, //
-    // C6 80-BF
-    0, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0x80, 0x80, 1, 0, 0, 0x80, 0x80,       //
-    0x80, 1, 0, 0x80, 0x80, 0, 0x80, 0x80, 1, 0, 0, 0, 0x80, 0x80, 0, 0x80, //
-    1, 0, 1, 0, 1, 0, 0x80, 1, 0, 0x80, 0, 0, 1, 0, 0x80, 1,                //
-    0, 0x80, 0x80, 1, 0, 1, 0, 0x80, 1, 0, 0, 0, 1, 0, 0, 0};
-static sz_u8_t const *const sz_utf8_fold_latin_c4_deltas_rvv_ = sz_utf8_fold_latin_c456_deltas_rvv_ + 0;
-static sz_u8_t const *const sz_utf8_fold_latin_c5_deltas_rvv_ = sz_utf8_fold_latin_c456_deltas_rvv_ + 64;
-static sz_u8_t const *const sz_utf8_fold_latin_c6_deltas_rvv_ = sz_utf8_fold_latin_c456_deltas_rvv_ + 128;
 
 /*  Case-fold a strip of ASCII bytes: `c + ((c - 'A' <= 25) * 0x20)`, the vector form of
  *  @c sz_ascii_fold_. Only `[0x41, 0x5A]` shifts by `+0x20`; other lanes pass through unchanged. */
@@ -116,8 +97,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_fold_latin_strip_rvv_(sz_u8_t const *source
                                                        vector_length);
     vuint8m8_t lut_index_u8m8 = __riscv_vadd_vv_u8m8(family_base_u8m8, low6_u8m8, vector_length);
     vuint8m8_t delta_u8m8 = __riscv_vmv_v_x_u8m8(0, vector_length);
-    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_latin_c456_deltas_rvv_,
-                                           lut_index_u8m8, vector_length);
+    delta_u8m8 = __riscv_vluxei8_v_u8m8_mu(delta_lanes_b1, delta_u8m8, sz_utf8_fold_c456_deltas_lut_, lut_index_u8m8,
+                                           vector_length);
     vbool1_t is_irregular_b1 = __riscv_vmsne_vx_u8m8_b1(__riscv_vand_vx_u8m8(delta_u8m8, 0x80, vector_length), 0,
                                                         vector_length);
 
@@ -604,6 +585,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_rvv(sz_cptr_t source, sz_size_t
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }

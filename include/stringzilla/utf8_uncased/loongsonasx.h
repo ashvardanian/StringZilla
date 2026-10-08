@@ -18,6 +18,7 @@ extern "C" {
 
 /*  This ISA has no dedicated uncased UTF-8 kernels yet; it delegates to the serial
  *  scaffolding so the per-backend symbol set stays uniform across all targets. */
+#if STRINGZILLA_ARCH_LOONGARCH64_
 #if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
@@ -56,6 +57,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_order_loongsonasx(sz_cptr_t a, sz_si
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #ifdef __cplusplus
 }

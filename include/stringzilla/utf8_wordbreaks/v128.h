@@ -35,6 +35,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -411,6 +412,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_wordbreaks_v128_( //
     sz_cptr_t text, sz_size_t length,                  //
     sz_size_t *word_lengths, sz_size_t words_capacity) {
 
+    if (length < 64) return sz_utf8_wordbreaks_serial_(text, length, word_lengths, words_capacity);
     if (length == 0 || words_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
 
@@ -534,6 +536,7 @@ STRINGZILLA_API sz_status_t sz_utf8_wordbreaks_v128(sz_cptr_t text, sz_size_t le
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

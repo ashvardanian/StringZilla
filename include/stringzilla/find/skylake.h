@@ -21,6 +21,7 @@ extern "C" {
  *  Includes extensions: F, CD, ER, PF, VL, DQ, BW.
  *
  *  This is the "starting level" for the advanced algorithms using K-mask registers on x86. */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,lzcnt,evex512"))), \
@@ -291,6 +292,7 @@ STRINGZILLA_API sz_status_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t hayst
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

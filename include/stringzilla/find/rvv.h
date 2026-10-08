@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("arch=+v"))), apply_to = function)
@@ -273,6 +274,7 @@ STRINGZILLA_API sz_status_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }

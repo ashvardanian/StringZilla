@@ -28,6 +28,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512"))), \
@@ -133,6 +134,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_skylake(sz_cptr_t source, 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

@@ -43,6 +43,7 @@ extern "C" {
  *  is the sole @c STRINGZILLA_ARCH_BIG_ENDIAN_ branch below. Everything else is expressed through
  *  @c vec_sld, which is a raw big-endian @c vsldoi, or through lane-wise operations whose meaning
  *  does not depend on element numbering, so the two branches cannot drift apart. */
+#if STRINGZILLA_ARCH_PPC64_
 #if STRINGZILLA_TARGET_POWERVSX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("power9-vector"))), apply_to = function)
@@ -1117,6 +1118,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t c
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_POWERVSX
+#endif // STRINGZILLA_ARCH_PPC64_
 
 #ifdef __cplusplus
 }

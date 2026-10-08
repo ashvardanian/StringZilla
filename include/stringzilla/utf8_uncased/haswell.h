@@ -24,6 +24,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
@@ -1297,6 +1298,7 @@ STRINGZILLA_API sz_status_t sz_utf8_find_cased_haswell(sz_cptr_t text, sz_size_t
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

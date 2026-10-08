@@ -27,6 +27,7 @@ extern "C" {
  *  negative index, and rely on an out-of-range index answering zero, so relaxing them would make
  *  the result engine dependent. Everything with no relaxed opportunity calls the @c _v128 kernel
  *  rather than restating it. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -490,6 +491,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_v128relaxed(sz_aes256_gcm_key_
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEONAES_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
@@ -606,6 +607,7 @@ STRINGZILLA_API sz_status_t sz_fill_random_neonaes(sz_ptr_t target, sz_size_t le
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEONAES_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

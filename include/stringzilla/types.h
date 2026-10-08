@@ -111,8 +111,7 @@
 #endif
 #endif
 
-/** Infer the target architecture, unless it's overridden by the build system. At this point we only
- *  provide optimized backends for x86_64 and AArch64. */
+/** Infer the target architecture, unless it's overridden by the build system. */
 #if !defined(STRINGZILLA_ARCH_X8664_)
 #if defined(__x86_64__) || defined(_M_X64)
 #define STRINGZILLA_ARCH_X8664_ (1)
@@ -125,6 +124,34 @@
 #define STRINGZILLA_ARCH_ARM64_ (1)
 #else
 #define STRINGZILLA_ARCH_ARM64_ (0)
+#endif
+#endif
+#if !defined(STRINGZILLA_ARCH_RISCV64_)
+#if defined(__riscv) && (__riscv_xlen == 64)
+#define STRINGZILLA_ARCH_RISCV64_ (1)
+#else
+#define STRINGZILLA_ARCH_RISCV64_ (0)
+#endif
+#endif
+#if !defined(STRINGZILLA_ARCH_LOONGARCH64_)
+#if defined(__loongarch__)
+#define STRINGZILLA_ARCH_LOONGARCH64_ (1)
+#else
+#define STRINGZILLA_ARCH_LOONGARCH64_ (0)
+#endif
+#endif
+#if !defined(STRINGZILLA_ARCH_PPC64_)
+#if defined(__powerpc64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
+#define STRINGZILLA_ARCH_PPC64_ (1)
+#else
+#define STRINGZILLA_ARCH_PPC64_ (0)
+#endif
+#endif
+#if !defined(STRINGZILLA_ARCH_WASM_)
+#if defined(__wasm__) || defined(__EMSCRIPTEN__)
+#define STRINGZILLA_ARCH_WASM_ (1)
+#else
+#define STRINGZILLA_ARCH_WASM_ (0)
 #endif
 #endif
 
@@ -349,7 +376,8 @@
  *  header scopes its kernels to their kit with a target pragma, so a unit at the baseline flags may
  *  define any kit the toolchain builds, as the CMake build does from its probes, except LASX and
  *  POWER9, as `lasxintrin.h` and `altivec.h` hide without `-mlasx` and `-mcpu=power9`. */
-#if !defined(STRINGZILLA_TARGET_WESTMERE)
+#if !defined(STRINGZILLA_TARGET_WESTMERE) || (STRINGZILLA_TARGET_WESTMERE && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_TARGET_WESTMERE
 #if STRINGZILLA_ARCH_X8664_ && defined(__SSE4_2__) && defined(__AES__)
 #define STRINGZILLA_TARGET_WESTMERE (1)
 #elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX__)
@@ -359,7 +387,8 @@
 #endif
 #endif
 
-#if !defined(STRINGZILLA_TARGET_HASWELL)
+#if !defined(STRINGZILLA_TARGET_HASWELL) || (STRINGZILLA_TARGET_HASWELL && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_TARGET_HASWELL
 #if STRINGZILLA_ARCH_X8664_ && defined(__AVX2__)
 #define STRINGZILLA_TARGET_HASWELL (1)
 #else
@@ -367,7 +396,8 @@
 #endif
 #endif
 
-#if !defined(STRINGZILLA_TARGET_GOLDMONT)
+#if !defined(STRINGZILLA_TARGET_GOLDMONT) || (STRINGZILLA_TARGET_GOLDMONT && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_TARGET_GOLDMONT
 #if STRINGZILLA_ARCH_X8664_ && defined(__SHA__)
 #define STRINGZILLA_TARGET_GOLDMONT (1)
 #elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX2__)
@@ -377,7 +407,8 @@
 #endif
 #endif
 
-#if !defined(STRINGZILLA_TARGET_SKYLAKE)
+#if !defined(STRINGZILLA_TARGET_SKYLAKE) || (STRINGZILLA_TARGET_SKYLAKE && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_TARGET_SKYLAKE
 #if STRINGZILLA_ARCH_X8664_ && defined(__AVX512F__)
 #define STRINGZILLA_TARGET_SKYLAKE (1)
 #else
@@ -385,7 +416,8 @@
 #endif
 #endif
 
-#if !defined(STRINGZILLA_TARGET_ICELAKE)
+#if !defined(STRINGZILLA_TARGET_ICELAKE) || (STRINGZILLA_TARGET_ICELAKE && !STRINGZILLA_ARCH_X8664_)
+#undef STRINGZILLA_TARGET_ICELAKE
 #if STRINGZILLA_ARCH_X8664_ && defined(__AVX512BW__) && defined(__VAES__)
 #define STRINGZILLA_TARGET_ICELAKE (1)
 #elif STRINGZILLA_ARCH_X8664_ && defined(_MSC_VER) && defined(__AVX512BW__)
@@ -400,7 +432,8 @@
  *  shared byte-lane bridges, like `sz_utf8_rune_pred_to_u64_*` and
  *  @c sz_utf8_vreinterpretq_u8_u4_neon_, assume little-endian lane ↔ byte order and would
  *  mis-execute on big-endian. */
-#if !defined(STRINGZILLA_TARGET_NEON)
+#if !defined(STRINGZILLA_TARGET_NEON) || (STRINGZILLA_TARGET_NEON && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_NEON
 #if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_NEON) && !STRINGZILLA_ARCH_BIG_ENDIAN_
 #define STRINGZILLA_TARGET_NEON (1)
 #elif STRINGZILLA_ARCH_ARM64_ && defined(_MSC_VER) && defined(_M_ARM64)
@@ -411,7 +444,8 @@
 #endif
 
 /*  SVE is optional since Armv8.2-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(STRINGZILLA_TARGET_SVE)
+#if !defined(STRINGZILLA_TARGET_SVE) || (STRINGZILLA_TARGET_SVE && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_SVE
 #if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE) && !STRINGZILLA_ARCH_BIG_ENDIAN_
 #define STRINGZILLA_TARGET_SVE (1)
 #else
@@ -420,7 +454,8 @@
 #endif
 
 /*  SVE2 is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(STRINGZILLA_TARGET_SVE2)
+#if !defined(STRINGZILLA_TARGET_SVE2) || (STRINGZILLA_TARGET_SVE2 && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_SVE2
 #if STRINGZILLA_ARCH_ARM64_ && defined(__ARM_FEATURE_SVE2) && !STRINGZILLA_ARCH_BIG_ENDIAN_
 #define STRINGZILLA_TARGET_SVE2 (1)
 #else
@@ -429,7 +464,8 @@
 #endif
 
 /*  AES is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(STRINGZILLA_TARGET_NEONAES)
+#if !defined(STRINGZILLA_TARGET_NEONAES) || (STRINGZILLA_TARGET_NEONAES && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_NEONAES
 #if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_AES) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define STRINGZILLA_TARGET_NEONAES (1)
 #else
@@ -438,7 +474,8 @@
 #endif
 
 /*  SHA2 is optional since Armv8.0-A, but never became mandatory, and MSVC cannot probe for it. */
-#if !defined(STRINGZILLA_TARGET_NEONSHA)
+#if !defined(STRINGZILLA_TARGET_NEONSHA) || (STRINGZILLA_TARGET_NEONSHA && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_NEONSHA
 #if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SHA2) || defined(__ARM_FEATURE_CRYPTO) || defined(__APPLE__))
 #define STRINGZILLA_TARGET_NEONSHA (1)
 #else
@@ -449,7 +486,8 @@
 /*  SVE2 AES is optional since Armv9.0-A, but never became mandatory, and MSVC cannot probe for it.
  *  GCC spells the feature macro @c __ARM_FEATURE_SVE2AES; Clang spells it
  *  @c __ARM_FEATURE_SVE2_AES. Accept both. */
-#if !defined(STRINGZILLA_TARGET_SVE2AES)
+#if !defined(STRINGZILLA_TARGET_SVE2AES) || (STRINGZILLA_TARGET_SVE2AES && !STRINGZILLA_ARCH_ARM64_)
+#undef STRINGZILLA_TARGET_SVE2AES
 #if STRINGZILLA_ARCH_ARM64_ && (defined(__ARM_FEATURE_SVE2AES) || defined(__ARM_FEATURE_SVE2_AES))
 #define STRINGZILLA_TARGET_SVE2AES (1)
 #else
@@ -529,9 +567,10 @@
 
 /*  WebAssembly SIMD128 is opt-in via @c -msimd128 with no runtime probe: an engine validates a
  *  module whole, so the flag alone decides, and a request without it is dropped. */
-#if !defined(STRINGZILLA_TARGET_V128) || (STRINGZILLA_TARGET_V128 && !(defined(__wasm__) && defined(__wasm_simd128__)))
+#if !defined(STRINGZILLA_TARGET_V128) || \
+    (STRINGZILLA_TARGET_V128 && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)))
 #undef STRINGZILLA_TARGET_V128
-#if defined(__wasm__) && defined(__wasm_simd128__)
+#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_simd128__)
 #define STRINGZILLA_TARGET_V128 (1)
 #else
 #define STRINGZILLA_TARGET_V128 (0)
@@ -543,9 +582,9 @@
  *  runtimes lower a few relaxed ops sub-optimally, but the level is exposed so native engines
  *  can use them. As with SIMD128, the flag alone decides. */
 #if !defined(STRINGZILLA_TARGET_V128RELAXED) || \
-    (STRINGZILLA_TARGET_V128RELAXED && !(defined(__wasm__) && defined(__wasm_relaxed_simd__)))
+    (STRINGZILLA_TARGET_V128RELAXED && !(STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)))
 #undef STRINGZILLA_TARGET_V128RELAXED
-#if defined(__wasm__) && defined(__wasm_relaxed_simd__)
+#if STRINGZILLA_ARCH_WASM_ && defined(__wasm_relaxed_simd__)
 #define STRINGZILLA_TARGET_V128RELAXED (1)
 #else
 #define STRINGZILLA_TARGET_V128RELAXED (0)
@@ -553,8 +592,9 @@
 #endif
 
 /*  RISC-V Vector extension (RVV 1.0) — `-march=rv64gcv`. Length-agnostic registers. */
-#if !defined(STRINGZILLA_TARGET_RVV)
-#if defined(__riscv) && (__riscv_xlen == 64) && defined(__riscv_vector)
+#if !defined(STRINGZILLA_TARGET_RVV) || (STRINGZILLA_TARGET_RVV && !STRINGZILLA_ARCH_RISCV64_)
+#undef STRINGZILLA_TARGET_RVV
+#if STRINGZILLA_ARCH_RISCV64_ && defined(__riscv_vector)
 #define STRINGZILLA_TARGET_RVV (1)
 #else
 #define STRINGZILLA_TARGET_RVV (0)
@@ -562,7 +602,8 @@
 #endif
 
 /*  RISC-V Vector Crypto (Zvk: Zvkned AES + Zvknhb SHA) — `-march=rv64gcv_zvkned_zvknhb`. */
-#if !defined(STRINGZILLA_TARGET_RVVCRYPTO)
+#if !defined(STRINGZILLA_TARGET_RVVCRYPTO) || (STRINGZILLA_TARGET_RVVCRYPTO && !STRINGZILLA_ARCH_RISCV64_)
+#undef STRINGZILLA_TARGET_RVVCRYPTO
 #if STRINGZILLA_TARGET_RVV && defined(__riscv_zvkned) && defined(__riscv_zvknhb)
 #define STRINGZILLA_TARGET_RVVCRYPTO (1)
 #else
@@ -571,8 +612,9 @@
 #endif
 
 /*  LoongArch Advanced SIMD eXtension (LASX, 256-bit) — `-mlasx`. */
-#if !defined(STRINGZILLA_TARGET_LOONGSONASX)
-#if defined(__loongarch__) && defined(__loongarch_asx)
+#if !defined(STRINGZILLA_TARGET_LOONGSONASX) || (STRINGZILLA_TARGET_LOONGSONASX && !STRINGZILLA_ARCH_LOONGARCH64_)
+#undef STRINGZILLA_TARGET_LOONGSONASX
+#if STRINGZILLA_ARCH_LOONGARCH64_ && defined(__loongarch_asx)
 #define STRINGZILLA_TARGET_LOONGSONASX (1)
 #else
 #define STRINGZILLA_TARGET_LOONGSONASX (0)
@@ -580,8 +622,9 @@
 #endif
 
 /*  IBM Power Vector-Scalar eXtension at the POWER9 level, ISA 3.0 — `-mcpu=power9`. */
-#if !defined(STRINGZILLA_TARGET_POWERVSX)
-#if (defined(__powerpc__) || defined(__powerpc64__)) && defined(__VSX__) && defined(__POWER9_VECTOR__)
+#if !defined(STRINGZILLA_TARGET_POWERVSX) || (STRINGZILLA_TARGET_POWERVSX && !STRINGZILLA_ARCH_PPC64_)
+#undef STRINGZILLA_TARGET_POWERVSX
+#if STRINGZILLA_ARCH_PPC64_ && defined(__VSX__) && defined(__POWER9_VECTOR__)
 #define STRINGZILLA_TARGET_POWERVSX (1)
 #else
 #define STRINGZILLA_TARGET_POWERVSX (0)
@@ -601,8 +644,6 @@
     (STRINGZILLA_TARGET_NEON || STRINGZILLA_ARCH_ARM64_NEONAES_ || STRINGZILLA_TARGET_NEONSHA || \
      STRINGZILLA_ARCH_ARM64_SVE_)
 #define STRINGZILLA_ARCH_RISCV64_RVV_ (STRINGZILLA_TARGET_RVV || STRINGZILLA_TARGET_RVVCRYPTO)
-#define STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_ STRINGZILLA_TARGET_LOONGSONASX
-#define STRINGZILLA_ARCH_PPC64_POWERVSX_ STRINGZILLA_TARGET_POWERVSX
 #define STRINGZILLA_ARCH_WASM_V128_ (STRINGZILLA_TARGET_V128 || STRINGZILLA_TARGET_V128RELAXED)
 
 /*  Hardware-specific headers for different SIMD intrinsics and register wrappers. */
@@ -615,7 +656,7 @@
 /*  The LASX and POWER9 intrinsics headers open in the same target region as their kernels.
  *  GCC 15 defines @c __loongarch_asx and @c __POWER9_VECTOR__ there, while Clang defines them
  *  only under `-mlasx` or `-mcpu=power9`. */
-#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#if STRINGZILLA_TARGET_LOONGSONASX
 #if !defined(__clang__)
 #pragma GCC push_options
 #pragma GCC target("lasx")
@@ -626,7 +667,7 @@
 #pragma GCC pop_options
 #endif
 #endif
-#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+#if STRINGZILLA_TARGET_POWERVSX
 #if !defined(__clang__)
 #pragma GCC push_options
 #pragma GCC target("power9-vector")
@@ -1215,13 +1256,13 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u128_vec_t {
     float64x2_t f64x2;
     float32x4_t f32x4;
 #endif
-#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#if STRINGZILLA_TARGET_LOONGSONASX
     __m128i lsx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_
     v128_t v128;
 #endif
-#if STRINGZILLA_ARCH_PPC64_POWERVSX_
+#if STRINGZILLA_TARGET_POWERVSX
     __vector unsigned char vsx_u8;
     __vector unsigned short vsx_u16;
     __vector unsigned int vsx_u32;
@@ -1256,7 +1297,7 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u256_vec_t {
     uint32x4_t u32x4s[2];
     uint64x2_t u64x2s[2];
 #endif
-#if STRINGZILLA_ARCH_LOONGARCH64_LOONGSONASX_
+#if STRINGZILLA_TARGET_LOONGSONASX
     __m256i lasx;
 #endif
 #if STRINGZILLA_ARCH_WASM_V128_
@@ -1309,6 +1350,47 @@ typedef union STRINGZILLA_MAY_ALIAS_ sz_u512_vec_t {
     sz_u128_vec_t u128s[4];
     sz_u128_vec_t u256s[2];
 } sz_u512_vec_t;
+
+#pragma endregion
+
+#pragma region Lane Compaction Tables
+
+/** Left-pack table for 32-bit permutes: row `[m]` holds the 8 dword indices that gather the
+ *  @c m -selected u64 lanes of 4, each a dword pair, to the front. 512 bytes stay cache-resident;
+ *  an 8-wide variant would need 16 KB. */
+sz_align_(64) static sz_u32_t const sz_compact4_dword_indices_[16][8] = {
+    {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
+    {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
+    {6, 7, 0, 0, 0, 0, 0, 0}, {0, 1, 6, 7, 0, 0, 0, 0}, {2, 3, 6, 7, 0, 0, 0, 0}, {0, 1, 2, 3, 6, 7, 0, 0},
+    {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
+};
+
+/** Byte form of @c sz_compact4_dword_indices_ for @c vqtbl2q_u8: row `[m]` holds the 32 byte
+ *  indices that gather the @c m -selected u64 lanes of 4 to the front. The first 16 bytes feed
+ *  lookup 0, for output lanes 0-1, and the last 16 feed lookup 1, for output lanes 2-3. */
+sz_align_(64) static sz_u8_t const sz_compact4_byte_indices_[16][32] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7},
+    {24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7},
+    {16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+    {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7},
+    {8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+     24, 25, 26, 27, 28, 29, 30, 31, 0,  1,  2,  3,  4,  5,  6,  7},
+    {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31},
+};
+
+/** Population count of every 4-bit mask, for the targets without a scalar popcount instruction. */
+sz_align_(64) static sz_u8_t const sz_popcount4_lut_[16] = {0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4};
 
 #pragma endregion
 
@@ -1392,7 +1474,7 @@ STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *vi
 #if !defined(STRINGZILLA_DEFAULT_ALIGNMENT)
 #if defined(__s390x__)
 #define STRINGZILLA_DEFAULT_ALIGNMENT 256
-#elif defined(__wasm__) || defined(__EMSCRIPTEN__)
+#elif STRINGZILLA_ARCH_WASM_
 #define STRINGZILLA_DEFAULT_ALIGNMENT 64
 #else
 #define STRINGZILLA_DEFAULT_ALIGNMENT 128

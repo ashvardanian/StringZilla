@@ -44,6 +44,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                         \
@@ -62,7 +63,7 @@ extern "C" {
 #pragma region Grapheme_Cluster_Break classifier
 
 enum {
-    sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s1_) / 64,
+    sz_grapheme_break_astral_stage1_tiles_k = sizeof(sz_utf8_grapheme_break_astral_stage2_low_) / 64,
     sz_grapheme_break_astral_stage2_tiles_k = sizeof(sz_utf8_grapheme_break_astral_s2_) / 64,
     sz_grapheme_break_astral_leaf_tiles_k = sizeof(sz_utf8_grapheme_break_astral_leaf_) / 64,
 };
@@ -104,13 +105,13 @@ STRINGZILLA_INLINE __m512i sz_grapheme_classify_bmp_icelake_(__m512i codepoints_
 STRINGZILLA_INLINE __m512i sz_grapheme_classify_astral16_icelake_(__m512i codepoints_u32x16) {
     __m512i const offset_u32x16 = _mm512_sub_epi32(codepoints_u32x16, _mm512_set1_epi32(0x10000));
     __m512i const stage1_u32x16 = sz_utf8_rune_permute256_icelake_(
-        sz_utf8_grapheme_break_astral_s0_,
+        sz_utf8_grapheme_break_astral_stage1_,
         _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 12), _mm512_set1_epi32(0xFF)));
     __m512i const stage2_index_u32x16 = _mm512_add_epi32(
         _mm512_slli_epi32(stage1_u32x16, 4),
         _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 8), _mm512_set1_epi32(0xF)));
     __m512i const stage2_u32x16 = sz_utf8_rune_lut_cascade_icelake_(
-        sz_utf8_grapheme_break_astral_s1_, sz_grapheme_break_astral_stage1_tiles_k, stage2_index_u32x16);
+        sz_utf8_grapheme_break_astral_stage2_low_, sz_grapheme_break_astral_stage1_tiles_k, stage2_index_u32x16);
     __m512i const leaf_index_u32x16 = _mm512_add_epi32(
         _mm512_slli_epi32(stage2_u32x16, 4),
         _mm512_and_si512(_mm512_srli_epi32(offset_u32x16, 4), _mm512_set1_epi32(0xF)));
@@ -467,6 +468,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_graphemes_icelake_( //
     sz_size_t *cluster_lengths, sz_size_t clusters_capacity) {
 
     sz_size_t clusters = 0;
+    if (length < 64) return sz_utf8_graphemes_serial_(text, length, cluster_lengths, clusters_capacity);
     if (length == 0 || clusters_capacity == 0) return 0;
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
     __m512i const lane_identity_u8x64 = sz_utf8_lane_identity_icelake_();
@@ -509,6 +511,7 @@ STRINGZILLA_API sz_status_t sz_utf8_graphemes_icelake(sz_cptr_t text, sz_size_t 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

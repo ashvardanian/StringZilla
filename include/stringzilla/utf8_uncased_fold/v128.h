@@ -25,6 +25,7 @@ extern "C" {
  *  codepoint to the serial decode/fold/encode. RVV uses a 64-entry @c vrgather; wasm has only a
  *  16-entry swizzle, so the Latin delta tables are split into 4×16 sub-tables selected by the
  *  index's high two bits. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
@@ -550,6 +551,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_v128(sz_cptr_t source, sz_size_
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_ARCH_WASM_V128_
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

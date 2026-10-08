@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -49,6 +50,7 @@ STRINGZILLA_API sz_status_t sz_equal_v128relaxed(sz_cptr_t a, sz_cptr_t b, sz_si
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

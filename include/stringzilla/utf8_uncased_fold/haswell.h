@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2"))), apply_to = function)
@@ -973,6 +974,7 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_haswell(sz_cptr_t source, sz_si
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2"))), apply_to = function)
@@ -99,6 +100,7 @@ STRINGZILLA_API sz_status_t sz_equal_westmere(sz_cptr_t a, sz_cptr_t b, sz_size_
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

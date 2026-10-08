@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_GOLDMONT
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse3,ssse3,sse4.1,sha"))), apply_to = function)
@@ -358,6 +359,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_goldmont(sz_sha256_state
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_GOLDMONT
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

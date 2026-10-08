@@ -25,6 +25,7 @@ extern "C" {
  *      - 2019 Ice Lake: VPOPCNTDQ, VNNI, VBMI2, BITALG, GFNI, VPCLMULQDQ, VAES.
  *
  *  We are going to use VBMI2 for @c _mm256_maskz_compress_epi8. */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(__attribute__((target("avx,avx512f,avx512vl,avx512bw,bmi,bmi2,evex512,popcnt"))), \
@@ -405,6 +406,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

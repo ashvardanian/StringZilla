@@ -20,6 +20,7 @@ extern "C" {
  *  none of which map onto a relaxed op), so they delegate to the baseline SIMD128. The decoder and
  *  the multistep newline/whitespace iterators are not defined here at all: a @c v128relaxed mask
  *  also carries @c v128, so their lists pick the @c v128 kernels. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -43,6 +44,7 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t l
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

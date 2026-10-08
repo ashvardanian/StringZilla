@@ -26,6 +26,7 @@ extern "C" {
  *  byte load down to @c u8m4 (half the per-strip throughput), and that loss dwarfs the
  *  saving from a single cheap per-strip @c vwredsumu. So the cheap-reduction-per-strip form
  *  below is kept deliberately. */
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_ARCH_RISCV64_RVV_
 
 #include <riscv_vector.h>
@@ -591,6 +592,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvv(sz_sha256_state_t const *
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_RISCV64_RVV_
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }

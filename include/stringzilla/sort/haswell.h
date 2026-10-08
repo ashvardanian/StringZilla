@@ -31,6 +31,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,popcnt"))), apply_to = function)
@@ -75,30 +76,9 @@ STRINGZILLA_INLINE sz_size_t sz_sort_compact4_haswell_(  //
     __m256i const keys_u64x4, __m256i const order_u64x4, //
     sz_u32_t const mask4, sz_pgram_t *const out_pgrams, sz_sorted_idx_t *const out_order) {
 
-    // Left-pack table for `vpermd`: row `[m]` holds the 8 dword indices that gather the `m`-selected u64 lanes
-    // (of 4, each a pair of dwords) to the front. 16 x 32 = 512 bytes, a single cache-resident load; an 8-wide
-    // variant would need 16 KB, which is why the partition stays 4-wide. `taken` comes from POPCNT, not a table.
-    static sz_u32_t const compact_lut[16][8] = {
-        {0, 0, 0, 0, 0, 0, 0, 0}, // 0b0000: none
-        {0, 1, 0, 0, 0, 0, 0, 0}, // 0b0001: lane 0
-        {2, 3, 0, 0, 0, 0, 0, 0}, // 0b0010: lane 1
-        {0, 1, 2, 3, 0, 0, 0, 0}, // 0b0011: lanes 0,1
-        {4, 5, 0, 0, 0, 0, 0, 0}, // 0b0100: lane 2
-        {0, 1, 4, 5, 0, 0, 0, 0}, // 0b0101: lanes 0,2
-        {2, 3, 4, 5, 0, 0, 0, 0}, // 0b0110: lanes 1,2
-        {0, 1, 2, 3, 4, 5, 0, 0}, // 0b0111: lanes 0,1,2
-        {6, 7, 0, 0, 0, 0, 0, 0}, // 0b1000: lane 3
-        {0, 1, 6, 7, 0, 0, 0, 0}, // 0b1001: lanes 0,3
-        {2, 3, 6, 7, 0, 0, 0, 0}, // 0b1010: lanes 1,3
-        {0, 1, 2, 3, 6, 7, 0, 0}, // 0b1011: lanes 0,1,3
-        {4, 5, 6, 7, 0, 0, 0, 0}, // 0b1100: lanes 2,3
-        {0, 1, 4, 5, 6, 7, 0, 0}, // 0b1101: lanes 0,2,3
-        {2, 3, 4, 5, 6, 7, 0, 0}, // 0b1110: lanes 1,2,3
-        {0, 1, 2, 3, 4, 5, 6, 7}, // 0b1111: all
-    };
-
+    // Stays 4-wide to keep the `vpermd` left-pack table at 512 bytes; `taken` comes from POPCNT.
     sz_size_t const taken = (sz_size_t)_mm_popcnt_u32(mask4);
-    __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)compact_lut[mask4]);
+    __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)sz_compact4_dword_indices_[mask4]);
     _mm256_storeu_si256((__m256i *)out_pgrams, _mm256_permutevar8x32_epi32(keys_u64x4, permutation_u32x8));
     _mm256_storeu_si256((__m256i *)out_order, _mm256_permutevar8x32_epi32(order_u64x4, permutation_u32x8));
     return taken;
@@ -465,6 +445,7 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_haswell(           //
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

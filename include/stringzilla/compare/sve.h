@@ -17,6 +17,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_SVE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve"))), apply_to = function)
@@ -72,6 +73,7 @@ STRINGZILLA_API sz_status_t sz_order_sve(sz_cptr_t a, sz_size_t a_length, sz_cpt
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_SVE_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

@@ -38,6 +38,7 @@ extern "C" {
  *  @c sz_aes256_gcm_key_t were derived for, and it matches the round instruction's throughput:
  *  @c AESE and @c AESMC fuse into a single operation of about three cycles' latency on every core
  *  that has them, so a chain shorter than eight leaves the pipe half idle. */
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_ARCH_ARM64_NEONAES_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+simd+crypto+aes"))), apply_to = function)
@@ -1009,6 +1010,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_neonaes(sz_aes256_gcm_key_t co
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_ARM64_NEONAES_
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

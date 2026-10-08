@@ -24,6 +24,7 @@ extern "C" {
  *  this file, and every hash step below is written against one pair of helpers that resolve to
  *  `vghsh.vv` and `vgmul.vv` where the extension is present and to the constant-time serial
  *  reduction where it is not. The AES side is vectorized either way. */
+#if STRINGZILLA_ARCH_RISCV64_
 #if STRINGZILLA_TARGET_RVVCRYPTO
 
 #include <riscv_vector.h>
@@ -810,6 +811,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_rvvcrypto(sz_aes256_gcm_key_t 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_RVVCRYPTO
+#endif // STRINGZILLA_ARCH_RISCV64_
 
 #ifdef __cplusplus
 }

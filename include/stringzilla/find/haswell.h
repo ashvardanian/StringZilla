@@ -19,6 +19,7 @@ extern "C" {
 
 /*  AVX2 implementation of the string search algorithms for Haswell processors and newer.
  *  Very minimalistic (compared to AVX-512), but still faster than the serial implementation. */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
@@ -356,6 +357,7 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_haswell(sz_cptr_t haystack, sz_size
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

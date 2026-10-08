@@ -24,6 +24,7 @@ extern "C" {
 /*  @c avx512vbmi carries the byte permute the counter-mode head uses. The tier already implies
  *  it, and `hash/icelake.h` and `utf8_graphemes/icelake.h` both name it; this string was
  *  short, not narrower. */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                      \
@@ -1025,6 +1026,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_icelake(sz_aes256_gcm_key_t co
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

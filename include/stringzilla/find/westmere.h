@@ -22,6 +22,7 @@ extern "C" {
  *
  *  `bmi,lzcnt` are added only so GCC accepts @c _tzcnt_u32 and @c _lzcnt_u32; without those flags
  *  both compile down to the legacy @c bsf and @c bsr, which keeps the tier honest. */
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,bmi,lzcnt"))), apply_to = function)
@@ -178,6 +179,7 @@ STRINGZILLA_API sz_status_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t hays
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_WESTMERE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

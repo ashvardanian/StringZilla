@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,popcnt"))), apply_to = function)
@@ -34,15 +35,6 @@ STRINGZILLA_INLINE __m256i sz_mm256_cmpge_epu8_haswell_(__m256i a_u8x32, __m256i
  *  vpermd. Starts in lanes [0,29] are trusted and the cursor steps 30, so any 2-/3-byte delimiter
  *  is loaded in full. */
 #pragma region Multistep newline and whitespace iteration
-
-/** Left-pack table: row `[m]` holds the 8 dword indices that gather the @c m -selected u64 lanes
- *  (of 4, each a dword pair) to the front for @c _mm256_permutevar8x32_epi32. */
-static sz_u32_t const sz_utf8_compact_lut_haswell_[16][8] = {
-    {0, 0, 0, 0, 0, 0, 0, 0}, {0, 1, 0, 0, 0, 0, 0, 0}, {2, 3, 0, 0, 0, 0, 0, 0}, {0, 1, 2, 3, 0, 0, 0, 0},
-    {4, 5, 0, 0, 0, 0, 0, 0}, {0, 1, 4, 5, 0, 0, 0, 0}, {2, 3, 4, 5, 0, 0, 0, 0}, {0, 1, 2, 3, 4, 5, 0, 0},
-    {6, 7, 0, 0, 0, 0, 0, 0}, {0, 1, 6, 7, 0, 0, 0, 0}, {2, 3, 6, 7, 0, 0, 0, 0}, {0, 1, 2, 3, 6, 7, 0, 0},
-    {4, 5, 6, 7, 0, 0, 0, 0}, {0, 1, 4, 5, 6, 7, 0, 0}, {2, 3, 4, 5, 6, 7, 0, 0}, {0, 1, 2, 3, 4, 5, 6, 7},
-};
 
 /** Peels the window's first @p emit_count matches with a @c vpermd left-pack, 4 lanes per
  *  sub-block: each sub-block gathers its set lanes to the front and masked-stores them at the
@@ -72,7 +64,7 @@ STRINGZILLA_INLINE void sz_utf8_iterate_peel_haswell_(                         /
             _mm256_set1_epi64x(1),
             _mm256_add_epi64(two_byte_add_u64x4, _mm256_add_epi64(three_byte_add_u64x4, three_byte_add_u64x4)));
 
-        __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)sz_utf8_compact_lut_haswell_[submask]);
+        __m256i const permutation_u32x8 = _mm256_loadu_si256((__m256i const *)sz_compact4_dword_indices_[submask]);
         __m256i const packed_offsets_u64x4 = _mm256_permutevar8x32_epi32(offsets_u64x4, permutation_u32x8);
         __m256i const packed_lengths_u64x4 = _mm256_permutevar8x32_epi32(lengths_u64x4, permutation_u32x8);
 
@@ -552,6 +544,7 @@ STRINGZILLA_API sz_status_t sz_utf8_delimiters_haswell(                         
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

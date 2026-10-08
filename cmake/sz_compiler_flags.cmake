@@ -266,13 +266,15 @@ endfunction ()
 
 # Stamps the architecture id and the `STRINGZILLA_TARGET_*` verdicts of the ISA probes onto a target.
 function (set_architecture_simd_definitions target)
-    if (STRINGZILLA_ARCH_X8664_)
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=1" "STRINGZILLA_ARCH_ARM64_=0")
-    elseif (STRINGZILLA_ARCH_ARM64_)
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=0" "STRINGZILLA_ARCH_ARM64_=1")
-    else ()
-        target_compile_definitions(${target} PRIVATE "STRINGZILLA_ARCH_X8664_=0" "STRINGZILLA_ARCH_ARM64_=0")
-    endif ()
+    target_compile_definitions(
+        ${target}
+        PRIVATE "STRINGZILLA_ARCH_X8664_=$<BOOL:${STRINGZILLA_ARCH_X8664_}>"
+                "STRINGZILLA_ARCH_ARM64_=$<BOOL:${STRINGZILLA_ARCH_ARM64_}>"
+                "STRINGZILLA_ARCH_RISCV64_=$<BOOL:${STRINGZILLA_ARCH_RISCV64_}>"
+                "STRINGZILLA_ARCH_LOONGARCH64_=$<BOOL:${STRINGZILLA_ARCH_LOONGARCH64_}>"
+                "STRINGZILLA_ARCH_PPC64_=$<BOOL:${STRINGZILLA_ARCH_PPC64_}>"
+                "STRINGZILLA_ARCH_WASM_=$<BOOL:${STRINGZILLA_ARCH_WASM_}>"
+    )
     target_link_libraries(${target} PRIVATE $<BUILD_INTERFACE:stringzilla_cpu_capabilities_compiled>)
 endfunction ()
 

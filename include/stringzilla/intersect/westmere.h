@@ -19,6 +19,8 @@ extern "C" {
 
 /*  Only a kernel lives here, so the whole body follows the kernel's own target: a region with no
  *  function in it would leave the target attribute unused. */
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_ARCH_X8664_WESTMERE_
 #if STRINGZILLA_TARGET_WESTMERE
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("sse4.2,aes"))), apply_to = function)
@@ -42,6 +44,8 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                    /
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_WESTMERE
+#endif // STRINGZILLA_ARCH_X8664_WESTMERE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

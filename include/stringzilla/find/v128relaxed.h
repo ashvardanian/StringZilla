@@ -26,6 +26,7 @@ extern "C" {
  *  @c rfind_byte, @c find, and @c rfind delegate to the baseline. @c relaxed_swizzle is the one
  *  find-family win, and it is already used by the byteset kernels below, whose bit-table index is
  *  provably in [0, 7], so relaxed equals strict. */
+#if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_TARGET_V128RELAXED
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("relaxed-simd"))), apply_to = function)
@@ -203,6 +204,7 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_v128relaxed(sz_cptr_t haystack, sz_
 #pragma clang attribute pop
 #endif
 #endif // STRINGZILLA_TARGET_V128RELAXED
+#endif // STRINGZILLA_ARCH_WASM_
 
 #ifdef __cplusplus
 }

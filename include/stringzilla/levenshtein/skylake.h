@@ -21,6 +21,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_SKYLAKE_
 #pragma region Skylake Implementation
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
@@ -377,6 +378,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engi
 #endif
 #pragma endregion Skylake Implementation
 #endif // STRINGZILLA_ARCH_X8664_SKYLAKE_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

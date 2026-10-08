@@ -21,6 +21,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_ARM64_
 #if STRINGZILLA_TARGET_SVE2AES
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("+sve+sve2+sve2-aes"))), apply_to = function)
@@ -866,6 +867,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_sve2aes(sz_aes256_gcm_key_t co
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_SVE2AES
+#endif // STRINGZILLA_ARCH_ARM64_
 
 #ifdef __cplusplus
 }

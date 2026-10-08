@@ -959,9 +959,10 @@ static sz_u8_t const sz_utf8_uncased_central_c5_deltas_lut_[64] = {
  *
  *  The per-rule range-check deltas, resolved in one @c vqtbl4q_u8: 'Ά' (86) +0x26, 'Έ'-'Ί' (88-8A)
  *  +0x25, 'Ύ'/'Ώ' (8E-8F) −1, 'Α'-'Ο' (91-9F) +0x20, 'Π'-'Ω' (A0-A9) and 'Ϊ'/'Ϋ' (AA-AB) −0x20. 'Ό'
- *  (8C) keeps its byte, as only its lead changes.
+ *  (8C) keeps its byte, as only its lead changes. The window at offset 64 flags the leads that
+ *  promote from CE to CF, for the classes whose lowercase lands in CF.
  */
-static sz_u8_t const sz_utf8_uncased_greek_ce_deltas_lut_[64] = {
+static sz_u8_t const sz_utf8_uncased_greek_ce_lut_[128] = {
     0,    0,    0,    0,    0,    0,    0x26, 0,
     0x25, 0x25, 0x25, 0,    0,    0,    0xFF, 0xFF, // CE 80-8F
     0,    0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
@@ -969,18 +970,18 @@ static sz_u8_t const sz_utf8_uncased_greek_ce_deltas_lut_[64] = {
     0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0, 0xE0,
     0xE0, 0xE0, 0xE0, 0xE0, 0,    0,    0,    0, // CE A0-AF
     0,    0,    0,    0,    0,    0,    0,    0,
-    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF (already lowercase)
+    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF
+    0,    0,    0,    0,    0,    0,    0,    0,
+    0,    0,    0,    0,    1,    0,    1,    1, // CE 80-8F: 8C, 8E, 8F
+    0,    0,    0,    0,    0,    0,    0,    0,
+    0,    0,    0,    0,    0,    0,    0,    0, // CE 90-9F: stay under CE
+    1,    1,    1,    1,    1,    1,    1,    1,
+    1,    1,    1,    1,    0,    0,    0,    0, // CE A0-AB: promote
+    0,    0,    0,    0,    0,    0,    0,    0,
+    0,    0,    0,    0,    0,    0,    0,    0, // CE B0-BF
 };
-
-/** Lead-promotion flags (+1, CE → CF) for the second-byte classes whose lowercase lands in the CF
- *  block: 'Ό' (8C), 'Ύ'/'Ώ' (8E-8F), 'Π'-'Ω' (A0-A9), 'Ϊ'/'Ϋ' (AA-AB). 'Α'-'Ο' (91-9F) stay under
- *  CE, so they do not promote. Propagated one lane back through @c next_bytes onto the lead. */
-static sz_u8_t const sz_utf8_uncased_greek_ce_promotes_lut_[64] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, // CE 80-8F: 8C, 8E, 8F promote
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE 90-9F: stay under CE
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, // CE A0-AB: promote to CF
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // CE B0-BF
-};
+static sz_u8_t const *const sz_utf8_uncased_greek_ce_deltas_lut_ = sz_utf8_uncased_greek_ce_lut_ + 0;
+static sz_u8_t const *const sz_utf8_uncased_greek_ce_promotes_lut_ = sz_utf8_uncased_greek_ce_lut_ + 64;
 
 #pragma region Substring Search
 

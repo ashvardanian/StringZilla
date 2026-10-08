@@ -16,6 +16,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_TARGET_ICELAKE
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
 #pragma clang attribute push(                                                                                    \
@@ -275,6 +276,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_sentences_icelake_( //
     sz_size_t *sentence_lengths, sz_size_t sentences_capacity) {
 
     sz_size_t sentences = 0;
+    if (length < 64) return sz_utf8_sentences_serial_(text, length, sentence_lengths, sentences_capacity);
     if (length == 0 || sentences_capacity == 0) return 0;
 
     sz_u8_t const *text_u8 = (sz_u8_t const *)text;
@@ -456,6 +458,7 @@ STRINGZILLA_API sz_status_t sz_utf8_sentences_icelake(sz_cptr_t text, sz_size_t 
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

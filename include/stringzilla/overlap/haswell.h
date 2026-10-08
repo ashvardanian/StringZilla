@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 
+#if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("avx2,fma,bmi,bmi2,popcnt"))), apply_to = function)
@@ -627,6 +628,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engin
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_ARCH_X8664_HASWELL_
+#endif // STRINGZILLA_ARCH_X8664_
 
 #ifdef __cplusplus
 }

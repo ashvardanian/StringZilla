@@ -21,6 +21,7 @@ extern "C" {
  *  word 4 for the high one. Recombining them yields the same 32-bit mask @c _mm256_movemask_epi8
  *  of AVX2 would produce, so the byte order matches and @c ctz and @c clz index bytes
  *  identically to the Haswell backend. */
+#if STRINGZILLA_ARCH_LOONGARCH64_
 #if STRINGZILLA_TARGET_LOONGSONASX
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("lasx"))), apply_to = function)
@@ -125,6 +126,7 @@ STRINGZILLA_API sz_status_t sz_equal_loongsonasx(sz_cptr_t a, sz_cptr_t b, sz_si
 #pragma GCC pop_options
 #endif
 #endif // STRINGZILLA_TARGET_LOONGSONASX
+#endif // STRINGZILLA_ARCH_LOONGARCH64_
 
 #ifdef __cplusplus
 }
