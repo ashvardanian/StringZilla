@@ -98,7 +98,16 @@ static void test_arrow_tape_without_stl() {
     verify(tape.size() == 0);
 }
 
+/** @brief Explicit nonces keep random filling available without LibC. */
+static void test_random_without_libc() {
+    char first[32], second[32];
+    sz::fill_random(sz::string_span(first, sizeof(first)), 42);
+    sz::fill_random(sz::string_span(second, sizeof(second)), 42);
+    verify(sz::string_view(first, sizeof(first)) == sz::string_view(second, sizeof(second)));
+}
+
 int main() {
+    test_random_without_libc();
     test_slices_without_stl();
     test_owning_string_without_stl();
     test_arrow_tape_without_stl();
