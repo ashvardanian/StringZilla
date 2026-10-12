@@ -135,6 +135,93 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u64x2_score_neon(sz_levenshtein_u64x
     return sz_levenshtein_u64x2_score_neon_(state, candidate);
 }
 
+STRINGZILLA_INLINE sz_u128_vec_t sz_levenshtein_u64x2_classes_u8_neon_(sz_u8_t const *classes) {
+    sz_u128_vec_t classes_vec;
+    classes_vec.u64x2 = vcombine_u64(vcreate_u64(classes[0]), vcreate_u64(classes[1]));
+    return classes_vec;
+}
+
+/** Two byte-wide class ids, as the byte transpose emits them, widened to row indices. */
+STRINGZILLA_INLINE sz_u128_vec_t sz_levenshtein_u64x2_classes_u8_neon(sz_u8_t const *classes) {
+    return sz_levenshtein_u64x2_classes_u8_neon_(classes);
+}
+
+STRINGZILLA_INLINE sz_u128_vec_t sz_levenshtein_u64x2_classes_u32_neon_(sz_u32_t const *classes) {
+    sz_u128_vec_t classes_vec;
+    classes_vec.u64x2 = vmovl_u32(vld1_u32(classes));
+    return classes_vec;
+}
+
+/** Two four-byte class ids, as the UTF-8 transpose emits them, widened to row indices. */
+STRINGZILLA_INLINE sz_u128_vec_t sz_levenshtein_u64x2_classes_u32_neon(sz_u32_t const *classes) {
+    return sz_levenshtein_u64x2_classes_u32_neon_(classes);
+}
+
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon_(sz_levenshtein_query_t const *query,
+                                                                 sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                 sz_size_t candidates, sz_size_t *cursors,
+                                                                 sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                                 sz_size_t positions, void *transpose_classes) {
+    sz_unused_(symbol_counts), sz_unused_(transpose_start), sz_unused_(candidates);
+    sz_u8_t const *const byte_to_class = query->byte_to_class;
+    sz_u8_t *const classes = (sz_u8_t *)transpose_classes;
+    sz_size_t filled = 0;
+    for (sz_size_t candidate = 0; candidate != 8; ++candidate)
+        filled = sz_max_of_two(filled,
+                               sz_min_of_two(positions, (sz_size_t)byte_counts[candidate] - cursors[candidate]));
+    sz_size_t position = 0;
+    for (; position + 8 <= filled; position += 8) {
+        sz_bool_t all_full = sz_true_k;
+        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
+            all_full = all_full && cursors[candidate] + 8 <= byte_counts[candidate] ? sz_true_k : sz_false_k;
+        if (!all_full) break;
+        uint8x8_t candidates_u8x8[8];
+        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
+            candidates_u8x8[candidate] = vcreate_u8(
+                sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[candidate] + cursors[candidate]).u64));
+        uint8x8x2_t const pair01_u8x8x2 = vtrn_u8(candidates_u8x8[0], candidates_u8x8[1]);
+        uint8x8x2_t const pair23_u8x8x2 = vtrn_u8(candidates_u8x8[2], candidates_u8x8[3]);
+        uint8x8x2_t const pair45_u8x8x2 = vtrn_u8(candidates_u8x8[4], candidates_u8x8[5]);
+        uint8x8x2_t const pair67_u8x8x2 = vtrn_u8(candidates_u8x8[6], candidates_u8x8[7]);
+        uint16x4x2_t const even03_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair01_u8x8x2.val[0]),
+                                                     vreinterpret_u16_u8(pair23_u8x8x2.val[0]));
+        uint16x4x2_t const odd03_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair01_u8x8x2.val[1]),
+                                                    vreinterpret_u16_u8(pair23_u8x8x2.val[1]));
+        uint16x4x2_t const even47_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair45_u8x8x2.val[0]),
+                                                     vreinterpret_u16_u8(pair67_u8x8x2.val[0]));
+        uint16x4x2_t const odd47_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair45_u8x8x2.val[1]),
+                                                    vreinterpret_u16_u8(pair67_u8x8x2.val[1]));
+        // Position `p` lands in `positions_u32x2x2[p % 4].val[p / 4]`, for all eight candidates.
+        uint32x2x2_t const positions_u32x2x2[4] = {
+            vtrn_u32(vreinterpret_u32_u16(even03_u16x4x2.val[0]), vreinterpret_u32_u16(even47_u16x4x2.val[0])),
+            vtrn_u32(vreinterpret_u32_u16(odd03_u16x4x2.val[0]), vreinterpret_u32_u16(odd47_u16x4x2.val[0])),
+            vtrn_u32(vreinterpret_u32_u16(even03_u16x4x2.val[1]), vreinterpret_u32_u16(even47_u16x4x2.val[1])),
+            vtrn_u32(vreinterpret_u32_u16(odd03_u16x4x2.val[1]), vreinterpret_u32_u16(odd47_u16x4x2.val[1]))};
+        for (sz_size_t offset = 0; offset != 8; ++offset)
+            vst1_u8(classes + (position + offset) * 8,
+                    vreinterpret_u8_u32(positions_u32x2x2[offset % 4].val[offset / 4]));
+        for (sz_size_t candidate = 0; candidate != 8; ++candidate) cursors[candidate] += 8;
+    }
+    for (; position != filled; ++position)
+        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
+            classes[position * 8 + candidate] = cursors[candidate] < byte_counts[candidate]
+                                                    ? byte_to_class[(sz_u8_t)texts[candidate][cursors[candidate]++]]
+                                                    : 0;
+    return filled;
+}
+
+/** The byte transpose for eight candidates, two per register across four registers: eight
+ *  positions per eight loads and three rounds of @c vtrn while every candidate has eight bytes
+ *  left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon(sz_levenshtein_query_t const *query,
+                                                                sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                                sz_size_t candidates, sz_size_t *cursors,
+                                                                sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                                sz_size_t positions, void *transpose_classes) {
+    return sz_levenshtein_u8x8_transpose_neon_(query, texts, byte_counts, candidates, cursors, symbol_counts,
+                                               transpose_start, positions, transpose_classes);
+}
+
 enum { sz_levenshtein_u64x2_candidates_per_step_neon_k = 2, sz_levenshtein_u64x2_registers_per_position_neon_k = 4 };
 
 STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t const *shared_query,
