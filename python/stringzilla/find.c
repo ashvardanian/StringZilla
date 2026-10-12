@@ -345,7 +345,10 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
         return NULL;
     }
 
-    // If separator is not found, return a tuple (self, "", "")
+    // Module-level functions receive the module as `self`, so the parts must reference the text argument
+    PyObject *owner = self != NULL && PyObject_TypeCheck(self, &StrType) ? self : args[0];
+
+    // If separator is not found, return (self, "", "") for `partition` and ("", "", self) for `rpartition`
     if (separator_index == -1) {
         PyObject *empty_str1 = Str_new(&StrType, Py_None, Py_None);
         PyObject *empty_str2 = Str_new(&StrType, Py_None, Py_None);
@@ -361,10 +364,17 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
             Py_DECREF(empty_str2);
             return NULL;
         }
-        Py_INCREF(self);
-        PyTuple_SET_ITEM(result_tuple, 0, self);
-        PyTuple_SET_ITEM(result_tuple, 1, empty_str1);
-        PyTuple_SET_ITEM(result_tuple, 2, empty_str2);
+        Py_INCREF(owner);
+        if (is_reverse) {
+            PyTuple_SET_ITEM(result_tuple, 0, empty_str1);
+            PyTuple_SET_ITEM(result_tuple, 1, empty_str2);
+            PyTuple_SET_ITEM(result_tuple, 2, owner);
+        }
+        else {
+            PyTuple_SET_ITEM(result_tuple, 0, owner);
+            PyTuple_SET_ITEM(result_tuple, 1, empty_str1);
+            PyTuple_SET_ITEM(result_tuple, 2, empty_str2);
+        }
         return result_tuple;
     }
 
@@ -379,16 +389,16 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
         return NULL;
     }
 
-    before->parent = self, before->memory.start = text.start, before->memory.length = separator_index;
-    middle->parent = self, middle->memory.start = text.start + separator_index,
+    before->parent = owner, before->memory.start = text.start, before->memory.length = separator_index;
+    middle->parent = owner, middle->memory.start = text.start + separator_index,
     middle->memory.length = separator.length;
-    after->parent = self, after->memory.start = text.start + separator_index + separator.length,
+    after->parent = owner, after->memory.start = text.start + separator_index + separator.length,
     after->memory.length = text.length - separator_index - separator.length;
 
     // All parts reference the same parent
-    Py_INCREF(self);
-    Py_INCREF(self);
-    Py_INCREF(self);
+    Py_INCREF(owner);
+    Py_INCREF(owner);
+    Py_INCREF(owner);
 
     // Build the result tuple
     result_tuple = PyTuple_New(3);

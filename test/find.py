@@ -195,6 +195,9 @@ def test_unit_globals():
     # Compare partitioning functions
     assert sz.partition("abcdef", "c") == ("ab", "c", "def")
     assert sz.rpartition("abcdef", "c") == ("ab", "c", "def")
+    assert sz.partition("abcdef", "x") == ("abcdef", "", "")
+    assert sz.rpartition("abcdef", "x") == ("", "", "abcdef")
+    assert tuple(map(str, Str("abcdef").rpartition("x"))) == ("", "", "abcdef")
 
     with pytest.raises(ValueError):
         sz.partition("abcdef", "")
