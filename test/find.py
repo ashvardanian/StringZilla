@@ -192,9 +192,14 @@ def test_unit_globals():
     assert sz.count_byteset("hello world", "aeiou", 2) == 2  # o, o
     assert sz.count_byteset("hello world", "aeiou", 0, 5) == 2  # e, o in "hello"
 
-    # Compare partitioning functions
+    # Compare partitioning functions.
     assert sz.partition("abcdef", "c") == ("ab", "c", "def")
     assert sz.rpartition("abcdef", "c") == ("ab", "c", "def")
+    assert sz.partition("abcdef", "x") == ("abcdef", "", "")
+    assert sz.rpartition("abcdef", "x") == ("", "", "abcdef")
+    assert Str("abcdef").rpartition("x") == ("", "", "abcdef")
+    parts = sz.partition(bytearray(b"abc:def"), b":")
+    assert parts == (b"abc", b":", b"def")
 
     with pytest.raises(ValueError):
         sz.partition("abcdef", "")
