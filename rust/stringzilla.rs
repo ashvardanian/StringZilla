@@ -155,9 +155,38 @@ extern "C" {
         strings: *const sz_strings_view_t,
         order: *const sz_size_t,
         count: sz_size_t,
-        form: Utf8NormalForm,
+        form: NormalForm,
         allocator: *mut sz_allocator_t,
         tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_split_best(
+        text: *const u8,
+        length: sz_size_t,
+        delimiters: *const Byteset,
+        kind: SplitKind,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_split_lines_best(
+        text: *const u8,
+        length: sz_size_t,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_join_best(
+        columns: *const sz_strings_view_t,
+        columns_count: sz_size_t,
+        rows: sz_size_t,
+        frames: *const sz_string_view_t,
+        between: sz_string_view_t,
+        output: *mut u8,
+        length: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -168,6 +197,16 @@ extern "C" {
         needle: *const c_void,
         needle_length: sz_size_t,
         found: *mut *const c_void,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_find_strings_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        needle: *const u8,
+        needle_length: sz_size_t,
+        positions: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -201,6 +240,15 @@ extern "C" {
         text: *const c_void,
         length: sz_size_t,
         count: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_utf8_count_strings_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        runes: *mut sz_size_t,
+        malformed_index: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -266,7 +314,7 @@ extern "C" {
     pub(crate) fn sz_utf8_norm_best(
         source: *const c_void,
         source_length: sz_size_t,
-        form: Utf8NormalForm,
+        form: NormalForm,
         target: *mut c_void,
         target_length: *mut sz_size_t,
         capabilities: sz_capability_t,
@@ -275,7 +323,7 @@ extern "C" {
     pub(crate) fn sz_utf8_find_denormalized_best(
         source: *const c_void,
         source_length: sz_size_t,
-        form: Utf8NormalForm,
+        form: NormalForm,
         found: *mut *const c_void,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
@@ -373,6 +421,15 @@ extern "C" {
         length: sz_size_t,
         seed: u64,
         hash: *mut u64,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_hash_strings_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        seed: u64,
+        hashes: *mut u64,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -741,12 +798,12 @@ pub(crate) union sz_strings_data_t {
     pub(crate) tape: sz_strings_tape_t,
 }
 
-/// Mirror of C's `sz_strings_view_t`, a borrowed collection the C side only reads, which
-/// [`Strings`] implementations hand to it and which is opaque outside this crate.
+/// Mirror of C's `sz_strings_view_t`, a borrowed collection the C side only reads, which a
+/// [`StringsView`] wraps.
 #[allow(non_camel_case_types)]
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct sz_strings_view_t {
+pub(crate) struct sz_strings_view_t {
     pub(crate) layout: sz_strings_layout_t,
     pub(crate) count: sz_size_t,
     pub(crate) data: sz_strings_data_t,
@@ -783,21 +840,8 @@ const _: () = {
     assert!(size_of::<sz_allocator_t>() == 4 * word && size_of::<sz_strings_rows_t>() == 3 * word);
 };
 
-/// Binds `items` into a `sz_strings_view_t` that lives for the span of `call`, allocating nothing.
-///
-/// The accessor reads the caller's slices in place, so the view borrows rather than copies and
-/// must never outlive the call the C side makes through it.
-pub(crate) fn with_strings<Element, Return>(
-    items: &[Element],
-    call: impl FnOnce(&sz_strings_view_t) -> Return,
-) -> Return
-where
-    Element: AsRef<[u8]>,
-{
-    with_strings_by(items, |item| item.as_ref(), call)
-}
-
-/// Binds `items` as [`with_strings`] does, reading each one's bytes through `key`.
+/// Binds `items` into a `sz_strings_view_t` that lives for the span of `call`, reading each one's
+/// bytes in place through `key`, which a [`StringsView`] cannot carry.
 ///
 /// The C side calls `key` from inside `call`, where a panic cannot unwind and aborts the process.
 pub(crate) fn with_strings_by<Element, Key, Return>(

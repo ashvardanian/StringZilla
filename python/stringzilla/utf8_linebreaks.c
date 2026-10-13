@@ -18,17 +18,16 @@ char const doc_utf8_linebreaks[] =                                              
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Returns:\n"                                                                                         //
-    "    Iterator yielding Str objects for each line-break-opportunity segment.\n\n"                     //
+    "    Iterator yielding String objects for each line-break-opportunity segment.\n\n"                  //
     "\n"                                                                                                 //
     "Example:\n"                                                                                         //
     "  >>> # Stream UAX-14 line-break opportunities lazily:\n"                                           //
     "  >>> len(list(sz.utf8_linebreaks('a\\nb'))) >= 2\n"                                                //
     "  True";
 
-PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *kwnames) {
-    sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8LinebreaksType, "utf8_linebreaks", sz_utf8_linebreaks_best, args,
+PyObject *String_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *kwnames) {
+    return Utf8Boundaries_make_(&Utf8LinebreaksType, "utf8_linebreaks", sz_utf8_linebreaks_best, self, args,
                                 positional_args_count, kwnames);
 }
 
@@ -36,11 +35,11 @@ static char const doc_Utf8Linebreaks[] =                                        
     "Utf8Linebreaks(string, ...)\n"                                               //
     "\n"                                                                          //
     "UTF-8 aware line-break-opportunity iterator per Unicode UAX-14 algorithm.\n" //
-    "Yields Str views for each line-break-opportunity segment, a soft wrap.\n"    //
+    "Yields String views for each line-break-opportunity segment, a soft wrap.\n" //
     "For hard-line splitting (str.splitlines()), use utf8_split_newlines().\n"    //
     "\n"                                                                          //
     "Created by:\n"                                                               //
-    "  - Str.utf8_linebreaks()\n"                                                 //
+    "  - String.utf8_linebreaks()\n"                                              //
     "  - sz.utf8_linebreaks()\n"                                                  //
     "\n"                                                                          //
     "UAX-14 Line_Break rules implemented:\n"                                      //

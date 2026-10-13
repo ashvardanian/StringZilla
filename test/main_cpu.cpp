@@ -48,10 +48,10 @@ using namespace ashvardanian::stringzilla::test;
 #if !STRINGZILLA_HEADER_ONLY
 
 template class std::basic_string_view<char>;
-template class sz::basic_string_slice<char>;
+template class sz::string_slice<char>;
 template class std::basic_string<char>;
-template class sz::basic_string<>;
-template class sz::basic_string_slice<char const>;
+template class sz::string<>;
+template class sz::string_slice<char const>;
 
 template class std::vector<sz::string_t>;
 template class std::map<sz::string_t, int>;
@@ -108,6 +108,9 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_strings_unescape_best),
         call_stub_(sz_strings_lookup_best),
         call_stub_(sz_strings_normalize_best),
+        call_stub_(sz_strings_split_best),
+        call_stub_(sz_strings_split_lines_best),
+        call_stub_(sz_strings_join_best),
         call_stub_(sz_allocator_init_unified_best),
         call_stub_(sz_allocator_init_device_best),
         call_stub_(sz_allocator_init_pinned_best),
@@ -117,9 +120,11 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_rfind_best),
         call_stub_(sz_find_byteset_best),
         call_stub_(sz_rfind_byteset_best),
+        call_stub_(sz_find_strings_best),
         call_stub_(sz_bytesum_best),
         call_stub_(sz_hash_best),
         call_stub_(sz_hash_multiseed_best),
+        call_stub_(sz_hash_strings_best),
         call_stub_(sz_hash_state_init_best),
         call_stub_(sz_hash_state_update_best),
         call_stub_(sz_hash_state_digest_best),
@@ -146,6 +151,7 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_sort_uncased_order_best),
         call_stub_(sz_intersect_best),
         call_stub_(sz_utf8_count_best),
+        call_stub_(sz_utf8_count_strings_best),
         call_stub_(sz_utf8_seek_best),
         call_stub_(sz_utf8_decode_best),
         call_stub_(sz_utf8_newlines_best),
@@ -262,8 +268,7 @@ int main(int, char const **argv) {
     failures += run_test(env.settings, "test_device_unit", test_device_unit);
     failures += run_test(env.settings, "test_arithmetic_unit", test_arithmetic_unit);
     failures += run_test(env.settings, "test_strings_view_unit", test_strings_view_unit);
-    failures += run_test(env.settings, "test_tape_assign_unit", test_tape_assign_unit);
-    failures += run_test(env.settings, "test_tape_overflow_unit", test_tape_overflow_unit);
+    failures += run_test(env.settings, "test_strings_columns_unit", test_strings_columns_unit);
     failures += run_test(env.settings, "test_allocator_unit", test_allocator_unit);
     failures += run_test(env.settings, "test_byteset_unit", test_byteset_unit);
 

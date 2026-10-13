@@ -39,7 +39,7 @@ char const doc_utf8_norm[] =                                                    
     "case folding and no default-ignorable codepoints.\n"                                                //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
+    "    text (String or str or bytes): The input UTF-8 string.\n"                                       //
     "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.\n"                            //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
@@ -55,9 +55,9 @@ char const doc_utf8_norm[] =                                                    
     "    >>> sz.utf8_norm('Stra\\u00dfe\\u00ad', 'NFKC_Casefold')  # folded, soft hyphen dropped\n"      //
     "    b'strasse'";
 
-PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                             PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t nargs_expected = !is_member + 1; // +1 for the `form` argument
     int validate = 0;                           // Default: no validation
     PyObject *form_obj = NULL, *capabilities_object = NULL;
@@ -161,7 +161,7 @@ char const doc_utf8_find_denormalized[] =                                       
     "fully normalized.\n"                                                                                //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
+    "    text (String or str or bytes): The input UTF-8 string.\n"                                       //
     "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.\n"                            //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
@@ -174,9 +174,9 @@ char const doc_utf8_find_denormalized[] =                                       
     "    >>> sz.utf8_find_denormalized('caf\\u00e9', 'NFC') is None  # precomposed, already NFC\n"       //
     "    True";
 
-PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_utf8_find_denormalized(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t nargs_expected = !is_member + 1; // +1 for `form`
     PyObject *form_obj = NULL, *capabilities_object = NULL;
 

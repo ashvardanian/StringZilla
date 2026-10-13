@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""UAX-14 line-break-opportunity segmentation: sz.utf8_linebreaks and the Str.utf8_linebreaks method.
+"""UAX-14 line-break-opportunity segmentation: sz.utf8_linebreaks and the String.utf8_linebreaks method.
 
 Mirrors the C++ test/utf8_linebreaks.cpp translation unit.
 
 Covers: basic and Unicode line iteration including CRLF as a single break opportunity, the tiling
-invariant across empty, single-line, and blank-line inputs, and Str-method parity with the module
+invariant across empty, single-line, and blank-line inputs, and String-method parity with the module
 function; adversarial malformed UTF-8 safety and SIMD window-seam and byte-offset phase sweeps;
 bit-exact conformance against every case in the official LineBreakTest, Line_Break class-adjacency
 pairs, differential fuzzing, and realistic multi-script prose; and cross-backend agreement on
@@ -44,7 +44,7 @@ from utf8_helpers import (
 )
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 _byte_boundaries = byte_boundaries
 
@@ -53,7 +53,7 @@ _byte_boundaries = byte_boundaries
 
 
 def test_utf8_linebreaks_basic():
-    """Line iteration yields Str segments that tile a multi-line text, a single line, and an empty
+    """Line iteration yields String segments that tile a multi-line text, a single line, and an empty
     string, which yields none."""
     result = [str(seg) for seg in sz.utf8_linebreaks("first\nsecond")]
     assert "".join(result) == "first\nsecond"  # Segments tile the input.
@@ -92,10 +92,10 @@ def test_utf8_linebreaks_unicode():
     assert "".join(result) == "a\r\nb"
 
 
-def test_utf8_linebreaks_str_method():
-    """The Str.utf8_linebreaks() method must agree with the module function."""
-    s = Str("first\nsecond")
-    method_result = [str(seg) for seg in s.utf8_linebreaks(s)]
+def test_utf8_linebreaks_string_method():
+    """The String.utf8_linebreaks() method must agree with the module function."""
+    s = String("first\nsecond")
+    method_result = [str(seg) for seg in s.utf8_linebreaks()]
     module_result = [str(seg) for seg in sz.utf8_linebreaks(s)]
     assert method_result == module_result
     assert method_result == [str(seg) for seg in sz.utf8_linebreaks("first\nsecond")]

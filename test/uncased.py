@@ -44,7 +44,7 @@ UNCASED_DEGENERATE_BOUNDS = [-11, -2, 0, 2, 6, 7]
 
 
 def test_unit_utf8_uncased_fold():
-    """Folds ASCII text, empty input, German sharp S, and both Str and bytes input forms to lowercase."""
+    """Folds ASCII text, empty input, German sharp S, and both String and bytes input forms to lowercase."""
     # ASCII
     assert sz.utf8_uncased_fold("HELLO") == b"hello"
     assert sz.utf8_uncased_fold("Hello World") == b"hello world"
@@ -55,8 +55,8 @@ def test_unit_utf8_uncased_fold():
     assert sz.utf8_uncased_fold("Straße") == b"strasse"
     assert sz.utf8_uncased_fold("GROSSE") == b"grosse"
 
-    # Method form on Str
-    assert sz.Str("HELLO").utf8_uncased_fold() == b"hello"
+    # Method form on String
+    assert sz.String("HELLO").utf8_uncased_fold() == b"hello"
 
     # Bytes input
     assert sz.utf8_uncased_fold(b"HELLO") == b"hello"
@@ -113,8 +113,8 @@ def test_utf8_uncased_search(haystack, needle, expected):
 
 
 def test_utf8_uncased_search_method():
-    """utf8_uncased_search is available as a Str method with the same semantics as the free function."""
-    s = sz.Str("Hello World")
+    """utf8_uncased_search is available as a String method with the same semantics as the free function."""
+    s = sz.String("Hello World")
     assert s.utf8_uncased_search("WORLD") == 6
     assert s.utf8_uncased_search("hello") == 0
     assert s.utf8_uncased_search("xyz") == -1
@@ -190,11 +190,11 @@ def test_utf8_uncased_search_slicing():
 )
 def test_utf8_uncased_matches(haystack, needle, expected_matches):
     """utf8_uncased_matches yields every case-insensitive match, agreeing between the free function
-    and the Str method."""
+    and the String method."""
     matches = [str(m) for m in sz.utf8_uncased_matches(haystack, needle)]
     assert matches == expected_matches
     # Also test method form
-    matches_method = [str(m) for m in sz.Str(haystack).utf8_uncased_matches(needle)]
+    matches_method = [str(m) for m in sz.String(haystack).utf8_uncased_matches(needle)]
     assert matches_method == expected_matches
 
 
@@ -266,8 +266,8 @@ def test_utf8_uncased_order():
     # Cyrillic
     assert sz.utf8_uncased_order("ПРИВЕТ", "привет") == 0
 
-    # Method form on Str
-    s = sz.Str("hello")
+    # Method form on String
+    s = sz.String("hello")
     assert s.utf8_uncased_order("HELLO") == 0
 
     # bytes input

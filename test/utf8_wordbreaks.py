@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""UAX-29 word-boundary segmentation: utf8_wordbreaks and Str.utf8_wordbreaks.
+"""UAX-29 word-boundary segmentation: utf8_wordbreaks and String.utf8_wordbreaks.
 
 Mirrors the C++ test/utf8_wordbreaks.cpp translation unit.
 
 Covers: basic word iteration and the skip_empty flag, TR29 contraction/number/apostrophe handling,
-multi-script and emoji text, the Str method surface, adversarial-byte and window-seam safety sweeps,
+multi-script and emoji text, the String method surface, adversarial-byte and window-seam safety sweeps,
 exact conformance against the official WordBreakTest.txt, class-adjacency pairs and triples built from
 the Word_Break property table, randomized differential fuzzing, realistic multi-script prose, and
 cross-backend agreement on realistic, malformed, and lane-straddling inputs.
@@ -46,7 +46,7 @@ from utf8_helpers import (
 )
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 # region Unit
 
@@ -152,12 +152,11 @@ def test_utf8_wordbreaks_deferred_mid(run_length: int):
         assert [str(w) for w in sz.utf8_wordbreaks(text)] == expected
 
 
-def test_utf8_wordbreaks_str_method():
-    """`Str.utf8_wordbreaks()` and the module-level `sz.utf8_wordbreaks()` return identical segmentation
+def test_utf8_wordbreaks_string_method():
+    """`String.utf8_wordbreaks()` and the module-level `sz.utf8_wordbreaks()` return identical segmentation
     for `"hello world"`."""
-    s = Str("hello world")
-    # Method requires text argument, even when called on Str object
-    result = [str(w) for w in s.utf8_wordbreaks(s)]
+    s = String("hello world")
+    result = [str(w) for w in s.utf8_wordbreaks()]
     assert result == ["hello", " ", "world"]
 
     # Also test via module function

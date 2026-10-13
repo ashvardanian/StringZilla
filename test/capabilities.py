@@ -1,5 +1,5 @@
 """Capability tests: the sz.{cpu,cuda,rocm,metal}_capabilities_{detected,compiled,enabled} producers,
-the sz.{cuda,rocm,metal}_stream_{init,free} producers, cpu_configure_thread, Strs.copy and
+the sz.{cuda,rocm,metal}_stream_{init,free} producers, cpu_configure_thread, Strings.copy and
 synchronize.
 
 Capabilities are reported along two independent axes, `detected` (what a device can execute) and
@@ -30,6 +30,7 @@ import time
 import weakref
 
 import pytest
+from base import get_random_string, scale_iterations
 
 import stringzilla as sz
 
@@ -137,7 +138,7 @@ def test_capabilities_keyword_narrows_one_call():
 
 def test_engine_capabilities_narrow_the_cpu():
     """A CPU engine's `capabilities=` is clamped to what this CPU runs, and it takes no stream."""
-    queries = sz.Strs(["kitten", "saturday"])
+    queries = sz.Strings(["kitten", "saturday"])
     everything = sz.cpu_capabilities_detected() | sz.cpu_capabilities_compiled()
     for capabilities in (sz.Capability.SERIAL, everything):
         distances = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
@@ -185,24 +186,24 @@ def test_cpu_copies_read_like_their_strings():
     """A tape copied for the CPU reads like the strings it came from, on the host and in an engine."""
     texts = ["kitten", "", "sitting"]
     capabilities = sz.cpu_capabilities_enabled()
-    tape = sz.Strs(texts).copy(capabilities)
-    assert tape == sz.Strs(texts) and [str(text) for text in tape[1:]] == texts[1:]
-    queries = sz.Strs(["kitten"])
-    from_strs = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
+    tape = sz.Strings(texts).copy(capabilities)
+    assert tape == sz.Strings(texts) and [str(text) for text in tape[1:]] == texts[1:]
+    queries = sz.Strings(["kitten"])
+    from_strings = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
     from_tape = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
     engine = sz.LevenshteinEngine(queries)
-    engine.distances(sz.Strs(texts), from_strs)
+    engine.distances(sz.Strings(texts), from_strings)
     engine.distances(tape, from_tape)
-    assert from_tape.tolist() == from_strs.tolist()
+    assert from_tape.tolist() == from_strings.tolist()
     assert sz.synchronize(capabilities) is None and sz.synchronize(capabilities, stream=None) is None
     with pytest.raises(TypeError):
-        sz.Strs(texts).copy()
+        sz.Strings(texts).copy()
 
 
 def test_engine_calls_from_many_threads_agree():
     """Threads scoring through one shared engine and through engines of their own all get the one-thread answer."""
-    queries = sz.Strs(["kitten", "saturday", "sunday"])
-    candidates = sz.Strs(["sitting", "sunday", "monday", "", "kitten"] * 64)
+    queries = sz.Strings(["kitten", "saturday", "sunday"])
+    candidates = sz.Strings(["sitting", "sunday", "monday", "", "kitten"] * 64)
 
     def score(engine):
         distances = memoryview(bytearray(len(queries) * len(candidates) * 8)).cast("Q", (len(queries), len(candidates)))
@@ -220,8 +221,8 @@ def test_engine_calls_from_many_threads_agree():
 @pytest.mark.thread_unsafe  # Times one call against a spinning thread, which other test threads would slow down.
 def test_engine_verbs_release_the_gil(rng):
     """Another Python thread keeps running through a long engine call, which only holds the engine's own lock."""
-    queries = sz.Strs(["".join(rng.choice("acgt") for _ in range(60)) for _ in range(64)])
-    candidates = sz.Strs(["".join(rng.choice("acgt") for _ in range(60)) for _ in range(8192)])
+    queries = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(64))])
+    candidates = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(8192))])
     engine = sz.LevenshteinEngine(queries)
     distances = memoryview(bytearray(len(queries) * len(candidates) * 8)).cast("Q", (len(queries), len(candidates)))
     ticks, stop = [0], threading.Event()
@@ -272,20 +273,20 @@ def unified_array(shape, dtype):
 
 
 def test_gpu_engine_reads_gpu_tapes():
-    """A CUDA engine scores `Strs.copy` candidates as the CPU engine does, once the stream is synchronized.
+    """A CUDA engine scores `Strings.copy` candidates as the CPU engine does, once the stream is synchronized.
 
     The CPU engine reads the same tape, while the strings in host memory are refused by the device.
     """
     gpu = cuda_capabilities_or_skip()
     texts = ["sitting", "sunday", "monday", "", "kitten"]
-    candidates = sz.Strs(texts).copy(gpu)
+    candidates = sz.Strings(texts).copy(gpu)
     assert len(candidates) == len(texts) and [str(text) for text in candidates] == texts
-    assert candidates == sz.Strs(texts) and str(candidates[1]) == "sunday" and str(candidates[-1]) == "kitten"
+    assert candidates == sz.Strings(texts) and str(candidates[1]) == "sunday" and str(candidates[-1]) == "kitten"
 
-    queries = sz.Strs(["kitten", "saturday"])
+    queries = sz.Strings(["kitten", "saturday"])
     expected = memoryview(bytearray(len(queries) * len(texts) * 8)).cast("Q", (len(queries), len(texts)))
     from_tape = memoryview(bytearray(len(queries) * len(texts) * 8)).cast("Q", (len(queries), len(texts)))
-    sz.LevenshteinEngine(queries).distances(sz.Strs(texts), expected)
+    sz.LevenshteinEngine(queries).distances(sz.Strings(texts), expected)
     sz.LevenshteinEngine(queries).distances(candidates, from_tape)
     assert from_tape.tolist() == expected.tolist()
     engine = sz.LevenshteinEngine(queries, capabilities=gpu)
@@ -294,4 +295,4 @@ def test_gpu_engine_reads_gpu_tapes():
     sz.synchronize(gpu)
     assert distances.tolist() == expected.tolist()
     with pytest.raises(BufferError):
-        engine.distances(sz.Strs(texts), distances)
+        engine.distances(sz.Strings(texts), distances)

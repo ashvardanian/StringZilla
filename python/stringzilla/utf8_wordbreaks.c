@@ -17,17 +17,16 @@ char const doc_utf8_wordbreaks[] =                                              
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Returns:\n"                                                                                         //
-    "    Iterator yielding Str objects for each word.\n\n"                                               //
+    "    Iterator yielding String objects for each word.\n\n"                                            //
     "\n"                                                                                                 //
     "Example:\n"                                                                                         //
     "  >>> # Stream UAX-29 word tokens lazily:\n"                                                        //
     "  >>> 'world' in (str(w) for w in sz.utf8_wordbreaks('Hi, world'))\n"                               //
     "  True";
 
-PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *kwnames) {
-    sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8WordbreaksType, "utf8_wordbreaks", sz_utf8_wordbreaks_best, args,
+PyObject *String_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *kwnames) {
+    return Utf8Boundaries_make_(&Utf8WordbreaksType, "utf8_wordbreaks", sz_utf8_wordbreaks_best, self, args,
                                 positional_args_count, kwnames);
 }
 
@@ -38,7 +37,7 @@ static char const doc_Utf8Wordbreaks[] =                                     //
     "Yields words, the text segments between consecutive word boundaries.\n" //
     "\n"                                                                     //
     "Created by:\n"                                                          //
-    "  - Str.utf8_wordbreaks()\n"                                            //
+    "  - String.utf8_wordbreaks()\n"                                         //
     "  - sz.utf8_wordbreaks()\n"                                             //
     "\n"                                                                     //
     "UAX-29 Word_Break rules implemented:\n"                                 //

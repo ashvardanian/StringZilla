@@ -18,17 +18,16 @@ char const doc_utf8_graphemes[] =                                               
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Returns:\n"                                                                                         //
-    "    Iterator yielding Str objects for each grapheme cluster.\n\n"                                   //
+    "    Iterator yielding String objects for each grapheme cluster.\n\n"                                //
     "\n"                                                                                                 //
     "Example:\n"                                                                                         //
     "  >>> # Stream UAX-29 grapheme clusters lazily:\n"                                                  //
     "  >>> [str(g) for g in sz.utf8_graphemes('abc')]\n"                                                 //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *kwnames) {
-    sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8GraphemesType, "utf8_graphemes", sz_utf8_graphemes_best, args,
+PyObject *String_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *kwnames) {
+    return Utf8Boundaries_make_(&Utf8GraphemesType, "utf8_graphemes", sz_utf8_graphemes_best, self, args,
                                 positional_args_count, kwnames);
 }
 
@@ -39,7 +38,7 @@ static char const doc_Utf8Graphemes[] =                                         
     "Yields grapheme clusters, the user-perceived characters.\n"                     //
     "\n"                                                                             //
     "Created by:\n"                                                                  //
-    "  - Str.utf8_graphemes()\n"                                                     //
+    "  - String.utf8_graphemes()\n"                                                  //
     "  - sz.utf8_graphemes()\n"                                                      //
     "\n"                                                                             //
     "UAX-29 Grapheme_Cluster_Break rules implemented:\n"                             //

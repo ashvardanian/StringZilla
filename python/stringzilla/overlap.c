@@ -136,23 +136,23 @@ static int OverlapEngine_init(OverlapEngine *self, PyObject *args, PyObject *kwa
 
 #pragma region Operations
 
-static char const doc_OverlapEngine_scores[] =                                                     //
-    "scores(candidates, out, *, stream=None) -> None\n"                                            //
-    "\n"                                                                                           //
-    "Score every prepared query against every candidate, at every width, into `out`.\n"            //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  candidates (Strs): Texts whose windows probe the forest, from `Strs.copy` on a GPU.\n"      //
-    "  out (buffer): Writable 3-D buffer of 32-bit floats, at least\n"                             //
-    "    (len(queries), len(candidates), len(widths)), contiguous along its width axis.\n"         //
-    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"   //
-    "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n" //
-    "    and read only after the caller joins the stream; a host engine ignores it.\n"             //
-    "Example:\n"                                                                                   //
-    "  >>> engine = sz.OverlapEngine(sz.Strs(['abcdef']), [3])\n"                                  //
-    "  >>> out = memoryview(bytearray(4)).cast('f', (1, 1, 1))\n"                                  //
-    "  >>> engine.scores(sz.Strs(['abcdef']), out)\n"                                              //
-    "  >>> out[0, 0, 0]\n"                                                                         //
+static char const doc_OverlapEngine_scores[] =                                                      //
+    "scores(candidates, out, *, stream=None) -> None\n"                                             //
+    "\n"                                                                                            //
+    "Score every prepared query against every candidate, at every width, into `out`.\n"             //
+    "\n"                                                                                            //
+    "Args:\n"                                                                                       //
+    "  candidates (Strings): Texts whose windows probe the forest, from `Strings.copy` on a GPU.\n" //
+    "  out (buffer): Writable 3-D buffer of 32-bit floats, at least\n"                              //
+    "    (len(queries), len(candidates), len(widths)), contiguous along its width axis.\n"          //
+    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"    //
+    "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n"  //
+    "    and read only after the caller joins the stream; a host engine ignores it.\n"              //
+    "Example:\n"                                                                                    //
+    "  >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3])\n"                                //
+    "  >>> out = memoryview(bytearray(4)).cast('f', (1, 1, 1))\n"                                   //
+    "  >>> engine.scores(sz.Strings(['abcdef']), out)\n"                                            //
+    "  >>> out[0, 0, 0]\n"                                                                          //
     "  1.0";
 
 static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args, Py_ssize_t positional_args_count,
@@ -240,7 +240,7 @@ static char const doc_OverlapEngine[] =                                         
     "that the query also spells, in [0, 1]. The score is asymmetric in the two sides.\n"             //
     "\n"                                                                                             //
     "Args:\n"                                                                                        //
-    "  queries (Strs): Texts whose windows are sorted into the forest.\n"                            //
+    "  queries (Strings): Texts whose windows are sorted into the forest.\n"                         //
     "  widths (sequence of int): Window widths in bytes, the last axis of every output.\n"           //
     "  candidates_budget (int, optional): The most candidates one round may carry on a device,\n"    //
     "    ignored on the CPU.\n"                                                                      //
@@ -249,9 +249,9 @@ static char const doc_OverlapEngine[] =                                         
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"  //
     "    for the default.\n"                                                                         //
     "Example:\n"                                                                                     //
-    "  >>> engine = sz.OverlapEngine(sz.Strs(['abcdef']), [3, 4])\n"                                 //
+    "  >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3, 4])\n"                              //
     "  >>> out = memoryview(bytearray(8)).cast('f', (1, 1, 2))\n"                                    //
-    "  >>> engine.scores(sz.Strs(['abcdefg']), out)\n"                                               //
+    "  >>> engine.scores(sz.Strings(['abcdefg']), out)\n"                                            //
     "  >>> 0.0 <= out[0, 0, 0] <= 1.0\n"                                                             //
     "  True";
 

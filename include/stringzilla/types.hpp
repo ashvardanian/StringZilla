@@ -13,13 +13,13 @@
  *  - @c ssize_t, @c ptr_t, @c cptr_t - address-related types.
  *  - @c status_t, @c bool_t, @c ordering_t, @c rune_t, @c rune_length_t, @c error_cost_t - logic.
  *
- *  The header also provides these higher-level types:
+ *  The header also provides @c strings_view_t, a borrowed column of strings in any layout of
+ *  @c sz_strings_view_t, and these higher-level types:
  *
  *  - `std::span<value_type>` - a view to a contiguous memory block of @c value_type elements.
  *  - `dummy_alloc<value_type>` - a dummy memory allocator shaped like @c std::allocator.
  *  - `vector<value_type, allocator_type>` - owning storage with fallible allocation.
- *  - `tape<char_type, offset_type, allocator_type>` - an owning sequence of packed strings.
- *  - `tape_view<char_type, offset_type>` - a borrowed view over string bytes and offsets.
+ *  - `strings<allocator_type>` - an owned column of strings, an @c sz_strings_span_t tape.
  */
 #ifndef STRINGZILLA_TYPES_HPP_
 #define STRINGZILLA_TYPES_HPP_
@@ -416,7 +416,7 @@ struct heap_alloc {
 /**
  *  @brief Random access iterator for any immutable container with indexed element lookup support.
  *
- *  @note Designed for @c tape and @c tape_view compatibility with STL
+ *  @note Designed for @c strings_view_t and @c strings compatibility with STL
  *      algorithms and ranges.
  */
 template <typename container_type_>
@@ -529,363 +529,323 @@ struct indexed_container_iterator {
     }
 };
 
-/** Length convention for @ref tape_view element spans. */
-enum class tape_termination_t {
+#pragma region String Collections
 
-    /** Matches @ref tape: a trailing @c '\0' is excluded, so elements
-     *  read as C-strings. */
-    nul_terminated_k,
+/** Allocates @p n bytes through the C++ allocator behind @p allocator_state, reading its throw as
+ *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
+template <typename allocator_type_>
+inline void *allocate_through_(sz_size_t n, void *allocator_state, void *) noexcept {
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+    try {
+        return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state),
+                                                                n);
+    }
+    catch (...) {
+        return nullptr;
+    }
+#else
+    return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
+#endif
+}
 
-    /** Raw Apache Arrow / cuDF / Parquet: the full `[offsets[i], offsets[i+1])`
-     *  span, no terminator. */
-    packed_k,
-};
+template <typename allocator_type_>
+inline void free_through_(void *ptr, sz_size_t n, void *allocator_state, void *) noexcept {
+    using value_type_ = typename allocator_type_::value_type;
+    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
+}
 
 /**
- *  @brief Borrowed variable-length elements in a buffer, delimited by a `count + 1` offsets array.
+ *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_allocator_t.
  *
- *  @tparam char_type_ Buffer element type: @c char, @c std::byte, or a wider unit.
- *  @tparam offset_type_ Offset type into the buffer, typically @c int32_t or @c int64_t.
- *  @tparam termination_ Length convention, see @ref tape_termination_t.
- *  @sa tape
+ *  A C++ allocator cannot resize a block where it lies, so @c reallocate stays null, as the C
+ *  contract allows, and the C side moves a block that must change size through @c allocate and
+ *  @c free.
  *
- *  Elements exclude the trailing NUL by default, matching @ref tape. Use @c packed_k for
- *  terminator-free Apache Arrow and cuDF columns.
+ *  @return The status the callback reports.
  */
-template <typename char_type_, typename offset_type_,
-          tape_termination_t termination_ = tape_termination_t::nul_terminated_k>
-struct tape_view {
-    using char_t = char_type_;
-    using offset_t = offset_type_;
-    using self_t = tape_view<char_t, offset_t, termination_>;
+template <typename allocator_type_, typename allocator_callback_>
+inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
+    sz_allocator_t c_allocator;
+    c_allocator.allocate = &allocate_through_<allocator_type_>;
+    c_allocator.reallocate = nullptr;
+    c_allocator.free = &free_through_<allocator_type_>;
+    c_allocator.handle = &allocator;
+    return static_cast<status_t>(callback(c_allocator));
+}
 
-    using value_t = std::span<char_t const>;
-    using value_type = value_t; // ? For STL compatibility
-    using iterator_t = indexed_container_iterator<self_t>;
-    using iterator = iterator_t; // ? For STL compatibility
+template <typename>
+class string_slice;
+template <typename>
+class string;
+class byteset_t;
+class look_up_table_t;
 
-    /** Bytes excluded from every element's length — one for the NULL terminator, zero for the
-     *  terminator-free Apache Arrow / cuDF convention. */
-    static constexpr std::size_t terminator_width_k = termination_ == tape_termination_t::nul_terminated_k ? 1u : 0u;
+using string_span_t = string_slice<char>;
+using string_view_t = string_slice<char const>;
 
-    std::span<char_t const> buffer_;
-    std::span<offset_t const> offsets_;
+template <typename allocator_type_>
+struct strings;
 
-    constexpr tape_view() noexcept : buffer_ {}, offsets_ {} {}
-    constexpr tape_view(std::span<char_t const> buffer, std::span<offset_t const> offsets) noexcept
-        : buffer_(buffer), offsets_(offsets) {}
+/**
+ *  @brief A borrowed column in any layout of @c sz_strings_view_t, the twin of @c string_view_t.
+ *
+ *  Every conversion reads the whole column into a fresh @c strings, whose blocks come from
+ *  the given allocator, and leaves it empty on failure.
+ */
+struct strings_view_t {
+    using value_type = string_view_t;
+    using iterator = indexed_container_iterator<strings_view_t>;
 
-    constexpr std::size_t size() const noexcept { return offsets_.size() != 0 ? offsets_.size() - 1 : 0; }
-    constexpr value_t operator[](std::size_t i) const noexcept {
-        return {buffer_.data() + offsets_[i],
-                static_cast<std::size_t>(offsets_[i + 1] - offsets_[i]) - terminator_width_k};
+    /** The C view every member reads. */
+    sz_strings_view_t raw;
+
+    /** Wraps a C view, like one over records or NUL-padded rows. */
+    explicit strings_view_t(sz_strings_view_t raw) noexcept : raw(raw) {}
+
+    /** An Apache Arrow @c String column: string i is `[offsets[i], offsets[i + 1])` of @p data. */
+    strings_view_t(char const *data, sz_u32_t const *offsets, std::size_t count) noexcept : raw {} {
+        raw.layout = sz_strings_u32_tape_k, raw.count = count;
+        raw.data.u32_tape.data = data, raw.data.u32_tape.offsets = offsets;
+    }
+
+    /** An Apache Arrow @c LargeString column, the same with 64-bit offsets. */
+    strings_view_t(char const *data, sz_u64_t const *offsets, std::size_t count) noexcept : raw {} {
+        raw.layout = sz_strings_u64_tape_k, raw.count = count;
+        raw.data.u64_tape.data = data, raw.data.u64_tape.offsets = offsets;
+    }
+
+    /** Views @p strings through an accessor, copying no bytes, so they must outlive the view. */
+    strings_view_t(std::span<string_view_t const> strings) noexcept;
+
+    /** Views the tape of @p strings. */
+    template <typename allocator_type_>
+    strings_view_t(strings<allocator_type_> const &strings) noexcept : strings_view_t(strings.view()) {}
+
+    std::size_t size() const noexcept { return raw.count; }
+    string_view_t operator[](std::size_t index) const noexcept;
+    iterator begin() const noexcept { return {*this, 0}; }
+    iterator end() const noexcept { return {*this, size()}; }
+
+    /**
+     *  @brief Finds @p needle in every string, like a @c LIKE '%needle%' filter over a column.
+     *  @param[out] positions The offset of each string's first match, or @c STRINGZILLA_SIZE_MAX.
+     *  @return @c success_k, or @c unexpected_dimensions_k when @p positions is too short.
+     *  @sa sz_find_strings_best
+     */
+    status_t find(string_view_t needle, std::span<std::size_t> positions,
+                  sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) const noexcept;
+
+    /**
+     *  @brief Hashes every string under one @p seed, each as @c string_view_t::hash would.
+     *  @return @c success_k, or @c unexpected_dimensions_k when @p hashes is too short.
+     *  @sa sz_hash_strings_best
+     */
+    status_t hashes(std::span<u64_t> hashes, u64_t seed = 0, sz_capability_t capabilities = default_capabilities(),
+                    sz_stream_t stream = nullptr) const noexcept;
+
+    /**
+     *  @brief Validates every string as UTF-8 and, unless @p runes is empty, counts its runes.
+     *  @param[out] runes Empty, or each string's runes, unspecified from the first ill-formed one.
+     *  @param[out] malformed_index The first ill-formed string, or @c size() if none is ill-formed.
+     *  @return @c success_k, @c invalid_utf8_k when a string is ill-formed, or
+     *      @c unexpected_dimensions_k when @p runes is too short.
+     *  @sa sz_utf8_count_strings_best
+     */
+    status_t utf8_count(std::span<std::size_t> runes, std::size_t &malformed_index,
+                        sz_capability_t capabilities = default_capabilities(),
+                        sz_stream_t stream = nullptr) const noexcept;
+
+    /**
+     *  @brief Writes every string into a NUL-padded row of @p width bytes, truncating longer ones.
+     *  @return The length of the longest string, to retry with wider rows, or
+     *      @c unexpected_dimensions_k when @p rows holds fewer than @c size() rows.
+     *  @sa sz_strings_to_rows_best
+     */
+    expected<std::size_t> to_rows(std::span<char> rows, std::size_t width,
+                                  sz_capability_t capabilities = default_capabilities(),
+                                  sz_stream_t stream = nullptr) const noexcept {
+        if (raw.count && rows.size() / raw.count < width) return {0, status_t::unexpected_dimensions_k};
+        sz_strings_rows_t const destination {.data = rows.data(), .stride = width, .width = width};
+        sz_size_t longest = 0;
+        sz_status_t const status = sz_strings_to_rows_best(&raw, nullptr, raw.count, &destination, &longest,
+                                                           capabilities, stream);
+        return {longest, static_cast<status_t>(status)};
     }
 
     /**
-     *  @brief The contiguous block the elements slice, from the first element's start to the
-     *      last one's end.
-     *
-     *  @note Starts at `offsets_[0]`, which a tape that is a slice of a wider one leaves non-zero.
+     *  @brief Copies every string into one tape, whatever the layout.
+     *  @sa sz_strings_to_tape_best
      */
-    constexpr std::span<char_t const> tape_bytes() const noexcept {
-        return size() == 0 ? std::span<char_t const> {}
-                           : std::span<char_t const> {buffer_.data() + offsets_[0],
-                                                      static_cast<std::size_t>(offsets_[size()] - offsets_[0])};
+    template <typename allocator_type_ = heap_alloc<char>>
+    expected<strings<allocator_type_>> gather(allocator_type_ allocator = {},
+                                              sz_capability_t capabilities = default_capabilities(),
+                                              sz_stream_t stream = nullptr) const noexcept {
+        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
+        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+            return sz_strings_to_tape_best(&raw, nullptr, raw.count, &c_allocator, &result.value.raw, capabilities,
+                                           stream);
+        });
+        return result;
     }
 
     /**
-     *  @brief Every element's length summed, terminators excluded, without walking the elements.
-     *
-     *  @note Returns the tape's own offset width, so a 32-bit tape stays 32-bit until a
-     *      caller needs more.
+     *  @brief Escapes every string for @p kind, like JSON or CSV.
+     *  @sa sz_strings_escape_best
      */
-    constexpr offset_t tape_total_bytes() const noexcept {
-        return size() == 0 ? offset_t {}
-                           : static_cast<offset_t>(offsets_[size()] - offsets_[0] -
-                                                   static_cast<offset_t>(size()) * terminator_width_k);
+    template <typename allocator_type_ = heap_alloc<char>>
+    expected<strings<allocator_type_>> escape(sz_escape_kind_t kind, allocator_type_ allocator = {},
+                                              sz_capability_t capabilities = default_capabilities(),
+                                              sz_stream_t stream = nullptr) const noexcept {
+        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
+        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+            return sz_strings_escape_best(&raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw, capabilities,
+                                          stream);
+        });
+        return result;
     }
 
-    /** One element's length, terminator excluded, in the tape's own offset width. */
-    constexpr offset_t tape_length_at(std::size_t i) const noexcept {
-        return static_cast<offset_t>(offsets_[i + 1] - offsets_[i] - terminator_width_k);
+    /**
+     *  @brief Unescapes every string from @p kind, checking all of them before writing any.
+     *  @param[out] malformed_index The first malformed string, set on @c invalid_utf8_k.
+     *  @sa sz_strings_unescape_best
+     */
+    template <typename allocator_type_ = heap_alloc<char>>
+    expected<strings<allocator_type_>> unescape(sz_escape_kind_t kind, std::size_t &malformed_index,
+                                                allocator_type_ allocator = {},
+                                                sz_capability_t capabilities = default_capabilities(),
+                                                sz_stream_t stream = nullptr) const noexcept {
+        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
+        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+            return sz_strings_unescape_best(&raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw,
+                                            &malformed_index, capabilities, stream);
+        });
+        return result;
     }
 
-    constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
-    constexpr iterator_t end() const noexcept { return iterator_t(*this, size()); }
-    constexpr iterator_t cbegin() const noexcept { return begin(); }
-    constexpr iterator_t cend() const noexcept { return end(); }
+    /**
+     *  @brief Maps every byte through @p table, like @c tolower does.
+     *  @sa sz_strings_lookup_best
+     */
+    template <typename allocator_type_ = heap_alloc<char>>
+    expected<strings<allocator_type_>> lookup(look_up_table_t const &table, allocator_type_ allocator = {},
+                                              sz_capability_t capabilities = default_capabilities(),
+                                              sz_stream_t stream = nullptr) const noexcept;
+
+    /**
+     *  @brief Brings every string into the Unicode @p form, like NFC.
+     *  @sa sz_strings_normalize_best
+     */
+    template <typename allocator_type_ = heap_alloc<char>>
+    expected<strings<allocator_type_>> normalize(sz_normal_form_t form, allocator_type_ allocator = {},
+                                                 sz_capability_t capabilities = default_capabilities(),
+                                                 sz_stream_t stream = nullptr) const noexcept {
+        expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
+        result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+            return sz_strings_normalize_best(&raw, nullptr, raw.count, form, &c_allocator, &result.value.raw,
+                                             capabilities, stream);
+        });
+        return result;
+    }
+
+    /**
+     *  @brief Joins every string with @p between into one, like Python's `str.join`.
+     *  @sa sz_strings_join_best
+     */
+    template <typename allocator_type_ = std::allocator<char>>
+    expected<string<allocator_type_>> join(string_view_t between, allocator_type_ allocator = {},
+                                           sz_capability_t capabilities = default_capabilities(),
+                                           sz_stream_t stream = nullptr) const noexcept;
+
+    /**
+     *  @brief Writes row r of @p columns as
+     *      `frames[0] + columns[0][r] + frames[1] + … + frames[n]`, with @p between between rows,
+     *      like CSV lines or JSON arrays.
+     *  @return @c unexpected_dimensions_k for uneven columns or when @p frames is not one longer.
+     *  @sa sz_strings_join_best
+     */
+    template <typename allocator_type_ = std::allocator<char>>
+    static expected<string<allocator_type_>> join(std::span<sz_strings_view_t const> columns,
+                                                  std::span<sz_string_view_t const> frames, string_view_t between,
+                                                  allocator_type_ allocator = {},
+                                                  sz_capability_t capabilities = default_capabilities(),
+                                                  sz_stream_t stream = nullptr) noexcept;
 };
 
-/** The terminator-free Apache Arrow / cuDF / Parquet flavor of @ref tape_view: element
- *  @c i is the full `[offsets[i], offsets[i+1])` span, no NULL excluded. */
-template <typename char_type_, typename offset_type_>
-using packed_tape_view = tape_view<char_type_, offset_type_, tape_termination_t::packed_k>;
-
 /**
- *  @brief Owns variable-length strings in NUL-terminated or canonical packed storage.
+ *  @brief An owned column: the C span and the allocator its blocks came from, the twin of
+ *      @c string.
  *
- *  The default layout appends NUL-terminated strings with separate offsets. Packed tapes use one
- *  canonical block of 64-bit offsets and unterminated bytes. Packed append repacks the block;
- *  only the default layout promises amortized growth.
+ *  Only the conversions of @c strings_view_t and the splits fill one, so it never grows and moves
+ *  without copies.
+ *  Its offsets are 32-bit while the payload fits in 4 GiB and 64-bit beyond.
  */
-template <typename char_type_, typename offset_type_, typename allocator_type_ = heap_alloc<char_type_>,
-          tape_termination_t termination_ = tape_termination_t::nul_terminated_k>
-struct tape {
-    static_assert(termination_ != tape_termination_t::packed_k ||
-                      (std::is_same<char_type_, char>::value && std::is_same<offset_type_, sz_u64_t>::value),
-                  "Canonical packed tapes use char and sz_u64_t");
-    using char_t = char_type_;
-    using offset_t = offset_type_;
-    using allocator_t = allocator_type_;
-    using self_t = tape<char_t, offset_t, allocator_t, termination_>;
+template <typename allocator_type_ = heap_alloc<char>>
+struct strings {
+    using allocator_type = allocator_type_;
+    using value_type = string_view_t;
+    using iterator = indexed_container_iterator<strings>;
 
-    using value_t = std::span<char_t const>;
-    using view_t = tape_view<char_t, offset_t, termination_>;
-    using value_type = value_t; // ? For STL compatibility
-    using iterator_t = indexed_container_iterator<self_t>;
-    using iterator = iterator_t; // ? For STL compatibility
+    /** The tape, zeroed while empty. */
+    sz_strings_span_t raw {};
 
-    using char_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<char_t>;
-    using offset_alloc_t = typename std::allocator_traits<allocator_t>::template rebind_alloc<offset_t>;
+    /** Where both blocks of @c raw come from and return to. */
+    allocator_type_ allocator {};
 
-    static_assert(std::is_nothrow_copy_constructible<allocator_t>::value &&
-                      std::is_nothrow_destructible<char_alloc_t>::value &&
-                      std::is_nothrow_destructible<offset_alloc_t>::value &&
-                      std::is_nothrow_default_constructible<char_alloc_t>::value &&
-                      std::is_nothrow_default_constructible<offset_alloc_t>::value &&
-                      std::is_nothrow_constructible<char_alloc_t, allocator_t const &>::value &&
-                      std::is_nothrow_constructible<offset_alloc_t, allocator_t const &>::value &&
-                      std::is_nothrow_constructible<allocator_t, char_alloc_t const &>::value &&
-                      std::is_nothrow_move_constructible<char_alloc_t>::value &&
-                      std::is_nothrow_move_constructible<offset_alloc_t>::value &&
-                      std::is_nothrow_move_assignable<char_alloc_t>::value &&
-                      std::is_nothrow_move_assignable<offset_alloc_t>::value,
-                  "Tape allocator construction and moves must be noexcept");
-    static_assert(noexcept(std::declval<char_alloc_t &>().allocate(std::size_t {})) &&
-                      noexcept(std::declval<offset_alloc_t &>().allocate(std::size_t {})) &&
-                      noexcept(std::declval<char_alloc_t &>().deallocate(nullptr, std::size_t {})) &&
-                      noexcept(std::declval<offset_alloc_t &>().deallocate(nullptr, std::size_t {})),
-                  "Tape allocators must return nullptr on failure and never throw");
-
-    /** Largest offset the tape can address, past which an @c offset_t would wrap around. */
-    static constexpr std::size_t max_offset_k = static_cast<std::size_t>((std::numeric_limits<offset_t>::max)());
-
-  private:
-    std::span<char_t> buffer_;
-    std::span<offset_t> offsets_;
-    char_alloc_t char_alloc_;
-    offset_alloc_t offset_alloc_;
-    std::size_t count_ = 0;
-
-  public:
-    constexpr tape() noexcept = default;
-
-    tape(tape const &) = delete;
-    tape &operator=(tape const &) = delete;
-
-    constexpr tape(tape &&other) noexcept
-        : buffer_(other.buffer_), offsets_(other.offsets_), char_alloc_(std::move(other.char_alloc_)),
-          offset_alloc_(std::move(other.offset_alloc_)), count_(other.count_) {
-        other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
-    }
-
-    constexpr tape &operator=(tape &&other) noexcept {
+    strings() noexcept = default;
+    explicit strings(allocator_type_ allocator) noexcept : allocator(allocator) {}
+    strings(strings const &) = delete;
+    strings &operator=(strings const &) = delete;
+    strings(strings &&other) noexcept : raw(other.raw), allocator(std::move(other.allocator)) { other.raw = {}; }
+    strings &operator=(strings &&other) noexcept {
         if (this == &other) return *this;
-        reset();
-        buffer_ = other.buffer_, offsets_ = other.offsets_;
-        char_alloc_ = std::move(other.char_alloc_), offset_alloc_ = std::move(other.offset_alloc_);
-        count_ = other.count_;
-        other.buffer_ = {}, other.offsets_ = {}, other.count_ = 0;
+        release_();
+        raw = other.raw, allocator = std::move(other.allocator);
+        other.raw = {};
         return *this;
     }
+    ~strings() noexcept { release_(); }
 
-    explicit constexpr tape(allocator_t allocator) noexcept : char_alloc_(allocator), offset_alloc_(allocator) {}
+    std::size_t size() const noexcept { return raw.count; }
+    string_view_t operator[](std::size_t index) const noexcept;
+    iterator begin() const noexcept { return {*this, 0}; }
+    iterator end() const noexcept { return {*this, size()}; }
 
-    constexpr tape(std::span<char_t> buffer, std::span<offset_t> offsets, allocator_t allocator) noexcept
-        requires(termination_ == tape_termination_t::nul_terminated_k)
-        : buffer_(buffer), offsets_(offsets), char_alloc_(allocator), offset_alloc_(allocator) {}
-
-    constexpr ~tape() noexcept { reset(); }
-    constexpr void reset() noexcept {
-        if (buffer_.data()) char_alloc_.deallocate(buffer_.data(), buffer_.size()), buffer_ = {};
-        if constexpr (termination_ == tape_termination_t::nul_terminated_k)
-            if (offsets_.data()) offset_alloc_.deallocate(offsets_.data(), offsets_.size());
-        offsets_ = {};
-        count_ = 0;
+    strings_view_t view() const noexcept {
+        sz_strings_view_t strings;
+        sz_strings_from_span(&raw, &strings);
+        return strings_view_t(strings);
     }
 
-    constexpr iterator_t begin() const noexcept { return iterator_t(*this, 0); }
-    constexpr iterator_t end() const noexcept { return iterator_t(*this, size()); }
-    constexpr iterator_t cbegin() const noexcept { return begin(); }
-    constexpr iterator_t cend() const noexcept { return end(); }
+    /**
+     *  @brief Splits @p text at the bytes of @p delimiters into its parts, like `bytes.split`.
+     *  @sa sz_strings_split_best
+     */
+    static expected<strings> split(string_view_t text, byteset_t const &delimiters, sz_split_kind_t kind,
+                                   allocator_type_ allocator = {},
+                                   sz_capability_t capabilities = default_capabilities(),
+                                   sz_stream_t stream = nullptr) noexcept;
 
-    template <typename strings_iterator_type_>
-    status_t assign(strings_iterator_type_ first, strings_iterator_type_ last) noexcept {
-        static_assert(std::is_base_of<std::forward_iterator_tag,
-                                      typename std::iterator_traits<strings_iterator_type_>::iterator_category>::value,
-                      "tape::assign needs multi-pass (forward) iterators");
-        std::size_t count = 0, combined_length = 0;
-        constexpr std::size_t terminator = view_t::terminator_width_k;
-        for (auto it = first; it != last; ++it, ++count) {
-            std::size_t const length = it->size();
-            if (combined_length > max_offset_k - terminator || length > max_offset_k - combined_length - terminator)
-                return status_t::overflow_risk_k;
-            combined_length += length + terminator;
-        }
-        if (count >= (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t) ||
-            combined_length > (std::numeric_limits<std::size_t>::max)() / sizeof(char_t))
-            return status_t::overflow_risk_k;
+    /**
+     *  @brief Splits @p text into lines without their breaks, like `str.splitlines`.
+     *  @sa sz_strings_split_lines_best
+     */
+    static expected<strings> split_lines(string_view_t text, allocator_type_ allocator = {},
+                                         sz_capability_t capabilities = default_capabilities(),
+                                         sz_stream_t stream = nullptr) noexcept;
 
-        self_t next {allocator_t(char_alloc_)};
-        if constexpr (termination_ == tape_termination_t::packed_k) {
-            std::size_t const header = (count + 1) * sizeof(offset_t);
-            if (combined_length > max_offset_k - header) return status_t::overflow_risk_k;
-            char_t *block = next.char_alloc_.allocate(header + combined_length);
-            if (!block) return status_t::bad_alloc_k;
-            next.buffer_ = {block, header + combined_length};
-            if (reinterpret_cast<sz_size_t>(block) % alignof(offset_t)) return status_t::bad_alloc_k;
-            next.offsets_ = {reinterpret_cast<offset_t *>(block), count + 1};
-            next.offsets_[0] = static_cast<offset_t>(header);
-        }
-        else if (count) {
-            char_t *buffer = next.char_alloc_.allocate(combined_length);
-            if (!buffer) return status_t::bad_alloc_k;
-            next.buffer_ = {buffer, combined_length};
-            offset_t *offsets = next.offset_alloc_.allocate(count + 1);
-            if (!offsets) return status_t::bad_alloc_k;
-            next.offsets_ = {offsets, count + 1};
-            next.offsets_[0] = 0;
-        }
-
-        std::size_t index = 0;
-        for (auto it = first; it != last; ++it, ++index) {
-            auto const &text = *it;
-            char_t const *source = text.data();
-            char_t *target = next.buffer_.data() + next.offsets_[index];
-            for (std::size_t i = 0; i != text.size(); ++i) target[i] = source[i];
-            if constexpr (termination_ == tape_termination_t::nul_terminated_k) target[text.size()] = char_t {};
-            next.offsets_[index + 1] = static_cast<offset_t>(next.offsets_[index] + text.size() + terminator);
-        }
-        next.count_ = count;
-        *this = std::move(next);
-        return status_t::success_k;
+  private:
+    void release_() noexcept {
+        [[maybe_unused]] status_t const status = with_allocator_(allocator, [&](sz_allocator_t &c_allocator) {
+            sz_strings_span_free(&raw, &c_allocator, nullptr);
+            return sz_success_k;
+        });
     }
-
-    constexpr std::size_t allocation_bytes() const noexcept {
-        return buffer_.size() * sizeof(char_t) +
-               (termination_ == tape_termination_t::nul_terminated_k ? offsets_.size() * sizeof(offset_t) : 0);
-    }
-
-    sz_strings_view_t strings() const noexcept
-        requires(termination_ == tape_termination_t::packed_k)
-    {
-        sz_strings_view_t view;
-        view.layout = sz_strings_u64_tape_k, view.count = count_;
-        view.data.u64_tape.data = buffer_.data(), view.data.u64_tape.offsets = offsets_.data();
-        return view;
-    }
-
-    status_t assign(sz_strings_view_t const &source) noexcept
-        requires(termination_ == tape_termination_t::packed_k)
-    {
-        if (source.count >= (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t)) return status_t::bad_alloc_k;
-        // Both passes of the iterator overload walk in order, so one fetched block serves 64 reads.
-        struct input_t {
-            using value_type = std::span<char_t const>;
-            sz_strings_view_t const &strings;
-            mutable sz_string_view_t views[64];
-            mutable std::size_t block_start;
-            explicit input_t(sz_strings_view_t const &strings) noexcept
-                : strings(strings), views(), block_start((std::numeric_limits<std::size_t>::max)()) {}
-            value_type operator[](std::size_t index) const noexcept {
-                std::size_t const start = index - index % 64;
-                if (start != block_start) block_start = start, sz_strings_get_block_(&strings, start, views);
-                return {views[index - start].start, views[index - start].length};
-            }
-        } input(source);
-        using input_iterator_t = indexed_container_iterator<input_t>;
-        return assign(input_iterator_t(input, 0), input_iterator_t(input, source.count));
-    }
-
-    status_t assign(std::span<sz_string_view_t const> views) noexcept
-        requires(termination_ == tape_termination_t::packed_k)
-    {
-        sz_strings_view_t source;
-        sz_strings_from_string_views(views.data(), views.size(), &source);
-        return assign(source);
-    }
-
-#if STRINGZILLA_WITH_STL
-    template <typename string_convertible_type_>
-    status_t assign(std::initializer_list<string_convertible_type_> inits) noexcept {
-        return assign(inits.begin(), inits.end());
-    }
-#endif
-
-    status_t append(std::span<char_t const> string) noexcept {
-        if constexpr (termination_ == tape_termination_t::packed_k) {
-            if (count_ == (std::numeric_limits<std::size_t>::max)()) return status_t::overflow_risk_k;
-            struct input_t {
-                using value_type = std::span<char_t const>;
-                self_t const &source;
-                value_type tail;
-                value_type operator[](std::size_t index) const noexcept {
-                    return index == source.size() ? tail : source[index];
-                }
-            } input {*this, string};
-            using input_iterator_t = indexed_container_iterator<input_t>;
-            return assign(input_iterator_t(input, 0), input_iterator_t(input, count_ + 1));
-        }
-
-        std::size_t const string_length = string.size();
-        std::size_t const current_used = count_ ? offsets_[count_] : 0;
-        if (string_length >= max_offset_k - current_used) return status_t::overflow_risk_k;
-        std::size_t const needed = current_used + string_length + 1;
-        std::size_t const max_offsets = (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t);
-        if (count_ >= max_offsets - 1) return status_t::overflow_risk_k;
-
-        if (count_ + 2 > offsets_.size()) {
-            std::size_t const capacity = sz_size_bit_ceil(count_ + 2);
-            if (!capacity || capacity > max_offsets) return status_t::overflow_risk_k;
-            offset_t *offsets = offset_alloc_.allocate(capacity);
-            if (!offsets) return status_t::bad_alloc_k;
-            if (offsets_.data()) {
-                for (std::size_t i = 0; i <= count_; ++i) offsets[i] = offsets_[i];
-                offset_alloc_.deallocate(offsets_.data(), offsets_.size());
-            }
-            offsets_ = {offsets, capacity};
-        }
-
-        std::span<char_t> next = buffer_;
-        if (needed > buffer_.size()) {
-            std::size_t const capacity = sz_size_bit_ceil(needed);
-            if (!capacity) return status_t::overflow_risk_k;
-            char_t *buffer = char_alloc_.allocate(capacity);
-            if (!buffer) return status_t::bad_alloc_k;
-            next = {buffer, capacity};
-            for (std::size_t i = 0; i < current_used; ++i) next[i] = buffer_[i];
-        }
-        // The input may point into the old buffer, so copy it before releasing that allocation.
-        for (std::size_t i = 0; i < string_length; ++i) next[current_used + i] = string[i];
-        next[needed - 1] = '\0';
-        if (next.data() != buffer_.data() && buffer_.data()) char_alloc_.deallocate(buffer_.data(), buffer_.size());
-        buffer_ = next;
-        offsets_[count_] = static_cast<offset_t>(current_used);
-        offsets_[++count_] = static_cast<offset_t>(needed);
-        return status_t::success_k;
-    }
-
-    constexpr value_type operator[](std::size_t i) const noexcept {
-        sz_assert_(i < count_ && "Index out of bounds");
-        view_t const values = view();
-        return values[i];
-    }
-
-    constexpr std::size_t size() const noexcept { return count_; }
-    constexpr view_t view() const noexcept { return {buffer_, offsets_.first(offsets_.empty() ? 0 : count_ + 1)}; }
-    constexpr std::span<char_t> const &buffer() const noexcept { return buffer_; }
-    constexpr std::span<offset_t> const &offsets() const noexcept { return offsets_; }
 };
+
+/** The owned column on the heap, the twin of @c string_t. */
+using strings_t = strings<>;
+
+#pragma endregion String Collections
 
 template <typename first_, typename second_>
 struct is_same_type;
@@ -1379,7 +1339,7 @@ class vector {
  *  @brief Allocator over the @b unified memory of one device group, which the host and that
  *      group's devices all address.
  *
- *  Nullable allocator for @ref tape and @ref vector.
+ *  Nullable allocator for @ref strings and @ref vector.
  *  @p capabilities_ picks the default vendor; an initialized C allocator can select it at runtime.
  *  The allocator handle and stream must outlive its allocations; a null stream uses the vendor's
  *  default device. Failure returns null; @c make reports initialization errors.

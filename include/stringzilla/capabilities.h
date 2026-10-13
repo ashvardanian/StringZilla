@@ -212,6 +212,15 @@ typedef enum sz_kernel_kind_t {
     /** Bring strings into a Unicode normalization form. */
     sz_kernel_strings_normalize_k,
 
+    /** Split a text at the bytes of a set into a tape. */
+    sz_kernel_strings_split_k,
+
+    /** Split a text at Unicode line breaks into a tape. */
+    sz_kernel_strings_split_lines_k,
+
+    /** Join columns of strings with frames around and between their rows. */
+    sz_kernel_strings_join_k,
+
     /** First occurrence of a substring. */
     sz_kernel_find_k,
 
@@ -230,6 +239,9 @@ typedef enum sz_kernel_kind_t {
     /** Last byte belonging to a set. */
     sz_kernel_rfind_byteset_k,
 
+    /** First occurrence of a substring in every string of a collection. */
+    sz_kernel_find_strings_k,
+
     /** Sum of all bytes. */
     sz_kernel_bytesum_k,
 
@@ -238,6 +250,9 @@ typedef enum sz_kernel_kind_t {
 
     /** One string hashed under several seeds at once. */
     sz_kernel_hash_multiseed_k,
+
+    /** Every string of a collection hashed under one seed. */
+    sz_kernel_hash_strings_k,
 
     /** Pseudo-random bytes from a seed. */
     sz_kernel_fill_random_k,
@@ -316,6 +331,9 @@ typedef enum sz_kernel_kind_t {
 
     /** Count of UTF-8 runes. */
     sz_kernel_utf8_count_k,
+
+    /** Validation and rune count of every string of a collection. */
+    sz_kernel_utf8_count_strings_k,
 
     /** Offset of the n-th UTF-8 rune. */
     sz_kernel_utf8_seek_k,
@@ -406,15 +424,20 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_strings_unescape_k: return "strings_unescape";
     case sz_kernel_strings_lookup_k: return "strings_lookup";
     case sz_kernel_strings_normalize_k: return "strings_normalize";
+    case sz_kernel_strings_split_k: return "strings_split";
+    case sz_kernel_strings_split_lines_k: return "strings_split_lines";
+    case sz_kernel_strings_join_k: return "strings_join";
     case sz_kernel_find_k: return "find";
     case sz_kernel_rfind_k: return "rfind";
     case sz_kernel_find_byte_k: return "find_byte";
     case sz_kernel_rfind_byte_k: return "rfind_byte";
     case sz_kernel_find_byteset_k: return "find_byteset";
     case sz_kernel_rfind_byteset_k: return "rfind_byteset";
+    case sz_kernel_find_strings_k: return "find_strings";
     case sz_kernel_bytesum_k: return "bytesum";
     case sz_kernel_hash_k: return "hash";
     case sz_kernel_hash_multiseed_k: return "hash_multiseed";
+    case sz_kernel_hash_strings_k: return "hash_strings";
     case sz_kernel_fill_random_k: return "fill_random";
     case sz_kernel_hash_state_init_k: return "hash_state_init";
     case sz_kernel_hash_state_update_k: return "hash_state_update";
@@ -441,6 +464,7 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_sort_uncased_order_k: return "sort_uncased_order";
     case sz_kernel_intersect_k: return "intersect";
     case sz_kernel_utf8_count_k: return "utf8_count";
+    case sz_kernel_utf8_count_strings_k: return "utf8_count_strings";
     case sz_kernel_utf8_seek_k: return "utf8_seek";
     case sz_kernel_utf8_decode_k: return "utf8_decode";
     case sz_kernel_utf8_newlines_k: return "utf8_newlines";
@@ -481,15 +505,20 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "strings_unescape")) return sz_kernel_strings_unescape_k;
     if (sz_same_literal_(name, length, "strings_lookup")) return sz_kernel_strings_lookup_k;
     if (sz_same_literal_(name, length, "strings_normalize")) return sz_kernel_strings_normalize_k;
+    if (sz_same_literal_(name, length, "strings_split")) return sz_kernel_strings_split_k;
+    if (sz_same_literal_(name, length, "strings_split_lines")) return sz_kernel_strings_split_lines_k;
+    if (sz_same_literal_(name, length, "strings_join")) return sz_kernel_strings_join_k;
     if (sz_same_literal_(name, length, "find")) return sz_kernel_find_k;
     if (sz_same_literal_(name, length, "rfind")) return sz_kernel_rfind_k;
     if (sz_same_literal_(name, length, "find_byte")) return sz_kernel_find_byte_k;
     if (sz_same_literal_(name, length, "rfind_byte")) return sz_kernel_rfind_byte_k;
     if (sz_same_literal_(name, length, "find_byteset")) return sz_kernel_find_byteset_k;
     if (sz_same_literal_(name, length, "rfind_byteset")) return sz_kernel_rfind_byteset_k;
+    if (sz_same_literal_(name, length, "find_strings")) return sz_kernel_find_strings_k;
     if (sz_same_literal_(name, length, "bytesum")) return sz_kernel_bytesum_k;
     if (sz_same_literal_(name, length, "hash")) return sz_kernel_hash_k;
     if (sz_same_literal_(name, length, "hash_multiseed")) return sz_kernel_hash_multiseed_k;
+    if (sz_same_literal_(name, length, "hash_strings")) return sz_kernel_hash_strings_k;
     if (sz_same_literal_(name, length, "fill_random")) return sz_kernel_fill_random_k;
     if (sz_same_literal_(name, length, "hash_state_init")) return sz_kernel_hash_state_init_k;
     if (sz_same_literal_(name, length, "hash_state_update")) return sz_kernel_hash_state_update_k;
@@ -519,6 +548,7 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "sort_uncased_order")) return sz_kernel_sort_uncased_order_k;
     if (sz_same_literal_(name, length, "intersect")) return sz_kernel_intersect_k;
     if (sz_same_literal_(name, length, "utf8_count")) return sz_kernel_utf8_count_k;
+    if (sz_same_literal_(name, length, "utf8_count_strings")) return sz_kernel_utf8_count_strings_k;
     if (sz_same_literal_(name, length, "utf8_seek")) return sz_kernel_utf8_seek_k;
     if (sz_same_literal_(name, length, "utf8_decode")) return sz_kernel_utf8_decode_k;
     if (sz_same_literal_(name, length, "utf8_newlines")) return sz_kernel_utf8_newlines_k;
@@ -554,6 +584,10 @@ typedef sz_status_t (*sz_kernel_hash_t)(sz_cptr_t, sz_size_t, sz_u64_t, sz_u64_t
 typedef sz_status_t (*sz_kernel_hash_multiseed_t)(sz_cptr_t, sz_size_t, sz_u64_t const *, sz_size_t, sz_u64_t *,
                                                   sz_stream_t);
 
+/** Signature of the @c sz_hash_strings_best kernels. */
+typedef sz_status_t (*sz_kernel_hash_strings_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t, sz_u64_t,
+                                                sz_u64_t *, sz_stream_t);
+
 /** Signature of the @c sz_hash_state_init_best kernels. */
 typedef sz_status_t (*sz_kernel_hash_state_init_t)(struct sz_hash_state_t *, sz_u64_t, sz_stream_t);
 
@@ -568,6 +602,10 @@ typedef sz_status_t (*sz_kernel_bytesum_t)(sz_cptr_t, sz_size_t, sz_u64_t *, sz_
 
 /** Signature of the kernels behind @c sz_utf8_count_best. */
 typedef sz_status_t (*sz_kernel_utf8_count_t)(sz_cptr_t, sz_size_t, sz_size_t *, sz_stream_t);
+
+/** Signature of the kernels behind @c sz_utf8_count_strings_best. */
+typedef sz_status_t (*sz_kernel_utf8_count_strings_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                      sz_size_t *, sz_size_t *, sz_stream_t);
 
 /** Signature of the kernels behind @c sz_utf8_seek_best. */
 typedef sz_status_t (*sz_kernel_utf8_seek_t)(sz_cptr_t, sz_size_t, sz_size_t, sz_cptr_t *, sz_stream_t);
@@ -720,6 +758,10 @@ typedef sz_status_t (*sz_kernel_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
 
 /** Signature of the @c sz_find_byteset_best and @c sz_rfind_byteset_best kernels. */
 typedef sz_status_t (*sz_kernel_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_cptr_t *, sz_stream_t);
+
+/** Signature of the @c sz_find_strings_best kernels. */
+typedef sz_status_t (*sz_kernel_find_strings_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t, sz_cptr_t,
+                                                sz_size_t, sz_size_t *, sz_stream_t);
 
 /** Signature of the @c sz_sort_order_best and @c sz_sort_uncased_order_best kernels. */
 typedef sz_status_t (*sz_kernel_sort_order_t)(sz_strings_view_t const *, sz_size_t, sz_bool_t, sz_allocator_t *,

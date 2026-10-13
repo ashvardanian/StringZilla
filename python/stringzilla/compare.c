@@ -9,10 +9,10 @@
 char const doc_like_equal[] =                                                                             //
     "Check if two strings are equal.\n"                                                                   //
     "\n"                                                                                                  //
-    "This function can be called as a method on a Str object or as a standalone function.\n"              //
+    "This function can be called as a method on a String object or as a standalone function.\n"           //
     "Args:\n"                                                                                             //
-    "  first (Str or str or bytes): The first string object.\n"                                           //
-    "  second (Str or str or bytes): The second string object.\n"                                         //
+    "  first (String or str or bytes): The first string object.\n"                                        //
+    "  second (String or str or bytes): The second string object.\n"                                      //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  bool: True if the strings are equal, False otherwise.\n"                                           //
@@ -25,10 +25,10 @@ char const doc_like_equal[] =                                                   
     "  >>> sz.equal('abc', 'abc')\n"                                                                      //
     "  True";
 
-PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *String_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member + 1 || positional_args_count > !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "equal() expects exactly two positional arguments");
         return NULL;
@@ -70,7 +70,7 @@ PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t posit
     Py_RETURN_TRUE;
 }
 
-PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
+PyObject *String_richcompare(PyObject *self, PyObject *other, int op) {
 
     sz_cptr_t a_start = NULL, b_start = NULL;
     sz_size_t a_length = 0, b_length = 0;
@@ -80,7 +80,7 @@ PyObject *Str_richcompare(PyObject *self, PyObject *other, int op) {
     sz_ordering_t ordering = sz_equal_k;
     sz_status_t const status = sz_order_best(a_start, a_length, b_start, b_length, &ordering, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
-        sz_py_raise_status(status, "Str comparison");
+        sz_py_raise_status(status, "String comparison");
         return NULL;
     }
     int const order = (int)ordering;

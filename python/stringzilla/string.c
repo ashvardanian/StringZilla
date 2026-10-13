@@ -1,12 +1,12 @@
 /**
- *  @file python/stringzilla/str.c
+ *  @file python/stringzilla/string.c
  *  @author Ash Vardanian
  *  @date September 11, 2023
- *  @brief The @c Str type - construction, buffer protocol, and byte-level transforms.
+ *  @brief The @c String type - construction, buffer protocol, and byte-level transforms.
  */
 #include "stringzilla.h"
 
-static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
+static int String_init(String *self, PyObject *args, PyObject *kwargs) {
 
     // Parse all arguments into PyObjects first
     Py_ssize_t nargs = PyTuple_Size(args);
@@ -46,7 +46,7 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
         }
     }
 
-    // Re-initialization: release any state bound by a prior __init__ before rebinding (mirrors Str_dealloc)
+    // A second __init__ releases what the prior one bound before rebinding, as String_dealloc does.
     if (self->parent) { Py_CLEAR(self->parent); }
     else if (self->memory.start) { free((void *)self->memory.start); }
     self->memory.start = NULL;
@@ -75,16 +75,16 @@ static int Str_init(Str *self, PyObject *args, PyObject *kwargs) {
     return 0;
 }
 
-PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    Str *self = Str_alloc_(); // `Str` is not a base type, so `type` is always `&StrType`.
+PyObject *String_new(PyTypeObject *type, PyObject *args, PyObject *kwds) {
+    String *self = String_alloc_(); // `String` is not a base type, so `type` is always `&StringType`.
     if (!self) {
-        PyErr_SetString(PyExc_RuntimeError, "Couldn't allocate a Str handle!");
+        PyErr_SetString(PyExc_RuntimeError, "Couldn't allocate a String handle!");
         return NULL;
     }
     return (PyObject *)self;
 }
 
-static void Str_dealloc(Str *self) {
+static void String_dealloc(String *self) {
     if (self->parent) { Py_XDECREF(self->parent); }
     else if (self->memory.start) { free(self->memory.start); }
 
@@ -92,10 +92,10 @@ static void Str_dealloc(Str *self) {
     // the now-unused `parent` field; fall through to a real free when the cache is full or absent.
     stringzilla_state_t *state = stringzilla_state_();
     if (state) sz_freelist_lock_(state);
-    if (state && state->str_freelist_count < sz_freelist_capacity_k) {
-        self->parent = (PyObject *)state->str_freelist_head;
-        state->str_freelist_head = self;
-        state->str_freelist_count++;
+    if (state && state->string_freelist_count < sz_freelist_capacity_k) {
+        self->parent = (PyObject *)state->string_freelist_head;
+        state->string_freelist_head = self;
+        state->string_freelist_count++;
         sz_freelist_unlock_(state);
         return;
     }
@@ -104,28 +104,32 @@ static void Str_dealloc(Str *self) {
     Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
-static PyObject *Str_str(Str *self) { return PyUnicode_FromStringAndSize(self->memory.start, self->memory.length); }
+static PyObject *String_to_unicode(String *self) {
+    return PyUnicode_FromStringAndSize(self->memory.start, self->memory.length);
+}
 
-static PyObject *Str_repr(Str *self) {
+static PyObject *String_repr(String *self) {
     // Interestingly, known-length string formatting only works in Python 3.12 and later.
     // https://docs.python.org/3/c-api/unicode.html#c.PyUnicode_FromFormat
     if (PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 12)
-        return PyUnicode_FromFormat("sz.Str('%.*s')", (int)self->memory.length, self->memory.start);
+        return PyUnicode_FromFormat("sz.String('%.*s')", (int)self->memory.length, self->memory.start);
     else {
         // Use a simpler formatting rule for older versions
         PyObject *str_obj = PyUnicode_FromStringAndSize(self->memory.start, self->memory.length);
-        PyObject *result = PyUnicode_FromFormat("sz.Str('%U')", str_obj);
+        PyObject *result = PyUnicode_FromFormat("sz.String('%U')", str_obj);
         Py_DECREF(str_obj);
         return result;
     }
 }
 
-static PyObject *Str_get_address(Str *self, void *closure) { return PyLong_FromSize_t((sz_size_t)self->memory.start); }
-static PyObject *Str_get_nbytes(Str *self, void *closure) { return PyLong_FromSize_t(self->memory.length); }
+static PyObject *String_get_address(String *self, void *closure) {
+    return PyLong_FromSize_t((sz_size_t)self->memory.start);
+}
+static PyObject *String_get_nbytes(String *self, void *closure) { return PyLong_FromSize_t(self->memory.length); }
 
-static Py_ssize_t Str_len(Str *self) { return self->memory.length; }
+static Py_ssize_t String_length(String *self) { return self->memory.length; }
 
-static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
+static PyObject *String_getitem(String *self, Py_ssize_t i) {
 
     // Negative indexing
     if (i < 0) i += self->memory.length;
@@ -139,7 +143,7 @@ static PyObject *Str_getitem(Str *self, Py_ssize_t i) {
     return PyUnicode_FromStringAndSize(self->memory.start + i, 1);
 }
 
-static PyObject *Str_subscript(Str *self, PyObject *key) {
+static PyObject *String_subscript(String *self, PyObject *key) {
     if (PySlice_Check(key)) {
         // Sanity checks
         Py_ssize_t start, stop, step;
@@ -151,8 +155,8 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
             return NULL;
         }
 
-        // Create a new `Str` object
-        Str *self_slice = Str_alloc_();
+        // Create a new `String` object
+        String *self_slice = String_alloc_();
         if (self_slice == NULL) return PyErr_NoMemory();
 
         // Set its properties based on the slice
@@ -167,15 +171,15 @@ static PyObject *Str_subscript(Str *self, PyObject *key) {
     else if (PyLong_Check(key)) {
         Py_ssize_t index = PyLong_AsSsize_t(key);
         if (index == -1 && PyErr_Occurred()) return NULL; // Propagate OverflowError instead of leaking it
-        return Str_getitem(self, index);
+        return String_getitem(self, index);
     }
     else {
-        PyErr_SetString(PyExc_TypeError, "Str indices must be integers or slices");
+        PyErr_SetString(PyExc_TypeError, "String indices must be integers or slices");
         return NULL;
     }
 }
 
-static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
+static int String_getbuffer(String *self, Py_buffer *view, int flags) {
     if (view == NULL) {
         PyErr_SetString(PyExc_ValueError, "NULL view in getbuffer");
         return -1;
@@ -184,7 +188,7 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
     // The backing bytes are immutable (str/bytes/mmap), so refuse a writable request instead of
     // silently handing back a "writable" view over read-only memory.
     if ((flags & PyBUF_WRITABLE) == PyBUF_WRITABLE) {
-        PyErr_SetString(PyExc_BufferError, "Str is read-only");
+        PyErr_SetString(PyExc_BufferError, "String is read-only");
         return -1;
     }
 
@@ -207,7 +211,7 @@ static int Str_getbuffer(Str *self, Py_buffer *view, int flags) {
     return 0;
 }
 
-static void Str_releasebuffer(PyObject *_, Py_buffer *view) {
+static void String_releasebuffer(PyObject *_, Py_buffer *view) {
     //! This function must not decrement `view->obj`, since that is done automatically
     //! in PyBuffer_Release() (this scheme is useful for breaking reference cycles).
     //! https://docs.python.org/3/c-api/typeobj.html#c.PyBufferProcs.bf_releasebuffer
@@ -217,7 +221,7 @@ char const doc_decode[] =                                                       
     "Decode the bytes into a Unicode string with a given encoding.\n"            //
     "\n"                                                                         //
     "Args:\n"                                                                    //
-    "  text (Str or str or bytes): The string object.\n"                         //
+    "  text (String or str or bytes): The string object.\n"                      //
     "  encoding (str, optional): The encoding to use, defaulting to 'utf-8'.\n"  //
     "  errors (str, optional): Error handling scheme, defaulting to 'strict'.\n" //
     "Returns:\n"                                                                 //
@@ -226,12 +230,12 @@ char const doc_decode[] =                                                       
     "  UnicodeDecodeError: If decoding fails.\n"                                 //
     "\n"                                                                         //
     "Example:\n"                                                                 //
-    "  >>> sz.Str('abc').decode() == 'abc'\n"                                    //
+    "  >>> sz.String('abc').decode() == 'abc'\n"                                 //
     "  True";
 
-PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
         PyErr_Format(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
@@ -276,7 +280,7 @@ char const doc_write_to[] =                                             //
     "Write the string to a file.\n"                                     //
     "\n"                                                                //
     "Args:\n"                                                           //
-    "  text (Str or str or bytes): The string object.\n"                //
+    "  text (String or str or bytes): The string object.\n"             //
     "  filename (str): The file path to write to.\n"                    //
     "Returns:\n"                                                        //
     "  None.\n"                                                         //
@@ -284,12 +288,12 @@ char const doc_write_to[] =                                             //
     "Example:\n"                                                        //
     "  >>> import os, tempfile\n"                                       //
     "  >>> path = os.path.join(tempfile.gettempdir(), 'sz_demo.bin')\n" //
-    "  >>> sz.Str('payload').write_to(path)";
+    "  >>> sz.String('payload').write_to(path)";
 
-PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                       PyObject *args_names_tuple) {
+PyObject *String_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                          PyObject *args_names_tuple) {
 
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count != !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
@@ -371,20 +375,20 @@ char const doc_offset_within[] =                                                
     "Return the raw byte offset of this StringZilla string within a larger StringZilla string.\n" //
     "\n"                                                                                          //
     "Args:\n"                                                                                     //
-    "  text (Str or str or bytes): The substring.\n"                                              //
-    "  larger (Str): The larger string to search within.\n"                                       //
+    "  text (String or str or bytes): The substring.\n"                                           //
+    "  larger (String): The larger string to search within.\n"                                    //
     "Returns:\n"                                                                                  //
     "  int: The byte offset where 'self' is found within 'larger', or -1 if not found.\n"         //
     "\n"                                                                                          //
     "Example:\n"                                                                                  //
-    "  >>> big = sz.Str('hello world')\n"                                                         //
+    "  >>> big = sz.String('hello world')\n"                                                      //
     "  >>> big[6:].offset_within(big)\n"                                                          //
     "  6";
 
-PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+PyObject *String_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
 
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count != !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "Invalid number of arguments");
         return NULL;
@@ -417,7 +421,7 @@ PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t po
     return PyLong_FromSize_t((sz_size_t)(slice.start - text.start));
 }
 
-static PyObject *Str_concat(PyObject *self, PyObject *other) {
+static PyObject *String_concat(PyObject *self, PyObject *other) {
     struct sz_string_view_t self_str, other_str;
 
     // Validate and convert `self` and `other`
@@ -427,8 +431,8 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
         return NULL;
     }
 
-    // Allocate a new Str instance
-    Str *result_str = Str_alloc_();
+    // Allocate a new String instance
+    String *result_str = String_alloc_();
     if (result_str == NULL) { return NULL; }
 
     // Calculate the total length of the new string
@@ -450,128 +454,131 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
     return (PyObject *)result_str;
 }
 
-static PySequenceMethods Str_as_sequence = {
-    .sq_length = Str_len,   //
-    .sq_item = Str_getitem, //
-    .sq_contains = Str_in,  //
+static PySequenceMethods String_as_sequence = {
+    .sq_length = String_length, //
+    .sq_item = String_getitem,  //
+    .sq_contains = String_in,   //
 };
 
-static PyMappingMethods Str_as_mapping = {
-    .mp_length = Str_len,          //
-    .mp_subscript = Str_subscript, // Is used to implement slices in Python
+static PyMappingMethods String_as_mapping = {
+    .mp_length = String_length,       //
+    .mp_subscript = String_subscript, // Is used to implement slices in Python
 };
 
-static PyBufferProcs Str_as_buffer = {
-    .bf_getbuffer = Str_getbuffer,
-    .bf_releasebuffer = Str_releasebuffer,
+static PyBufferProcs String_as_buffer = {
+    .bf_getbuffer = String_getbuffer,
+    .bf_releasebuffer = String_releasebuffer,
 };
 
-static PyNumberMethods Str_as_number = {
-    .nb_add = Str_concat,
+static PyNumberMethods String_as_number = {
+    .nb_add = String_concat,
 };
 
-static char const doc_Str_address[] =                                  //
+static char const doc_String_address[] =                               //
     "Memory address of the first byte of the string, as an integer.\n" //
     "\n"                                                               //
     "Enables zero-copy interop, e.g. with PyArrow or ctypes.\n"        //
     "\n"                                                               //
     "Example:\n"                                                       //
-    "  >>> isinstance(sz.Str('abc').address, int)\n"                   //
+    "  >>> isinstance(sz.String('abc').address, int)\n"                //
     "  True";
 
-static char const doc_Str_nbytes[] =   //
-    "Length of the string in bytes.\n" //
-    "\n"                               //
-    "Example:\n"                       //
-    "  >>> sz.Str('abc').nbytes\n"     //
+static char const doc_String_nbytes[] = //
+    "Length of the string in bytes.\n"  //
+    "\n"                                //
+    "Example:\n"                        //
+    "  >>> sz.String('abc').nbytes\n"   //
     "  3";
 
-static PyGetSetDef Str_getsetters[] = {
+static PyGetSetDef String_getsetters[] = {
     // Compatibility with PyArrow
-    {"address", (getter)Str_get_address, NULL, doc_Str_address, NULL}, //
-    {"nbytes", (getter)Str_get_nbytes, NULL, doc_Str_nbytes, NULL},    //
-    {NULL}                                                             // Sentinel
+    {"address", (getter)String_get_address, NULL, doc_String_address, NULL}, //
+    {"nbytes", (getter)String_get_nbytes, NULL, doc_String_nbytes, NULL},    //
+    {NULL}                                                                   // Sentinel
 };
 
-static PyMethodDef Str_methods[] = {
-    {"contains", (PyCFunction)Str_like_contains, STRINGZILLA_METHOD_FLAGS, doc_contains},
-    {"count", (PyCFunction)Str_like_count, STRINGZILLA_METHOD_FLAGS, doc_count},
-    {"splitlines", (PyCFunction)Str_like_splitlines, STRINGZILLA_METHOD_FLAGS, doc_splitlines},
-    {"startswith", (PyCFunction)Str_like_startswith, STRINGZILLA_METHOD_FLAGS, doc_startswith},
-    {"endswith", (PyCFunction)Str_like_endswith, STRINGZILLA_METHOD_FLAGS, doc_endswith},
-    {"decode", (PyCFunction)Str_like_decode, STRINGZILLA_METHOD_FLAGS, doc_decode},
-    {"hash", (PyCFunction)Str_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
-    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, STRINGZILLA_METHOD_FLAGS, doc_hash_multiseed},
-    {"sha256", (PyCFunction)Str_like_sha256, STRINGZILLA_METHOD_FLAGS, doc_like_sha256},
-    {"lstrip", (PyCFunction)Str_like_lstrip, STRINGZILLA_METHOD_FLAGS, doc_lstrip},
-    {"rstrip", (PyCFunction)Str_like_rstrip, STRINGZILLA_METHOD_FLAGS, doc_rstrip},
-    {"strip", (PyCFunction)Str_like_strip, STRINGZILLA_METHOD_FLAGS, doc_strip},
+static PyMethodDef String_methods[] = {
+    {"contains", (PyCFunction)String_like_contains, STRINGZILLA_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)String_like_count, STRINGZILLA_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)String_like_splitlines, STRINGZILLA_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)String_like_startswith, STRINGZILLA_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)String_like_endswith, STRINGZILLA_METHOD_FLAGS, doc_endswith},
+    {"decode", (PyCFunction)String_like_decode, STRINGZILLA_METHOD_FLAGS, doc_decode},
+    {"hash", (PyCFunction)String_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
+    {"hash_multiseed", (PyCFunction)String_like_hash_multiseed, STRINGZILLA_METHOD_FLAGS, doc_hash_multiseed},
+    {"sha256", (PyCFunction)String_like_sha256, STRINGZILLA_METHOD_FLAGS, doc_like_sha256},
+    {"lstrip", (PyCFunction)String_like_lstrip, STRINGZILLA_METHOD_FLAGS, doc_lstrip},
+    {"rstrip", (PyCFunction)String_like_rstrip, STRINGZILLA_METHOD_FLAGS, doc_rstrip},
+    {"strip", (PyCFunction)String_like_strip, STRINGZILLA_METHOD_FLAGS, doc_strip},
+    {"join", (PyCFunction)String_join, STRINGZILLA_METHOD_FLAGS, doc_String_join},
 
     // Bidirectional operations
-    {"find", (PyCFunction)Str_like_find, STRINGZILLA_METHOD_FLAGS, doc_find},
-    {"index", (PyCFunction)Str_like_index, STRINGZILLA_METHOD_FLAGS, doc_index},
-    {"partition", (PyCFunction)Str_like_partition, STRINGZILLA_METHOD_FLAGS, doc_partition},
-    {"split", (PyCFunction)Str_like_split, STRINGZILLA_METHOD_FLAGS, doc_split},
-    {"rfind", (PyCFunction)Str_like_rfind, STRINGZILLA_METHOD_FLAGS, doc_rfind},
-    {"rindex", (PyCFunction)Str_like_rindex, STRINGZILLA_METHOD_FLAGS, doc_rindex},
-    {"rpartition", (PyCFunction)Str_like_rpartition, STRINGZILLA_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", (PyCFunction)Str_like_rsplit, STRINGZILLA_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)String_like_find, STRINGZILLA_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)String_like_index, STRINGZILLA_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)String_like_partition, STRINGZILLA_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)String_like_split, STRINGZILLA_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)String_like_rfind, STRINGZILLA_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)String_like_rindex, STRINGZILLA_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)String_like_rpartition, STRINGZILLA_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)String_like_rsplit, STRINGZILLA_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", (PyCFunction)Str_like_find_first_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", (PyCFunction)Str_like_find_last_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_not_of},
-    {"count_byteset", (PyCFunction)Str_like_count_byteset, STRINGZILLA_METHOD_FLAGS, doc_count_byteset},
-    {"split_byteset", (PyCFunction)Str_like_split_byteset, STRINGZILLA_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, STRINGZILLA_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)String_like_find_first_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)String_like_find_last_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)String_like_find_first_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)String_like_find_last_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_not_of},
+    {"count_byteset", (PyCFunction)String_like_count_byteset, STRINGZILLA_METHOD_FLAGS, doc_count_byteset},
+    {"split_byteset", (PyCFunction)String_like_split_byteset, STRINGZILLA_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)String_like_rsplit_byteset, STRINGZILLA_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", (PyCFunction)Str_like_split_iter, STRINGZILLA_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, STRINGZILLA_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, STRINGZILLA_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, STRINGZILLA_METHOD_FLAGS,
+    {"split_iter", (PyCFunction)String_like_split_iterator, STRINGZILLA_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)String_like_rsplit_iterator, STRINGZILLA_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)String_like_split_byteset_iterator, STRINGZILLA_METHOD_FLAGS,
+     doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)String_like_rsplit_byteset_iterator, STRINGZILLA_METHOD_FLAGS,
      doc_rsplit_byteset_iter},
 
     // UTF-8 aware operations
-    {"utf8_count", (PyCFunction)Str_like_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_utf8_count},
-    {"utf8_split_newlines", (PyCFunction)Str_like_utf8_split_newlines, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_count", (PyCFunction)String_like_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_utf8_count},
+    {"utf8_split_newlines", (PyCFunction)String_like_utf8_split_newlines, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_newlines},
-    {"utf8_newlines", (PyCFunction)Str_like_utf8_newlines, STRINGZILLA_METHOD_FLAGS, doc_utf8_newlines},
-    {"utf8_split_whitespaces", (PyCFunction)Str_like_utf8_split_whitespaces, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_newlines", (PyCFunction)String_like_utf8_newlines, STRINGZILLA_METHOD_FLAGS, doc_utf8_newlines},
+    {"utf8_split_whitespaces", (PyCFunction)String_like_utf8_split_whitespaces, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_whitespaces},
-    {"utf8_whitespaces", (PyCFunction)Str_like_utf8_whitespaces, STRINGZILLA_METHOD_FLAGS, doc_utf8_whitespaces},
-    {"utf8_split_delimiters", (PyCFunction)Str_like_utf8_split_delimiters, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_whitespaces", (PyCFunction)String_like_utf8_whitespaces, STRINGZILLA_METHOD_FLAGS, doc_utf8_whitespaces},
+    {"utf8_split_delimiters", (PyCFunction)String_like_utf8_split_delimiters, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_delimiters},
-    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, STRINGZILLA_METHOD_FLAGS, doc_utf8_delimiters},
-    {"utf8_wordbreaks", (PyCFunction)Str_like_utf8_wordbreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_wordbreaks},
-    {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, STRINGZILLA_METHOD_FLAGS, doc_utf8_codepoints},
-    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, STRINGZILLA_METHOD_FLAGS, doc_utf8_graphemes},
-    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, STRINGZILLA_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_linebreaks},
-    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_fold},
-    {"utf8_norm", (PyCFunction)Str_like_utf8_norm, STRINGZILLA_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_delimiters", (PyCFunction)String_like_utf8_delimiters, STRINGZILLA_METHOD_FLAGS, doc_utf8_delimiters},
+    {"utf8_wordbreaks", (PyCFunction)String_like_utf8_wordbreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_wordbreaks},
+    {"utf8_codepoints", (PyCFunction)String_like_utf8_codepoints, STRINGZILLA_METHOD_FLAGS, doc_utf8_codepoints},
+    {"utf8_graphemes", (PyCFunction)String_like_utf8_graphemes, STRINGZILLA_METHOD_FLAGS, doc_utf8_graphemes},
+    {"utf8_sentences", (PyCFunction)String_like_utf8_sentences, STRINGZILLA_METHOD_FLAGS, doc_utf8_sentences},
+    {"utf8_linebreaks", (PyCFunction)String_like_utf8_linebreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_linebreaks},
+    {"utf8_uncased_fold", (PyCFunction)String_like_utf8_uncased_fold, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_fold},
+    {"utf8_norm", (PyCFunction)String_like_utf8_norm, STRINGZILLA_METHOD_FLAGS, doc_utf8_norm},
+    {"utf8_find_denormalized", (PyCFunction)String_like_utf8_find_denormalized, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_find_denormalized},
-    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_uncased_search", (PyCFunction)String_like_utf8_uncased_search, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_uncased_search},
-    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_uncased_matches", (PyCFunction)String_like_utf8_uncased_matches, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_uncased_matches},
-    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_order},
+    {"utf8_uncased_order", (PyCFunction)String_like_utf8_uncased_order, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", (PyCFunction)Str_offset_within, STRINGZILLA_METHOD_FLAGS, doc_offset_within},
-    {"write_to", (PyCFunction)Str_write_to, STRINGZILLA_METHOD_FLAGS, doc_write_to},
+    {"offset_within", (PyCFunction)String_offset_within, STRINGZILLA_METHOD_FLAGS, doc_offset_within},
+    {"write_to", (PyCFunction)String_write_to, STRINGZILLA_METHOD_FLAGS, doc_write_to},
 
     // In-place transforms
-    {"translate", (PyCFunction)Str_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
-    {"fill_random", (PyCFunction)Str_like_fill_random, STRINGZILLA_METHOD_FLAGS, doc_fill_random},
+    {"translate", (PyCFunction)String_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
+    {"fill_random", (PyCFunction)String_like_fill_random, STRINGZILLA_METHOD_FLAGS, doc_fill_random},
 
     {NULL, NULL, 0, NULL} // Sentinel
 };
 
-static char const doc_Str[] =                                                                //
-    "Str(source)\n"                                                                          //
+static char const doc_String[] =                                                             //
+    "String(source)\n"                                                                       //
     "\n"                                                                                     //
     "Immutable byte-string/slice class with SIMD and SWAR-accelerated operations.\n"         //
     "Provides high-performance byte-string operations using modern CPU instructions.\n"      //
@@ -587,29 +594,29 @@ static char const doc_Str[] =                                                   
     "  - translate(): Byte-level translations with lookup tables\n"                          //
     "\n"                                                                                     //
     "Example:\n"                                                                             //
-    "  >>> text = sz.Str('the quick brown fox')\n"                                           //
+    "  >>> text = sz.String('the quick brown fox')\n"                                        //
     "  >>> text.find('brown')        # SIMD-accelerated substring search\n"                  //
     "  10\n"                                                                                 //
     "  >>> str(text[10:15])          # slicing returns a zero-copy view, not a new buffer\n" //
     "  'brown'";
 
-PyTypeObject StrType = {
+PyTypeObject StringType = {
     PyVarObject_HEAD_INIT(NULL, 0) //
-        .tp_name = "stringzilla.Str",
-    .tp_doc = doc_Str,
-    .tp_basicsize = sizeof(Str),
+        .tp_name = "stringzilla.String",
+    .tp_doc = doc_String,
+    .tp_basicsize = sizeof(String),
     .tp_flags = Py_TPFLAGS_DEFAULT,
-    .tp_new = Str_new,
-    .tp_init = Str_init,
-    .tp_dealloc = Str_dealloc,
-    .tp_hash = Str_hash,
-    .tp_richcompare = Str_richcompare,
-    .tp_repr = (reprfunc)Str_repr,
-    .tp_str = Str_str,
-    .tp_methods = Str_methods,
-    .tp_as_sequence = &Str_as_sequence,
-    .tp_as_mapping = &Str_as_mapping,
-    .tp_as_buffer = &Str_as_buffer,
-    .tp_as_number = &Str_as_number,
-    .tp_getset = Str_getsetters,
+    .tp_new = String_new,
+    .tp_init = String_init,
+    .tp_dealloc = String_dealloc,
+    .tp_hash = String_hash,
+    .tp_richcompare = String_richcompare,
+    .tp_repr = (reprfunc)String_repr,
+    .tp_str = String_to_unicode,
+    .tp_methods = String_methods,
+    .tp_as_sequence = &String_as_sequence,
+    .tp_as_mapping = &String_as_mapping,
+    .tp_as_buffer = &String_as_buffer,
+    .tp_as_number = &String_as_number,
+    .tp_getset = String_getsetters,
 };

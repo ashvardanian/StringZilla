@@ -564,8 +564,7 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/stringzilla.c
         python/stringzilla/shared.c
         python/stringzilla/file.c
-        python/stringzilla/str.c
-        python/stringzilla/strs.c
+        python/stringzilla/string.c
         python/stringzilla/strings.c
         python/stringzilla/hash.c
         python/stringzilla/cipher.c

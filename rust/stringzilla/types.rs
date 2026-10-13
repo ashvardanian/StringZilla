@@ -12,17 +12,19 @@
 //!   at once, which the library clamps every CPU mask to
 //!
 //! ROCm and Metal have the same three. Reach for the enabled set unless you specifically mean one
-//! of the raw axes. Every consumer, an engine, a [`Tape`] or a [`UnifiedAllocator`], takes a
-//! [`Stream`] of that mask, which names the device it queues work on: [`Stream::default`] for the
-//! default one, or [`Stream::new`] on any device by its ordinal.
+//! of the raw axes. Every consumer, an engine, a [`StringsView`] conversion or a
+//! [`UnifiedAllocator`], takes a [`Stream`] of that mask, which names the device it queues work on:
+//! [`Stream::default`] for the default one, or [`Stream::new`] on any device by its ordinal.
 //!
 //! File: rust/stringzilla/types.rs
 //! Author: Ash Vardanian
 
+use core::alloc::{AllocError, Allocator, Layout};
 use core::ffi::{c_void, CStr};
 use core::fmt;
 use core::marker::PhantomData;
 use core::ops::BitOr;
+use core::ptr::NonNull;
 
 use super::*;
 
@@ -154,7 +156,7 @@ impl StatusCode for sz_status_t {
 /// Corresponds to `sz_normal_form_t` in the C API.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Utf8NormalForm {
+pub enum NormalForm {
     /// Canonical Decomposition. Decomposes precomposed characters into base + combining marks.
     Nfd = 0,
     /// Canonical Decomposition followed by Canonical Composition. The most common Unicode form.
@@ -612,7 +614,7 @@ impl Capabilities {
     }
 }
 
-/// A stream of one capability group's device, where engines, [`Tape`] conversions and
+/// A stream of one capability group's device, where engines, [`StringsView`] conversions and
 /// [`UnifiedAllocator`] blocks queue work: a vendor's default when null, the CPU's always null.
 ///
 /// # Examples
@@ -703,12 +705,13 @@ impl Stream {
     /// # Examples
     ///
     /// ```
-    /// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream};
+    /// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
     ///
     /// let stream = Stream::default(Capabilities::cpu_enabled());
     /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
     /// let mut distances = [0usize; 1];
-    /// stream.scope(|scope| engine.distances(scope, &["sitting"], &mut distances, 1))?;
+    /// let candidates = StringsView::from_slices(&["sitting"]);
+    /// stream.scope(|scope| engine.distances(scope, candidates, &mut distances, 1))?;
     /// assert_eq!(distances[0], 3);
     /// # Ok::<(), stringzilla::sz::Status>(())
     /// ```
@@ -765,66 +768,30 @@ impl Scope<'_, '_> {
     }
 }
 
-/// A batch of strings an engine's verb reads: a slice or an array of byte strings, read where it
-/// lies through an accessor over it, or a [`Tape`].
-///
-/// A GPU engine reads its batch in place, so it takes a [`Tape`] in memory its device reaches;
-/// given host strings, it refuses the round with [`Status::DeviceMemoryMismatch`].
-///
-/// # Safety
-///
-/// The view an implementation hands `call` reads `count` strings that live as long as `self`.
-pub unsafe trait Strings {
-    /// Hands `call` the `sz_strings_view_t` an engine of the group of `stream` reads the batch
-    /// through.
-    fn with_strings<Return>(
-        &self,
-        stream: &Stream,
-        call: impl FnOnce(&sz_strings_view_t) -> Return,
-    ) -> Result<Return, Status>;
-}
-
-unsafe impl<Text: AsRef<[u8]>> Strings for [Text] {
-    fn with_strings<Return>(
-        &self,
-        _stream: &Stream,
-        call: impl FnOnce(&sz_strings_view_t) -> Return,
-    ) -> Result<Return, Status> {
-        Ok(with_strings(self, call))
-    }
-}
-
-unsafe impl<Text: AsRef<[u8]>, const COUNT: usize> Strings for [Text; COUNT] {
-    fn with_strings<Return>(
-        &self,
-        _stream: &Stream,
-        call: impl FnOnce(&sz_strings_view_t) -> Return,
-    ) -> Result<Return, Status> {
-        Ok(with_strings(self.as_slice(), call))
-    }
-}
-
-/// Memory the host and the devices of one capability group both address, for the tapes and the
+/// Memory the host and the devices of one capability group both address, for the columns and the
 /// outputs of their engines.
 ///
 /// It is the C library's `sz_allocator_init_unified_best` behind the standard
-/// [`Allocator`](core::alloc::Allocator), so `Vec::new_in` and every other allocator-aware
-/// collection places its contents there. Every block lands on the device of the stream it borrows,
-/// and a block aligned less strictly than its layout asks is refused.
+/// [`Allocator`](core::alloc::Allocator), so `Vec::new_in`, a [`Strings`] and every other
+/// allocator-aware collection places its contents there. Every block lands on the device of the
+/// stream it borrows, the host heap for a CPU stream, and a block aligned less strictly than its
+/// layout asks is refused.
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Tape, UnifiedAllocator};
+/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 ///
+/// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
 /// let unified = UnifiedAllocator::new(&stream);
-/// let candidates = Tape::copy(&["sitting", "kitten"], &unified, &stream)?;
+/// // The host gathers the slices, which a GPU cannot read, into memory the GPU reaches.
+/// let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
 /// let mut distances = Vec::new_in(unified);
 /// distances.resize(2, 0usize);
 ///
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-/// stream.scope(|scope| engine.distances(scope, &candidates, &mut distances, 2))?;
+/// stream.scope(|scope| engine.distances(scope, candidates.view(), &mut distances, 2))?;
 /// assert_eq!(distances[..], [3, 0]);
 /// # Ok::<(), stringzilla::sz::Status>(())
 /// ```
@@ -856,19 +823,16 @@ impl<'stream> UnifiedAllocator<'stream> {
     }
 }
 
-unsafe impl core::alloc::Allocator for UnifiedAllocator<'_> {
-    fn allocate(&self, layout: core::alloc::Layout) -> Result<core::ptr::NonNull<[u8]>, core::alloc::AllocError> {
-        use core::ptr::NonNull;
-
+unsafe impl Allocator for UnifiedAllocator<'_> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         if layout.size() == 0 {
-            let dangling =
-                NonNull::new(core::ptr::without_provenance_mut::<u8>(layout.align())).ok_or(core::alloc::AllocError)?;
+            let dangling = NonNull::new(core::ptr::without_provenance_mut::<u8>(layout.align())).ok_or(AllocError)?;
             return Ok(NonNull::slice_from_raw_parts(dangling, 0));
         }
-        let allocator = self.c_allocator().map_err(|_| core::alloc::AllocError)?;
-        let (allocate, free) = allocator.allocate.zip(allocator.free).ok_or(core::alloc::AllocError)?;
+        let allocator = self.c_allocator().map_err(|_| AllocError)?;
+        let (allocate, free) = allocator.allocate.zip(allocator.free).ok_or(AllocError)?;
         let block = unsafe { allocate(layout.size(), allocator.handle, self.stream.handle) } as *mut u8;
-        let block = NonNull::new(block).ok_or(core::alloc::AllocError)?;
+        let block = NonNull::new(block).ok_or(AllocError)?;
         if block.as_ptr().addr() % layout.align() != 0 {
             unsafe {
                 free(
@@ -878,12 +842,12 @@ unsafe impl core::alloc::Allocator for UnifiedAllocator<'_> {
                     self.stream.handle,
                 )
             };
-            return Err(core::alloc::AllocError);
+            return Err(AllocError);
         }
         Ok(NonNull::slice_from_raw_parts(block, layout.size()))
     }
 
-    unsafe fn deallocate(&self, block: core::ptr::NonNull<u8>, layout: core::alloc::Layout) {
+    unsafe fn deallocate(&self, block: NonNull<u8>, layout: Layout) {
         if layout.size() == 0 {
             return;
         }
@@ -1158,27 +1122,33 @@ mod tests {
         assert_eq!(empty.as_ptr().cast::<u8>().addr() % 256, 0);
     }
 
-    /// A tape copied for the CPU reads like the slice it came from, its outputs in the same memory.
+    /// A column in the CPU's unified memory and a borrowed Arrow tape read like their slices.
     #[test]
-    fn cpu_tapes_read_like_their_slices() {
+    fn cpu_columns_read_like_their_slices() {
         extern crate alloc;
         use alloc::vec::Vec;
 
         let cpu = Stream::default(Capabilities::cpu_enabled());
         let unified = UnifiedAllocator::new(&cpu);
         let words = ["sitting", "sunday", "", "kitten"];
-        let tape = sz::Tape::copy(&words, &unified, &cpu).unwrap();
-        assert_eq!(tape.len(), words.len());
+        let slices = sz::StringsView::from_slices(&words);
+        let column = sz::Strings::copy_in(slices, unified, &cpu).unwrap();
+        let arrow = sz::StringsView::from_u64_tape(b"sittingsundaykitten", &[0, 7, 13, 13, 19]).unwrap();
+        assert!(column.view().iter().eq(slices.iter()) && arrow.iter().eq(slices.iter()));
 
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
-        let mut from_slice = [0usize; 4];
-        let mut from_tape = Vec::new_in(unified);
-        from_tape.resize(words.len(), usize::MAX);
-        cpu.scope(|scope| engine.distances(scope, &words, &mut from_slice, words.len()))
+        let mut from_slices = [0usize; 4];
+        let mut from_arrow = [0usize; 4];
+        let mut from_column = Vec::new_in(unified);
+        from_column.resize(words.len(), usize::MAX);
+        cpu.scope(|scope| engine.distances(scope, slices, &mut from_slices, words.len()))
             .unwrap();
-        cpu.scope(|scope| engine.distances(scope, &tape, &mut from_tape, words.len()))
+        cpu.scope(|scope| engine.distances(scope, arrow, &mut from_arrow, words.len()))
             .unwrap();
-        assert_eq!(from_tape[..], from_slice[..]);
+        cpu.scope(|scope| engine.distances(scope, column.view(), &mut from_column, words.len()))
+            .unwrap();
+        assert_eq!(from_arrow, from_slices);
+        assert_eq!(from_column[..], from_slices);
     }
 
     /// A verb refuses a stream of another group before queuing anything, and its scope reports that
@@ -1189,12 +1159,13 @@ mod tests {
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut distances = [0usize; 1];
         let gpu = Stream::default(Capability::Metal.into());
-        let refused = gpu.scope(|scope| engine.distances(scope, &["sitting"], &mut distances, 1));
+        let candidates = sz::StringsView::from_slices(&["sitting"]);
+        let refused = gpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 1));
         assert_eq!(refused, Err(Status::DeviceMemoryMismatch));
     }
 
-    /// A CUDA engine reads a tape in unified memory and agrees with the host engine, which reads
-    /// the same tape, while host-resident strings are refused rather than read.
+    /// A CUDA engine reads a column in unified memory and agrees with the host engine, which reads
+    /// the same column, while host-resident strings are refused rather than read.
     #[cfg(feature = "cuda")]
     #[test]
     fn unified_batches_reach_a_cuda_engine() {
@@ -1205,29 +1176,29 @@ mod tests {
             return;
         };
         let gpu = Stream::new(capabilities, 0).unwrap();
+        let cpu = Stream::default(Capabilities::cpu_enabled());
         let unified = UnifiedAllocator::new(&gpu);
         let queries = ["kitten", "saturday", "Straße"];
-        let words = ["sitting", "sunday", "strasse", "", "kitten"];
-        let candidates = sz::Tape::copy(&words, &unified, &gpu).unwrap();
+        let words = sz::StringsView::from_slices(&["sitting", "sunday", "strasse", "", "kitten"]);
+        let candidates = sz::Strings::copy_in(words, unified, &cpu).unwrap();
         let mut device_distances = Vec::new_in(unified);
         device_distances.resize(queries.len() * words.len(), usize::MAX);
 
-        let cpu = Stream::default(Capabilities::cpu_enabled());
         let mut host = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut host_distances = [0usize; 15];
-        let mut tape_distances = [0usize; 15];
-        cpu.scope(|scope| host.distances(scope, &words, &mut host_distances, words.len()))
+        let mut column_distances = [0usize; 15];
+        cpu.scope(|scope| host.distances(scope, words, &mut host_distances, words.len()))
             .unwrap();
-        cpu.scope(|scope| host.distances(scope, &candidates, &mut tape_distances, words.len()))
+        cpu.scope(|scope| host.distances(scope, candidates.view(), &mut column_distances, words.len()))
             .unwrap();
-        assert_eq!(tape_distances, host_distances);
+        assert_eq!(column_distances, host_distances);
 
         let mut device = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
-        gpu.scope(|scope| device.distances(scope, &candidates, &mut device_distances, words.len()))
+        gpu.scope(|scope| device.distances(scope, candidates.view(), &mut device_distances, words.len()))
             .unwrap();
         assert_eq!(device_distances[..], host_distances[..]);
         assert_eq!(
-            gpu.scope(|scope| device.distances(scope, &words, &mut device_distances, words.len())),
+            gpu.scope(|scope| device.distances(scope, words, &mut device_distances, words.len())),
             Err(Status::DeviceMemoryMismatch)
         );
     }

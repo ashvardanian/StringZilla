@@ -6,14 +6,18 @@
  */
 #include "stringzilla.h"
 
-PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter, PyObject *const *args,
-                               Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
+PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter, PyObject *self,
+                               PyObject *const *args, Py_ssize_t positional_args_count, PyObject *args_names_tuple) {
 
-    if (positional_args_count != 1) {
-        PyErr_Format(PyExc_TypeError, "%s() takes one positional argument, got %zd", name, positional_args_count);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
+    if (positional_args_count != !is_member) {
+        PyErr_Format(
+            PyExc_TypeError,
+            is_member ? "%s() takes no positional arguments, got %zd" : "%s() takes one positional argument, got %zd",
+            name, positional_args_count);
         return NULL;
     }
-    PyObject *const text_obj = args[0];
+    PyObject *const text_obj = is_member ? self : args[0];
     PyObject *capabilities_object = NULL;
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
@@ -28,8 +32,8 @@ PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segme
     if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
     sz_string_view_t text_view;
-    if (PyObject_TypeCheck(text_obj, &StrType)) {
-        Str *str_obj = (Str *)text_obj;
+    if (PyObject_TypeCheck(text_obj, &StringType)) {
+        String *str_obj = (String *)text_obj;
         text_view = str_obj->memory;
     }
     else if (PyUnicode_Check(text_obj)) {
@@ -43,7 +47,7 @@ PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segme
         text_view.length = (sz_size_t)PyBytes_GET_SIZE(text_obj);
     }
     else {
-        PyErr_SetString(PyExc_TypeError, "Expected str, bytes, or Str");
+        PyErr_SetString(PyExc_TypeError, "Expected str, bytes, or String");
         return NULL;
     }
 
@@ -80,7 +84,7 @@ PyObject *Utf8Boundaries_next_(Utf8Boundaries *self) {
     sz_size_t const segment_length = self->batch_lengths[self->batch_index++];
     self->start += segment_length;
 
-    Str *result_obj = Str_alloc_();
+    String *result_obj = String_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
     result_obj->memory.start = segment_start;

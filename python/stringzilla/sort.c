@@ -7,8 +7,8 @@
 #include "stringzilla.h"
 
 /** Dispatches to the byte-wise or Unicode case-folded argsort backend. */
-sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order, sz_size_t top,
-                              sz_bool_t reverse, sz_capability_t capabilities) {
+sz_status_t Strings_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order, sz_size_t top,
+                                 sz_bool_t reverse, sz_capability_t capabilities) {
     return uncased ? sz_sort_uncased_order_best(strings, top, reverse, NULL, order, capabilities, NULL)
                    : sz_sort_order_best(strings, top, reverse, NULL, order, capabilities, NULL);
 }
@@ -16,7 +16,8 @@ sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *string
 char const doc_argsort[] =                                                                                //
     "argsort(*, reverse=False, uncased=False, top=None, out=None, capabilities=None) -> tuple | buffer\n" //
     "\n"                                                                                                  //
-    "Return the stable permutation of indices that sorts the Strs.\n"                                     //
+    "Return the stable permutation of indices that sorts the Strings, like\n"                             //
+    "`sorted(range(len(strings)), key=strings.__getitem__)`, copying no strings.\n"                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  reverse (bool, optional): Sort in descending order. Defaults to False.\n"                          //
@@ -29,13 +30,13 @@ char const doc_argsort[] =                                                      
     "Returns:\n"                                                                                          //
     "  tuple[int, ...]: The sorting permutation, or `out` itself when an `out` buffer is given.\n"        //
     "Example:\n"                                                                                          //
-    "  >>> sz.Strs(['banana', 'apple', 'cherry']).argsort()\n"                                            //
+    "  >>> sz.Strings(['banana', 'apple', 'cherry']).argsort()\n"                                         //
     "  (1, 0, 2)";
 
-/** Returns the tuple of indices permuting a @c Strs object into sorted order. With `top=k`, returns
- *  just the @c k leading indices (top-K). */
-PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                       PyObject *args_names_tuple) {
+/** Returns the tuple of indices permuting a @c Strings object into sorted order. With `top=k`,
+ *  returns just the @c k leading indices (top-K). */
+PyObject *Strings_argsort(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                          PyObject *args_names_tuple) {
 
     sz_bool_t reverse = sz_false_k, uncased = sz_false_k;
     sz_size_t top = 0;
@@ -90,7 +91,7 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
         top = (sz_size_t)top_value;
     }
 
-    sz_size_t const count = Strs_len(self);
+    sz_size_t const count = self->tape.count;
     // With `top` set, only the leading `top` indices are ordered, so we expose just those.
     sz_size_t const result_count = (top != 0 && top < count) ? top : count;
 
@@ -98,21 +99,9 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
     Py_buffer out_view;
     sz_bool_t have_out = sz_false_k;
     if (out_obj && out_obj != Py_None) {
-        // PyBUF_CONTIG = writable + C-contiguous; rejects strided/read-only targets up front.
-        if (PyObject_GetBuffer(out_obj, &out_view, PyBUF_CONTIG) != 0) return NULL;
-        if (out_view.itemsize != (Py_ssize_t)sizeof(sz_size_t)) {
-            PyErr_Format(PyExc_TypeError,
-                         "out must be a contiguous buffer of %zu-byte unsigned integers (e.g. numpy.uintp)",
-                         sizeof(sz_size_t));
-            PyBuffer_Release(&out_view);
+        if (sz_py_export_contiguous_buffer(out_obj, "out", PyBUF_CONTIG, (Py_ssize_t)sizeof(sz_size_t), result_count,
+                                           &out_view) != 0)
             return NULL;
-        }
-        if ((sz_size_t)(out_view.len / out_view.itemsize) < result_count) {
-            PyErr_Format(PyExc_ValueError, "out buffer holds %zd indices, need %zu",
-                         (Py_ssize_t)(out_view.len / out_view.itemsize), result_count);
-            PyBuffer_Release(&out_view);
-            return NULL;
-        }
         have_out = sz_true_k;
     }
 
@@ -130,9 +119,10 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
 
     // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
     sz_strings_view_t strings;
-    sz_py_export_strings_as_view((PyObject *)self, &strings);
+    sz_strings_from_span(&self->tape, &strings);
     // Skip an empty collection: the kernels report its zero-byte scratch as a failed allocation.
-    sz_status_t status = count ? Strs_run_argsort_(uncased, &strings, order, top, reverse, capabilities) : sz_success_k;
+    sz_status_t status = count ? Strings_run_argsort_(uncased, &strings, order, top, reverse, capabilities)
+                               : sz_success_k;
     if (status == sz_success_k && have_out && !sort_into_out)
         memcpy(out_view.buf, order, result_count * sizeof(sz_size_t));
     if (status != sz_success_k) {

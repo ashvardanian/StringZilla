@@ -144,6 +144,30 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t 
                                                   sz_byteset_t const *set, sz_cptr_t *match,
                                                   sz_capability_t capabilities, sz_stream_t stream);
 
+/**
+ *  @brief Finds @p needle in every one of `strings[order[i]]`, or of the first @p count strings,
+ *      like a @c LIKE '%needle%' filter over a column.
+ *
+ *  A tape read in its own order is searched as one run of bytes, so the tier's substring search
+ *  runs once per matching string and never for a string without a match, and a match crossing
+ *  into the next string counts for neither. Other layouts and orders search string by string.
+ *
+ *  @param[in] strings The strings to search, in any layout.
+ *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
+ *  @param[in] count Number of strings to search.
+ *  @param[in] needle The substring to find.
+ *  @param[in] needle_length Number of bytes in the needle, zero matching at every start.
+ *  @param[out] positions The offset of each first match within its string, or
+ *      @c STRINGZILLA_SIZE_MAX where a string holds none, @p count of them.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
+ *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
+ *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
+ */
+STRINGZILLA_API sz_status_t sz_find_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_capability_t capabilities,
+                                                 sz_stream_t stream);
+
 /** @copydoc sz_find_byte_best */
 STRINGZILLA_API sz_status_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                 sz_cptr_t *match, sz_stream_t stream);
@@ -155,6 +179,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_serial(sz_cptr_t haystack, sz_size_t h
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                            sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_serial(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                   sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                   sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -182,6 +211,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_westmere(sz_cptr_t haystack, sz_size_t
 STRINGZILLA_API sz_status_t sz_find_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                              sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_westmere(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                     sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_westmere(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                               sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
@@ -200,6 +234,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_haswell(sz_cptr_t haystack, sz_size_t 
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_haswell(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                    sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_haswell(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -227,6 +266,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_skylake(sz_cptr_t haystack, sz_size_t 
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_skylake(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                    sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_skylake(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -258,6 +302,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_neon(sz_cptr_t haystack, sz_size_t hay
 STRINGZILLA_API sz_status_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_neon(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_neon(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                           sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
@@ -284,6 +333,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_sve(sz_cptr_t haystack, sz_size_t hays
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                         sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_sve(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -315,6 +369,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_rvv(sz_cptr_t haystack, sz_size_t hays
 STRINGZILLA_API sz_status_t sz_find_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                         sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_rvv(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_rvv(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
@@ -341,6 +400,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_v128(sz_cptr_t haystack, sz_size_t hay
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                          sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_v128(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -369,6 +433,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_v128relaxed(sz_cptr_t haystack, sz_siz
 STRINGZILLA_API sz_status_t sz_find_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                 sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_v128relaxed(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                        sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                        sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_v128relaxed(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                  sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
@@ -396,6 +465,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_loongsonasx(sz_cptr_t haystack, sz_siz
 STRINGZILLA_API sz_status_t sz_find_loongsonasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                 sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
 
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_loongsonasx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                        sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                        sz_size_t *positions, sz_stream_t stream);
+
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_loongsonasx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                                  sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
@@ -422,6 +496,11 @@ STRINGZILLA_API sz_status_t sz_rfind_byte_powervsx(sz_cptr_t haystack, sz_size_t
 /** @copydoc sz_find_best */
 STRINGZILLA_API sz_status_t sz_find_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                              sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream);
+
+/** @copydoc sz_find_strings_best */
+STRINGZILLA_API sz_status_t sz_find_strings_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                     sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                     sz_size_t *positions, sz_stream_t stream);
 
 /** @copydoc sz_rfind_best */
 STRINGZILLA_API sz_status_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
@@ -585,6 +664,15 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t 
                                                   sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(haystack), sz_unused_(haystack_length), sz_unused_(set), sz_unused_(match), sz_unused_(capabilities),
         sz_unused_(stream);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_capability_t capabilities,
+                                                 sz_stream_t stream) {
+    sz_unused_(strings), sz_unused_(order), sz_unused_(count), sz_unused_(needle), sz_unused_(needle_length),
+        sz_unused_(positions), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

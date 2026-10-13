@@ -77,12 +77,13 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `Sha256` — an incremental SHA-256 hasher with a one-shot convenience constructor.
 - `BuildSzHasher` — a `std::hash::BuildHasher`, gated on feature `std`, for using `Hasher` with `HashMap`/`HashSet`.
 - `Utf8View`, `Utf8Runes`, `Utf8SplitNewlines`, `Utf8SplitWhitespaces`, `Utf8Wordbreaks`, `Utf8Graphemes`, `Utf8Sentences`, `Utf8Linebreaks` — lazy UTF-8 views and iterators.
-- `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `Utf8NormalForm` — uncased search and Unicode normalization helpers.
+- `Utf8UncasedNeedle`, `Utf8UncasedMatches`, `NormalForm` — uncased search and Unicode normalization helpers.
 - `SemVer`, `Status` — version and error types.
 - `Capability`, `Capabilities` — one CPU or GPU capability, and a set of them printed as their names, with the producers that report a device's set by its ordinal.
-- `Stream`, `Scope` — a stream of one device, which every engine, tape and allocator takes, and the span its engine verbs queue in before one join.
-- `Tape`, `UnifiedAllocator` — a batch gathered into one tape, and the memory the host and a GPU both address.
-- `EscapeKind`, `UnescapeError` — the formats a `Tape` escapes for, and the first malformed string unescaping stopped at.
+- `Stream`, `Scope` — a stream of one device, which every engine, conversion and allocator takes, and the span its engine verbs queue in before one join.
+- `StringsView`, `StringsIter` — a borrowed column, an Arrow tape or slices read in place, which every engine verb and conversion reads.
+- `Strings`, `UnifiedAllocator` — an owned column in any `Allocator`, and the memory the host and a GPU both address.
+- `EscapeKind`, `SplitKind`, `StringsError` — the formats a column escapes for, whether a split ends a part at every delimiter or every run of them, and the first malformed string unescaping or UTF-8 validation stopped at.
 - `ArgsortOptions` — knobs for sorting.
 
 `Status` is the error of every fallible call: one variant per failure code of C's `sz_status_t`, plus `Unrecognized` for a code this crate's header does not list.
@@ -349,74 +350,112 @@ assert_eq!(spaced, b"abc");
 
 ```rust
 pub fn utf8_uncased_fold<S: AsRef<[u8]>, T: AsMut<[u8]>>(source: S, target: &mut T) -> Result<usize, Status>;
-pub fn utf8_norm<S: AsRef<[u8]>, T: AsMut<[u8]>>(source: S, form: Utf8NormalForm, target: &mut T) -> Result<usize, Status>;
-pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -> Option<usize>;
+pub fn utf8_norm<S: AsRef<[u8]>, T: AsMut<[u8]>>(source: S, form: NormalForm, target: &mut T) -> Result<usize, Status>;
+pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: NormalForm) -> Option<usize>;
 ```
 
 `utf8_uncased_fold` applies Unicode case folding, for example `ß` → `ss`, returning the number of bytes written.
-`utf8_norm` normalizes to one of the five `Utf8NormalForm` variants: `Nfd`, `Nfc`, `Nfkd`, `Nfkc`, and `NfkcCasefold`, the Unicode `toNFKC_Casefold` that caseless search keys match on.
+`utf8_norm` normalizes to one of the five `NormalForm` variants: `Nfd`, `Nfc`, `Nfkd`, `Nfkc`, and `NfkcCasefold`, the Unicode `toNFKC_Casefold` that caseless search keys match on.
 `utf8_find_denormalized` is a fast check returning the byte offset of the first non-conforming byte, or `None` if already normalized:
 
 ```rust
-use stringzilla::sz::{self, Utf8NormalForm};
+use stringzilla::sz::{self, NormalForm};
 
 let mut dest = [0u8; 33];
 let len = sz::utf8_uncased_fold("HELLO WORLD", &mut dest).unwrap();
 assert_eq!(&dest[..len], b"hello world");
 
 // NFC check: a decomposed "café" (e + combining acute) violates NFC.
-assert!(sz::utf8_find_denormalized("cafe\u{0301}", Utf8NormalForm::Nfc).is_some());
-assert!(sz::utf8_find_denormalized("caf\u{00E9}", Utf8NormalForm::Nfc).is_none());
+assert!(sz::utf8_find_denormalized("cafe\u{0301}", NormalForm::Nfc).is_some());
+assert!(sz::utf8_find_denormalized("caf\u{00E9}", NormalForm::Nfc).is_none());
 
 let mut out = vec![0u8; "cafe\u{0301}".len() * 18];
-let n = sz::utf8_norm("cafe\u{0301}", Utf8NormalForm::Nfc, &mut out).unwrap();
+let n = sz::utf8_norm("cafe\u{0301}", NormalForm::Nfc, &mut out).unwrap();
 assert_eq!(&out[..n], "caf\u{00E9}".as_bytes());
 ```
 
 The C kernels write without a capacity, so target buffers must hold the worst-case expansion whatever the input: `source.len() * 3` for folding and `source.len() * 18` for normalization.
 A shorter one is refused with `Status::UnexpectedDimensions` before anything is written.
 
-### Escaping, Mapping and Normalizing Collections
+### Splitting, Joining, Escaping, Mapping and Normalizing Collections
 
-A `Tape` gathers a batch into two blocks, the bytes of every string back to back and their offsets, in the layout Apache Arrow reads.
-Each conversion reads one tape and writes a new one from the same allocator, on the device of its stream:
+A column of strings comes in two types.
+A `StringsView` borrows one in any layout C reads: an Apache Arrow `String` or `LargeString` tape of bytes and offsets, or a slice of anything `AsRef<[u8]>`, read in place through an accessor.
+A `Strings<A>` owns one tape, its payload and its offsets both from the allocator `A`, `Global` unless named, and frees them on drop.
+Every conversion writes a new `Strings`, or a joined `Vec<u8, A>`, from the allocator it is given, on the device of the stream it is given, joining that stream before returning:
 
 ```rust
-impl<'stream> Tape<'stream> {
-    pub fn copy<T: AsRef<[u8]>>(texts: &[T], allocator: &UnifiedAllocator, stream: &'stream Stream) -> Result<Self, Status>;
-    pub fn escape(&self, kind: EscapeKind) -> Result<Self, Status>;
-    pub fn unescape(&self, kind: EscapeKind) -> Result<Self, UnescapeError>;
-    pub fn lookup(&self, table: [u8; 256]) -> Result<Self, Status>;
-    pub fn normalize(&self, form: Utf8NormalForm) -> Result<Self, Status>;
-    pub fn to_rows(&self, rows: &mut [u8], width: usize) -> Result<usize, Status>;
-    pub fn get(&self, index: usize) -> Option<&[u8]>;
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &[u8]>;
+impl<A: Allocator> Strings<A> {
+    pub fn copy_in(strings: StringsView<'_>, allocator: A, stream: &Stream) -> Result<Self, Status>;
+    pub fn split_in(text: &[u8], delimiters: Byteset, kind: SplitKind, allocator: A, stream: &Stream) -> Result<Self, Status>;
+    pub fn split_lines_in(text: &[u8], allocator: A, stream: &Stream) -> Result<Self, Status>;
+    pub fn view(&self) -> StringsView<'_>;
+}
+impl<'a> StringsView<'a> {
+    pub fn from_u32_tape(data: &'a [u8], offsets: &'a [u32]) -> Result<Self, Status>;
+    pub fn from_u64_tape(data: &'a [u8], offsets: &'a [u64]) -> Result<Self, Status>;
+    pub fn from_slices<T: AsRef<[u8]>>(texts: &'a [T]) -> Self;
+    pub fn get(&self, index: usize) -> Option<&'a [u8]>;
+    pub fn iter(&self) -> StringsIter<'a>;
+    pub fn escape_in<A: Allocator>(&self, kind: EscapeKind, allocator: A, stream: &Stream) -> Result<Strings<A>, Status>;
+    pub fn unescape_in<A: Allocator>(&self, kind: EscapeKind, allocator: A, stream: &Stream) -> Result<Strings<A>, StringsError>;
+    pub fn lookup_in<A: Allocator>(&self, table: &[u8; 256], allocator: A, stream: &Stream) -> Result<Strings<A>, Status>;
+    pub fn normalize_in<A: Allocator>(&self, form: NormalForm, allocator: A, stream: &Stream) -> Result<Strings<A>, Status>;
+    pub fn join_in<A: Allocator>(&self, between: &[u8], allocator: A, stream: &Stream) -> Result<Vec<u8, A>, Status>;
+    pub fn join_columns_in<A: Allocator>(columns: &[StringsView<'_>], frames: &[&[u8]], between: &[u8], allocator: A, stream: &Stream) -> Result<Vec<u8, A>, Status>;
+    pub fn to_rows(&self, rows: &mut [u8], width: usize, stream: &Stream) -> Result<usize, Status>;
+    pub fn find(&self, needle: &[u8], positions: &mut [usize], stream: &Stream) -> Result<(), Status>;
+    pub fn hashes(&self, seed: u64, hashes: &mut [u64], stream: &Stream) -> Result<(), Status>;
+    pub fn utf8_count(&self, runes: Option<&mut [usize]>, stream: &Stream) -> Result<(), StringsError>;
 }
 ```
 
+`from_u32_tape` and `from_u64_tape` refuse offsets that fall or run past the data with `Status::UnexpectedDimensions`, and accept a sliced Arrow array whose first offset is past zero.
 `EscapeKind` names the format: `Json`, `JsonAscii`, `Csv`, `Html`, `Url`, `Hex` or `Console`, the last one keeping logs safe from control bytes and bidirectional overrides.
-`unescape` stops at the first malformed string, like a CSV field with an unbalanced quote, and reports its position as `UnescapeError::Malformed`.
+`unescape_in` stops at the first malformed string, like a CSV field with an unbalanced quote, and reports its position as `StringsError::Malformed`.
+`find` writes each string's first match of one needle, `usize::MAX` where there is none, and `hashes` each string's `hash_with_seed`, both into a slice of exactly `len()` entries.
+`utf8_count` validates every string as UTF-8, reporting the first ill-formed one as `StringsError::Malformed`, and writes each one's rune count into such a slice unless given `None`.
+`split_in` cuts a text at the bytes of a `Byteset`, every delimiter ending a part with `SplitKind::Each`, like `slice::split`, or every run of them with `SplitKind::Runs`, like `str::split_ascii_whitespace`.
+`split_lines_in` cuts UTF-8 at the line breaks of Python's `str.splitlines()`, CR LF counting as one, leaving no empty line after the last.
+`join_columns_in` writes row `r` as `frames[0]`, `columns[0][r]`, `frames[1]` and so on, with `between` between rows, serializing CSV lines or JSON records without a string per cell, and `join_in` joins one column like `slice::join`.
 `to_rows` writes NUL-padded fixed-width rows, truncating longer strings, and returns the longest length to retry with wider rows:
 
 ```rust
-use stringzilla::sz::{Capabilities, EscapeKind, Stream, Tape, UnescapeError, UnifiedAllocator, Utf8NormalForm};
+use std::alloc::Global;
+use stringzilla::sz::{Byteset, Capabilities, EscapeKind, NormalForm, SplitKind, Stream, Strings, StringsError, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
-let unified = UnifiedAllocator::new(&cpu);
-let names = Tape::copy(&["Ada", "Grace \"Amazing\" Hopper", "Stra\u{df}e"], &unified, &cpu)?;
+let names = StringsView::from_slices(&["Ada", "Grace \"Amazing\" Hopper", "Stra\u{df}e"]);
 
-let fields = names.escape(EscapeKind::Csv)?;
-assert_eq!(fields.get(1), Some(&br#""Grace ""Amazing"" Hopper""#[..]));
-assert!(fields.unescape(EscapeKind::Csv).unwrap().iter().eq(names.iter()));
+let fields = names.escape_in(EscapeKind::Csv, Global, &cpu)?;
+assert_eq!(fields.view().get(1), Some(&br#""Grace ""Amazing"" Hopper""#[..]));
+let restored = fields.view().unescape_in(EscapeKind::Csv, Global, &cpu).unwrap();
+assert!(restored.view().iter().eq(names.iter()));
 
-let keys = names.normalize(Utf8NormalForm::NfkcCasefold)?;
-assert_eq!(keys.get(2), Some(&b"strasse"[..]));
+let years = StringsView::from_slices(&["1815", "1906", "1984"]);
+let csv = StringsView::join_columns_in(&[fields.view(), years], &[b"", b",", b""], b"\r\n", Global, &cpu)?;
+assert_eq!(csv, "Ada,1815\r\n\"Grace \"\"Amazing\"\" Hopper\",1906\r\nStra\u{df}e,1984".as_bytes());
+let lines = Strings::split_lines_in(&csv, Global, &cpu)?;
+let cells = Strings::split_in(lines.view().get(2).unwrap(), Byteset::from(","), SplitKind::Each, Global, &cpu)?;
+assert!(cells.view().iter().eq(["Stra\u{df}e".as_bytes(), b"1984"]));
+
+let mut runes = [0; 3];
+names.utf8_count(Some(&mut runes), &cpu).unwrap();
+assert_eq!(runes, [3, 22, 6]);
+
+let keys = names.normalize_in(NormalForm::NfkcCasefold, Global, &cpu)?;
+assert_eq!(keys.view().get(2), Some(&b"strasse"[..]));
 
 let mut rows = [0u8; 3 * 8];
-assert_eq!(names.to_rows(&mut rows, 8)?, 22); // "Grace \"Amazing\" Hopper" is 22 bytes long
+assert_eq!(names.to_rows(&mut rows, 8, &cpu)?, 22); // "Grace \"Amazing\" Hopper" is 22 bytes long
 
-let broken = Tape::copy(&["fine", "\"unbalanced"], &unified, &cpu)?;
-assert_eq!(broken.unescape(EscapeKind::Csv).err(), Some(UnescapeError::Malformed(1)));
+let broken = StringsView::from_slices(&["fine", "\"unbalanced"]);
+assert_eq!(broken.unescape_in(EscapeKind::Csv, Global, &cpu).err(), Some(StringsError::Malformed(1)));
+
+// An Arrow array sliced from its second string, copied into a tape of its own.
+let arrow = StringsView::from_u32_tape(b"skipAdaGrace", &[4, 7, 12])?;
+let copy = Strings::copy_in(arrow, Global, &cpu)?;
+assert!(copy.view().iter().eq([&b"Ada"[..], b"Grace"]));
 ```
 
 ### Uncased UTF-8 Search
@@ -661,8 +700,8 @@ Preparation is the expensive half, so a long-lived engine amortizes it across ev
 fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
     stream: &Stream) -> Result<LevenshteinEngine, Status>;
 
-fn distances<'scope, C: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: &'scope C, distances: &'scope mut [usize], distances_stride: usize) -> Result<(), Status>;
+fn distances<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    candidates: StringsView<'scope>, distances: &'scope mut [usize], distances_stride: usize) -> Result<(), Status>;
 ```
 
 `LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, an ill-formed byte decoding to `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
@@ -672,24 +711,27 @@ The output is a `[queries, candidates]` block the caller owns: query `q` against
 A stride wider than the candidate count is what lets one round fill a sub-block of a larger matrix.
 
 ```rust
-use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream};
+use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 
 let mut distances = [0usize; 4];
-cpu.scope(|scope| engine.distances(scope, &["sitting", "sunday"], &mut distances, 2)).unwrap();
+let candidates = StringsView::from_slices(&["sitting", "sunday"]);
+cpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 2)).unwrap();
 assert_eq!(distances[0], 3); // kitten vs sitting
 assert_eq!(distances[3], 3); // saturday vs sunday
 
-// The same engine, a second round, no preparation repeated.
-let mut again = [0usize; 2];
-cpu.scope(|scope| engine.distances(scope, &["mitten"], &mut again, 1)).unwrap();
+// The same engine, a second round over an Arrow tape, no preparation repeated.
+let mut again = [0usize; 4];
+let arrow = StringsView::from_u32_tape(b"mittenkitten", &[0, 6, 12]).unwrap();
+cpu.scope(|scope| engine.distances(scope, arrow, &mut again, 2)).unwrap();
+assert_eq!(again[..2], [1, 0]); // kitten vs mitten and kitten
 
 // Runes rather than bytes, for text where a codepoint is the unit.
 let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes, &cpu).unwrap();
 let mut one = [0usize; 1];
-cpu.scope(|scope| unicode.distances(scope, &["cafe"], &mut one, 1)).unwrap();
+cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), &mut one, 1)).unwrap();
 assert_eq!(one[0], 1);
 ```
 
@@ -703,8 +745,8 @@ Nothing is stored per candidate, so the candidates may change round to round whi
 fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget: usize,
     stream: &Stream) -> Result<OverlapEngine, Status>;
 
-fn scores<'scope, C: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: &'scope C, scores: &'scope mut [f32],
+fn scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    candidates: StringsView<'scope>, scores: &'scope mut [f32],
     scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
 ```
 
@@ -713,13 +755,14 @@ The output is a `[queries, candidates, widths]` block with the width axis unit-s
 The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
 
 ```rust
-use stringzilla::sz::{Capabilities, OverlapEngine, Stream};
+use stringzilla::sz::{Capabilities, OverlapEngine, Stream, StringsView};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).unwrap();
 
 let mut scores = [0.0f32; 2];
-cpu.scope(|scope| engine.scores(scope, &["the quick brown cat"], &mut scores, 2, 2)).unwrap();
+let candidates = StringsView::from_slices(&["the quick brown cat"]);
+cpu.scope(|scope| engine.scores(scope, candidates, &mut scores, 2, 2)).unwrap();
 assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 ```
 
@@ -733,16 +776,16 @@ fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
     overlap_policy: SubstringsOverlapPolicy, hot_states: usize, matches_budget: usize,
     haystacks_budget: usize, stream: &Stream) -> Result<SubstringsEngine, Status>;
 
-fn counts<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    haystacks: &'scope H, counts: &'scope mut [usize], counts_stride: usize) -> Result<(), Status>;
-fn find<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    haystacks: &'scope H, matches: &'scope mut [SubstringsMatch],
+fn counts<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: StringsView<'scope>, counts: &'scope mut [usize], counts_stride: usize) -> Result<(), Status>;
+fn find<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: StringsView<'scope>, matches: &'scope mut [SubstringsMatch],
     matches_offsets: &'scope mut [usize]) -> Result<(), Status>;
-fn replace<'scope, H: Strings + ?Sized, R: Strings + ?Sized>(&'scope mut self,
-    scope: &'scope Scope<'scope, '_>, haystacks: &'scope H, replacements: &'scope R,
+fn replace<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: StringsView<'scope>, replacements: StringsView<'scope>,
     target: &'scope mut [u8], offsets: &'scope mut [usize]) -> Result<(), Status>;
-fn bm25_scores<'scope, H: Strings + ?Sized>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    haystacks: &'scope H, document_lengths: Option<&'scope [f32]>, parameters: &'scope Bm25Params,
+fn bm25_scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
+    haystacks: StringsView<'scope>, document_lengths: Option<&'scope [f32]>, parameters: &'scope Bm25Params,
     needle_weights: &'scope [f32], scores: &'scope mut [f32], scores_stride: usize) -> Result<(), Status>;
 
 fn report(&self) -> SubstringsReport;
@@ -766,7 +809,7 @@ That is what lets one call with an empty output size the next one, with no walk 
 
 ```rust
 use stringzilla::sz::{
-    Capabilities, CaseSensitivity, Stream, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
+    Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
 
@@ -782,15 +825,15 @@ let mut engine = SubstringsEngine::new(
 )
 .unwrap();
 
-let documents = ["a catalog of cats", "nothing here"];
+let documents = StringsView::from_slices(&["a catalog of cats", "nothing here"]);
 let mut counts = [0usize; 2];
-cpu.scope(|scope| engine.counts(scope, &documents, &mut counts, 1)).unwrap();
+cpu.scope(|scope| engine.counts(scope, documents, &mut counts, 1)).unwrap();
 assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 
 // `find` fills one boundary per haystack plus a final total, whether or not the matches fit.
 let mut matches = [SubstringsMatch::default(); 3];
 let mut offsets = [0usize; 3];
-cpu.scope(|scope| engine.find(scope, &documents, &mut matches, &mut offsets)).unwrap();
+cpu.scope(|scope| engine.find(scope, documents, &mut matches, &mut offsets)).unwrap();
 assert_eq!(offsets, [0, 3, 3]);
 assert_eq!(engine.report().matches_emitted, 3);
 assert_eq!(engine.report().shortfall, 0);
@@ -810,8 +853,8 @@ Rewriting is defined only under a cover, so an engine built with `SubstringsOver
 A `target` too small is not an error either: `report().target_length` names the bytes the rewrite needed and the buffer's contents are then unspecified, so an empty `target` is how the next call is sized.
 
 ```rust
-use stringzilla::sz::{Bm25Params, Capabilities, CaseSensitivity, Stream, SubstringsEngine, SubstringsOverlapPolicy,
-                      SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
+use stringzilla::sz::{Bm25Params, Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine,
+                      SubstringsOverlapPolicy, SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO};
 
 let cpu = Stream::default(Capabilities::cpu_enabled());
 let mut engine = SubstringsEngine::new(
@@ -825,19 +868,19 @@ let mut engine = SubstringsEngine::new(
 )
 .unwrap();
 
-let documents = ["cat and dog", "nothing here"];
+let documents = StringsView::from_slices(&["cat and dog", "nothing here"]);
 let mut scores = [0.0f32; 2];
 let parameters = Bm25Params::normalized(10.0);
-cpu.scope(|scope| engine.bm25_scores(scope, &documents, None, &parameters, &[1.0, 1.0], &mut scores, 1))
+cpu.scope(|scope| engine.bm25_scores(scope, documents, None, &parameters, &[1.0, 1.0], &mut scores, 1))
     .unwrap();
 assert_eq!(scores[1], 0.0);
 
 // One replacement per needle: an empty target sizes the rewrite, a second scope performs it.
-let replacements = ["feline", "canine"];
+let replacements = StringsView::from_slices(&["feline", "canine"]);
 let mut offsets = [0usize; 3];
-cpu.scope(|scope| engine.replace(scope, &documents, &replacements, &mut [], &mut offsets)).unwrap();
+cpu.scope(|scope| engine.replace(scope, documents, replacements, &mut [], &mut offsets)).unwrap();
 let mut target = vec![0u8; engine.report().target_length];
-cpu.scope(|scope| engine.replace(scope, &documents, &replacements, &mut target, &mut offsets)).unwrap();
+cpu.scope(|scope| engine.replace(scope, documents, replacements, &mut target, &mut offsets)).unwrap();
 assert_eq!(&target[offsets[0]..offsets[1]], b"feline and canine");
 ```
 
@@ -982,23 +1025,24 @@ The verb borrows the engine, its inputs and its outputs for the whole scope, so 
 A stream of another group than the engine's is refused with `Status::DeviceMemoryMismatch`.
 
 A device engine reads its rounds where they lie, so its candidates and its outputs have to sit in memory the device reaches.
-`UnifiedAllocator::new(&stream)` is that memory on the stream's device, behind the standard `Allocator` trait, so `Vec::new_in` and any other allocator-aware collection lays an output out there.
-`Tape::copy` gathers a batch on the host into one tape of bytes and offsets in it, and every engine reads that tape in place, while a batch of host strings is refused with `Status::DeviceMemoryMismatch`.
-The conversions of a tape on a GPU stream, like `escape` or `normalize`, run on that GPU.
+`UnifiedAllocator::new(&stream)` is that memory on the stream's device, behind the standard `Allocator` trait, so `Vec::new_in`, `Strings` and any other allocator-aware collection lays its contents out there.
+`Strings::copy_in` on a CPU stream gathers a batch into one tape of bytes and offsets in that memory, and every engine reads the tape in place, while slices, host tapes and blocks of another vendor are refused with `Status::DeviceMemoryMismatch`.
+The conversions of a column on a GPU stream, like `escape_in` or `normalize_in`, run on that GPU and write into the allocator they are given, which has to be one the GPU reaches.
 
 ```rust
-use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Tape, UnifiedAllocator};
+use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Strings, StringsView, UnifiedAllocator};
 
+let cpu = Stream::default(Capabilities::cpu_enabled());
 let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
 let unified = UnifiedAllocator::new(&stream);
-let candidates = Tape::copy(&["sitting", "kitten"], &unified, &stream)?;
+let candidates = Strings::copy_in(StringsView::from_slices(&["sitting", "kitten"]), unified, &cpu)?;
 let mut distances = Vec::new_in(unified);
 distances.resize(2, 0usize);
 
 let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-stream.scope(|scope| engine.distances(scope, &candidates, &mut distances, 2))?;
+stream.scope(|scope| engine.distances(scope, candidates.view(), &mut distances, 2))?;
 assert_eq!(distances[..], [3, 0]);
 ```
 
 `stream.synchronize()` joins a stream outside any scope.
-A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and a `Tape` copied for any capabilities reads there too.
+A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and a column in any memory reads there too.

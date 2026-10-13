@@ -37,8 +37,8 @@ char const doc_utf8_uncased_search[] =                                          
     "  - bytes input: start/end are BYTE offsets, returns BYTE offset\n"                                 //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    haystack (Str or str or bytes): The string to search in.\n"                                     //
-    "    needle (Str or str or bytes): The substring to find.\n"                                         //
+    "    haystack (String or str or bytes): The string to search in.\n"                                  //
+    "    needle (String or str or bytes): The substring to find.\n"                                      //
     "    start (int, optional): Starting index, defaulting to 0.\n"                                      //
     "    end (int, optional): Ending index, defaulting to length.\n"                                     //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
@@ -55,9 +55,9 @@ char const doc_utf8_uncased_search[] =                                          
     "    >>> sz.utf8_uncased_search(b'Stra\\xc3\\x9fe', b'STRASSE')  # 'ß' = 2 bytes\n"                  //
     "    0";
 
-PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                       PyObject *args_names_tuple) {
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple) {
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Argument objects
     PyObject *haystack_obj = NULL;
@@ -266,8 +266,8 @@ char const doc_utf8_uncased_order[] =                                           
     "one-to-many expansions, like 'Straße' equaling 'STRASSE'.\n"                                        //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    a (Str or str or bytes): First string to compare.\n"                                            //
-    "    b (Str or str or bytes): Second string to compare.\n"                                           //
+    "    a (String or str or bytes): First string to compare.\n"                                         //
+    "    b (String or str or bytes): Second string to compare.\n"                                        //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
@@ -280,9 +280,9 @@ char const doc_utf8_uncased_order[] =                                           
     "    >>> sz.utf8_uncased_order('apple', 'BANANA')\n"                                                 //
     "    -1";
 
-PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                      PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t nargs_expected = is_member ? 1 : 2; // b if method, a+b if function
     int validate = 0;                              // Default: no validation
     PyObject *capabilities_object = NULL;
@@ -360,24 +360,24 @@ char const doc_utf8_uncased_matches[] =                                         
     "An empty needle matches at every codepoint boundary, the end included.\n"                           //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    haystack (Str or str or bytes): The string to search in.\n"                                     //
-    "    needle (Str or str or bytes): The pattern to find.\n"                                           //
+    "    haystack (String or str or bytes): The string to search in.\n"                                  //
+    "    needle (String or str or bytes): The pattern to find.\n"                                        //
     "    include_overlapping (bool, optional): Allow overlapping matches, defaulting to False.\n"        //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Yields:\n"                                                                                          //
-    "    Str: Each matched region as a view into the original haystack.\n"                               //
+    "    String: Each matched region as a view into the original haystack.\n"                            //
     "\n"                                                                                                 //
     "Examples:\n"                                                                                        //
     "    >>> list(sz.utf8_uncased_matches('Hello HELLO hello', 'hello'))\n"                              //
-    "    [sz.Str('Hello'), sz.Str('HELLO'), sz.Str('hello')]\n"                                          //
+    "    [sz.String('Hello'), sz.String('HELLO'), sz.String('hello')]\n"                                 //
     "    >>> list(sz.utf8_uncased_matches('Straße STRASSE', 'strasse'))\n"                               //
-    "    [sz.Str('Straße'), sz.Str('STRASSE')]";
+    "    [sz.String('Straße'), sz.String('STRASSE')]";
 
-PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *kwnames) {
+PyObject *String_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                           PyObject *kwnames) {
     // Check if called as member or module function
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     int min_args = is_member ? 1 : 2;
     int max_args = is_member ? 2 : 3;
 
@@ -459,7 +459,7 @@ static PyObject *Utf8UncasedMatchesType_next(Utf8UncasedMatches *self) {
         return NULL;
     }
 
-    Str *result_obj = Str_alloc_();
+    String *result_obj = String_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
     result_obj->memory.start = match;
@@ -489,22 +489,22 @@ static PyObject *Utf8UncasedMatchesType_iter(PyObject *self) {
     return self;
 }
 
-static char const doc_Utf8UncasedMatches[] =                                    //
-    "Utf8UncasedMatches(haystack, needle, ...)\n"                               //
-    "\n"                                                                        //
-    "Iterator yielding all uncased matches of needle in haystack.\n"            //
-    "Uses Unicode case folding for proper handling of international text.\n"    //
-    "\n"                                                                        //
-    "Created by:\n"                                                             //
-    "  - Str.utf8_uncased_matches()\n"                                          //
-    "  - sz.utf8_uncased_matches()\n"                                           //
-    "\n"                                                                        //
-    "Each iteration yields a Str view of the matched region in the haystack.\n" //
-    "The matched length may differ from needle length due to case folding\n"    //
-    "expansions, like German 'ß' matching 'SS'.\n"                              //
-    "\n"                                                                        //
-    "Example:\n"                                                                //
-    "  >>> len(list(sz.utf8_uncased_matches('aAaA', 'a')))\n"                   //
+static char const doc_Utf8UncasedMatches[] =                                       //
+    "Utf8UncasedMatches(haystack, needle, ...)\n"                                  //
+    "\n"                                                                           //
+    "Iterator yielding all uncased matches of needle in haystack.\n"               //
+    "Uses Unicode case folding for proper handling of international text.\n"       //
+    "\n"                                                                           //
+    "Created by:\n"                                                                //
+    "  - String.utf8_uncased_matches()\n"                                          //
+    "  - sz.utf8_uncased_matches()\n"                                              //
+    "\n"                                                                           //
+    "Each iteration yields a String view of the matched region in the haystack.\n" //
+    "The matched length may differ from needle length due to case folding\n"       //
+    "expansions, like German 'ß' matching 'SS'.\n"                                 //
+    "\n"                                                                           //
+    "Example:\n"                                                                   //
+    "  >>> len(list(sz.utf8_uncased_matches('aAaA', 'a')))\n"                      //
     "  4";
 
 PyTypeObject Utf8UncasedMatchesType = {

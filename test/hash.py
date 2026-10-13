@@ -6,7 +6,7 @@ Mirrors the C++ test/hash.cpp translation unit.
 Covers: seeded hash and the incremental Hasher, multiseed tuples and output buffers, bytesum,
 one-shot and progressive SHA-256, and HMAC-SHA-256 including its keyword-argument surface.
 Compares against: Python hashlib and hmac, and self-consistency between the standalone
-functions, the Str methods, and the incremental engines.
+functions, the String methods, and the incremental engines.
 
 Run:
     uv pip install numpy pyarrow pytest pytest-repeat
@@ -27,7 +27,7 @@ from random import Random
 import pytest
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 # NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
 # other than `ImportError`.
@@ -49,9 +49,9 @@ from base import (
 
 @pytest.mark.parametrize("body", ["", "hello", "world", "abcdefg", "a" * 32])
 def test_hash_basic_equivalence(body: str, seed: StreamKey):
-    """The standalone `sz.hash` and the `Str.hash` method return the same seeded digest for the same body."""
+    """The standalone `sz.hash` and the `String.hash` method return the same seeded digest for the same body."""
     hash_seeded = sz.hash(body, seed=seed)
-    hash_member = sz.Str(body).hash(seed=seed)
+    hash_member = sz.String(body).hash(seed=seed)
     assert hash_seeded == hash_member
 
 
@@ -99,9 +99,9 @@ def test_hash_multiseed_equivalence(body: str):
     seeds = array("Q", seeds_list)
     expected = tuple(sz.hash(body, s) for s in seeds_list)
 
-    # Tuple-returning form, standalone and as a member of `Str`
+    # Tuple-returning form, standalone and as a member of `String`
     assert sz.hash_multiseed(body, seeds) == expected
-    assert sz.Str(body).hash_multiseed(seeds) == expected
+    assert sz.String(body).hash_multiseed(seeds) == expected
 
     # Output-buffer form fills in place and returns None
     out = array("Q", [0] * len(seeds))
@@ -132,8 +132,8 @@ def test_sha256(length: int, rng: Random):
     # One-shot: standalone function
     assert sz.sha256(text) == expected
 
-    # One-shot: Str method
-    assert Str(text).sha256() == expected
+    # One-shot: String method
+    assert String(text).sha256() == expected
 
     # One-shot: bytes input
     assert sz.sha256(text.encode()) == expected
@@ -210,12 +210,12 @@ def test_sha256_lanes(lanes_count: int, rng: Random):
 
 
 @pytest.mark.parametrize("lanes_count", [0, 1, 8, 17])
-def test_sha256_lanes_strs(lanes_count: int, rng: Random):
-    """`sz.Sha256s.update` reads a `Strs` in place, in both its tape and reordered layouts."""
+def test_sha256_lanes_strings(lanes_count: int, rng: Random):
+    """`sz.Sha256s.update` reads a `Strings` in place, whether it owns its tape or borrows a slice of one."""
 
     messages = [get_random_string(rng, length=(index * 137) % 4096) for index in range(lanes_count)]
 
-    for texts in (sz.Strs(messages), sz.Strs(messages).shuffled()):
+    for texts in (sz.Strings(messages), sz.Strings([""] + messages)[1:]):
         expected = [hashlib.sha256(str(text).encode()).digest() for text in texts]
         assert sz.Sha256s(lanes_count).update(texts).digest() == expected
 
@@ -254,7 +254,7 @@ def test_sha256_lanes_errors():
     with pytest.raises(ValueError):
         sz.Sha256s(2).update([b"only-one-chunk"])
     with pytest.raises(ValueError):
-        sz.Sha256s(2).update(sz.Strs(["only-one-chunk"]))
+        sz.Sha256s(2).update(sz.Strings(["only-one-chunk"]))
     with pytest.raises(ValueError):
         sz.Sha256s(2).digest(out=bytearray(63))
     with pytest.raises(TypeError):
@@ -309,9 +309,9 @@ def test_hmac_sha256_many(messages_count: int, key_length: int, rng: Random):
     messages = [get_random_string(rng, length=(index * 37) % 512) for index in range(messages_count)]
     expected = [hmac.new(key, message.encode(), hashlib.sha256).digest() for message in messages]
 
-    # Both a plain sequence and a `Strs`, whose tape is read in place
+    # Both a plain sequence and a `Strings`, whose tape is read in place
     assert sz.hmac_sha256(key, [message.encode() for message in messages]) == expected
-    assert sz.hmac_sha256(key, sz.Strs(messages)) == expected
+    assert sz.hmac_sha256(key, sz.Strings(messages)) == expected
 
 
 @pytest.mark.skipif("np" not in globals(), reason="NumPy is not installed")
@@ -393,13 +393,13 @@ def test_unit_backend_differential_bytesum(backend_results, length: int, rng: Ra
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_hash(backend_results, length: int, seed: StreamKey, rng: Random):
     """`sz.hash` has no Python-native oracle, so every backend must at least agree with every other one,
-    for the standalone function and the `Str` method alike, across random/tiled/all-same-char bodies."""
+    for the standalone function and the `String` method alike, across random/tiled/all-same-char bodies."""
     for body in differential_bodies(length, rng):
         assert_backends_agree(
             backend_results(lambda capabilities, body=body: sz.hash(body, seed=seed, capabilities=capabilities))
         )
         assert_backends_agree(
-            backend_results(lambda capabilities, body=body: Str(body).hash(seed=seed, capabilities=capabilities))
+            backend_results(lambda capabilities, body=body: String(body).hash(seed=seed, capabilities=capabilities))
         )
 
 
@@ -441,7 +441,7 @@ def test_unit_backend_differential_fill_random(backend_results, length, nonce):
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_sha256(capabilities, length: int, rng: Random):
-    """`sz.sha256` and the `Str.sha256()` method must match `hashlib.sha256`, and so must the
+    """`sz.sha256` and the `String.sha256()` method must match `hashlib.sha256`, and so must the
     incremental `sz.Sha256` class under every individual backend config, not merely agree with each
     other, since SHA-256 has a fully independent, standard-library oracle."""
     text = get_random_string(rng, length=length)
@@ -449,7 +449,7 @@ def test_unit_backend_differential_sha256(capabilities, length: int, rng: Random
     expected_hex = expected_digest.hex()
     assert sz.sha256(text) == expected_digest
     assert sz.sha256(text.encode()) == expected_digest
-    assert Str(text).sha256() == expected_digest
+    assert String(text).sha256() == expected_digest
 
     incremental = sz.Sha256(capabilities=capabilities)
     incremental.update(text)

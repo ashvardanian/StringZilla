@@ -34,7 +34,6 @@
 #include <cstring> // `std::memcpy`
 
 #include <algorithm>     // `std::transform`
-#include <forward_list>  // `std::forward_list`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
 #include <memory>        // `std::allocator`
@@ -130,7 +129,10 @@ static strings_backend_t const strings_dispatched {"dispatched",
                                                    cpu_best<sz_strings_escape_best>,
                                                    cpu_best<sz_strings_unescape_best>,
                                                    cpu_best<sz_strings_lookup_best>,
-                                                   cpu_best<sz_strings_normalize_best>};
+                                                   cpu_best<sz_strings_normalize_best>,
+                                                   cpu_best<sz_strings_split_best>,
+                                                   cpu_best<sz_strings_split_lines_best>,
+                                                   cpu_best<sz_strings_join_best>};
 
 #pragma endregion Helpers
 
@@ -258,148 +260,135 @@ void test_strings_view_unit() {
     }
 }
 
-/** Verifies assignment from forward iterators and appending an element from the same tape. */
-void test_tape_assign_unit() {
-    sz::tape<char, std::uint32_t> tape;
+/** Pins @c sz::strings_view_t in each layout and the @c sz::strings its conversions return,
+ *  which own their blocks alone and leave nothing behind on failure. */
+void test_strings_columns_unit() {
+    char const payload[] = "alphabetagamma";
+    sz_u32_t const narrow_offsets[] = {0, 5, 9, 14};
 
-    // A forward list is walked forward only, but any number of times - all that `assign` needs.
-    std::forward_list<std::string> strings {"alpha", "", "gamma"};
-    verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
-    verify(tape.size() == 3);
-    verify(sz::string_view_t(tape[0].data(), tape[0].size()) == "alpha"_sv);
-    verify(tape[1].size() == 0);
-    verify(sz::string_view_t(tape[2].data(), tape[2].size()) == "gamma"_sv);
-    verify(tape.append(tape[0]) == sz::status_t::success_k);
-    verify(sz::string_view_t(tape[3].data(), tape[3].size()) == "alpha"_sv);
-    verify(tape.assign(tape.begin(), tape.end()) == sz::status_t::success_k);
-    verify(tape.size() == 4 && sz::string_view_t(tape[3].data(), tape[3].size()) == "alpha"_sv);
-    auto const terminated_bytes = tape.buffer();
-    verify(terminated_bytes[tape[0].size()] == '\0');
-    auto moved = std::move(tape);
-    verify(tape.size() == 0 && moved.size() == 4);
-    verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
-    tape = std::move(moved);
-    auto &same = tape;
-    tape = std::move(same);
-    verify(tape.size() == 4);
-    verify(tape.assign(strings.end(), strings.end()) == sz::status_t::success_k);
-    verify(tape.view().size() == 0);
-
-    std::uint32_t const offsets[] = {0, 5, 5};
-    sz::packed_tape_view<char, std::uint32_t> const packed({"alpha", 5}, offsets);
-    verify(packed[1].empty());
-
-    auto const [allocator, status] = sz::unified_alloc<char, sz_cap_serial_k>::make();
-    verify(status == sz::status_t::success_k);
-    tape_t owned(allocator), independent(allocator);
-    verify(owned.assign(strings.begin(), strings.end()) == sz::status_t::success_k);
-    verify(owned.size() == 3 && owned[1].empty());
-    std::array<sz_string_view_t, 3> views {{{"a\0b", 3}, {"", 0}, {"de", 2}}};
-    verify(owned.assign(views) == sz::status_t::success_k);
-    verify(owned.allocation_bytes() == 4 * sizeof(sz_u64_t) + 5);
-    verify(owned.view().tape_total_bytes() == 5);
-    verify(owned.assign(owned.strings()) == sz::status_t::success_k);
-    verify(independent.assign(owned.strings()) == sz::status_t::success_k);
-    owned.reset();
-    verify(independent.size() == 3 && independent[1].empty());
-    verify(sz::string_view_t(independent[0].data(), independent[0].size()) == "a\0b"_sv);
-    verify(independent.append(independent[0]) == sz::status_t::success_k);
-    verify(independent.size() == 4 && independent[3].size() == 3);
-    verify(independent.strings().layout == sz_strings_u64_tape_k);
-    auto const descriptor = independent.strings();
-    owned = std::move(independent);
-    verify(independent.size() == 0 && owned.strings().data.u64_tape.data == descriptor.data.u64_tape.data);
-    sz_strings_view_t oversized = owned.strings();
-    oversized.count = STRINGZILLA_SIZE_MAX;
-    verify(owned.assign(oversized) == sz::status_t::bad_alloc_k);
-    verify(owned.size() == 4);
-    verify(owned.assign(std::span<sz_string_view_t const> {}) == sz::status_t::success_k);
-    verify(owned.size() == 0);
-
-    sz::tape<char16_t, std::uint32_t> wide;
-    std::array<std::u16string_view, 2> const units {u"alpha", u""};
-    verify(wide.assign(units.begin(), units.end()) == sz::status_t::success_k);
-    verify(wide.append(wide[0]) == sz::status_t::success_k);
-    verify(std::u16string_view(wide[2].data(), wide[2].size()) == units[0]);
-    auto const terminated_units = wide.buffer();
-    verify(terminated_units[units[0].size()] == u'\0');
-}
-
-/** Validates that @c tape refuses to grow past the range of its offset type. */
-void test_tape_overflow_unit() {
-    // 8-bit offsets hit the same code path as 32-bit offsets past 4 GB, but already at 256 bytes.
-    using small_tape_t = sz::tape<char, std::uint8_t>;
-
-    // Appending past the offset range must fail cleanly and leave the stored strings untouched.
+    // Arrow `String` and `LargeString` columns read alike, and a slice keeps its parent's offsets
+    // until a gather packs it from zero.
     {
-        small_tape_t tape;
-        std::string const oversized_string(200, 'x');
-        verify(tape.append(std::span<char const>(oversized_string)) == sz::status_t::success_k);
-        // Two 200-byte strings need 402 bytes of buffer, past the 255 maximum of 8-bit offsets.
-        verify(tape.append(std::span<char const>(oversized_string)) == sz::status_t::overflow_risk_k);
-        verify(tape.size() == 1);
-        // The first string must still sit at offset 0, ending at 201 with its NULL terminator.
-        verify(tape.offsets()[0] == 0);
-        verify(tape.offsets()[1] == 201);
-        verify(std::memcmp(tape.buffer().data(), oversized_string.data(), oversized_string.size()) == 0);
+        sz_u64_t const wide_offsets[] = {0, 5, 9, 14};
+        sz::strings_view_t const narrow(payload, narrow_offsets, 3), wide(payload, wide_offsets, 3);
+        verify(narrow.size() == 3 && narrow[1] == "beta"_sv && wide[2] == "gamma"_sv);
+        verify(std::equal(narrow.begin(), narrow.end(), wide.begin(), wide.end()));
+        sz_u64_t hashes[3];
+        verify(wide.hashes(hashes) == sz::status_t::success_k && hashes[2] == wide[2].hash());
+        char upper_table[256];
+        sz_strings_lookup_init_upper(upper_table);
+        auto const [upper, lookup_status] = wide.lookup(sz::look_up_table_t(upper_table));
+        verify(lookup_status == sz::status_t::success_k && upper[0] == "ALPHA"_sv);
+
+        sz::strings_view_t const slice(payload, narrow_offsets + 1, 2);
+        verify(slice[0] == "beta"_sv && slice[1] == "gamma"_sv);
+        auto const [gathered, gather_status] = slice.gather();
+        verify(gather_status == sz::status_t::success_k && gathered.size() == 2);
+        verify(gathered.raw.data.u32_tape.offsets[0] == 0 && gathered[1] == "gamma"_sv);
     }
 
-    // Same for bulk assignment: the combined size must fit the offset range.
+    // An accessor over views reads the same way, and JSON escaping round-trips through unescaping.
     {
-        small_tape_t tape;
-        std::string const stored_string(10, 'z');
-        verify(tape.append(std::span<char const>(stored_string)) == sz::status_t::success_k);
-        std::vector<std::string> strings {std::string(200, 'x'), std::string(200, 'y')};
-        verify(tape.assign(strings.begin(), strings.end()) == sz::status_t::overflow_risk_k);
-        verify(tape.size() == 1 && tape[0].size() == stored_string.size());
+        std::array<sz::string_view_t, 3> const views {"Alpha"_sv, ""_sv, "a\"b\n"_sv};
+        sz::strings_view_t const strings(views);
+        verify(strings.raw.layout == sz_strings_accessor_k && strings[2] == "a\"b\n"_sv);
+        std::size_t positions[3];
+        verify(strings.find("a"_sv, positions) == sz::status_t::success_k);
+        verify(positions[0] == 4 && positions[1] == STRINGZILLA_SIZE_MAX && positions[2] == 0);
+        verify(strings.find("a"_sv, std::span(positions).first(2)) == sz::status_t::unexpected_dimensions_k);
+        auto const [folded, normalize_status] = strings.normalize(sz_normal_form_nfkc_casefold_k);
+        verify(normalize_status == sz::status_t::success_k && folded[0] == "alpha"_sv);
+
+        auto const [escaped, escape_status] = strings.escape(sz_escape_json_k);
+        verify(escape_status == sz::status_t::success_k && escaped[2] == "a\\\"b\\n"_sv);
+        std::size_t malformed_index = 0;
+        auto const [unescaped, unescape_status] = escaped.view().unescape(sz_escape_json_k, malformed_index);
+        verify(unescape_status == sz::status_t::success_k);
+        verify(std::equal(unescaped.begin(), unescaped.end(), views.begin(), views.end()));
     }
+
+    // Splits cut a text like `bytes.split` and `str.splitlines`, and joins frame the columns back
+    // into one string, alone or side by side as CSV, as long as all the columns are equally long.
+    {
+        auto const [each, each_status] = sz::strings_t::split(",a,,b"_sv, ","_bs, sz_split_each_k);
+        verify(each_status == sz::status_t::success_k && each.size() == 4 && each[0].empty() && each[3] == "b"_sv);
+        auto const [runs, runs_status] = sz::strings_t::split(" a \t b "_sv, " \t"_bs, sz_split_runs_k);
+        verify(runs_status == sz::status_t::success_k && runs.size() == 2 && runs[1] == "b"_sv);
+        auto const [lines, lines_status] = sz::strings_t::split_lines("one\r\ntwo\xC2\x85three\n"_sv);
+        verify(lines_status == sz::status_t::success_k && lines.size() == 3 && lines[2] == "three"_sv);
+
+        auto const [joined, join_status] = each.view().join("|"_sv);
+        verify(join_status == sz::status_t::success_k && joined == "|a||b"_sv);
+        sz_strings_view_t const columns[] {lines.view().raw, sz::strings_view_t(payload, narrow_offsets, 3).raw};
+        sz_string_view_t const frames[] {{"\"", 1}, {"\",", 2}, {"", 0}};
+        auto const [csv, csv_status] = sz::strings_view_t::join(columns, frames, "\n"_sv);
+        verify(csv_status == sz::status_t::success_k && csv == "\"one\",alpha\n\"two\",beta\n\"three\",gamma"_sv);
+        sz_strings_view_t const ragged[] {lines.view().raw, each.view().raw};
+        auto const [rejected, rejected_status] = sz::strings_view_t::join(ragged, frames, "\n"_sv);
+        verify(rejected_status == sz::status_t::unexpected_dimensions_k && rejected.empty());
+    }
+
+    // Counting runes validates every string, naming the first ill-formed one.
+    {
+        std::array<sz::string_view_t, 3> const texts {"héllo"_sv, "ok"_sv, "\xC3("_sv};
+        std::size_t runes[3], malformed_index = 0;
+        verify(sz::strings_view_t(std::span(texts).first(2)).utf8_count(runes, malformed_index) ==
+               sz::status_t::success_k);
+        verify(runes[0] == 5 && runes[1] == 2 && malformed_index == 2);
+        verify(sz::strings_view_t(texts).utf8_count({}, malformed_index) == sz::status_t::invalid_utf8_k);
+        verify(malformed_index == 2);
+    }
+
+    // A malformed string fails the whole column with nothing allocated, and moves hand blocks over
+    // without copies, so every block returns exactly once.
     {
         struct allocation_state_t {
             sz_allocator_t heap {};
-            std::size_t calls = 0, fail_at = 0, live_bytes = 0;
+            std::size_t live_bytes = 0;
         } state;
         verify(sz_allocator_init_heap(&state.heap) == sz_success_k);
-        sz_allocator_t allocator {};
-        allocator.handle = &state;
-        allocator.allocate = [](sz_size_t bytes, void *handle, sz_stream_t stream) -> void * {
+        sz_allocator_t counting {};
+        counting.handle = &state;
+        counting.allocate = [](sz_size_t bytes, void *handle, sz_stream_t stream) -> void * {
             auto &state = *static_cast<allocation_state_t *>(handle);
-            if (++state.calls == state.fail_at) return nullptr;
             void *block = state.heap.allocate(bytes, state.heap.handle, stream);
             if (block) state.live_bytes += bytes;
             return block;
         };
-        allocator.reallocate = [](void *block, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
-                                  sz_stream_t stream) -> void * {
-            auto &state = *static_cast<allocation_state_t *>(handle);
-            if (++state.calls == state.fail_at) return nullptr;
-            void *resized = state.heap.reallocate(block, old_bytes, new_bytes, state.heap.handle, stream);
-            if (resized || !new_bytes) state.live_bytes = state.live_bytes - old_bytes + new_bytes;
-            return resized;
-        };
-        allocator.free = [](void *block, sz_size_t bytes, void *handle, sz_stream_t stream) {
+        counting.free = [](void *block, sz_size_t bytes, void *handle, sz_stream_t stream) {
             auto &state = *static_cast<allocation_state_t *>(handle);
             verify(bytes <= state.live_bytes);
             state.live_bytes -= bytes;
             state.heap.free(block, bytes, state.heap.handle, stream);
         };
-        using allocated_tape_t = sz::tape<char, std::uint32_t, sz::unified_alloc<char>>;
+        sz::unified_alloc<char> const allocator(counting);
         {
-            allocated_tape_t tape {sz::unified_alloc<char>(allocator)};
-            std::array<std::string_view, 1> const texts {"kept"};
-            verify(tape.assign(texts.begin(), texts.end()) == sz::status_t::success_k);
-            std::size_t const live_bytes = state.live_bytes;
-            for (std::size_t fail_after : {1u, 2u}) {
-                state.fail_at = state.calls + fail_after;
-                verify(tape.assign(texts.begin(), texts.end()) == sz::status_t::bad_alloc_k);
-                verify(tape.size() == 1 && sz::string_view_t(tape[0].data(), tape[0].size()) == "kept"_sv);
-                verify(state.live_bytes == live_bytes);
-            }
+            std::array<sz::string_view_t, 2> const hex {"6869"_sv, "6g"_sv};
+            std::size_t malformed_index = 0;
+            sz::strings_view_t const escaped(hex);
+            auto const [decoded, decode_status] = escaped.unescape(sz_escape_hex_k, malformed_index, allocator);
+            verify(decode_status == sz::status_t::invalid_utf8_k && malformed_index == 1);
+            verify(decoded.size() == 0 && decoded.raw.data.u32_tape.offsets == nullptr && state.live_bytes == 0);
+
+            sz::strings_view_t const column(payload, narrow_offsets, 3);
+            auto [first, first_status] = column.gather(allocator);
+            auto [second, second_status] = column.gather(allocator);
+            verify(first_status == sz::status_t::success_k && second_status == sz::status_t::success_k);
+            sz_cptr_t const first_payload = first.raw.data.u32_tape.data;
+            sz::strings<sz::unified_alloc<char>> moved(std::move(first));
+            verify(first.size() == 0 && first.raw.data.u32_tape.data == nullptr);
+            verify(moved.size() == 3 && moved.raw.data.u32_tape.data == first_payload);
+            second = std::move(moved);
+            verify(moved.size() == 0 && second.raw.data.u32_tape.data == first_payload);
+            auto &same = second;
+            second = std::move(same);
+            verify(second.size() == 3 && second[2] == "gamma"_sv);
         }
         verify(state.live_bytes == 0);
     }
 }
 
-#pragma endregion Sequence
+#pragma endregion Strings Views
 
 #pragma region Allocator
 
@@ -1259,7 +1248,7 @@ void test_extensions_updates_unit() {
     let_verify(str s = "ab", sz::succeeded(s.try_assign("hello"_sv | "world")) && s == "helloworld");
 
     // A throwing allocator must surface as `bad_alloc_k` from the `noexcept` twins.
-    let_verify(sz::basic_string<throwing_allocator_t> s, s.try_reserve(1000) == sz::status_t::bad_alloc_k && s.empty());
+    let_verify(sz::string<throwing_allocator_t> s, s.try_reserve(1000) == sz::status_t::bad_alloc_k && s.empty());
 
     // Self-referencing methods.
     let_verify(str s = "test", sz::succeeded(s.try_assign(s.view())) && s == "test");
@@ -1280,7 +1269,7 @@ void test_extensions_updates_unit() {
         std::size_t live_bytes = 0;
         accounting_allocator_t const allocator {&live_bytes};
         {
-            sz::basic_string<accounting_allocator_t> s(allocator);
+            sz::string<accounting_allocator_t> s(allocator);
             verify(sz::succeeded(s.try_assign("STRASSE AND STRASSE")));
             verify(sz::succeeded(s.try_utf8_uncased_fold()) && s == "strasse and strasse");
             verify(sz::succeeded(s.try_utf8_normalize(sz_normal_form_nfd_k)) && s == "strasse and strasse");
@@ -1617,7 +1606,7 @@ void test_string_reserve_unit() {
 
 /** Checks the string class for leaks, and that blocks return to the allocator that granted them. */
 void test_memory_stability_equivalence(test_context_t &context, std::size_t length) {
-    using accounting_string_t = sz::basic_string<accounting_allocator_t>;
+    using accounting_string_t = sz::string<accounting_allocator_t>;
     static_assert(sizeof(accounting_string_t) == sizeof(sz::string_t) + sizeof(std::size_t *),
                   "Only a stateful allocator may widen the string");
 

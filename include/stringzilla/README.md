@@ -241,12 +241,14 @@ The one owning C string type is `sz_string_t`, documented under [String Collecti
 
 ### C++ types
 
-The C++ layer lives in `namespace ashvardanian::stringzilla`, conventionally aliased as `sz`, and is built on two class templates plus a 256-bit `byteset`.
+The C++ layer lives in `namespace ashvardanian::stringzilla`, conventionally aliased as `sz`, and is built on the types below plus a 256-bit `byteset`.
 
-- `sz::basic_string_slice<char_type>` — a non-owning, length-bounded view over `char` or `char const`.
-  Two aliases exist: the read-only `sz::string_view_t = basic_string_slice<char const>` and the mutable `sz::string_span_t = basic_string_slice<char>`.
-- `sz::basic_string<allocator = std::allocator<char>>` — an owning, Small-String-Optimized `char` container; the alias `sz::string_t` uses the default `std::allocator`.
+- `sz::string_slice<char_type>` — a non-owning, length-bounded view over `char` or `char const`.
+  Two aliases exist: the read-only `sz::string_view_t = string_slice<char const>` and the mutable `sz::string_span_t = string_slice<char>`.
+- `sz::string<allocator = std::allocator<char>>` — an owning, Small-String-Optimized `char` container; the alias `sz::string_t` uses the default `std::allocator`.
   A stateful allocator travels with the string under the usual `std::allocator_traits` propagation rules, and an empty one costs no bytes.
+- `sz::strings_view_t` — a borrowed column of strings, wrapping a `sz_strings_view_t` in any of its layouts.
+- `sz::strings<allocator = sz::heap_alloc<char>>` — an owned, move-only column, a `sz_strings_span_t` tape and the allocator of its blocks; the alias `sz::strings_t` uses the default.
 - `sz::byteset_t` — the C++ wrapper around `sz_byteset_t`, constructible from an initializer list, a `(pointer, count)` pair, or a `std::array`, and composable with `operator|`.
 - `sz::status_t` — a scoped enum mirroring `sz_status_t` with `success_k`, `bad_alloc_k`, `invalid_utf8_k`, `contains_duplicates_k`, and the rest, returned by the fallible `try_*` free functions.
 
@@ -920,6 +922,33 @@ int main() {
 }
 ```
 
+Collections pair the same way: `sz::strings_view_t` borrows an Arrow `String` or `LargeString` array from `(data, offsets, count)`, a span of `sz::string_view_t`, or an owned column, and `sz::strings_t` owns one.
+Its conversions, `gather`, `escape`, `unescape`, `lookup` and `normalize`, return a fresh `sz::strings` inside an `sz::expected` with the status, and leave nothing allocated on failure.
+`find`, `hashes` and `to_rows` write into spans the caller owns.
+Every one takes a capability mask, `sz::default_capabilities()` unless given, and a stream, like the C dispatch points.
+
+```cpp
+#include <stringzilla/stringzilla.hpp>
+namespace sz = ashvardanian::stringzilla;
+
+int main() {
+    char const payload[] = "alphabetagamma";
+    sz_u32_t const offsets[] = {0, 5, 9, 14};
+    sz::strings_view_t const column(payload, offsets, 3); // an Arrow `String` array, no copies
+
+    auto const [escaped, escape_status] = column.escape(sz_escape_json_k);
+    if (sz::failed(escape_status)) return 1;
+
+    std::size_t malformed_index = 0;
+    auto const [unescaped, unescape_status] = escaped.view().unescape(sz_escape_json_k, malformed_index);
+    assert(sz::succeeded(unescape_status) && unescaped[1] == "beta");
+
+    std::size_t positions[3];
+    if (sz::failed(column.find("a", positions))) return 1; // the first match in every string
+    return 0;
+}
+```
+
 ## Runtime Dispatch and Capabilities
 
 Every kernel exists in a serial form plus one or more per-ISA forms, named with a backend suffix (`_serial`, `_westmere`, `_goldmont`, `_haswell`, `_skylake`, `_icelake`, `_neon`, `_neonaes`, `_neonsha`, `_sve`, `_sve2`, `_sve2aes`, `_v128`, `_v128relaxed`, `_rvv`, `_rvvcrypto`, `_loongsonasx`, `_powervsx`), and the engines add one per GPU vendor, `_cuda`, `_rocm` and `_metal`.
@@ -1094,7 +1123,7 @@ Most notably:
 Check the following set of asserts validating the `std::string` specification.
 It's not realistic to expect the average developer to remember the [14 overloads of `std::string::replace`][stl-replace].
 
-[stl-replace]: https://en.cppreference.com/w/cpp/string/basic_string/replace
+[stl-replace]: https://en.cppreference.com/w/cpp/string/string/replace
 
 ```cpp
 using str = std::string;

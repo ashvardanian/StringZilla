@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""UAX-29 grapheme cluster segmentation: sz.utf8_graphemes and Str.utf8_graphemes().
+"""UAX-29 grapheme cluster segmentation: sz.utf8_graphemes and String.utf8_graphemes().
 
 Mirrors the C++ test/utf8_graphemes.cpp translation unit.
 
 Covers: ASCII, combining-mark, ZWJ-emoji-family, regional-indicator-flag, and skin-tone-modifier
-cluster iteration and the Str method surface, malformed-byte and SIMD window-seam safety sweeps,
+cluster iteration and the String method surface, malformed-byte and SIMD window-seam safety sweeps,
 class-adjacency pairs and triples, fuzz against the pure-Python UAX-29 baseline and multi-script
 prose paragraphs, and cross-backend agreement on regular and malformed inputs.
 Compares against: the official UCD GraphemeBreakTest, ICU's createCharacterInstance segmenter,
@@ -47,7 +47,7 @@ from utf8_helpers import (
 )
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 _byte_boundaries = byte_boundaries
 _SEGMENTATION_PALETTE = SEGMENTATION_PALETTE
@@ -98,10 +98,10 @@ def test_utf8_graphemes_unicode():
     assert [str(g) for g in sz.utf8_graphemes(waver)] == [waver]
 
 
-def test_utf8_graphemes_str_method():
-    """The Str.utf8_graphemes() method must agree with the module function."""
-    s = Str("héllo")
-    method_result = [str(g) for g in s.utf8_graphemes(s)]
+def test_utf8_graphemes_string_method():
+    """The String.utf8_graphemes() method must agree with the module function."""
+    s = String("héllo")
+    method_result = [str(g) for g in s.utf8_graphemes()]
     module_result = [str(g) for g in sz.utf8_graphemes(s)]
     assert method_result == module_result
     assert method_result == [str(g) for g in sz.utf8_graphemes("héllo")]

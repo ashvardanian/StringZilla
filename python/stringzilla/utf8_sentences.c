@@ -17,17 +17,16 @@ char const doc_utf8_sentences[] =                                               
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Returns:\n"                                                                                         //
-    "    Iterator yielding Str objects for each sentence.\n\n"                                           //
+    "    Iterator yielding String objects for each sentence.\n\n"                                        //
     "\n"                                                                                                 //
     "Example:\n"                                                                                         //
     "  >>> # Stream UAX-29 sentences lazily:\n"                                                          //
     "  >>> len(list(sz.utf8_sentences('Hi. Bye.'))) >= 2\n"                                              //
     "  True";
 
-PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *kwnames) {
-    sz_unused_(self);
-    return Utf8Boundaries_make_(&Utf8SentencesType, "utf8_sentences", sz_utf8_sentences_best, args,
+PyObject *String_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *kwnames) {
+    return Utf8Boundaries_make_(&Utf8SentencesType, "utf8_sentences", sz_utf8_sentences_best, self, args,
                                 positional_args_count, kwnames);
 }
 
@@ -38,7 +37,7 @@ static char const doc_Utf8Sentences[] =                                         
     "Yields sentences, the text segments between consecutive sentence boundaries.\n" //
     "\n"                                                                             //
     "Created by:\n"                                                                  //
-    "  - Str.utf8_sentences()\n"                                                     //
+    "  - String.utf8_sentences()\n"                                                  //
     "  - sz.utf8_sentences()\n"                                                      //
     "\n"                                                                             //
     "UAX-29 Sentence_Break rules implemented:\n"                                     //

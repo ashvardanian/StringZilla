@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""UTF-8 normalization: sz.utf8_norm, sz.utf8_find_denormalized and Strs.normalize across the NFC, NFD,
+"""UTF-8 normalization: sz.utf8_norm, sz.utf8_find_denormalized and Strings.normalize across the NFC, NFD,
 NFKC, NFKD and NFKC_Casefold forms.
 
 Mirrors the C++ test/utf8_norm.cpp translation unit.
 
-Covers: NFC/NFD/NFKC/NFKD/NFKC_Casefold normalization and denormalization-violation offsets on Str and
+Covers: NFC/NFD/NFKC/NFKD/NFKC_Casefold normalization and denormalization-violation offsets on String and
 bytes input, ligature and combining-mark expansions, case folding and dropped default ignorables,
 idempotence, whole collections normalized in one call, and cross-backend agreement over
 precomposed/decomposed text, malformed UTF-8, and random ASCII corpora.
@@ -74,8 +74,8 @@ def test_unit_utf8_norm():
         twice = sz.utf8_norm(once, form)
         assert once == twice, f"Idempotence failed for form {form}"
 
-    # Method form on Str
-    assert sz.Str("café").utf8_norm("NFD") == "café".encode("utf-8")
+    # Method form on String
+    assert sz.String("café").utf8_norm("NFD") == "café".encode()
 
     # Bytes input
     assert sz.utf8_norm("café".encode("utf-8"), "NFC") == "café".encode("utf-8")
@@ -129,8 +129,8 @@ def test_unit_utf8_find_denormalized():
     assert nfc_violation is not None
     assert isinstance(nfc_violation, int)
 
-    # Method form on Str
-    assert sz.Str("hello").utf8_find_denormalized("NFC") is None
+    # Method form on String
+    assert sz.String("hello").utf8_find_denormalized("NFC") is None
 
     # Bytes input
     assert sz.utf8_find_denormalized(b"hello", "NFD") is None
@@ -199,10 +199,10 @@ NFKC_CASEFOLD_TEXTS = [
 
 def test_utf8_norm_nfkc_casefold():
     """NFKC_Casefold folds case, expands compatibility characters and drops default ignorables, as a
-    `unicodedata` rebuild of toNFKC_Casefold does, through `sz.utf8_norm`, `Strs.normalize` and the quick check."""
+    `unicodedata` rebuild of toNFKC_Casefold does, through `sz.utf8_norm`, `Strings.normalize` and the quick check."""
     expected = [nfkc_casefold_reference(text) for text in NFKC_CASEFOLD_TEXTS]
     assert [sz.utf8_norm(text, "NFKC_Casefold").decode() for text in NFKC_CASEFOLD_TEXTS] == expected
-    assert [str(text) for text in sz.Strs(NFKC_CASEFOLD_TEXTS).normalize("NFKC_Casefold")] == expected
+    assert [str(text) for text in sz.Strings(NFKC_CASEFOLD_TEXTS).normalize("NFKC_Casefold")] == expected
     assert sz.utf8_find_denormalized("strasse", "NFKC_Casefold") is None
     assert sz.utf8_find_denormalized("Strasse", "NFKC_Casefold") == 0
 
@@ -408,17 +408,20 @@ def test_utf8_norm_backend_differential_random(backend_results, rng: Random, for
 
 
 @pytest.mark.parametrize("form", NORMALIZATION_FORMS + ("NFKC_Casefold",))
-def test_strs_normalize_backend_differential(backend_results, form: str):
-    """`Strs.normalize` brings a whole collection into `form` in one call, agreeing across every backend with
-    `unicodedata.normalize`, or the rebuild of toNFKC_Casefold, over a tape and a fragmented reordering of it."""
+def test_strings_normalize_backend_differential(backend_results, form: str):
+    """`Strings.normalize` brings a whole collection into `form` in one call, agreeing across every backend with
+    `unicodedata.normalize`, or the rebuild of toNFKC_Casefold, over a tape and a slice whose offsets start
+    past zero."""
     texts = UTF8_NORM_BACKEND_DIFFERENTIAL_TEXTS + NFKC_CASEFOLD_TEXTS
     reference = nfkc_casefold_reference if form == "NFKC_Casefold" else lambda text: unicodedata.normalize(form, text)
     expected = [reference(text) for text in texts]
 
     def normalize(capabilities):
-        forward = [str(text) for text in sz.Strs(texts).normalize(form, capabilities=capabilities)]
-        backward = [str(text) for text in sz.Strs(texts, view=True)[::-1].normalize(form, capabilities=capabilities)]
-        return forward, backward[::-1]
+        whole = [str(text) for text in sz.Strings(texts).normalize(form, capabilities=capabilities)]
+        borrowed = [
+            str(text) for text in sz.Strings(["skipped"] + texts)[1:].normalize(form, capabilities=capabilities)
+        ]
+        return whole, borrowed
 
     assert_backends_agree(backend_results(normalize), oracle=(expected, expected))
 

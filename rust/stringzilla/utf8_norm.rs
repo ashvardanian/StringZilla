@@ -34,14 +34,14 @@ use super::*;
 ///
 /// ```
 /// use stringzilla::stringzilla as sz;
-/// use sz::Utf8NormalForm;
+/// use sz::NormalForm;
 /// let source = "caf\u{00E9}"; // "café" NFC (precomposed é)
 /// let mut dest = vec![0u8; source.len() * 18];
-/// let len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut dest).unwrap();
+/// let len = sz::utf8_norm(source, NormalForm::Nfc, &mut dest).unwrap();
 /// assert_eq!(&dest[..len], "caf\u{00E9}".as_bytes()); // unchanged — already NFC
 /// ```
 ///
-pub fn utf8_norm<Source, Target>(source: Source, form: Utf8NormalForm, target: &mut Target) -> Result<usize, Status>
+pub fn utf8_norm<Source, Target>(source: Source, form: NormalForm, target: &mut Target) -> Result<usize, Status>
 where
     Source: AsRef<[u8]>,
     Target: AsMut<[u8]> + ?Sized,
@@ -89,14 +89,14 @@ where
 ///
 /// ```
 /// use stringzilla::stringzilla as sz;
-/// use sz::Utf8NormalForm;
+/// use sz::NormalForm;
 /// // NFD string (decomposed): base 'e' + combining acute U+0301
 /// let nfd = "cafe\u{0301}";
-/// assert!(sz::utf8_find_denormalized(nfd, Utf8NormalForm::Nfc).is_some());
-/// assert!(sz::utf8_find_denormalized("café", Utf8NormalForm::Nfc).is_none());
+/// assert!(sz::utf8_find_denormalized(nfd, NormalForm::Nfc).is_some());
+/// assert!(sz::utf8_find_denormalized("café", NormalForm::Nfc).is_none());
 /// ```
 ///
-pub fn utf8_find_denormalized<Source>(source: Source, form: Utf8NormalForm) -> Option<usize>
+pub fn utf8_find_denormalized<Source>(source: Source, form: NormalForm) -> Option<usize>
 where
     Source: AsRef<[u8]>,
 {
@@ -136,12 +136,7 @@ mod tests {
     #[test]
     fn utf8_norm_golden_vectors() {
         // ASCII is invariant under all normalization forms.
-        for form in [
-            Utf8NormalForm::Nfd,
-            Utf8NormalForm::Nfc,
-            Utf8NormalForm::Nfkd,
-            Utf8NormalForm::Nfkc,
-        ] {
+        for form in [NormalForm::Nfd, NormalForm::Nfc, NormalForm::Nfkd, NormalForm::Nfkc] {
             let source = "Hello, world! 123";
             let mut dest = vec![0u8; source.len() * 18];
             let len = sz::utf8_norm(source, form, &mut dest).unwrap();
@@ -151,7 +146,7 @@ mod tests {
         // CAFE_NFC has precomposed é, U+00E9; NFC → NFC is a no-op, emitting the same bytes.
         {
             let mut dest = vec![0u8; CAFE_NFC.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut dest).unwrap();
+            let len = sz::utf8_norm(CAFE_NFC, NormalForm::Nfc, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFC→NFC unchanged");
         }
 
@@ -159,14 +154,14 @@ mod tests {
         // the precomposed form.
         {
             let mut dest = vec![0u8; CAFE_NFD.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFD, Utf8NormalForm::Nfc, &mut dest).unwrap();
+            let len = sz::utf8_norm(CAFE_NFD, NormalForm::Nfc, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFC.as_bytes(), "café NFD→NFC gives precomposed form");
         }
 
         // NFD of the precomposed form must give the decomposed form.
         {
             let mut dest = vec![0u8; CAFE_NFC.len() * 18];
-            let len = sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfd, &mut dest).unwrap();
+            let len = sz::utf8_norm(CAFE_NFC, NormalForm::Nfd, &mut dest).unwrap();
             assert_eq!(&dest[..len], CAFE_NFD.as_bytes(), "café NFC→NFD gives decomposed form");
         }
 
@@ -174,18 +169,18 @@ mod tests {
         let ligature = "\u{FB03}"; // 3 bytes: 0xEF 0xAC 0x83
         {
             let mut dest = vec![0u8; ligature.len() * 18];
-            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkd, &mut dest).unwrap();
+            let len = sz::utf8_norm(ligature, NormalForm::Nfkd, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"ffi", "ligature NFKD → ffi");
         }
         {
             let mut dest = vec![0u8; ligature.len() * 18];
-            let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkc, &mut dest).unwrap();
+            let len = sz::utf8_norm(ligature, NormalForm::Nfkc, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"ffi", "ligature NFKC → ffi");
         }
         {
             let source = "Stra\u{DF}e";
             let mut dest = vec![0u8; source.len() * 18];
-            let len = sz::utf8_norm(source, Utf8NormalForm::NfkcCasefold, &mut dest).unwrap();
+            let len = sz::utf8_norm(source, NormalForm::NfkcCasefold, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"strasse", "NFKC_Casefold folds the sharp s");
         }
 
@@ -193,18 +188,18 @@ mod tests {
         {
             let source = CAFE_NFD;
             let mut first = vec![0u8; source.len() * 18];
-            let first_len = sz::utf8_norm(source, Utf8NormalForm::Nfc, &mut first).unwrap();
+            let first_len = sz::utf8_norm(source, NormalForm::Nfc, &mut first).unwrap();
             let first_result = first[..first_len].to_vec();
 
             let mut second = vec![0u8; first_len * 18];
-            let second_len = sz::utf8_norm(&first_result[..], Utf8NormalForm::Nfc, &mut second).unwrap();
+            let second_len = sz::utf8_norm(&first_result[..], NormalForm::Nfc, &mut second).unwrap();
             assert_eq!(&second[..second_len], &first_result[..], "NFC is idempotent");
         }
 
         // Refused below the worst case although this input fits, as the kernel takes no capacity.
         let mut short = vec![0u8; CAFE_NFC.len() * 18 - 1];
         assert_eq!(
-            sz::utf8_norm(CAFE_NFC, Utf8NormalForm::Nfc, &mut short),
+            sz::utf8_norm(CAFE_NFC, NormalForm::Nfc, &mut short),
             Err(sz::Status::UnexpectedDimensions)
         );
     }
@@ -213,14 +208,14 @@ mod tests {
     fn utf8_find_denormalized() {
         // NFC string: precomposed é — no violation.
         assert_eq!(
-            sz::utf8_find_denormalized(CAFE_NFC, Utf8NormalForm::Nfc),
+            sz::utf8_find_denormalized(CAFE_NFC, NormalForm::Nfc),
             None,
             "NFC string has no NFC violation"
         );
 
         // NFD string: decomposed e + combining acute U+0301.
         // The combining mark violates NFC: it should be composed with the preceding base.
-        let violation = sz::utf8_find_denormalized(CAFE_NFD, Utf8NormalForm::Nfc);
+        let violation = sz::utf8_find_denormalized(CAFE_NFD, NormalForm::Nfc);
         assert!(violation.is_some(), "NFD string must report an NFC violation");
         // The violation may point to the base 'e' at byte 3 or to the combining mark at byte 4;
         // either is within the suffix that must change during composition.
@@ -232,7 +227,7 @@ mod tests {
         // NFC string has no NFD violation only if it contains no precomposed characters.
         // ASCII is valid NFD.
         assert_eq!(
-            sz::utf8_find_denormalized("hello", Utf8NormalForm::Nfd),
+            sz::utf8_find_denormalized("hello", NormalForm::Nfd),
             None,
             "pure ASCII has no NFD violation"
         );

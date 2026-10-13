@@ -18,7 +18,7 @@ import hashlib
 import stringzilla as sz
 
 _OPTIONFLAGS = doctest.NORMALIZE_WHITESPACE | doctest.IGNORE_EXCEPTION_DETAIL
-"""Names referenced by the docstring examples, e.g. ``>>> sz.Str(...)``. Doctests run in a namespace
+"""Names referenced by the docstring examples, e.g. ``>>> sz.String(...)``. Doctests run in a namespace
 seeded with these, mirroring how a user would ``import stringzilla as sz``."""
 
 

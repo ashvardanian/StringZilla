@@ -51,10 +51,10 @@ static PyObject *Utf8Split_make_(PyTypeObject *type, PyObject *text_obj, sz_stri
 /** Shared body for the six `utf8_split_*` and bare-separator factories. Parses @c skip_empty, plus
  *  @c with_separators for the `split_*` variants, and @c capabilities, and allocates a @c Utf8Split
  *  of @p type that runs @p tokenizer over @p base_parts. */
-static PyObject *Str_like_utf8_split_(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                      PyObject *args_names_tuple, PyTypeObject *type, sz_py_tokenizer_t tokenizer,
-                                      int base_parts, int allow_with_separators) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+static PyObject *String_like_utf8_split_(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                         PyObject *args_names_tuple, PyTypeObject *type, sz_py_tokenizer_t tokenizer,
+                                         int base_parts, int allow_with_separators) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t min_args = !is_member;
     Py_ssize_t max_args = !is_member + (allow_with_separators ? 2 : 1);
     if (positional_args_count < min_args || positional_args_count > max_args) {
@@ -122,24 +122,24 @@ char const doc_utf8_split_newlines[] =                                          
     "Unlike splitlines(), this returns an iterator for memory-efficient processing.\n"                    //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty lines, defaulting to False.\n"                             //
     "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n"    //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the lines as Str objects.\n"                                        //
+    "  iterator: An iterator yielding the lines as String objects.\n"                                     //
     "\n"                                                                                                  //
     "Recognized newlines:\n"                                                                              //
     "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                           //
     "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_split_newlines())\n"                                       //
+    "  >>> sum(1 for _ in sz.String('a\\nb').utf8_split_newlines())\n"                                    //
     "  2";
-PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                       PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitNewlinesType,
-                                sz_utf8_newlines_best, 0, 1);
+PyObject *String_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitNewlinesType,
+                                   sz_utf8_newlines_best, 0, 1);
 }
 
 char const doc_utf8_newlines[] =                                                                          //
@@ -149,23 +149,23 @@ char const doc_utf8_newlines[] =                                                
     "Yields each newline separator; utf8_split_newlines() yields the lines between them.\n"               //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the newline separators as Str objects.\n"                           //
+    "  iterator: An iterator yielding the newline separators as String objects.\n"                        //
     "\n"                                                                                                  //
     "Recognized newlines:\n"                                                                              //
     "  LF (\\n), VT (\\v), FF (\\f), CR (\\r), NEL (U+0085),\n"                                           //
     "  LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029), CRLF (\\r\\n)\n"                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sum(1 for _ in sz.Str('a\\nb').utf8_newlines())\n"                                             //
+    "  >>> sum(1 for _ in sz.String('a\\nb').utf8_newlines())\n"                                          //
     "  1";
-PyObject *Str_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8NewlinesType,
-                                sz_utf8_newlines_best, 1, 0);
+PyObject *String_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8NewlinesType,
+                                   sz_utf8_newlines_best, 1, 0);
 }
 
 char const doc_utf8_split_whitespaces[] =                                                                 //
@@ -175,12 +175,12 @@ char const doc_utf8_split_whitespaces[] =                                       
     "Splits on each whitespace codepoint; pass skip_empty=True for str.split()-style tokens.\n"           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n"    //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the non-whitespace tokens as Str objects.\n"                        //
+    "  iterator: An iterator yielding the non-whitespace tokens as String objects.\n"                     //
     "\n"                                                                                                  //
     "Recognized whitespace:\n"                                                                            //
     "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                               //
@@ -189,12 +189,12 @@ char const doc_utf8_split_whitespaces[] =                                       
     "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                                 //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sum(1 for _ in sz.Str('foo bar baz').utf8_split_whitespaces())\n"                              //
+    "  >>> sum(1 for _ in sz.String('foo bar baz').utf8_split_whitespaces())\n"                           //
     "  3";
-PyObject *Str_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitWhitespacesType,
-                                sz_utf8_whitespaces_best, 0, 1);
+PyObject *String_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitWhitespacesType,
+                                   sz_utf8_whitespaces_best, 0, 1);
 }
 
 char const doc_utf8_whitespaces[] =                                                                       //
@@ -204,11 +204,11 @@ char const doc_utf8_whitespaces[] =                                             
     "Yields each whitespace codepoint; utf8_split_whitespaces() yields the tokens between them.\n"        //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the whitespace separators as Str objects.\n"                        //
+    "  iterator: An iterator yielding the whitespace separators as String objects.\n"                     //
     "\n"                                                                                                  //
     "Recognized whitespace:\n"                                                                            //
     "  ASCII: TAB, LF, VT, FF, CR, SPACE\n"                                                               //
@@ -217,12 +217,12 @@ char const doc_utf8_whitespaces[] =                                             
     "  CJK: IDEOGRAPHIC SPACE (U+3000)\n"                                                                 //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sum(1 for _ in sz.Str('foo bar').utf8_whitespaces())\n"                                        //
+    "  >>> sum(1 for _ in sz.String('foo bar').utf8_whitespaces())\n"                                     //
     "  1";
-PyObject *Str_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8WhitespacesType,
-                                sz_utf8_whitespaces_best, 1, 0);
+PyObject *String_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8WhitespacesType,
+                                   sz_utf8_whitespaces_best, 1, 0);
 }
 
 char const doc_utf8_split_delimiters[] =                                                                  //
@@ -233,20 +233,20 @@ char const doc_utf8_split_delimiters[] =                                        
     "Splits on delimiters, one separator per codepoint, and yields the segments between them.\n"          //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  with_separators (bool, optional): Interleave the separators losslessly, defaulting to False.\n"    //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the non-delimiter segments as Str objects.\n"                       //
+    "  iterator: An iterator yielding the non-delimiter segments as String objects.\n"                    //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(str(t) for t in sz.Str('Hi, world').utf8_split_delimiters(skip_empty=True))\n"            //
+    "  >>> list(str(t) for t in sz.String('Hi, world').utf8_split_delimiters(skip_empty=True))\n"         //
     "  ['Hi', 'world']";
-PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitDelimitersType,
-                                sz_utf8_delimiters_best, 0, 1);
+PyObject *String_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8SplitDelimitersType,
+                                   sz_utf8_delimiters_best, 0, 1);
 }
 
 char const doc_utf8_delimiters[] =                                                                        //
@@ -257,19 +257,19 @@ char const doc_utf8_delimiters[] =                                              
     "utf8_split_delimiters() yields the fields between them.\n"                                           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  iterator: An iterator yielding the delimiter separators as Str objects.\n"                         //
+    "  iterator: An iterator yielding the delimiter separators as String objects.\n"                      //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(str(d) for d in sz.Str('a.b').utf8_delimiters())\n"                                       //
+    "  >>> list(str(d) for d in sz.String('a.b').utf8_delimiters())\n"                                    //
     "  ['.']";
-PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple) {
-    return Str_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8DelimitersType,
-                                sz_utf8_delimiters_best, 1, 0);
+PyObject *String_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
+    return String_like_utf8_split_(self, args, positional_args_count, args_names_tuple, &Utf8DelimitersType,
+                                   sz_utf8_delimiters_best, 1, 0);
 }
 
 /** Refills @c bounds with the next batch of separators from @c suffix, closing it with @c end once
@@ -316,7 +316,7 @@ static PyObject *Utf8SplitType_next(Utf8Split *self) {
     sz_cptr_t const segment_start = self->bounds[i];
     sz_size_t const segment_length = (sz_size_t)(self->bounds[i + 1] - self->bounds[i]);
 
-    Str *result_obj = Str_alloc_();
+    String *result_obj = String_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
     result_obj->memory.start = segment_start;

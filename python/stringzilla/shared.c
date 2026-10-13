@@ -2,7 +2,7 @@
  *  @file python/stringzilla/shared.c
  *  @author Ash Vardanian
  *  @date September 16, 2023
- *  @brief The @c Str and @c Strs free-lists and the argument-export helpers.
+ *  @brief The @c String and @c Strings free-lists and the argument-export helpers.
  */
 #include "stringzilla.h"
 
@@ -12,17 +12,14 @@ stringzilla_state_t *stringzilla_state_(void) {
     return module ? (stringzilla_state_t *)PyModule_GetState(module) : NULL;
 }
 
-/** The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
-Strs **Strs_freelist_next_(Strs *node) { return (Strs **)&node->data; }
-
-/** Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
-Str *Str_alloc_(void) {
+/** Allocate a blank @c String header, reusing a cached one from the free-list when available. */
+String *String_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
     if (state) sz_freelist_lock_(state);
-    if (state && state->str_freelist_head) {
-        Str *self = state->str_freelist_head;
-        state->str_freelist_head = (Str *)self->parent; // Unlink (the dead `parent` held `next`).
-        state->str_freelist_count--;
+    if (state && state->string_freelist_head) {
+        String *self = state->string_freelist_head;
+        state->string_freelist_head = (String *)self->parent; // Unlink (the dead `parent` held `next`).
+        state->string_freelist_count--;
         sz_freelist_unlock_(state);
         _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
         self->parent = NULL;
@@ -31,49 +28,26 @@ Str *Str_alloc_(void) {
         return self;
     }
     if (state) sz_freelist_unlock_(state);
-    return (Str *)StrType.tp_alloc(&StrType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
+    return (String *)StringType.tp_alloc(&StringType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
 }
 
-/** Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
-Strs *Strs_alloc_(void) {
+/** Allocate a blank @c Strings header, reusing a cached one from the free-list when available. */
+Strings *Strings_alloc_(void) {
     stringzilla_state_t *state = stringzilla_state_();
     if (state) sz_freelist_lock_(state);
-    if (state && state->strs_freelist_head) {
-        Strs *self = state->strs_freelist_head;
-        state->strs_freelist_head = *Strs_freelist_next_(self); // Unlink (the dead `data` held `next`).
-        state->strs_freelist_count--;
+    if (state && state->strings_freelist_head) {
+        Strings *self = state->strings_freelist_head;
+        state->strings_freelist_head = (Strings *)self->parent; // Unlink (the dead `parent` held `next`).
+        state->strings_freelist_count--;
         sz_freelist_unlock_(state);
         _Py_NewReference((PyObject *)self); // Refcount back to 1; non-GC type, so no retracking.
-        // Restore `tp_alloc`'s zero-init so a caller's early error path deallocs safely (the dealloc
-        // `switch` reads `layout`/`data`); `STRS_U32_TAPE_VIEW` with a NULL parent is a no-op to free.
-        self->layout = STRS_U32_TAPE_VIEW;
-        memset(&self->data, 0, sizeof(self->data));
+        // Restore `tp_alloc`'s zero-init, so an early error path deallocs a tape holding no blocks
+        self->tape = (sz_strings_span_t) {0};
+        self->parent = NULL;
         return self;
     }
     if (state) sz_freelist_unlock_(state);
-    return (Strs *)StrsType.tp_alloc(&StrsType, 0); // Fresh header (zero-initialized); NULL propagates on OOM.
-}
-
-/**
- *  @brief Allocates an empty @c Strs in the fragmented layout. Consolidates the count-zero
- *      initialization otherwise inlined across slicing, splitting, and reordering paths.
- *  @return A new empty @c Strs, or @c NULL with a Python exception set on allocation failure.
- */
-Strs *strs_make_empty_fragmented_(void) {
-    sz_allocator_t allocator;
-    sz_status_t const allocator_status = sz_allocator_init_heap(&allocator);
-    if (allocator_status != sz_success_k) {
-        sz_py_raise_status(allocator_status, "heap allocator initialization");
-        return NULL;
-    }
-    Strs *result = Strs_alloc_();
-    if (result == NULL) return (Strs *)PyErr_NoMemory();
-    result->layout = STRS_FRAGMENTED;
-    result->data.fragmented.count = 0;
-    result->data.fragmented.spans = NULL;
-    result->data.fragmented.parent = NULL;
-    result->data.fragmented.allocator = allocator;
-    return result;
+    return (Strings *)StringsType.tp_alloc(&StringsType, 0); // Fresh header (zero-initialized); NULL on OOM.
 }
 
 /** Checks if a Python object represents a mutable buffer. Returns @c sz_true_k if the object can
@@ -144,10 +118,10 @@ sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t
         *length = PyByteArray_GET_SIZE(object);
         return 1;
     }
-    else if (PyObject_TypeCheck(object, &StrType)) {
-        Str *str = (Str *)object;
-        *start = str->memory.start;
-        *length = str->memory.length;
+    else if (PyObject_TypeCheck(object, &StringType)) {
+        String *string = (String *)object;
+        *start = string->memory.start;
+        *length = string->memory.length;
         return 1;
     }
     else if (PyObject_TypeCheck(object, &FileType)) {

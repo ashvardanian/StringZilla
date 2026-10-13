@@ -9,10 +9,10 @@
 /**
  *  @brief Points @p strings at the strings in @p texts, borrowing them in place.
  *
- *  A @c Strs is viewed in its own layout, so a tape-backed corpus never leaves its buffer. Any
- *  other sequence is snapshotted into a tuple and unpacked into @p scratch, which must hold
- *  @p scratch_capacity views. The snapshot is what pins the chunks: holding the caller's list
- *  would keep the container alive while any chunk could be dropped from under its view.
+ *  A @c Strings is viewed in place, so its tape never leaves its buffer. Any other sequence is
+ *  snapshotted into a tuple and unpacked into @p scratch, which must hold @p scratch_capacity
+ *  views. The snapshot is what pins the chunks: holding the caller's list would keep the container
+ *  alive while any chunk could be dropped from under its view.
  *
  *  @return A new reference pinning the strings, to outlive the kernel call, or @c NULL on failure.
  */
@@ -91,7 +91,7 @@ static PyObject *Sha256_digests_to_list_(sz_u8_t const *digests, sz_size_t diges
     return result;
 }
 
-Py_hash_t Str_hash(Str *self) {
+Py_hash_t String_hash(String *self) {
     sz_u64_t hash = 0;
     sz_status_t const status = sz_hash_best(self->memory.start, self->memory.length, 0, &hash, sz_cap_cpus_k, NULL);
     if (status != sz_success_k) {
@@ -105,9 +105,9 @@ Py_hash_t Str_hash(Str *self) {
 char const doc_like_hash[] =                                                                              //
     "Compute the hash value of the string.\n"                                                             //
     "\n"                                                                                                  //
-    "This function can be called as a method on a Str object or as a standalone function.\n"              //
+    "This function can be called as a method on a String object or as a standalone function.\n"           //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string to hash, positional-only when standalone.\n"                //
+    "  text (String or str or bytes): The string to hash, positional-only when standalone.\n"             //
     "  seed (int, optional): The seed value for hashing. Defaults to 0. Can be positional or keyword.\n"  //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
@@ -118,8 +118,8 @@ char const doc_like_hash[] =                                                    
     "Signature:\n"                                                                                        //
     "  >>> def hash(text, seed=0, /, *, capabilities=None) -> int: ...";
 
-PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                        PyObject *args_names_tuple) {
+PyObject *String_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *text_obj = NULL;
     PyObject *seed_obj = NULL;
@@ -127,8 +127,8 @@ PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positi
     sz_string_view_t text;
     sz_u64_t seed = 0;
 
-    // Check if this is a method call on a Str instance
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    // Check if this is a method call on a String instance
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -205,6 +205,82 @@ PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positi
     return PyLong_FromUnsignedLongLong((unsigned long long)result);
 }
 
+char const doc_Strings_hashes[] =                                                                         //
+    "hashes(seed=0, *, out=None, capabilities=None) -> tuple | buffer\n"                                  //
+    "\n"                                                                                                  //
+    "Hash every string under one seed, each equal to `sz.hash(text, seed)`, like the built-in `hash`\n"   //
+    "over each but stable across runs and platforms, for group-by keys, joins and sharding.\n"            //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  seed (int, optional): The seed every string is hashed under, defaulting to 0.\n"                   //
+    "  out (buffer, optional): Writable, C-contiguous buffer of 64-bit unsigned integers like\n"          //
+    "    numpy.uint64 to receive the hashes with zero allocation. Defaults to None.\n"                    //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
+    "Returns:\n"                                                                                          //
+    "  tuple[int, ...]: One unsigned 64-bit hash per string, or `out` itself when an `out` buffer is\n"   //
+    "    given.\n"                                                                                        //
+    "Example:\n"                                                                                          //
+    "  >>> sz.Strings(['a', 'b']).hashes(7) == (sz.hash('a', 7), sz.hash('b', 7))\n"                      //
+    "  True";
+
+PyObject *Strings_hashes(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                         PyObject *args_names_tuple) {
+    if (positional_args_count > 1)
+        return PyErr_Format(PyExc_TypeError, "hashes() takes at most 1 positional argument, got %zd",
+                            positional_args_count);
+    PyObject *seed_obj = positional_args_count ? args[0] : NULL, *out_obj = NULL, *capabilities_object = NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "seed") == 0           ? &seed_obj
+                          : PyUnicode_CompareWithASCIIString(key, "out") == 0          ? &out_obj
+                          : PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 ? &capabilities_object
+                                                                                       : NULL;
+        if (!slot) return PyErr_Format(PyExc_TypeError, "hashes() got an unexpected keyword argument '%U'", key);
+        if (*slot) return PyErr_Format(PyExc_TypeError, "hashes() got multiple values for argument '%U'", key);
+        *slot = args[positional_args_count + keyword_index];
+    }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
+    sz_u64_t seed = 0;
+    if (seed_obj) {
+        if (!PyLong_Check(seed_obj)) {
+            PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+            return NULL;
+        }
+        seed = PyLong_AsUnsignedLongLong(seed_obj);
+        if (PyErr_Occurred()) return NULL;
+    }
+
+    sz_size_t const count = self->tape.count;
+    Py_buffer out_view;
+    if (out_obj == Py_None) out_obj = NULL;
+    if (out_obj && sz_py_export_contiguous_buffer(out_obj, "out", PyBUF_CONTIG, (Py_ssize_t)sizeof(sz_u64_t), count,
+                                                  &out_view) != 0)
+        return NULL;
+    sz_u64_t *hashes = out_obj ? (sz_u64_t *)out_view.buf : PyMem_New(sz_u64_t, count);
+    if (!hashes) return PyErr_NoMemory();
+
+    sz_strings_view_t strings;
+    sz_strings_from_span(&self->tape, &strings);
+    sz_status_t const status = sz_hash_strings_best(&strings, NULL, count, seed, hashes, capabilities, NULL);
+    if (out_obj) {
+        PyBuffer_Release(&out_view);
+        if (status == sz_success_k) return Py_NewRef(out_obj);
+        sz_py_raise_status(status, "hashes()");
+        return NULL;
+    }
+    PyObject *result = status == sz_success_k ? PyTuple_New((Py_ssize_t)count) : NULL;
+    if (status != sz_success_k) sz_py_raise_status(status, "hashes()");
+    for (sz_size_t i = 0; result && i != count; ++i) {
+        PyObject *const hash = PyLong_FromUnsignedLongLong((unsigned long long)hashes[i]);
+        if (hash) PyTuple_SET_ITEM(result, (Py_ssize_t)i, hash);
+        else Py_CLEAR(result);
+    }
+    PyMem_Free(hashes);
+    return result;
+}
+
 char const doc_hash_multiseed[] =                                                                         //
     "Hash one string under many seeds at once.\n"                                                         //
     "\n"                                                                                                  //
@@ -213,7 +289,7 @@ char const doc_hash_multiseed[] =                                               
     "many seeds (feature hashing, Count-Min sketches, Bloom/cuckoo filters, MinHash/LSH).\n"              //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string to hash, positional-only when standalone.\n"                //
+    "  text (String or str or bytes): The string to hash, positional-only when standalone.\n"             //
     "  seeds (buffer of uint64): Contiguous 64-bit seeds, e.g. numpy.uint64 array or array('Q', ...).\n"  //
     "       Plain int lists are not accepted - wrap them in array('Q', seeds) or numpy.\n"                //
     "  out (writable uint64 buffer, optional): A contiguous buffer of at least len(seeds) elements.\n"    //
@@ -225,9 +301,9 @@ char const doc_hash_multiseed[] =                                               
     "Example:\n"                                                                                          //
     "  >>> def hash_multiseed(text, seeds, /, out=None, *, capabilities=None) -> tuple | None: ...";
 
-PyObject *Str_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *args_names_tuple) {
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     PyObject *text_obj = is_member ? self : NULL;
     PyObject *seeds_obj = NULL;
     PyObject *out_obj = NULL;
@@ -340,7 +416,7 @@ char const doc_fill_random[] =                                                  
     "Fill a string-like buffer in place with pseudo-random bytes.\n"                                      //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  buffer (Str or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"      //
+    "  buffer (String or bytes-like): Writable, contiguous byte buffer (e.g., memoryview/bytearray).\n"   //
     "  nonce (int, optional): Seed ensuring reproducible output for the same inputs, defaulting to 0.\n"  //
     "  alphabet (str or bytes, optional): If provided, remaps random bytes to its characters.\n"          //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
@@ -355,9 +431,9 @@ char const doc_fill_random[] =                                                  
     "  >>> len(buf)\n"                                                                                    //
     "  16";
 
-PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 3) {
         PyErr_SetString(PyExc_TypeError, "fill_random() expects 1 to 4 positional arguments");
         return NULL;
@@ -566,9 +642,9 @@ PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positi
 char const doc_like_bytesum[] =                                                                           //
     "Compute the checksum of individual byte values in a string.\n"                                       //
     "\n"                                                                                                  //
-    "This function can be called as a method on a Str object or as a standalone function.\n"              //
+    "This function can be called as a method on a String object or as a standalone function.\n"           //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string to hash.\n"                                                 //
+    "  text (String or str or bytes): The string to hash.\n"                                              //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  int: The checksum of individual byte values in a string.\n"                                        //
@@ -579,10 +655,10 @@ char const doc_like_bytesum[] =                                                 
     "  >>> sz.bytesum('abc')\n"                                                                           //
     "  294";
 
-PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                           PyObject *args_names_tuple) {
+PyObject *String_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple) {
     // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "bytesum() expects exactly one positional argument");
         return NULL;
@@ -621,9 +697,9 @@ PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t pos
 char const doc_like_sha256[] =                                                                            //
     "Compute SHA256 cryptographic hash of the input data.\n"                                              //
     "\n"                                                                                                  //
-    "This function can be called as a method on a Str object or as a standalone function.\n"              //
+    "This function can be called as a method on a String object or as a standalone function.\n"           //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The input data to hash.\n"                                             //
+    "  text (String or str or bytes): The input data to hash.\n"                                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  bytes: The 32-byte (256-bit) SHA256 digest.\n"                                                     //
@@ -631,14 +707,14 @@ char const doc_like_sha256[] =                                                  
     "  TypeError: If the argument is not string-like or incorrect number of arguments is provided.\n"     //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> digest = sz.Str('abc').sha256().hex()\n"                                                       //
+    "  >>> digest = sz.String('abc').sha256().hex()\n"                                                    //
     "  >>> digest[:8]\n"                                                                                  //
     "  'ba7816bf'";
 
-PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
+PyObject *String_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 1) {
         PyErr_SetString(PyExc_TypeError, "sha256() expects exactly one positional argument");
         return NULL;
@@ -776,12 +852,12 @@ char const doc_hmac_sha256[] =                                                  
     "\n"                                                                                                  //
     "Authenticating one message is a serial dependency chain no instruction set can speed up, but\n"      //
     "independent messages compress in parallel lanes: sixteen at a time on AVX-512, eight on\n"           //
-    "AVX2. Pass a Strs of messages - a batch of tokens or requests sharing a secret - and both\n"         //
+    "AVX2. Pass a Strings of messages - a batch of tokens or requests sharing a secret - and both\n"      //
     "the message pass and the outer wrap run lane-parallel.\n"                                            //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
     "  key (str | bytes): The secret key.\n"                                                              //
-    "  message (str | bytes | Strs | sequence): One message, or many to authenticate together.\n"         //
+    "  message (str | bytes | Strings | sequence): One message, or many to authenticate together.\n"      //
     "  out (buffer, optional): Writable, C-contiguous buffer of bytes holding at least 32 per\n"          //
     "       message - a `(len(message), 32)` numpy.uint8 matrix receives one tag per row with\n"          //
     "       zero allocation. Defaults to None.\n"                                                         //
@@ -793,7 +869,7 @@ char const doc_hmac_sha256[] =                                                  
     "Example:\n"                                                                                          //
     "  >>> len(sz.hmac_sha256(b'key', b'message'))\n"                                                     //
     "  32\n"                                                                                              //
-    "  >>> sz.hmac_sha256(b'key', sz.Strs(['a', 'b'])) == [\n"                                            //
+    "  >>> sz.hmac_sha256(b'key', sz.Strings(['a', 'b'])) == [\n"                                         //
     "  ...     sz.hmac_sha256(b'key', b'a'), sz.hmac_sha256(b'key', b'b')]\n"                             //
     "  True";
 
@@ -928,7 +1004,7 @@ PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t position
 
     sz_status_t status = sz_success_k;
     if (texts.count) {
-        // The `Strs` fast path leaves `views` unfilled, so materialize the spans the wrap will reuse.
+        // The `Strings` fast path leaves `views` empty, so materialize the spans the wrap reuses.
         for (sz_size_t index = 0; index < texts.count;) index += sz_strings_get_block_(&texts, index, views + index);
         sz_strings_from_string_views(views, texts.count, &texts);
 
@@ -1679,15 +1755,15 @@ static char const doc_Sha256s[] =                                               
     "  >>> hello == sz.Sha256().update(b'Hello, world!').digest()\n"                         //
     "  True";
 
-static char const doc_Sha256s_update[] =                                                         //
-    "update(chunks) -> Sha256s\n"                                                                //
-    "\n"                                                                                         //
-    "Append the next chunk of every lane's message.\n"                                           //
-    "\n"                                                                                         //
-    "Args:\n"                                                                                    //
-    "  chunks (Strs | sequence): Exactly one string-like chunk per lane; may be empty. A Strs\n" //
-    "       is read in place, whatever its layout, so a tape never leaves its buffer.\n"         //
-    "Returns:\n"                                                                                 //
+static char const doc_Sha256s_update[] =                                                               //
+    "update(chunks) -> Sha256s\n"                                                                      //
+    "\n"                                                                                               //
+    "Append the next chunk of every lane's message.\n"                                                 //
+    "\n"                                                                                               //
+    "Args:\n"                                                                                          //
+    "  chunks (Strings | sequence): Exactly one string-like chunk per lane; may be empty. A Strings\n" //
+    "       is read in place, whatever its layout, so a tape never leaves its buffer.\n"               //
+    "Returns:\n"                                                                                       //
     "  Sha256s: The same object, to allow chaining.";
 
 static char const doc_Sha256s_digest[] =                                                          //

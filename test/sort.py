@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Sequence sorting: Strs.sorted / argsort, top-K and reverse selection, uncased ordering, and the
+"""Sequence sorting: Strings.sorted / argsort, top-K and reverse selection, uncased ordering, and the
 argsort(out=...) buffer protocol.
 
 Mirrors the C++ test/sort.cpp translation unit.
 
-Covers: Strs.sorted() and argsort() over Strs collections, repr/str truncation, top-K and reverse
+Covers: Strings.sorted() and argsort() over Strings collections, repr/str truncation, top-K and reverse
 ordering, uncased case-folded sorting, the argsort(out=...) buffer protocol and its rejections,
-Strs.intersect() position pairing and duplicate collapsing, sampling, and a batch-size and
+Strings.intersect() position pairing and duplicate collapsing, sampling, and a batch-size and
 corpus-shape sweep across every capability_sweep() backend.
 Compares against: CPython sorted() in byte mode, and cross-backend permutation agreement across
 every capability_sweep() backend.
@@ -31,7 +31,7 @@ from base import (
     numpy_available,
 )
 
-from stringzilla import Str, Strs
+from stringzilla import String, Strings
 
 # NumPy is optional; the naked `except` also catches PyPy, which fails this import with an error
 # other than `ImportError`.
@@ -44,24 +44,24 @@ except:  # noqa: E722
 # region Unit
 
 
-def test_unit_strs_sequence():
-    """`Strs` sequence smoke test: splitlines, repr/str truncation on large arrays, sorted()/argsort()
+def test_unit_strings_sequence():
+    """`Strings` sequence smoke test: splitlines, repr/str truncation on large arrays, sorted()/argsort()
     with reverse and top-K, uncased stable ordering that keeps fold-equal strings in input order, the
     keyword-only argument surface, and sample()."""
     native = "p3\np2\np1"
-    big = Str(native)
+    big = String(native)
 
     lines = big.splitlines()
     assert [2, 1, 0] == list(lines.argsort())
     assert "p3" in lines
     assert "p4" not in lines
 
-    assert repr(lines) == "sz.Strs(['p3', 'p2', 'p1'])"
-    assert repr(Str("a" * 1_000_000).split()).endswith("... ])")
+    assert repr(lines) == "sz.Strings(['p3', 'p2', 'p1'])"
+    assert repr(String("a" * 1_000_000).split()).endswith("... ])")
 
     assert str(lines) == "['p3', 'p2', 'p1']"
-    assert str(Str("a" * 1_000_000).split()).startswith("['aaa")
-    assert str(Str("a" * 1_000_000).split()).endswith("aaa']")
+    assert str(String("a" * 1_000_000).split()).startswith("['aaa")
+    assert str(String("a" * 1_000_000).split()).endswith("aaa']")
 
     lines_sorted = lines.sorted()
     assert [0, 1, 2] == list(lines_sorted.argsort())
@@ -78,7 +78,7 @@ def test_unit_strs_sequence():
     assert list(lines.sorted()) == list(lines.sorted(top=999))  # `top` beyond the count sorts everything
 
     # Uncased, stable ordering (fold-equal strings keep input order).
-    mixed = Str("Banana\napple\nBANANA\nApple").splitlines()
+    mixed = String("Banana\napple\nBANANA\nApple").splitlines()
     assert ["apple", "Apple", "Banana", "BANANA"] == list(mixed.sorted(uncased=True))
     assert [1, 3, 0, 2] == list(mixed.argsort(uncased=True))
     assert ["Banana", "BANANA", "apple", "Apple"] == list(mixed.sorted(uncased=True, reverse=True))
@@ -96,11 +96,11 @@ def test_unit_strs_sequence():
     assert "p4" not in sampled
 
 
-def test_unit_strs_intersect():
-    """`Strs.intersect` returns parallel position tuples mapping equal strings across two collections,
+def test_unit_strings_intersect():
+    """`Strings.intersect` returns parallel position tuples mapping equal strings across two collections,
     matching each distinct shared value exactly once even when either side holds duplicates."""
-    first = Str("banana\napple\ncherry").splitlines()
-    second = Str("cherry\norange\npineapple\nbanana").splitlines()
+    first = String("banana\napple\ncherry").splitlines()
+    second = String("cherry\norange\npineapple\nbanana").splitlines()
 
     ours, theirs = first.intersect(second)
     assert len(ours) == len(theirs) == 2
@@ -114,51 +114,51 @@ def test_unit_strs_intersect():
     assert sorted(seeded_theirs) == sorted(theirs)
 
     # No overlap and empty inputs produce empty tuples.
-    assert first.intersect(Str("kiwi\nmango").splitlines()) == ((), ())
-    assert first.intersect(Str("").splitlines()) == ((), ())
+    assert first.intersect(String("kiwi\nmango").splitlines()) == ((), ())
+    assert first.intersect(String("").splitlines()) == ((), ())
 
     # Duplicates on either side collapse to a single match per distinct value.
-    dup_ours, dup_theirs = Str("apple\napple\nbanana").splitlines().intersect(Str("apple\napple").splitlines())
+    dup_ours, dup_theirs = String("apple\napple\nbanana").splitlines().intersect(String("apple\napple").splitlines())
     assert len(dup_ours) == len(dup_theirs) == 1
 
-    # Only Strs-to-Strs intersections are supported.
+    # Only Strings-to-Strings intersections are supported.
     try:
         first.intersect(["banana"])
-        assert False, "intersect() should reject non-Strs arguments"
+        assert False, "intersect() should reject non-Strings arguments"
     except TypeError:
         pass
 
 
-def test_unit_strs_argsort_out():
+def test_unit_strings_argsort_out():
     """`argsort(out=...)` writes the permutation into a caller pointer-width buffer and returns it."""
     import array
     import struct
 
-    strs = Str("banana\napple\ncherry\nApple\nBANANA").splitlines()
-    n = len(strs)
+    strings = String("banana\napple\ncherry\nApple\nBANANA").splitlines()
+    n = len(strings)
 
     # `out` must match `sz_size_t` exactly: one pointer-width unsigned integer per index.
     index_code = next(code for code in "LQ" if array.array(code).itemsize == struct.calcsize("P"))
     buf = array.array(index_code, [0] * n)
-    assert strs.argsort(uncased=True, out=buf) is buf
-    assert tuple(buf) == strs.argsort(uncased=True)
+    assert strings.argsort(uncased=True, out=buf) is buf
+    assert tuple(buf) == strings.argsort(uncased=True)
 
     # Top-K writes exactly `top` indices and leaves the rest of a wider buffer untouched.
     wide = array.array(index_code, [12345] * n)
-    strs.argsort(top=2, out=wide)
-    assert tuple(wide[:2]) == strs.argsort(top=2)
+    strings.argsort(top=2, out=wide)
+    assert tuple(wide[:2]) == strings.argsort(top=2)
     assert all(x == 12345 for x in wide[2:]), "argsort(out=...) clobbered past `top`"
 
     # Rejections: wrong itemsize (2-byte `'H'` on every platform), undersized, read-only, and
     # `sorted()` has no `out=`.
     with pytest.raises(TypeError):
-        strs.argsort(out=array.array("H", [0] * n))
+        strings.argsort(out=array.array("H", [0] * n))
     with pytest.raises(ValueError):
-        strs.argsort(out=array.array(index_code, [0] * (n - 1)))
+        strings.argsort(out=array.array(index_code, [0] * (n - 1)))
     with pytest.raises((TypeError, BufferError)):
-        strs.argsort(out=bytes(8 * n))
+        strings.argsort(out=bytes(8 * n))
     with pytest.raises(TypeError):
-        strs.sorted(out=buf)
+        strings.sorted(out=buf)
 
 
 # endregion Unit
@@ -178,15 +178,15 @@ def assert_sort_family_matches_oracles(
 ):
     """Sweep every backend for `.sorted()`/`.argsort()` on one batch, asserting backend parity, the
     permutation/order relationship, and (for both byte and uncased modes) a CPython oracle."""
-    strs = Strs(native_list)
+    strings = Strings(native_list)
 
     sorted_results = backend_results(
         lambda capabilities: list(
-            map(str, strs.sorted(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities))
+            map(str, strings.sorted(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities))
         )
     )
     argsort_results = backend_results(
-        lambda capabilities: strs.argsort(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities)
+        lambda capabilities: strings.argsort(top=top, reverse=reverse, uncased=uncased, capabilities=capabilities)
     )
 
     assert_backends_agree(sorted_results)
@@ -207,12 +207,12 @@ def assert_sort_family_matches_oracles(
 @pytest.mark.parametrize("part_length", [5, 10])
 @pytest.mark.parametrize("variability", [2, 3])
 def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, rng: Random):
-    """Fuzzed `Strs.argsort()`/`.sorted()` agree with Python's native `sorted()` on randomized batches:
+    """Fuzzed `Strings.argsort()`/`.sorted()` agree with Python's native `sorted()` on randomized batches:
     the pairwise `<`/`>` comparator, the permutation, and the re-split substrings all match, and the
     `argsort(out=...)` NumPy buffer path returns the same permutation."""
     native_list = [get_random_string(rng, variability=variability, length=part_length) for _ in range(list_length)]
     native_joined = ".".join(native_list)
-    big_joined = Str(native_joined)
+    big_joined = String(native_joined)
     big_list = big_joined.split(".")
 
     # Before testing sorting, validate pairwise comparator consistency
@@ -220,7 +220,7 @@ def test_fuzzy_sorting(list_length: int, part_length: int, variability: int, rng
         return -1 if a < b else (1 if a > b else 0)
 
     def sz_cmp(a: str, b: str) -> int:
-        sa, sb = Str(a), Str(b)
+        sa, sb = String(a), String(b)
         if sa < sb:
             return -1
         if sa > sb:
@@ -301,7 +301,7 @@ BATCH_BUILDERS = {
 def test_unit_backend_differential_sorted_argsort(
     backend_results, rng: Random, batch_size: int, batch_name: str, uncased: bool
 ):
-    """`Strs.sorted()`/`.argsort()` agree across every `capability_sweep()` backend and with CPython
+    """`Strings.sorted()`/`.argsort()` agree across every `capability_sweep()` backend and with CPython
     `sorted()`, byte mode or case-folded when `uncased=True`, across batch sizes bracketing
     SIMD/threading thresholds and the all-equal, single-char, length-1, and empty-mixed corner shapes;
     a divergence is a kernel bug, not a binding bug."""
@@ -323,7 +323,7 @@ def test_unit_backend_differential_sorted_argsort_top_reverse(
 
 
 def test_unit_backend_differential_sorted_argsort_empty(backend_results):
-    """An empty `Strs` collection sorts to empty on every `capability_sweep()` backend for every
+    """An empty `Strings` collection sorts to empty on every `capability_sweep()` backend for every
     `uncased`/`reverse` combination; a divergence is a kernel bug, not a binding bug."""
     for uncased in (False, True):
         for reverse in (False, True):

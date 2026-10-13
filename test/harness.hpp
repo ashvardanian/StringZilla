@@ -303,8 +303,6 @@ result_type_ kernel_result(kernel_type_ const &kernel, arguments_types_... argum
     return result;
 }
 
-using tape_view_t = tape_view<char, sz_size_t>;
-
 struct device_backend_t {
     sz::device_t selected = sz::device_t::cpu();
     sz_capability_t capabilities = 0;
@@ -314,7 +312,7 @@ struct device_backend_t {
     sz_status_t (*free)(sz_stream_t) = nullptr;
 };
 
-using tape_t = tape<char, sz_u64_t, unified_alloc<char>, tape_termination_t::packed_k>;
+using unified_strings_t = strings<unified_alloc<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
 
@@ -955,8 +953,7 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal);
 
 void test_arithmetic_unit();
 void test_strings_view_unit();
-void test_tape_assign_unit();
-void test_tape_overflow_unit();
+void test_strings_columns_unit();
 void test_allocator_unit();
 void test_byteset_unit();
 

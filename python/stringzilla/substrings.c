@@ -198,15 +198,15 @@ static char const doc_SubstringsEngine_counts[] =                               
     "Count the matches of every needle in every haystack, into `out`.\n"                          //
     "\n"                                                                                          //
     "Args:\n"                                                                                     //
-    "  haystacks (Strs): Texts to search, from `Strs.copy` on a GPU.\n"                           //
+    "  haystacks (Strings): Texts to search, from `Strings.copy` on a GPU.\n"                     //
     "  out (buffer): Writable 1-D buffer of pointer-width unsigned integers, one per haystack.\n" //
     "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"         //
     "    A device engine enqueues there and returns, so `out` must be device-reachable\n"         //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"            //
     "Example:\n"                                                                                  //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']))\n"                                //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                             //
     "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                            //
-    "  >>> engine.counts(sz.Strs(['hershey']), out)\n"                                            //
+    "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                         //
     "  >>> out[0]\n"                                                                              //
     "  3";
 
@@ -281,7 +281,7 @@ static char const doc_SubstringsEngine_find[] =                                 
     "what sizes the next call.\n"                                                                      //
     "\n"                                                                                               //
     "Args:\n"                                                                                          //
-    "  haystacks (Strs): Texts to search, from `Strs.copy` on a GPU.\n"                                //
+    "  haystacks (Strings): Texts to search, from `Strings.copy` on a GPU.\n"                          //
     "  matches (buffer or None): Writable, fully contiguous 2-D buffer of pointer-width unsigned\n"    //
     "    integers, shaped `(capacity, 4)` - haystack index, needle index, byte offset, byte length.\n" //
     "    None makes the call a pure size query.\n"                                                     //
@@ -291,10 +291,10 @@ static char const doc_SubstringsEngine_find[] =                                 
     "    A device engine enqueues there and returns, so both buffers must be device-reachable\n"       //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"                 //
     "Example:\n"                                                                                       //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']))\n"                                     //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                                  //
     "  >>> matches = memoryview(bytearray(3 * 4 * 8)).cast('Q', (3, 4))\n"                             //
     "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                         //
-    "  >>> engine.find(sz.Strs(['hershey']), matches, offsets)\n"                                      //
+    "  >>> engine.find(sz.Strings(['hershey']), matches, offsets)\n"                                   //
     "  >>> offsets[1]\n"                                                                               //
     "  3";
 
@@ -399,30 +399,30 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     Py_RETURN_NONE;
 }
 
-static char const doc_SubstringsEngine_replace[] =                                                     //
-    "replace(haystacks, replacements, target, offsets, *, stream=None) -> None\n"                      //
-    "\n"                                                                                               //
-    "Rewrite every haystack into one target buffer, one replacement per needle.\n"                     //
-    "\n"                                                                                               //
-    "Needs a leftmost policy, since a substitution over matches that share bytes is not a function.\n" //
-    "A target too small is not an error: `offsets` and `report` are filled either way.\n"              //
-    "\n"                                                                                               //
-    "Args:\n"                                                                                          //
-    "  haystacks (Strs): Texts to rewrite, from `Strs.copy` on a GPU.\n"                               //
-    "  replacements (Strs): One replacement per needle; an empty one deletes the match. On a GPU\n"    //
-    "    engine, from `Strs.copy` too.\n"                                                              //
-    "  target (buffer or None): Writable, contiguous byte buffer; None makes the call a size query.\n" //
-    "  offsets (buffer): Writable, contiguous 1-D buffer of pointer-width unsigned integers holding\n" //
-    "    len(haystacks) + 1 rewritten boundaries, the last being the total.\n"                         //
-    "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"              //
-    "    A device engine enqueues there and returns, so both buffers must be device-reachable\n"       //
-    "    and read only after the caller joins the stream; a host engine ignores it.\n"                 //
-    "Example:\n"                                                                                       //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']), overlap_policy='leftmost-longest')\n"  //
-    "  >>> target = memoryview(bytearray(16))\n"                                                       //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                         //
-    "  >>> engine.replace(sz.Strs(['hershey']), sz.Strs(['HE', 'SHE']), target, offsets)\n"            //
-    "  >>> bytes(target[offsets[0]:offsets[1]])\n"                                                     //
+static char const doc_SubstringsEngine_replace[] =                                                       //
+    "replace(haystacks, replacements, target, offsets, *, stream=None) -> None\n"                        //
+    "\n"                                                                                                 //
+    "Rewrite every haystack into one target buffer, one replacement per needle.\n"                       //
+    "\n"                                                                                                 //
+    "Needs a leftmost policy, since a substitution over matches that share bytes is not a function.\n"   //
+    "A target too small is not an error: `offsets` and `report` are filled either way.\n"                //
+    "\n"                                                                                                 //
+    "Args:\n"                                                                                            //
+    "  haystacks (Strings): Texts to rewrite, from `Strings.copy` on a GPU.\n"                           //
+    "  replacements (Strings): One replacement per needle; an empty one deletes the match. On a GPU\n"   //
+    "    engine, from `Strings.copy` too.\n"                                                             //
+    "  target (buffer or None): Writable, contiguous byte buffer; None makes the call a size query.\n"   //
+    "  offsets (buffer): Writable, contiguous 1-D buffer of pointer-width unsigned integers holding\n"   //
+    "    len(haystacks) + 1 rewritten boundaries, the last being the total.\n"                           //
+    "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"                //
+    "    A device engine enqueues there and returns, so both buffers must be device-reachable\n"         //
+    "    and read only after the caller joins the stream; a host engine ignores it.\n"                   //
+    "Example:\n"                                                                                         //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']), overlap_policy='leftmost-longest')\n" //
+    "  >>> target = memoryview(bytearray(16))\n"                                                         //
+    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                           //
+    "  >>> engine.replace(sz.Strings(['hershey']), sz.Strings(['HE', 'SHE']), target, offsets)\n"        //
+    "  >>> bytes(target[offsets[0]:offsets[1]])\n"                                                       //
     "  b'HErSHEy'";
 
 static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *const *args,
@@ -539,7 +539,7 @@ static char const doc_SubstringsEngine_bm25_scores[] =                          
     "Term frequencies are raw overlapping counts, so the engine's own overlap policy does not apply.\n" //
     "\n"                                                                                                //
     "Args:\n"                                                                                           //
-    "  haystacks (Strs): Documents to score, from `Strs.copy` on a GPU.\n"                              //
+    "  haystacks (Strings): Documents to score, from `Strings.copy` on a GPU.\n"                        //
     "  needle_weights (buffer): One 32-bit float IDF or boost per needle.\n"                            //
     "  out (buffer): Writable 1-D buffer of 32-bit floats, one score per haystack.\n"                   //
     "  document_lengths (buffer, optional): One 32-bit float length per haystack; byte lengths\n"       //
@@ -552,11 +552,11 @@ static char const doc_SubstringsEngine_bm25_scores[] =                          
     "    A device engine enqueues there and returns, so `out` must be device-reachable\n"               //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"                  //
     "Example:\n"                                                                                        //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['cat', 'dog']))\n"                                     //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['cat', 'dog']))\n"                                  //
     "  >>> weights = memoryview(bytearray(2 * 4)).cast('f')\n"                                          //
     "  >>> weights[0], weights[1] = 1.0, 1.0\n"                                                         //
     "  >>> out = memoryview(bytearray(2 * 4)).cast('f')\n"                                              //
-    "  >>> engine.bm25_scores(sz.Strs(['cat and dog', 'nothing here']), weights, out,\n"                //
+    "  >>> engine.bm25_scores(sz.Strings(['cat and dog', 'nothing here']), weights, out,\n"             //
     "  ...                    average_document_length=10.0)\n"                                          //
     "  >>> out[1]\n"                                                                                    //
     "  0.0";
@@ -629,16 +629,16 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
     if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     Py_buffer weights_view;
-    if (sz_py_export_input_buffer(weights_obj, "needle_weights", (Py_ssize_t)sizeof(sz_f32_t), needles_count,
-                                  &weights_view) != 0)
+    if (sz_py_export_contiguous_buffer(weights_obj, "needle_weights", PyBUF_CONTIG_RO, (Py_ssize_t)sizeof(sz_f32_t),
+                                       needles_count, &weights_view) != 0)
         return NULL;
 
     sz_f32_t const *lengths = STRINGZILLA_NULL;
     Py_buffer lengths_view;
     sz_bool_t have_lengths = sz_false_k;
     if (lengths_obj && lengths_obj != Py_None) {
-        if (sz_py_export_input_buffer(lengths_obj, "document_lengths", (Py_ssize_t)sizeof(sz_f32_t), haystacks.count,
-                                      &lengths_view) != 0) {
+        if (sz_py_export_contiguous_buffer(lengths_obj, "document_lengths", PyBUF_CONTIG_RO,
+                                           (Py_ssize_t)sizeof(sz_f32_t), haystacks.count, &lengths_view) != 0) {
             PyBuffer_Release(&weights_view);
             return NULL;
         }
@@ -686,9 +686,9 @@ static char const doc_SubstringsEngine_report[] =                               
     "engine these are written by the device, so join the stream before reading them.\n"              //
     "\n"                                                                                             //
     "Example:\n"                                                                                     //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']))\n"                                   //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                                //
     "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                               //
-    "  >>> engine.counts(sz.Strs(['hershey']), out)\n"                                               //
+    "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                            //
     "  >>> engine.report['matches_emitted']\n"                                                       //
     "  3";
 
@@ -740,7 +740,7 @@ static char const doc_SubstringsEngine[] =                                      
     "One Aho-Corasick pass answers every needle at once, whatever the vocabulary size.\n"               //
     "\n"                                                                                                //
     "Args:\n"                                                                                           //
-    "  needles (Strs): The vocabulary to compile; an empty needle is refused.\n"                        //
+    "  needles (Strings): The vocabulary to compile; an empty needle is refused.\n"                     //
     "  case_sensitivity (str, optional): 'cased' matches bytes, 'uncased' folds both sides.\n"          //
     "  overlap_policy (str, optional): 'overlapping', 'leftmost-longest', or 'leftmost-first'.\n"       //
     "  hot_states (int, optional): States kept in the dense hot rows; None sizes them automatically.\n" //
@@ -751,9 +751,9 @@ static char const doc_SubstringsEngine[] =                                      
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"     //
     "    for the default.\n"                                                                            //
     "Example:\n"                                                                                        //
-    "  >>> engine = sz.SubstringsEngine(sz.Strs(['he', 'she']), case_sensitivity='cased')\n"            //
+    "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']), case_sensitivity='cased')\n"         //
     "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                                  //
-    "  >>> engine.counts(sz.Strs(['hershey']), out)\n"                                                  //
+    "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                               //
     "  >>> out[0]\n"                                                                                    //
     "  3";
 

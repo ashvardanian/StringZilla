@@ -177,7 +177,7 @@ static char const doc_File[] =                                                  
     "  >>> path = os.path.join(tempfile.mkdtemp(), 'log.txt')\n"                             //
     "  >>> _ = pathlib.Path(path).write_text('error: disk full\\nok\\nerror: timeout\\n')\n" //
     "  >>> # Memory-map and scan in place - no copy into RAM, SIMD-accelerated:\n"           //
-    "  >>> sz.Str(sz.File(path)).count('error')\n"                                           //
+    "  >>> sz.String(sz.File(path)).count('error')\n"                                        //
     "  2";
 
 PyTypeObject FileType = {

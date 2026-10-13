@@ -66,15 +66,7 @@
 namespace ashvardanian {
 namespace stringzilla {
 
-class byteset_t;
-template <typename>
-class basic_string_slice;
-template <typename>
-class basic_string;
 class utf8_uncased_needle_t;
-
-using string_span_t = basic_string_slice<char>;
-using string_view_t = basic_string_slice<char const>;
 
 template <std::size_t count_characters>
 using carray = char[count_characters];
@@ -371,7 +363,7 @@ inline static constexpr exclude_overlaps_t exclude_overlaps;
 
 /**
  *  @brief Zero-cost wrapper around the `.find` member function of string-like classes.
- *  @see https://en.cppreference.com/w/cpp/string/basic_string/find
+ *  @see https://en.cppreference.com/w/cpp/string/string/find
  */
 template <typename string_type_, typename overlaps_type_ = include_overlaps_t, typename needle_type_ = string_type_>
 struct matcher_find {
@@ -398,7 +390,7 @@ struct matcher_find {
 
 /**
  *  @brief Zero-cost wrapper around the `.rfind` member function of string-like classes.
- *  @see https://en.cppreference.com/w/cpp/string/basic_string/rfind
+ *  @see https://en.cppreference.com/w/cpp/string/string/rfind
  */
 template <typename string_type_, typename overlaps_type_ = include_overlaps_t, typename needle_type_ = string_type_>
 struct matcher_rfind {
@@ -1806,62 +1798,6 @@ inline void raise(status_t status) noexcept(false) {
 
 #pragma endregion
 
-#pragma region Global Operations with Dynamic Memory
-
-/** Allocates @p n bytes through the C++ allocator behind @p allocator_state, reading its throw as
- *  null, so the C side reports @c bad_alloc_k rather than unwinding through its frames. */
-template <typename allocator_type_>
-inline void *allocate_through_(sz_size_t n, void *allocator_state, void *) noexcept {
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
-    try {
-        return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state),
-                                                                n);
-    }
-    catch (...) {
-        return nullptr;
-    }
-#else
-    return std::allocator_traits<allocator_type_>::allocate(*reinterpret_cast<allocator_type_ *>(allocator_state), n);
-#endif
-}
-
-template <typename allocator_type_>
-inline void free_through_(void *ptr, sz_size_t n, void *allocator_state, void *) noexcept {
-    using value_type_ = typename allocator_type_::value_type;
-    return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
-}
-
-/** Moves a block into a fresh one of @p new_bytes, as a C++ allocator cannot resize in place. */
-template <typename allocator_type_>
-inline void *reallocate_through_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes, void *allocator_state,
-                                 void *stream) noexcept {
-    if (!new_bytes) {
-        if (pointer) free_through_<allocator_type_>(pointer, old_bytes, allocator_state, stream);
-        return nullptr;
-    }
-    void *moved = allocate_through_<allocator_type_>(new_bytes, allocator_state, stream);
-    if (!moved || !pointer) return moved;
-    std::memcpy(moved, pointer, sz_min_of_two(old_bytes, new_bytes));
-    free_through_<allocator_type_>(pointer, old_bytes, allocator_state, stream);
-    return moved;
-}
-
-/**
- *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_allocator_t.
- *  @return The status the callback reports.
- */
-template <typename allocator_type_, typename allocator_callback_>
-inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
-    sz_allocator_t c_allocator;
-    c_allocator.allocate = &allocate_through_<allocator_type_>;
-    c_allocator.reallocate = &reallocate_through_<allocator_type_>;
-    c_allocator.free = &free_through_<allocator_type_>;
-    c_allocator.handle = &allocator;
-    return static_cast<status_t>(callback(c_allocator));
-}
-
-#pragma endregion
-
 #pragma region Helper Template Classes
 
 /** A result of split a string once, containing the string slice ::before,
@@ -1931,7 +1867,7 @@ struct concatenation;
  *  Neither exposes the @c value_type, `size()` and `copy()` interface the expression template
  *  relies on, which is why baking the deduced type straight into @c concatenation fails to compile.
  *  Everything that is not already a nested expression is therefore normalized into a
- *  @c string_view_t, matching what the `basic_string_slice::operator|` overloads produce.
+ *  @c string_view_t, matching what the `string_slice::operator|` overloads produce.
  */
 template <typename type_>
 struct concatenation_operand {
@@ -2084,7 +2020,7 @@ struct matcher_utf8_uncased_search {
  *      long in any case.
  */
 template <typename char_type_>
-class basic_string_slice {
+class string_slice {
 
     using char_type = char_type_;
     using mutable_char_type = typename std::remove_const<char_type_>::type;
@@ -2109,9 +2045,9 @@ class basic_string_slice {
     using difference_type = std::ptrdiff_t;
 
     /*  Non-STL type definitions */
-    using string_slice_t = basic_string_slice<char_type>;
-    using string_span_t = basic_string_slice<mutable_char_type>;
-    using string_view_t = basic_string_slice<immutable_char_type>;
+    using string_slice_t = string_slice<char_type>;
+    using string_span_t = string_slice<mutable_char_type>;
+    using string_view_t = string_slice<immutable_char_type>;
     using partition_type = string_partition_result<string_slice_t>;
 
     /**
@@ -2124,14 +2060,13 @@ class basic_string_slice {
 
 #pragma region Constructors and STL Utilities
 
-    constexpr basic_string_slice() noexcept : start_(nullptr), length_(0) {}
-    constexpr basic_string_slice(pointer c_string) noexcept
-        : start_(c_string), length_(null_terminated_length(c_string)) {}
-    constexpr basic_string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
+    constexpr string_slice() noexcept : start_(nullptr), length_(0) {}
+    constexpr string_slice(pointer c_string) noexcept : start_(c_string), length_(null_terminated_length(c_string)) {}
+    constexpr string_slice(pointer c_string, size_type length) noexcept : start_(c_string), length_(length) {}
 
-    basic_string_slice(basic_string_slice const &other) noexcept = default;
-    basic_string_slice &operator=(basic_string_slice const &other) noexcept = default;
-    basic_string_slice(std::nullptr_t) = delete;
+    string_slice(string_slice const &other) noexcept = default;
+    string_slice &operator=(string_slice const &other) noexcept = default;
+    string_slice(std::nullptr_t) = delete;
 
     /** Exchanges the view with that of the @p other. */
     void swap(string_slice_t &other) noexcept {
@@ -2141,13 +2076,13 @@ class basic_string_slice {
 
 #if STRINGZILLA_WITH_STL
 
-    constexpr basic_string_slice(std::string const &other) noexcept
+    constexpr string_slice(std::string const &other) noexcept
         requires std::is_const_v<char_type>
-        : basic_string_slice(other.data(), other.size()) {}
+        : string_slice(other.data(), other.size()) {}
 
-    constexpr basic_string_slice(std::string &other) noexcept
+    constexpr string_slice(std::string &other) noexcept
         requires(!std::is_const_v<char_type>)
-        : basic_string_slice(other.data(), other.size()) {}
+        : string_slice(other.data(), other.size()) {}
 
     constexpr string_slice_t &operator=(std::string const &other) noexcept
         requires std::is_const_v<char_type>
@@ -2173,9 +2108,9 @@ class basic_string_slice {
         return os.write(str.data(), str.size());
     }
 
-    constexpr basic_string_slice(std::string_view const &other) noexcept
+    constexpr string_slice(std::string_view const &other) noexcept
         requires std::is_const_v<char_type>
-        : basic_string_slice(other.data(), other.size()) {}
+        : string_slice(other.data(), other.size()) {}
 
     constexpr string_slice_t &operator=(std::string_view const &other) noexcept
         requires std::is_const_v<char_type>
@@ -2603,7 +2538,7 @@ class basic_string_slice {
 
     /**
      *  @brief Lazily concatenates two slices into an expression template, without allocating.
-     *  @sa concatenate for the variadic form, and the converting constructor of @c basic_string
+     *  @sa concatenate for the variadic form, and the converting constructor of @c string
      *      that materializes the expression.
      */
     concatenation<string_view_t, string_view_t> operator|(string_view_t other) const noexcept {
@@ -3109,12 +3044,12 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *
  *  @section sz_cpp_api API
  *
- *  Some APIs are different from @c basic_string_slice:
+ *  Some APIs are different from @c string_slice:
  *
  *  - @c lstrip, @c rstrip, @c strip modify the string in-place, instead of returning a new view.
  *  - @c sat, @c sub, and element access have non-const overloads returning mutable references.
  *
- *  Functions defined for @c basic_string, but not present in @c basic_string_slice:
+ *  Functions defined for @c string, but not present in @c string_slice:
  *
  *  - @c replace, @c insert, @c erase, @c append, @c push_back, @c pop_back, @c resize,
  *  - @c try_ exception-free twins, returning a @c status_t instead of throwing,
@@ -3122,7 +3057,7 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *  - @c translate for character mapping,
  *  - @c randomize, @c random for fast random string generation.
  *
- *  Functions defined for @c basic_string_slice, but not present in @c basic_string:
+ *  Functions defined for @c string_slice, but not present in @c string:
  *
  *  - @c partition, @c rpartition, @c split, @c rsplit, @c find_all and @c rfind_all, left out to
  *    enforce lifetimes over long operations,
@@ -3138,7 +3073,7 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *  @c std::terminate is called.
  */
 template <typename allocator_type_ = std::allocator<char>>
-class basic_string {
+class string {
 
     using char_type = char;
     using sz_alloc_type = sz_allocator_t;
@@ -3177,7 +3112,7 @@ class basic_string {
         if (other.size()) std::memcpy(start, other.data(), other.size());
     }
 
-    void move(basic_string &other) noexcept {
+    void move(string &other) noexcept {
         // We can't just assign the other string state, as its start address may be somewhere else on the stack.
         sz_ptr_t string_start;
         sz_size_t string_length;
@@ -3210,8 +3145,8 @@ class basic_string {
 
     /*  Non-STL type definitions */
     using allocator_type = allocator_type_;
-    using string_span_t = basic_string_slice<char_type>;
-    using string_view_t = basic_string_slice<typename std::add_const<char_type>::type>;
+    using string_span_t = string_slice<char_type>;
+    using string_view_t = string_slice<typename std::add_const<char_type>::type>;
     using partition_type = string_partition_result<string_view_t>;
 
     /**
@@ -3228,9 +3163,9 @@ class basic_string {
 
 #pragma region Constructors and STL Utilities
 
-    constexpr basic_string() noexcept : basic_string(allocator_type_()) {}
+    constexpr string() noexcept : string(allocator_type_()) {}
 
-    constexpr explicit basic_string(allocator_type_ const &allocator) noexcept : allocator_(allocator) {
+    constexpr explicit string(allocator_type_ const &allocator) noexcept : allocator_(allocator) {
         // ! Instead of relying on the `sz_string_init`, we have to reimplement it to support `constexpr`.
         string_.internal.start = &string_.internal.chars[0];
         string_.words[1] = 0;
@@ -3238,15 +3173,14 @@ class basic_string {
         string_.words[3] = 0;
     }
 
-    ~basic_string() noexcept { release(); }
+    ~string() noexcept { release(); }
 
-    basic_string(basic_string &&other) noexcept : allocator_(std::move(other.allocator_)) { move(other); }
+    string(string &&other) noexcept : allocator_(std::move(other.allocator_)) { move(other); }
 
     /** Steals the buffer when the allocators propagate or compare equal, and copies the bytes
      *  otherwise. */
-    basic_string &operator=(basic_string &&other) noexcept(
-        allocator_traits_t::propagate_on_container_move_assignment::value ||
-        allocator_traits_t::is_always_equal::value) {
+    string &operator=(string &&other) noexcept(allocator_traits_t::propagate_on_container_move_assignment::value ||
+                                               allocator_traits_t::is_always_equal::value) {
         if (this == &other) return *this;
         if constexpr (allocator_traits_t::propagate_on_container_move_assignment::value) {
             release();
@@ -3265,13 +3199,13 @@ class basic_string {
         return *this;
     }
 
-    basic_string(basic_string const &other) noexcept(false)
+    string(string const &other) noexcept(false)
         : allocator_(allocator_traits_t::select_on_container_copy_construction(other.allocator_)) {
         init(other);
     }
 
     /** Adopts the other allocator first when it propagates, so the copy lands in its memory. */
-    basic_string &operator=(basic_string const &other) noexcept(false) {
+    string &operator=(string const &other) noexcept(false) {
         if (this == &other) return *this;
         if constexpr (allocator_traits_t::propagate_on_container_copy_assignment::value) {
             if (allocator_ != other.allocator_) release();
@@ -3280,30 +3214,25 @@ class basic_string {
         return assign(other);
     }
 
-    basic_string(string_view_t view) noexcept(false) { init(view); }
-    basic_string(string_view_t view, allocator_type_ const &allocator) noexcept(false) : allocator_(allocator) {
-        init(view);
-    }
-    basic_string &operator=(string_view_t view) noexcept(false) { return assign(view); }
+    string(string_view_t view) noexcept(false) { init(view); }
+    string(string_view_t view, allocator_type_ const &allocator) noexcept(false) : allocator_(allocator) { init(view); }
+    string &operator=(string_view_t view) noexcept(false) { return assign(view); }
 
-    basic_string(const_pointer c_string) noexcept(false) : basic_string(string_view_t(c_string)) {}
-    basic_string(const_pointer c_string, size_type length) noexcept(false)
-        : basic_string(string_view_t(c_string, length)) {}
-    basic_string &operator=(const_pointer other) noexcept(false) { return assign(string_view_t(other)); }
+    string(const_pointer c_string) noexcept(false) : string(string_view_t(c_string)) {}
+    string(const_pointer c_string, size_type length) noexcept(false) : string(string_view_t(c_string, length)) {}
+    string &operator=(const_pointer other) noexcept(false) { return assign(string_view_t(other)); }
 
-    basic_string(std::nullptr_t) = delete;
+    string(std::nullptr_t) = delete;
 
     /** Construct a string by repeating a certain @p character @p count times. */
-    basic_string(size_type count, value_type character) noexcept(false) { init(count, character); }
+    string(size_type count, value_type character) noexcept(false) { init(count, character); }
 
-    basic_string(basic_string const &other, size_type pos) noexcept(false) { init(string_view_t(other).substr(pos)); }
-    basic_string(basic_string const &other, size_type pos, size_type count) noexcept(false) {
+    string(string const &other, size_type pos) noexcept(false) { init(string_view_t(other).substr(pos)); }
+    string(string const &other, size_type pos, size_type count) noexcept(false) {
         init(string_view_t(other).substr(pos, count));
     }
 
-    basic_string(std::initializer_list<value_type> list) noexcept(false) {
-        init(string_view_t(list.begin(), list.size()));
-    }
+    string(std::initializer_list<value_type> list) noexcept(false) { init(string_view_t(list.begin(), list.size())); }
 
     operator string_view_t() const noexcept sz_lifetime_bound_ { return view(); }
     string_view_t view() const noexcept sz_lifetime_bound_ {
@@ -3322,7 +3251,7 @@ class basic_string {
     }
 
     /** Exchanges the string contents witt the @p other string. */
-    void swap(basic_string &other) noexcept {
+    void swap(string &other) noexcept {
         // If at least one of the strings is on the stack, a basic `swap(string_, other.string_)` won't work,
         // as the pointer to the stack-allocated memory will be swapped, instead of the contents.
         sz_ptr_t first_start, second_start;
@@ -3340,8 +3269,8 @@ class basic_string {
 
 #if STRINGZILLA_WITH_STL
 
-    basic_string(std::string const &other) noexcept(false) : basic_string(other.data(), other.size()) {}
-    basic_string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
+    string(std::string const &other) noexcept(false) : string(other.data(), other.size()) {}
+    string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
 
     // As we are need both `data()` and `size()`, going through `operator string_view_t()`
     // and `sz_string_unpack` is faster than separate invocations.
@@ -3353,12 +3282,12 @@ class basic_string {
      */
     template <typename stream_traits_>
     friend std::basic_ostream<value_type, stream_traits_> &operator<<(
-        std::basic_ostream<value_type, stream_traits_> &os, basic_string const &str) noexcept(false) {
+        std::basic_ostream<value_type, stream_traits_> &os, string const &str) noexcept(false) {
         return os.write(str.data(), str.size());
     }
 
-    basic_string(std::string_view other) noexcept(false) : basic_string(other.data(), other.size()) {}
-    basic_string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
+    string(std::string_view other) noexcept(false) : string(other.data(), other.size()) {}
+    string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
     operator std::string_view() const noexcept { return view(); }
 
     /**
@@ -3367,7 +3296,7 @@ class basic_string {
      *      `sz::string_t email = name | "@" | domain;`.
      */
     template <typename first_type_, typename second_type_>
-    basic_string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
+    string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &allocator);
             if (!ptr) return sz_bad_alloc_k;
@@ -3377,7 +3306,7 @@ class basic_string {
     }
 
     template <typename first_type_, typename second_type_>
-    basic_string &operator=(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
+    string &operator=(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
         raise(try_assign(expression));
         return *this;
     }
@@ -3421,11 +3350,11 @@ class basic_string {
 #if STRINGZILLA_WITH_STL
 
     reference at(size_type pos) noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
+        if (pos >= size()) throw std::out_of_range("sz::string::at");
         return string_.internal.start[pos];
     }
     const_reference at(size_type pos) const noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::at");
+        if (pos >= size()) throw std::out_of_range("sz::string::at");
         return string_.internal.start[pos];
     }
 
@@ -3519,21 +3448,21 @@ class basic_string {
     }
 
     /** Added for STL compatibility. */
-    basic_string substr() const noexcept { return *this; }
+    string substr() const noexcept { return *this; }
 
     /**
      *  @brief Return a slice of this view after first @c skip bytes.
      *  @throws @c std::out_of_range if `skip > size()`.
      *  @sa sub for a cleaner exception-less alternative.
      */
-    basic_string substr(size_type skip) const noexcept(false) { return view().substr(skip); }
+    string substr(size_type skip) const noexcept(false) { return view().substr(skip); }
 
     /**
      *  @brief Return a slice of this view after first @p skip bytes, taking at most @c count bytes.
      *  @throws @c std::out_of_range if `skip > size()`.
      *  @sa sub for a cleaner exception-less alternative.
      */
-    basic_string substr(size_type skip, size_type count) const noexcept(false) { return view().substr(skip, count); }
+    string substr(size_type skip, size_type count) const noexcept(false) { return view().substr(skip, count); }
 
     /**
      *  @brief Exports a slice of this view after the first @p skip bytes, at most @p count long.
@@ -3612,12 +3541,12 @@ class basic_string {
     }
 
     /** Checks if the string is equal to the other string. */
-    bool operator==(basic_string const &other) const noexcept { return view() == other.view(); }
+    bool operator==(string const &other) const noexcept { return view() == other.view(); }
     bool operator==(string_view_t other) const noexcept { return view() == other; }
     bool operator==(const_pointer other) const noexcept { return view() == string_view_t(other); }
 
     /** Computes the lexicographic ordering between this and the @p other string. */
-    std::strong_ordering operator<=>(basic_string const &other) const noexcept { return view() <=> other.view(); }
+    std::strong_ordering operator<=>(string const &other) const noexcept { return view() <=> other.view(); }
     std::strong_ordering operator<=>(string_view_t other) const noexcept { return view() <=> other; }
     std::strong_ordering operator<=>(const_pointer other) const noexcept { return view() <=> string_view_t(other); }
 
@@ -3865,7 +3794,7 @@ class basic_string {
      *  @brief Python-like convenience function, dropping prefix formed of given characters.
      *  @note Similar to `boost::algorithm::trim_left_if(str, is_any_of(set))`.
      */
-    basic_string &lstrip(byteset_t set) noexcept {
+    string &lstrip(byteset_t set) noexcept {
         auto remaining = view().lstrip(set);
         remove_prefix(size() - remaining.size());
         return *this;
@@ -3875,7 +3804,7 @@ class basic_string {
      *  @brief Python-like convenience function, dropping suffix formed of given characters.
      *  @note Similar to `boost::algorithm::trim_right_if(str, is_any_of(set))`.
      */
-    basic_string &rstrip(byteset_t set) noexcept {
+    string &rstrip(byteset_t set) noexcept {
         auto remaining = view().rstrip(set);
         remove_suffix(size() - remaining.size());
         return *this;
@@ -3885,7 +3814,7 @@ class basic_string {
      *  @brief Python-like convenience function, stripping characters from the @p set off both ends.
      *  @note Similar to `boost::algorithm::trim_if(str, is_any_of(set))`.
      */
-    basic_string &strip(byteset_t set) noexcept { return lstrip(set).rstrip(set); }
+    string &strip(byteset_t set) noexcept { return lstrip(set).rstrip(set); }
 
 #pragma endregion
 #pragma endregion
@@ -4012,7 +3941,7 @@ class basic_string {
      *      actual new size.
      *  @return @c success_k, @c overflow_risk_k for a @p count past @c max_size, or @c bad_alloc_k
      *      if the allocation failed.
-     *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
+     *  @see https://en.cppreference.com/w/cpp/string/string/resize_and_overwrite
      */
     template <typename operation_type_>
     status_t try_resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
@@ -4087,7 +4016,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      */
     void resize(size_type count, value_type character = '\0') noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::basic_string::resize");
+        if (count > max_size()) throw std::length_error("sz::string::resize");
         raise(try_resize(count, character));
     }
 
@@ -4099,11 +4028,11 @@ class basic_string {
      *      actual new size.
      *  @throws @c std::length_error if the string is too long.
      *  @throws @c std::bad_alloc if the allocation fails.
-     *  @see https://en.cppreference.com/w/cpp/string/basic_string/resize_and_overwrite
+     *  @see https://en.cppreference.com/w/cpp/string/string/resize_and_overwrite
      */
     template <typename operation_type_>
     void resize_and_overwrite(size_type count, operation_type_ operation) noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::basic_string::resize_and_overwrite");
+        if (count > max_size()) throw std::length_error("sz::string::resize_and_overwrite");
         raise(try_resize_and_overwrite(count, operation));
     }
 
@@ -4118,7 +4047,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      */
     void reserve(size_type capacity) noexcept(false) {
-        if (capacity > max_size()) throw std::length_error("sz::basic_string::reserve");
+        if (capacity > max_size()) throw std::length_error("sz::string::reserve");
         raise(try_reserve(capacity));
     }
 
@@ -4128,9 +4057,9 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    basic_string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + repeats > max_size()) throw std::length_error("sz::basic_string::insert");
+    string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
+        if (offset > size()) throw std::out_of_range("sz::string::insert");
+        if (size() + repeats > max_size()) throw std::length_error("sz::string::insert");
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, offset, repeats, &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
@@ -4144,9 +4073,9 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    basic_string &insert(size_type offset, string_view_t other) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::basic_string::insert");
-        if (size() + other.size() > max_size()) throw std::length_error("sz::basic_string::insert");
+    string &insert(size_type offset, string_view_t other) noexcept(false) {
+        if (offset > size()) throw std::out_of_range("sz::string::insert");
+        if (size() + other.size() > max_size()) throw std::length_error("sz::string::insert");
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, offset, other.size(), &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
@@ -4160,7 +4089,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    basic_string &insert(size_type offset, const_pointer start, size_type length) noexcept(false) {
+    string &insert(size_type offset, const_pointer start, size_type length) noexcept(false) {
         return insert(offset, string_view_t(start, length));
     }
 
@@ -4170,8 +4099,8 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    basic_string &insert(size_type offset, string_view_t other, size_type other_index,
-                         size_type count = npos) noexcept(false) {
+    string &insert(size_type offset, string_view_t other, size_type other_index,
+                   size_type count = npos) noexcept(false) {
         return insert(offset, other.substr(other_index, count));
     }
 
@@ -4209,10 +4138,10 @@ class basic_string {
     iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound_ {
 
         auto pos = range_length(cbegin(), it);
-        if (pos > size()) throw std::out_of_range("sz::basic_string::insert");
+        if (pos > size()) throw std::out_of_range("sz::string::insert");
 
         auto added_length = range_length(first, last);
-        if (size() + added_length > max_size()) throw std::length_error("sz::basic_string::insert");
+        if (size() + added_length > max_size()) throw std::length_error("sz::string::insert");
 
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, pos, added_length, &allocator) ? sz_success_k : sz_bad_alloc_k;
@@ -4238,9 +4167,9 @@ class basic_string {
      *  @throws @c std::out_of_range if `pos > size()`.
      *  @sa try_erase_slice for a cleaner exception-less alternative.
      */
-    basic_string &erase(size_type pos = 0, size_type count = npos) noexcept(false) {
+    string &erase(size_type pos = 0, size_type count = npos) noexcept(false) {
         if (!count || empty()) return *this;
-        if (pos >= size()) throw std::out_of_range("sz::basic_string::erase");
+        if (pos >= size()) throw std::out_of_range("sz::string::erase");
         sz_string_erase(&string_, pos, count);
         return *this;
     }
@@ -4251,9 +4180,9 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(size_type pos, size_type count, string_view_t const &str) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + str.size() > max_size()) throw std::length_error("sz::basic_string::replace");
+    string &replace(size_type pos, size_type count, string_view_t const &str) noexcept(false) {
+        if (pos > size()) throw std::out_of_range("sz::string::replace");
+        if (size() - count + str.size() > max_size()) throw std::length_error("sz::string::replace");
         raise(try_preparing_replacement(pos, count, str.size()));
         if (str.size()) std::memcpy(data() + pos, str.data(), str.size());
         return *this;
@@ -4265,7 +4194,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(const_iterator first, const_iterator last, string_view_t const &str) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, string_view_t const &str) noexcept(false) {
         return replace(range_length(cbegin(), first), last - first, str);
     }
 
@@ -4275,8 +4204,8 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(size_type pos, size_type count, string_view_t const &str, size_type pos2,
-                          size_type count2 = npos) noexcept(false) {
+    string &replace(size_type pos, size_type count, string_view_t const &str, size_type pos2,
+                    size_type count2 = npos) noexcept(false) {
         return replace(pos, count, str.substr(pos2, count2));
     }
 
@@ -4286,7 +4215,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(size_type pos, size_type count, const_pointer cstr, size_type count2) noexcept(false) {
+    string &replace(size_type pos, size_type count, const_pointer cstr, size_type count2) noexcept(false) {
         return replace(pos, count, string_view_t(cstr, count2));
     }
 
@@ -4296,8 +4225,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(const_iterator first, const_iterator last, const_pointer cstr,
-                          size_type count2) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, const_pointer cstr, size_type count2) noexcept(false) {
         return replace(range_length(cbegin(), first), last - first, string_view_t(cstr, count2));
     }
 
@@ -4307,7 +4235,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(size_type pos, size_type count, const_pointer cstr) noexcept(false) {
+    string &replace(size_type pos, size_type count, const_pointer cstr) noexcept(false) {
         return replace(pos, count, string_view_t(cstr));
     }
 
@@ -4317,7 +4245,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(const_iterator first, const_iterator last, const_pointer cstr) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, const_pointer cstr) noexcept(false) {
         return replace(range_length(cbegin(), first), last - first, string_view_t(cstr));
     }
 
@@ -4327,9 +4255,9 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(size_type pos, size_type count, size_type count2, char_type character) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
+    string &replace(size_type pos, size_type count, size_type count2, char_type character) noexcept(false) {
+        if (pos > size()) throw std::out_of_range("sz::string::replace");
+        if (size() - count + count2 > max_size()) throw std::length_error("sz::string::replace");
         raise(try_preparing_replacement(pos, count, count2));
         std::memset(data() + pos, character, count2);
         return *this;
@@ -4341,8 +4269,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(const_iterator first, const_iterator last, size_type count2,
-                          char_type character) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, size_type count2, char_type character) noexcept(false) {
         return replace(range_length(cbegin(), first), last - first, count2, character);
     }
 
@@ -4353,13 +4280,13 @@ class basic_string {
      *  @sa try_replace for a cleaner exception-less alternative.
      */
     template <typename input_iterator>
-    basic_string &replace(const_iterator first, const_iterator last, input_iterator first2,
-                          input_iterator last2) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, input_iterator first2,
+                    input_iterator last2) noexcept(false) {
         auto pos = range_length(cbegin(), first);
         auto count = range_length(first, last);
         auto count2 = range_length(first2, last2);
-        if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
+        if (pos > size()) throw std::out_of_range("sz::string::replace");
+        if (size() - count + count2 > max_size()) throw std::length_error("sz::string::replace");
         raise(try_preparing_replacement(pos, count, count2));
         for (iterator output = begin() + pos; first2 != last2; ++first2, ++output) *output = *first2;
         return *this;
@@ -4371,8 +4298,7 @@ class basic_string {
      *  @throws @c std::length_error if the string is too long.
      *  @sa try_replace for a cleaner exception-less alternative.
      */
-    basic_string &replace(const_iterator first, const_iterator last,
-                          std::initializer_list<char_type> list) noexcept(false) {
+    string &replace(const_iterator first, const_iterator last, std::initializer_list<char_type> list) noexcept(false) {
         return replace(first, last, list.begin(), list.end());
     }
 
@@ -4398,7 +4324,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_assign for a cleaner exception-less alternative.
      */
-    basic_string &assign(string_view_t other) noexcept(false) {
+    string &assign(string_view_t other) noexcept(false) {
         raise(try_assign(other));
         return *this;
     }
@@ -4409,7 +4335,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_assign for a cleaner exception-less alternative.
      */
-    basic_string &assign(size_type repeats, char_type character) noexcept(false) {
+    string &assign(size_type repeats, char_type character) noexcept(false) {
         resize(repeats, character);
         std::memset(data(), character, repeats);
         return *this;
@@ -4421,7 +4347,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_assign for a cleaner exception-less alternative.
      */
-    basic_string &assign(const_pointer other, size_type length) noexcept(false) { return assign({other, length}); }
+    string &assign(const_pointer other, size_type length) noexcept(false) { return assign({other, length}); }
 
     /**
      *  @brief Overwrites the string with the given string.
@@ -4429,7 +4355,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_assign for a cleaner exception-less alternative.
      */
-    basic_string &assign(string_view_t str, size_type pos, size_type count = npos) noexcept(false) {
+    string &assign(string_view_t str, size_type pos, size_type count = npos) noexcept(false) {
         return assign(str.substr(pos, count));
     }
 
@@ -4440,7 +4366,7 @@ class basic_string {
      *  @sa try_assign for a cleaner exception-less alternative.
      */
     template <typename input_iterator>
-    basic_string &assign(input_iterator first, input_iterator last) noexcept(false) {
+    string &assign(input_iterator first, input_iterator last) noexcept(false) {
         resize(range_length(first, last));
         for (iterator output = begin(); first != last; ++first, ++output) *output = *first;
         return *this;
@@ -4452,9 +4378,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_assign for a cleaner exception-less alternative.
      */
-    basic_string &assign(std::initializer_list<char_type> list) noexcept(false) {
-        return assign(list.begin(), list.end());
-    }
+    string &assign(std::initializer_list<char_type> list) noexcept(false) { return assign(list.begin(), list.end()); }
 
     /**
      *  @brief Appends to the end of the current string.
@@ -4462,7 +4386,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(string_view_t str) noexcept(false) {
+    string &append(string_view_t str) noexcept(false) {
         raise(try_append(str));
         return *this;
     }
@@ -4473,7 +4397,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(string_view_t str, size_type pos, size_type length = npos) noexcept(false) {
+    string &append(string_view_t str, size_type pos, size_type length = npos) noexcept(false) {
         return append(str.substr(pos, length));
     }
 
@@ -4483,7 +4407,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(const_pointer str, size_type length) noexcept(false) { return append({str, length}); }
+    string &append(const_pointer str, size_type length) noexcept(false) { return append({str, length}); }
 
     /**
      *  @brief Appends to the end of the current string.
@@ -4491,7 +4415,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(const_pointer str) noexcept(false) { return append(string_view_t(str)); }
+    string &append(const_pointer str) noexcept(false) { return append(string_view_t(str)); }
 
     /**
      *  @brief Appends a repeated character to the end of the current string.
@@ -4499,7 +4423,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(size_type repeats, char_type ch) noexcept(false) {
+    string &append(size_type repeats, char_type ch) noexcept(false) {
         resize(size() + repeats, ch);
         return *this;
     }
@@ -4510,7 +4434,7 @@ class basic_string {
      *  @throws @c std::bad_alloc if the allocation fails.
      *  @sa try_append for a cleaner exception-less alternative.
      */
-    basic_string &append(std::initializer_list<char_type> other) noexcept(false) {
+    string &append(std::initializer_list<char_type> other) noexcept(false) {
         return append(other.begin(), other.end());
     }
 
@@ -4521,25 +4445,23 @@ class basic_string {
      *  @sa try_append for a cleaner exception-less alternative.
      */
     template <typename input_iterator>
-    basic_string &append(input_iterator first, input_iterator last) noexcept(false) {
+    string &append(input_iterator first, input_iterator last) noexcept(false) {
         insert<input_iterator>(cend(), first, last);
         return *this;
     }
 
-    basic_string &operator+=(string_view_t other) noexcept(false) { return append(other); }
-    basic_string &operator+=(std::initializer_list<char_type> other) noexcept(false) { return append(other); }
-    basic_string &operator+=(char_type character) noexcept(false) { return operator+=(string_view_t(&character, 1)); }
-    basic_string &operator+=(const_pointer other) noexcept(false) { return operator+=(string_view_t(other)); }
+    string &operator+=(string_view_t other) noexcept(false) { return append(other); }
+    string &operator+=(std::initializer_list<char_type> other) noexcept(false) { return append(other); }
+    string &operator+=(char_type character) noexcept(false) { return operator+=(string_view_t(&character, 1)); }
+    string &operator+=(const_pointer other) noexcept(false) { return operator+=(string_view_t(other)); }
 
-    basic_string operator+(char_type character) const noexcept(false) {
-        return operator+(string_view_t(&character, 1));
+    string operator+(char_type character) const noexcept(false) { return operator+(string_view_t(&character, 1)); }
+    string operator+(const_pointer other) const noexcept(false) { return operator+(string_view_t(other)); }
+    string operator+(string_view_t other) const noexcept(false) {
+        return string {concatenation<string_view_t, string_view_t> {view(), other}};
     }
-    basic_string operator+(const_pointer other) const noexcept(false) { return operator+(string_view_t(other)); }
-    basic_string operator+(string_view_t other) const noexcept(false) {
-        return basic_string {concatenation<string_view_t, string_view_t> {view(), other}};
-    }
-    basic_string operator+(std::initializer_list<char_type> other) const noexcept(false) {
-        return basic_string {concatenation<string_view_t, string_view_t> {view(), string_view_t(other)}};
+    string operator+(std::initializer_list<char_type> other) const noexcept(false) {
+        return string {concatenation<string_view_t, string_view_t> {view(), string_view_t(other)}};
     }
 
 #endif
@@ -4560,7 +4482,7 @@ class basic_string {
      *  @brief Overwrites the string with random binary data.
      *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
      */
-    basic_string &fill_random(std::uint64_t nonce) noexcept {
+    string &fill_random(std::uint64_t nonce) noexcept {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
@@ -4576,7 +4498,7 @@ class basic_string {
      *  In this case the undefined behaviour in concurrent environments may play in our favor,
      *  but it's recommended to use the other overload in such cases.
      */
-    basic_string &fill_random() noexcept {
+    string &fill_random() noexcept {
         static std::uint64_t nonce = 42;
         return fill_random(nonce++);
     }
@@ -4587,8 +4509,8 @@ class basic_string {
      *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    static basic_string random(size_type length, std::uint64_t nonce) noexcept(false) {
-        return basic_string(length, '\0').fill_random(nonce);
+    static string random(size_type length, std::uint64_t nonce) noexcept(false) {
+        return string(length, '\0').fill_random(nonce);
     }
 
     /**
@@ -4596,7 +4518,7 @@ class basic_string {
      *  @param[in] length The length of the generated string.
      *  @throws @c std::bad_alloc if the allocation fails.
      */
-    static basic_string random(size_type length) noexcept(false) { return basic_string(length, '\0').fill_random(); }
+    static string random(size_type length) noexcept(false) { return string(length, '\0').fill_random(); }
 
     /**
      *  @brief Replaces @b (in-place) all occurrences of a given string with the @p replacement.
@@ -4606,7 +4528,7 @@ class basic_string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    basic_string &replace_all(string_view_t pattern, string_view_t replacement) noexcept(false) {
+    string &replace_all(string_view_t pattern, string_view_t replacement) noexcept(false) {
         raise(try_replace_all(pattern, replacement));
         return *this;
     }
@@ -4620,7 +4542,7 @@ class basic_string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    basic_string &replace_all(byteset_t pattern, string_view_t replacement) noexcept(false) {
+    string &replace_all(byteset_t pattern, string_view_t replacement) noexcept(false) {
         raise(try_replace_all(pattern, replacement));
         return *this;
     }
@@ -4655,7 +4577,7 @@ class basic_string {
      *      @p table.
      *  @sa sz_strings_lookup_best
      */
-    basic_string &lookup(look_up_table_t const &table) noexcept {
+    string &lookup(look_up_table_t const &table) noexcept {
         lookup(table, data());
         return *this;
     }
@@ -4744,7 +4666,7 @@ class basic_string {
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Allocate result buffer (worst-case 3x expansion), fold into it, then swap
-        basic_string result(allocator_);
+        string result(allocator_);
         status_t const status = result.try_resize_and_overwrite(
             string_length * 3, [string_start, string_length](char_type *buf, size_type) {
                 return best_result_<sz_utf8_uncased_fold_best, sz_size_t>(string_start, string_length, buf);
@@ -4797,7 +4719,7 @@ class basic_string {
         sz_string_unpack(&string_, &string_start, &string_length, &string_space, &string_is_external);
 
         // Allocate result buffer (worst-case 18x expansion), normalize into it, then swap
-        basic_string result(allocator_);
+        string result(allocator_);
         status_t const status = result.try_resize_and_overwrite(
             string_length * 18, [string_start, string_length, form](char_type *buf, size_type) {
                 return best_result_<sz_utf8_norm_best, sz_size_t>(string_start, string_length, form, buf);
@@ -4819,7 +4741,7 @@ class basic_string {
     status_t try_preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
 };
 
-using string_t = basic_string<>;
+using string_t = string<>;
 
 static_assert(sizeof(string_t) == 4 * sizeof(void *), "String size must be 4 pointers.");
 
@@ -4831,7 +4753,7 @@ inline constexpr byteset_t operator""_bs(char const *str, std::size_t length) no
 } // namespace literals
 
 template <typename allocator_>
-status_t basic_string<allocator_>::try_resize(size_type count, value_type character) noexcept {
+status_t string<allocator_>::try_resize(size_type count, value_type character) noexcept {
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
@@ -4862,7 +4784,7 @@ status_t basic_string<allocator_>::try_resize(size_type count, value_type charac
 }
 
 template <typename allocator_>
-status_t basic_string<allocator_>::try_assign(string_view_t other) noexcept {
+status_t string<allocator_>::try_assign(string_view_t other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -4893,7 +4815,7 @@ status_t basic_string<allocator_>::try_assign(string_view_t other) noexcept {
 }
 
 template <typename allocator_>
-status_t basic_string<allocator_>::try_push_back(char_type c) noexcept {
+status_t string<allocator_>::try_push_back(char_type c) noexcept {
     return with_allocator_([&](sz_alloc_type &allocator) {
         auto old_size = size();
         sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, 1, &allocator);
@@ -4904,7 +4826,7 @@ status_t basic_string<allocator_>::try_push_back(char_type c) noexcept {
 }
 
 template <typename allocator_>
-status_t basic_string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
+status_t string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
     return with_allocator_([&](sz_alloc_type &allocator) {
         // Sometimes we are inserting part of this string into itself.
         // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
@@ -4927,7 +4849,7 @@ status_t basic_string<allocator_>::try_append(const_pointer str, size_type lengt
 
 template <typename allocator_>
 template <typename pattern_type>
-status_t basic_string<allocator_>::try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
+status_t string<allocator_>::try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
     // Depending on the size of the pattern and the replacement, we may need to allocate more space.
     // There are 3 cases to consider:
     // 1. The pattern and the replacement are of the same length. Piece of cake!
@@ -5024,7 +4946,7 @@ status_t basic_string<allocator_>::try_replace_all_(pattern_type pattern, string
 
 template <typename allocator_>
 template <typename first_type_, typename second_type_>
-status_t basic_string<allocator_>::try_assign(concatenation<first_type_, second_type_> const &other) noexcept {
+status_t string<allocator_>::try_assign(concatenation<first_type_, second_type_> const &other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -5044,7 +4966,7 @@ status_t basic_string<allocator_>::try_assign(concatenation<first_type_, second_
 }
 
 template <typename allocator_>
-status_t basic_string<allocator_>::try_preparing_replacement( //
+status_t string<allocator_>::try_preparing_replacement( //
     size_type offset, size_type length, size_type replacement_length) noexcept {
 
     // There are three cases:
@@ -5224,10 +5146,130 @@ inline status_t lookup(string_span_t string, look_up_table_t const &table,
 }
 
 template <typename allocator_>
-void basic_string<allocator_>::lookup(look_up_table_t const &table, pointer output) const noexcept {
+void string<allocator_>::lookup(look_up_table_t const &table, pointer output) const noexcept {
     [[maybe_unused]] status_t const status = ashvardanian::stringzilla::lookup(view(), table, output);
     sz_assert_(status == status_t::success_k);
 }
+
+#pragma region String Collections
+
+inline strings_view_t::strings_view_t(std::span<string_view_t const> strings) noexcept : raw {} {
+    raw.layout = sz_strings_accessor_k, raw.count = strings.size();
+    raw.data.accessor.handle = strings.data();
+    raw.data.accessor.get = [](void const *handle, sz_size_t const *indices, sz_size_t count, sz_string_view_t *views) {
+        string_view_t const *strings = static_cast<string_view_t const *>(handle);
+        for (sz_size_t position = 0; position != count; ++position) {
+            views[position].start = strings[indices[position]].data();
+            views[position].length = strings[indices[position]].size();
+        }
+    };
+}
+
+inline string_view_t strings_view_t::operator[](std::size_t index) const noexcept {
+    sz_size_t const position = index;
+    sz_string_view_t string;
+    sz_strings_get_(&raw, &position, 1, &string);
+    return {string.start, string.length};
+}
+
+template <typename allocator_type_>
+string_view_t strings<allocator_type_>::operator[](std::size_t index) const noexcept {
+    strings_view_t const strings = view();
+    return strings[index];
+}
+
+inline status_t strings_view_t::find(string_view_t needle, std::span<std::size_t> positions,
+                                     sz_capability_t capabilities, sz_stream_t stream) const noexcept {
+    if (positions.size() < raw.count) return status_t::unexpected_dimensions_k;
+    return static_cast<status_t>(sz_find_strings_best(&raw, nullptr, raw.count, needle.data(), needle.size(),
+                                                      positions.data(), capabilities, stream));
+}
+
+inline status_t strings_view_t::hashes(std::span<u64_t> hashes, u64_t seed, sz_capability_t capabilities,
+                                       sz_stream_t stream) const noexcept {
+    if (hashes.size() < raw.count) return status_t::unexpected_dimensions_k;
+    return static_cast<status_t>(
+        sz_hash_strings_best(&raw, nullptr, raw.count, seed, hashes.data(), capabilities, stream));
+}
+
+template <typename allocator_type_>
+expected<strings<allocator_type_>> strings_view_t::lookup(look_up_table_t const &table, allocator_type_ allocator,
+                                                          sz_capability_t capabilities,
+                                                          sz_stream_t stream) const noexcept {
+    expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
+    result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+        return sz_strings_lookup_best(&raw, nullptr, raw.count, table.raw(), &c_allocator, &result.value.raw,
+                                      capabilities, stream);
+    });
+    return result;
+}
+
+inline status_t strings_view_t::utf8_count(std::span<std::size_t> runes, std::size_t &malformed_index,
+                                           sz_capability_t capabilities, sz_stream_t stream) const noexcept {
+    if (!runes.empty() && runes.size() < raw.count) return status_t::unexpected_dimensions_k;
+    return static_cast<status_t>(sz_utf8_count_strings_best(
+        &raw, nullptr, raw.count, runes.empty() ? nullptr : runes.data(), &malformed_index, capabilities, stream));
+}
+
+template <typename allocator_type_>
+expected<string<allocator_type_>> strings_view_t::join(string_view_t between, allocator_type_ allocator,
+                                                       sz_capability_t capabilities,
+                                                       sz_stream_t stream) const noexcept {
+    sz_string_view_t const frames[2] {};
+    return join(std::span(&raw, 1), frames, between, allocator, capabilities, stream);
+}
+
+template <typename allocator_type_>
+expected<string<allocator_type_>> strings_view_t::join(std::span<sz_strings_view_t const> columns,
+                                                       std::span<sz_string_view_t const> frames, string_view_t between,
+                                                       allocator_type_ allocator, sz_capability_t capabilities,
+                                                       sz_stream_t stream) noexcept {
+    expected<string<allocator_type_>> result {string<allocator_type_>(allocator), status_t::unexpected_dimensions_k};
+    sz_size_t const rows = columns.empty() ? 0 : columns.front().count;
+    if (frames.size() != columns.size() + 1) return result;
+    for (sz_strings_view_t const &column : columns)
+        if (column.count != rows) return result;
+
+    sz_string_view_t const separator {between.data(), between.size()};
+    sz_size_t length = 0;
+    result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
+                                                               separator, nullptr, &length, capabilities, stream));
+    if (failed(result.status)) return result;
+    status_t const resized = result.value.try_resize_and_overwrite(length, [&](char *output, std::size_t) {
+        result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
+                                                                   separator, output, &length, capabilities, stream));
+        return length;
+    });
+    if (failed(resized)) result.status = resized;
+    return result;
+}
+
+template <typename allocator_type_>
+expected<strings<allocator_type_>> strings<allocator_type_>::split(string_view_t text, byteset_t const &delimiters,
+                                                                   sz_split_kind_t kind, allocator_type_ allocator,
+                                                                   sz_capability_t capabilities,
+                                                                   sz_stream_t stream) noexcept {
+    expected<strings> result {strings(allocator), status_t::success_k};
+    result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+        return sz_strings_split_best(text.data(), text.size(), &delimiters.raw(), kind, &c_allocator, &result.value.raw,
+                                     capabilities, stream);
+    });
+    return result;
+}
+
+template <typename allocator_type_>
+expected<strings<allocator_type_>> strings<allocator_type_>::split_lines(string_view_t text, allocator_type_ allocator,
+                                                                         sz_capability_t capabilities,
+                                                                         sz_stream_t stream) noexcept {
+    expected<strings> result {strings(allocator), status_t::success_k};
+    result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
+        return sz_strings_split_lines_best(text.data(), text.size(), &c_allocator, &result.value.raw, capabilities,
+                                           stream);
+    });
+    return result;
+}
+
+#pragma endregion String Collections
 
 /**
  *  @brief Internal data-structure wrapping arbitrary sequential containers for random lookups.

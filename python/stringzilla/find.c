@@ -56,7 +56,7 @@ static sz_status_t sz_py_rfind_byte_not_from_(sz_cptr_t haystack, sz_size_t hays
 typedef struct sz_py_split_t sz_py_split_t;
 
 /** Finds the next separator in the remainder of @p split, from its front or from its back. */
-typedef sz_status_t (*sz_py_split_finder_t)(sz_py_split_t const *split, sz_cptr_t *match);
+typedef sz_status_t (*sz_py_split_finder_t)(sz_py_split_t *split, sz_cptr_t *match);
 
 /**
  *  @brief A split in progress, shared by the lazy @c FindSplits and the eager @c split family.
@@ -72,7 +72,7 @@ struct sz_py_split_t {
     sz_byteset_t set;
     sz_capability_t capabilities;
 
-    /** Bytes a separator spans: the separator length, or 1 for a byteset. */
+    /** Bytes a separator spans: the separator length, 1 for a byteset, or the last line break's. */
     sz_size_t match_length;
 
     /** Parts left to yield, 0 once the last one is out. */
@@ -83,24 +83,47 @@ struct sz_py_split_t {
     sz_bool_t skip_empty;
 };
 
-static sz_status_t sz_py_split_find_(sz_py_split_t const *split, sz_cptr_t *match) {
+static sz_status_t sz_py_split_find_(sz_py_split_t *split, sz_cptr_t *match) {
     return sz_find_best(split->start, (sz_size_t)(split->end - split->start), split->separator.start,
                         split->separator.length, match, split->capabilities, NULL);
 }
 
-static sz_status_t sz_py_split_rfind_(sz_py_split_t const *split, sz_cptr_t *match) {
+static sz_status_t sz_py_split_rfind_(sz_py_split_t *split, sz_cptr_t *match) {
     return sz_rfind_best(split->start, (sz_size_t)(split->end - split->start), split->separator.start,
                          split->separator.length, match, split->capabilities, NULL);
 }
 
-static sz_status_t sz_py_split_find_byteset_(sz_py_split_t const *split, sz_cptr_t *match) {
+static sz_status_t sz_py_split_find_byteset_(sz_py_split_t *split, sz_cptr_t *match) {
     return sz_find_byteset_best(split->start, (sz_size_t)(split->end - split->start), &split->set, match,
                                 split->capabilities, NULL);
 }
 
-static sz_status_t sz_py_split_rfind_byteset_(sz_py_split_t const *split, sz_cptr_t *match) {
+static sz_status_t sz_py_split_rfind_byteset_(sz_py_split_t *split, sz_cptr_t *match) {
     return sz_rfind_byteset_best(split->start, (sz_size_t)(split->end - split->start), &split->set, match,
                                  split->capabilities, NULL);
+}
+
+/** Finds the next line break of `str.splitlines`, whose @c set holds the one-byte breaks and the
+ *  leads of NEL, LS and PS: CR LF spans 2 bytes, NEL 2, LS and PS 3; other leads are skipped. */
+static sz_status_t sz_py_split_find_line_break_(sz_py_split_t *split, sz_cptr_t *match) {
+    for (sz_cptr_t cursor = split->start;;) {
+        sz_status_t const status = sz_find_byteset_best(cursor, (sz_size_t)(split->end - cursor), &split->set, match,
+                                                        split->capabilities, NULL);
+        if (status != sz_success_k || !*match) return status;
+        sz_size_t const rest = (sz_size_t)(split->end - *match);
+        sz_u8_t const *const bytes = (sz_u8_t const *)*match;
+        sz_u8_t const first = bytes[0];
+        sz_u8_t const second = rest > 1 ? bytes[1] : 0, third = rest > 2 ? bytes[2] : 0;
+        sz_size_t const length = first == 0xC2   ? (second == 0x85 ? 2 : 0)
+                                 : first == 0xE2 ? (second == 0x80 && (third == 0xA8 || third == 0xA9) ? 3 : 0)
+                                 : first == '\r' && second == '\n' ? 2
+                                                                   : 1;
+        if (length) {
+            split->match_length = length;
+            return sz_success_k;
+        }
+        cursor = *match + 1;
+    }
 }
 
 /**
@@ -162,7 +185,7 @@ typedef struct {
  *  @return 1 if the string is present, 0 if it is not, -1 in case of error.
  *  @see Docs: https://docs.python.org/3/c-api/sequence.html#c.PySequence_Contains
  */
-int Str_in(Str *self, PyObject *needle_obj) {
+int String_in(String *self, PyObject *needle_obj) {
 
     sz_string_view_t needle;
     if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
@@ -185,7 +208,7 @@ int Str_in(Str *self, PyObject *needle_obj) {
  *  @brief Implementation of all search-like operations, parameterized by a function callback.
  *  @return 1 on success, 0 on failure.
  */
-static int Str_find_implementation_( //
+static int String_find_implementation_( //
     PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count, PyObject *args_names_tuple,
     sz_py_finder_t finder, sz_bool_t is_reverse, sz_bool_t needle_is_byteset, Py_ssize_t *offset_out,
     sz_string_view_t *haystack_out, sz_string_view_t *needle_out) {
@@ -197,7 +220,7 @@ static int Str_find_implementation_( //
     PyObject *end_obj = NULL;
     PyObject *capabilities_object = NULL;
 
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -321,7 +344,7 @@ char const doc_contains[] =                                                     
     "Check if a string contains a substring.\n"                                                           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to search for.\n"                                                   //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -330,16 +353,16 @@ char const doc_contains[] =                                                     
     "  bool: True if the substring is found, False otherwise.\n"                                          //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').contains('ell')\n"                                                             //
+    "  >>> sz.String('hello').contains('ell')\n"                                                          //
     "  True";
 
-PyObject *Str_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+PyObject *String_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
-                                  sz_false_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
+                                     sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) { Py_RETURN_FALSE; }
     else { Py_RETURN_TRUE; }
@@ -349,7 +372,7 @@ char const doc_find[] =                                                         
     "Find the first occurrence of a substring.\n"                                                         //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to find.\n"                                                         //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -358,25 +381,103 @@ char const doc_find[] =                                                         
     "  int: The index of the first occurrence, or -1 if not found.\n"                                     //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').find('l')\n"                                                                   //
+    "  >>> sz.String('hello').find('l')\n"                                                                //
     "  2";
 
-PyObject *Str_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                        PyObject *args_names_tuple) {
+PyObject *String_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                           PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
-                                  sz_false_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
+                                     sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
+}
+
+char const doc_Strings_find[] =                                                                           //
+    "find(needle, *, out=None, capabilities=None) -> tuple | buffer\n"                                    //
+    "\n"                                                                                                  //
+    "Find the first occurrence of `needle` in every string, like `str.find` over each, counting bytes\n"  //
+    "as `bytes.find` does, in one pass over the whole tape.\n"                                            //
+    "\n"                                                                                                  //
+    "Args:\n"                                                                                             //
+    "  needle (String or str or bytes): The substring to find; an empty one matches at 0.\n"              //
+    "  out (buffer, optional): Writable, C-contiguous buffer of pointer-width signed integers like\n"     //
+    "    numpy.intp to receive the offsets with zero allocation. Defaults to None.\n"                     //
+    "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
+    "Returns:\n"                                                                                          //
+    "  tuple[int, ...]: The byte offset of the first match in each string, or -1 where it holds none,\n"  //
+    "    or `out` itself when an `out` buffer is given.\n"                                                //
+    "Example:\n"                                                                                          //
+    "  >>> sz.Strings(['hello', 'world', 'help']).find('el')\n"                                           //
+    "  (1, -1, 1)";
+
+PyObject *Strings_find(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                       PyObject *args_names_tuple) {
+    if (positional_args_count > 1)
+        return PyErr_Format(PyExc_TypeError, "find() takes at most 1 positional argument, got %zd",
+                            positional_args_count);
+    PyObject *needle_obj = positional_args_count ? args[0] : NULL, *out_object = NULL, *capabilities_object = NULL;
+    Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
+    for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
+        PyObject *const key = PyTuple_GET_ITEM(args_names_tuple, keyword_index);
+        PyObject **slot = PyUnicode_CompareWithASCIIString(key, "needle") == 0         ? &needle_obj
+                          : PyUnicode_CompareWithASCIIString(key, "out") == 0          ? &out_object
+                          : PyUnicode_CompareWithASCIIString(key, "capabilities") == 0 ? &capabilities_object
+                                                                                       : NULL;
+        if (!slot) return PyErr_Format(PyExc_TypeError, "find() got an unexpected keyword argument '%U'", key);
+        if (*slot) return PyErr_Format(PyExc_TypeError, "find() got multiple values for argument '%U'", key);
+        *slot = args[positional_args_count + keyword_index];
+    }
+    if (!needle_obj) {
+        PyErr_SetString(PyExc_TypeError, "find() missing required argument 'needle'");
+        return NULL;
+    }
+    sz_capability_t capabilities;
+    if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
+    sz_string_view_t needle;
+    if (!sz_py_export_string_like(needle_obj, &needle.start, &needle.length)) {
+        wrap_current_exception("The needle argument must be string-like");
+        return NULL;
+    }
+
+    sz_size_t const count = self->tape.count;
+    Py_buffer out_view;
+    if (out_object == Py_None) out_object = NULL;
+    if (out_object && sz_py_export_contiguous_buffer(out_object, "out", PyBUF_CONTIG, (Py_ssize_t)sizeof(sz_size_t),
+                                                     count, &out_view) != 0)
+        return NULL;
+    sz_size_t *positions = out_object ? (sz_size_t *)out_view.buf : PyMem_New(sz_size_t, count);
+    if (!positions) return PyErr_NoMemory();
+
+    sz_strings_view_t strings;
+    sz_strings_from_span(&self->tape, &strings);
+    sz_status_t const status = sz_find_strings_best(&strings, NULL, count, needle.start, needle.length, positions,
+                                                    capabilities, NULL);
+    if (out_object) {
+        PyBuffer_Release(&out_view);
+        if (status == sz_success_k) return Py_NewRef(out_object);
+        sz_py_raise_status(status, "find()");
+        return NULL;
+    }
+    PyObject *result = status == sz_success_k ? PyTuple_New((Py_ssize_t)count) : NULL;
+    if (status != sz_success_k) sz_py_raise_status(status, "find()");
+    for (sz_size_t i = 0; result && i != count; ++i) {
+        // A string without a match holds `SIZE_MAX`, which reads back as -1
+        PyObject *const position = PyLong_FromSsize_t((Py_ssize_t)positions[i]);
+        if (position) PyTuple_SET_ITEM(result, (Py_ssize_t)i, position);
+        else Py_CLEAR(result);
+    }
+    PyMem_Free(positions);
+    return result;
 }
 
 char const doc_index[] =                                                                                  //
     "Find the first occurrence of a substring or raise an error if not found.\n"                          //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to find.\n"                                                         //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -387,16 +488,16 @@ char const doc_index[] =                                                        
     "  ValueError: If the substring is not found.\n"                                                      //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').index('l')\n"                                                                  //
+    "  >>> sz.String('hello').index('l')\n"                                                               //
     "  2";
 
-PyObject *Str_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *String_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
-                                  sz_false_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best, sz_false_k,
+                                     sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
@@ -409,7 +510,7 @@ char const doc_rfind[] =                                                        
     "Find the last occurrence of a substring.\n"                                                          //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to find.\n"                                                         //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -418,16 +519,16 @@ char const doc_rfind[] =                                                        
     "  int: The index of the last occurrence, or -1 if not found.\n"                                      //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').rfind('l')\n"                                                                  //
+    "  >>> sz.String('hello').rfind('l')\n"                                                               //
     "  3";
 
-PyObject *Str_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *String_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, sz_true_k,
-                                  sz_false_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, sz_true_k,
+                                     sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -436,7 +537,7 @@ char const doc_rindex[] =                                                       
     "Find the last occurrence of a substring or raise an error if not found.\n"                           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to find.\n"                                                         //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -447,16 +548,16 @@ char const doc_rindex[] =                                                       
     "  ValueError: If the substring is not found.\n"                                                      //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').rindex('l')\n"                                                                 //
+    "  >>> sz.String('hello').rindex('l')\n"                                                              //
     "  3";
 
-PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
+PyObject *String_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, sz_true_k,
-                                  sz_false_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best, sz_true_k,
+                                     sz_false_k, &signed_offset, &text, &separator))
         return NULL;
     if (signed_offset == -1) {
         PyErr_SetString(PyExc_ValueError, "substring not found");
@@ -465,17 +566,17 @@ PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t posi
     return PyLong_FromSsize_t(signed_offset);
 }
 
-static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                               PyObject *args_names_tuple, sz_py_finder_t finder,
-                                               sz_bool_t is_reverse) {
+static PyObject *String_partition_implementation_(PyObject *self, PyObject *const *args,
+                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple,
+                                                  sz_py_finder_t finder, sz_bool_t is_reverse) {
     Py_ssize_t separator_index;
     sz_string_view_t text;
     sz_string_view_t separator;
     PyObject *result_tuple;
 
-    // Use `Str_find_implementation_` to get the index of the separator
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, finder, is_reverse, sz_false_k,
-                                  &separator_index, &text, &separator))
+    // Use `String_find_implementation_` to get the index of the separator
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, finder, is_reverse,
+                                     sz_false_k, &separator_index, &text, &separator))
         return NULL;
 
     // If the separator length is zero, we must raise a `ValueError`
@@ -486,8 +587,8 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
 
     // If separator is not found, return a tuple (self, "", "")
     if (separator_index == -1) {
-        PyObject *empty_str1 = Str_new(&StrType, Py_None, Py_None);
-        PyObject *empty_str2 = Str_new(&StrType, Py_None, Py_None);
+        PyObject *empty_str1 = String_new(&StringType, Py_None, Py_None);
+        PyObject *empty_str2 = String_new(&StringType, Py_None, Py_None);
         if (!empty_str1 || !empty_str2) {
             Py_XDECREF(empty_str1);
             Py_XDECREF(empty_str2);
@@ -508,9 +609,9 @@ static PyObject *Str_partition_implementation_(PyObject *self, PyObject *const *
     }
 
     // Create the three parts manually
-    Str *before = Str_new(&StrType, NULL, NULL);
-    Str *middle = Str_new(&StrType, NULL, NULL);
-    Str *after = Str_new(&StrType, NULL, NULL);
+    String *before = String_new(&StringType, NULL, NULL);
+    String *middle = String_new(&StringType, NULL, NULL);
+    String *after = String_new(&StringType, NULL, NULL);
     if (!before || !middle || !after) {
         Py_XDECREF(before);
         Py_XDECREF(middle);
@@ -548,47 +649,47 @@ char const doc_partition[] =                                                    
     "Split the string into a 3-tuple around the first occurrence of a separator.\n"                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separator (str): The separator to partition by.\n"                                                 //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  tuple: A 3-tuple (head, separator, tail), or `(self, '', '')` if the separator is not found.\n"    //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> tuple(map(str, sz.Str('a=b=c').partition('=')))\n"                                             //
+    "  >>> tuple(map(str, sz.String('a=b=c').partition('=')))\n"                                          //
     "  ('a', '=', 'b=c')";
 
-PyObject *Str_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                             PyObject *args_names_tuple) {
-    return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best,
-                                         sz_false_k);
+PyObject *String_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple) {
+    return String_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_find_best,
+                                            sz_false_k);
 }
 
 char const doc_rpartition[] =                                                                              //
     "Split the string into a 3-tuple around the last occurrence of a separator.\n"                         //
     "\n"                                                                                                   //
     "Args:\n"                                                                                              //
-    "  text (Str or str or bytes): The string object.\n"                                                   //
+    "  text (String or str or bytes): The string object.\n"                                                //
     "  separator (str): The separator to partition by.\n"                                                  //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n"  //
     "Returns:\n"                                                                                           //
     "  tuple: A 3-tuple (head, separator, tail). If the separator is not found, returns ('', '', self).\n" //
     "\n"                                                                                                   //
     "Example:\n"                                                                                           //
-    "  >>> tuple(map(str, sz.Str('a=b=c').rpartition('=')))\n"                                             //
+    "  >>> tuple(map(str, sz.String('a=b=c').rpartition('=')))\n"                                          //
     "  ('a=b', '=', 'c')";
 
-PyObject *Str_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
-    return Str_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best,
-                                         sz_true_k);
+PyObject *String_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    return String_partition_implementation_(self, args, positional_args_count, args_names_tuple, &sz_rfind_best,
+                                            sz_true_k);
 }
 
 char const doc_count[] =                                                                                  //
     "Count the occurrences of a substring.\n"                                                             //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  substring (str): The substring to count.\n"                                                        //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -598,11 +699,11 @@ char const doc_count[] =                                                        
     "  int: The number of occurrences of the substring.\n"                                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('banana').count('a')\n"                                                                 //
+    "  >>> sz.String('banana').count('a')\n"                                                              //
     "  3";
 
-PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *String_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *haystack_obj = NULL;
     PyObject *needle_obj = NULL;
@@ -611,7 +712,7 @@ PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t posit
     PyObject *allowoverlap_obj = NULL;
     PyObject *capabilities_object = NULL;
 
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -753,7 +854,7 @@ char const doc_startswith[] =                                                   
     "Check if a string starts with a given prefix.\n"                                                     //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  prefix (str): The prefix to check.\n"                                                              //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -762,11 +863,11 @@ char const doc_startswith[] =                                                   
     "  bool: True if the string starts with the prefix, False otherwise.\n"                               //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').startswith('he')\n"                                                            //
+    "  >>> sz.String('hello').startswith('he')\n"                                                         //
     "  True";
 
-PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
+PyObject *String_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *str_obj = NULL;
     PyObject *prefix_obj = NULL;
@@ -774,7 +875,7 @@ PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t 
     PyObject *end_obj = NULL;
     PyObject *capabilities_object = NULL;
 
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -877,7 +978,7 @@ char const doc_endswith[] =                                                     
     "Check if a string ends with a given suffix.\n"                                                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  suffix (str): The suffix to check.\n"                                                              //
     "  start (int, optional): The starting index, defaulting to 0.\n"                                     //
     "  end (int, optional): The ending index, defaulting to the string length.\n"                         //
@@ -886,11 +987,11 @@ char const doc_endswith[] =                                                     
     "  bool: True if the string ends with the suffix, False otherwise.\n"                                 //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').endswith('lo')\n"                                                              //
+    "  >>> sz.String('hello').endswith('lo')\n"                                                           //
     "  True";
 
-PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                            PyObject *args_names_tuple) {
+PyObject *String_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *str_obj = NULL;
     PyObject *suffix_obj = NULL;
@@ -898,7 +999,7 @@ PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t po
     PyObject *end_obj = NULL;
     PyObject *capabilities_object = NULL;
 
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -1002,7 +1103,7 @@ char const doc_find_first_of[] =                                                
     "Find the index of the first occurrence of any character from another string.\n"                      //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str): A string containing characters to search for.\n"                                      //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
     "  end (int, optional): Ending index, defaulting to the string length.\n"                             //
@@ -1011,16 +1112,16 @@ char const doc_find_first_of[] =                                                
     "  int: Index of the first matching character, or -1 if none found.\n"                                //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').find_first_of('aeiou')\n"                                                      //
+    "  >>> sz.String('hello').find_first_of('aeiou')\n"                                                   //
     "  1";
 
-PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
+PyObject *String_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_from_,
-                                  sz_false_k, sz_true_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_from_,
+                                     sz_false_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1029,7 +1130,7 @@ char const doc_find_first_not_of[] =                                            
     "Find the index of the first character not in another string.\n"                                      //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str): A string containing characters to exclude.\n"                                         //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
     "  end (int, optional): Ending index, defaulting to the string length.\n"                             //
@@ -1038,16 +1139,16 @@ char const doc_find_first_not_of[] =                                            
     "  int: Index of the first non-matching character, or -1 if all match.\n"                             //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').find_first_not_of('he')\n"                                                     //
+    "  >>> sz.String('hello').find_first_not_of('he')\n"                                                  //
     "  2";
 
-PyObject *Str_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple) {
+PyObject *String_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_not_from_,
-                                  sz_false_k, sz_true_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_find_byte_not_from_,
+                                     sz_false_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1056,7 +1157,7 @@ char const doc_find_last_of[] =                                                 
     "Find the index of the last occurrence of any character from another string.\n"                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str): A string containing characters to search for.\n"                                      //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
     "  end (int, optional): Ending index, defaulting to the string length.\n"                             //
@@ -1065,16 +1166,16 @@ char const doc_find_last_of[] =                                                 
     "  int: Index of the last matching character, or -1 if none found.\n"                                 //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').find_last_of('aeiou')\n"                                                       //
+    "  >>> sz.String('hello').find_last_of('aeiou')\n"                                                    //
     "  4";
 
-PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple) {
+PyObject *String_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_from_,
-                                  sz_true_k, sz_true_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_from_,
+                                     sz_true_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1083,7 +1184,7 @@ char const doc_find_last_not_of[] =                                             
     "Find the index of the last character not in another string.\n"                                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str): A string containing characters to exclude.\n"                                         //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
     "  end (int, optional): Ending index, defaulting to the string length.\n"                             //
@@ -1092,16 +1193,16 @@ char const doc_find_last_not_of[] =                                             
     "  int: Index of the last non-matching character, or -1 if all match.\n"                              //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello').find_last_not_of('lo')\n"                                                      //
+    "  >>> sz.String('hello').find_last_not_of('lo')\n"                                                   //
     "  1";
 
-PyObject *Str_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple) {
+PyObject *String_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple) {
     Py_ssize_t signed_offset;
     sz_string_view_t text;
     sz_string_view_t separator;
-    if (!Str_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_not_from_,
-                                  sz_true_k, sz_true_k, &signed_offset, &text, &separator))
+    if (!String_find_implementation_(self, args, positional_args_count, args_names_tuple, &sz_py_rfind_byte_not_from_,
+                                     sz_true_k, sz_true_k, &signed_offset, &text, &separator))
         return NULL;
     return PyLong_FromSsize_t(signed_offset);
 }
@@ -1110,7 +1211,7 @@ char const doc_count_byteset[] =                                                
     "Count the occurrences of any character from a set of characters.\n"                                  //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str): A string containing characters to count.\n"                                           //
     "  start (int, optional): Starting index, defaulting to 0.\n"                                         //
     "  end (int, optional): Ending index, defaulting to the string length.\n"                             //
@@ -1119,11 +1220,11 @@ char const doc_count_byteset[] =                                                
     "  int: The number of occurrences of any character from the set.\n"                                   //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hello world').count_byteset('lo')\n"                                                   //
+    "  >>> sz.String('hello world').count_byteset('lo')\n"                                                //
     "  5";
 
-PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
+PyObject *String_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
     // Fast path variables
     PyObject *haystack_obj = NULL;
     PyObject *needle_obj = NULL;
@@ -1131,7 +1232,7 @@ PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize
     PyObject *end_obj = NULL;
     PyObject *capabilities_object = NULL;
 
-    int const is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int const is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
 
     // Fast argument validation
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_Size(args_names_tuple) : 0;
@@ -1268,19 +1369,26 @@ PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize
     return PyLong_FromSize_t(count);
 }
 
-/** Collects every part of @p split into a @c Strs viewing @p parent_string, in source order even
- *  when splitting from the back, as CPython's @c rsplit reports them. */
-static Strs *Str_split_(PyObject *parent_string, sz_py_split_t *split) {
+/**
+ *  @brief Cuts every part off @p split, in source order even when splitting from the back, as
+ *      CPython's @c rsplit reports them, into @p parts for @c sz_py_split_gather_ to free.
+ *  @return The number of parts, or -1 with a Python exception set and @p parts null.
+ */
+static Py_ssize_t sz_py_split_parts_(sz_py_split_t *split, sz_string_view_t **parts) {
     sz_size_t spans_capacity = 4, spans_count = 0;
     sz_string_view_t *spans = (sz_string_view_t *)malloc(spans_capacity * sizeof(sz_string_view_t));
-    if (!spans) return (Strs *)PyErr_NoMemory();
+    *parts = NULL;
+    if (!spans) {
+        PyErr_NoMemory();
+        return -1;
+    }
 
     for (;;) {
         sz_string_view_t part;
         int const step = sz_py_split_next_(split, &part);
         if (step < 0) {
             free(spans);
-            return NULL;
+            return -1;
         }
         if (step == 0) break;
         if (spans_count == spans_capacity) {
@@ -1288,7 +1396,8 @@ static Strs *Str_split_(PyObject *parent_string, sz_py_split_t *split) {
             sz_string_view_t *new_spans = (sz_string_view_t *)realloc(spans, spans_capacity * sizeof(sz_string_view_t));
             if (!new_spans) {
                 free(spans);
-                return (Strs *)PyErr_NoMemory();
+                PyErr_NoMemory();
+                return -1;
             }
             spans = new_spans;
         }
@@ -1301,27 +1410,30 @@ static Strs *Str_split_(PyObject *parent_string, sz_py_split_t *split) {
             spans[i] = spans[spans_count - i - 1];
             spans[spans_count - i - 1] = temp;
         }
+    *parts = spans;
+    return (Py_ssize_t)spans_count;
+}
 
-    Strs *result = strs_make_empty_fragmented_();
-    if (!result) {
-        free(spans);
-        return NULL;
-    }
-    result->data.fragmented.parent = parent_string;
-    Py_INCREF(parent_string);
-    result->data.fragmented.spans = spans;
-    result->data.fragmented.count = spans_count;
+/** Copies the first @p count of @p parts into a new @c Strings and frees them, or passes on the
+ *  error of a failed split. */
+static PyObject *sz_py_split_gather_(sz_string_view_t *parts, Py_ssize_t count) {
+    if (count < 0) return NULL;
+    sz_strings_view_t strings;
+    sz_strings_from_string_views(parts, (sz_size_t)count, &strings);
+    PyObject *result = Strings_gather_(&strings, NULL, (sz_size_t)count, "split()");
+    free(parts);
     return result;
 }
 
-/** Proxy parsing the function arguments of `Str.split`, `Str.rsplit`, `Str.split_byteset`, and
- *  `Str.rsplit_byteset`, then splitting eagerly with @c Str_split_ or lazily as @c FindSplits. */
-static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                               PyObject *args_names_tuple,                        //
-                                               sz_py_split_finder_t finder, sz_bool_t is_byteset, //
-                                               sz_bool_t is_reverse, sz_bool_t is_lazy_iterator) {
+/** Proxy parsing the function arguments of `String.split`, `String.rsplit`, `String.split_byteset`,
+ *  and `String.rsplit_byteset`, splitting eagerly into a @c Strings or lazily as @c FindSplits. */
+static PyObject *String_split_with_known_callback(PyObject *self, PyObject *const *args,
+                                                  Py_ssize_t positional_args_count,
+                                                  PyObject *args_names_tuple,                        //
+                                                  sz_py_split_finder_t finder, sz_bool_t is_byteset, //
+                                                  sz_bool_t is_reverse, sz_bool_t is_lazy_iterator) {
     // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t expected_min_args = !is_member;
     Py_ssize_t expected_max_args = !is_member + 4;
     if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
@@ -1362,7 +1474,7 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
     sz_string_view_t separator = {" ", 1};
     int keepseparator;
     int skip_empty = 0;
-    Py_ssize_t maxsplit;
+    Py_ssize_t maxsplit = -1;
 
     // Validate and convert `text`
     if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
@@ -1394,7 +1506,6 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
             return NULL;
         }
     }
-    else { maxsplit = PY_SSIZE_T_MAX; }
 
     // Validate and convert `skip_empty`
     if (skip_empty_obj) {
@@ -1419,9 +1530,22 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
         .is_reverse = is_reverse,
         .skip_empty = skip_empty ? sz_true_k : sz_false_k,
     };
-    if (is_byteset)
-        for (sz_size_t i = 0; i != separator.length; ++i) sz_byteset_add(&split.set, separator.start[i]);
-    if (!is_lazy_iterator) return (PyObject *)Str_split_(text_obj, &split);
+    for (sz_size_t i = 0; i != separator.length; ++i) sz_byteset_add(&split.set, separator.start[i]);
+    if (!is_lazy_iterator && maxsplit < 0 && !keepseparator && (is_byteset || separator.length == 1)) {
+        sz_allocator_t allocator;
+        sz_strings_span_t tape = {0};
+        sz_status_t status = sz_allocator_init_heap(&allocator);
+        if (status == sz_success_k)
+            status = sz_strings_split_best(text.start, text.length, &split.set,
+                                           skip_empty ? sz_split_runs_k : sz_split_each_k, &allocator, &tape,
+                                           capabilities, NULL);
+        return Strings_from_tape_(status, &tape, &allocator, "split()");
+    }
+    if (!is_lazy_iterator) {
+        sz_string_view_t *parts;
+        Py_ssize_t const count = sz_py_split_parts_(&split, &parts);
+        return sz_py_split_gather_(parts, count);
+    }
 
     FindSplits *iterator = (FindSplits *)FindSplitsType.tp_alloc(&FindSplitsType, 0);
     if (!iterator) return NULL;
@@ -1434,102 +1558,102 @@ static PyObject *Str_split_with_known_callback(PyObject *self, PyObject *const *
 }
 
 char const doc_split[] =                                                                                  //
-    "Split a string by a separator.\n"                                                                    //
+    "Split a string by a separator, like `str.split`.\n"                                                  //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include the separator in results, defaulting to False.\n"          //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Strs: A list of strings split by the separator.\n"                                                 //
+    "  Strings: The parts, copied onto a tape of their own.\n"                                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(map(str, sz.Str('a,b,c').split(',')))\n"                                                  //
+    "  >>> list(map(str, sz.String('a,b,c').split(',')))\n"                                               //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
-                                         sz_false_k, sz_false_k, sz_false_k);
+PyObject *String_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
+                                            sz_false_k, sz_false_k, sz_false_k);
 }
 
 char const doc_rsplit[] =                                                                                 //
-    "Split a string by a separator starting from the end.\n"                                              //
+    "Split a string by a separator starting from the end, like `str.rsplit`.\n"                           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include the separator in results, defaulting to False.\n"          //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Strs: A list of strings split by the separator.\n"                                                 //
+    "  Strings: The parts, copied onto a tape of their own.\n"                                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(map(str, sz.Str('a,b,c').rsplit(',')))\n"                                                 //
+    "  >>> list(map(str, sz.String('a,b,c').rsplit(',')))\n"                                              //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
-                                         sz_false_k, sz_true_k, sz_false_k);
+PyObject *String_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
+                                            sz_false_k, sz_true_k, sz_false_k);
 }
 
 char const doc_split_byteset[] =                                                                          //
     "Split a string by a set of character separators.\n"                                                  //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separators (str): A string containing separator characters.\n"                                     //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Strs: A list of strings split by the character set.\n"                                             //
+    "  Strings: The parts, copied onto a tape of their own.\n"                                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(map(str, sz.Str('a,b;c').split_byteset(',;')))\n"                                         //
+    "  >>> list(map(str, sz.String('a,b;c').split_byteset(',;')))\n"                                      //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_byteset_,
-                                         sz_true_k, sz_false_k, sz_false_k);
+PyObject *String_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                            sz_py_split_find_byteset_, sz_true_k, sz_false_k, sz_false_k);
 }
 
 char const doc_rsplit_byteset[] =                                                                         //
     "Split a string by a set of character separators in reverse order.\n"                                 //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separators (str): A string containing separator characters.\n"                                     //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
     "  skip_empty (bool, optional): Skip empty segments, defaulting to False.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Strs: A list of strings split by the character set.\n"                                             //
+    "  Strings: The parts, copied onto a tape of their own.\n"                                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(map(str, sz.Str('a,b;c').rsplit_byteset(',;')))\n"                                        //
+    "  >>> list(map(str, sz.String('a,b;c').rsplit_byteset(',;')))\n"                                     //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
-                                         sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_false_k);
+PyObject *String_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                            sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_false_k);
 }
 
 char const doc_split_iter[] =                                                                             //
     "Create an iterator for splitting a string by a separator.\n"                                         //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separator in results, defaulting to False.\n"              //
@@ -1540,20 +1664,20 @@ char const doc_split_iter[] =                                                   
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Stream parts lazily instead of materializing a list (that is what split() is for):\n"        //
-    "  >>> sum(1 for _ in sz.Str('a,b,c').split_iter(','))\n"                                             //
+    "  >>> sum(1 for _ in sz.String('a,b,c').split_iter(','))\n"                                          //
     "  3";
 
-PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
-                                         sz_false_k, sz_false_k, sz_true_k);
+PyObject *String_like_split_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_,
+                                            sz_false_k, sz_false_k, sz_true_k);
 }
 
 char const doc_rsplit_iter[] =                                                                            //
     "Create an iterator for splitting a string by a separator in reverse order.\n"                        //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separator (str): The separator to split by; an empty one leaves the text whole.\n"                 //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separator in results, defaulting to False.\n"              //
@@ -1564,20 +1688,20 @@ char const doc_rsplit_iter[] =                                                  
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Iterates from the end; the first yielded part is the last field:\n"                          //
-    "  >>> str(next(iter(sz.Str('a/b/c').rsplit_iter('/'))))\n"                                           //
+    "  >>> str(next(iter(sz.String('a/b/c').rsplit_iter('/'))))\n"                                        //
     "  'c'";
 
-PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
-                                         sz_false_k, sz_true_k, sz_true_k);
+PyObject *String_like_rsplit_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_rfind_,
+                                            sz_false_k, sz_true_k, sz_true_k);
 }
 
 char const doc_split_byteset_iter[] =                                                                     //
     "Create an iterator for splitting a string by a set of character separators.\n"                       //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separators (str): A string containing separator characters.\n"                                     //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
@@ -1588,20 +1712,20 @@ char const doc_split_byteset_iter[] =                                           
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Splits on ANY byte in the set, streamed lazily:\n"                                           //
-    "  >>> str(next(iter(sz.Str('a,b;c').split_byteset_iter(',;'))))\n"                                   //
+    "  >>> str(next(iter(sz.String('a,b;c').split_byteset_iter(',;'))))\n"                                //
     "  'a'";
 
-PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                      PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple, sz_py_split_find_byteset_,
-                                         sz_true_k, sz_false_k, sz_true_k);
+PyObject *String_like_split_byteset_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                            sz_py_split_find_byteset_, sz_true_k, sz_false_k, sz_true_k);
 }
 
 char const doc_rsplit_byteset_iter[] =                                                                    //
     "Create an iterator for splitting a string by a set of character separators in reverse order.\n"      //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  separators (str): A string containing separator characters.\n"                                     //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  keepseparator (bool, optional): Include separators in results, defaulting to False.\n"             //
@@ -1612,34 +1736,34 @@ char const doc_rsplit_byteset_iter[] =                                          
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
     "  >>> # Reverse byteset split; first yielded part is the last field:\n"                              //
-    "  >>> str(next(iter(sz.Str('a,b;c').rsplit_byteset_iter(',;'))))\n"                                  //
+    "  >>> str(next(iter(sz.String('a,b;c').rsplit_byteset_iter(',;'))))\n"                               //
     "  'c'";
 
-PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                       PyObject *args_names_tuple) {
-    return Str_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
-                                         sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_true_k);
+PyObject *String_like_rsplit_byteset_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                              PyObject *args_names_tuple) {
+    return String_split_with_known_callback(self, args, positional_args_count, args_names_tuple,
+                                            sz_py_split_rfind_byteset_, sz_true_k, sz_true_k, sz_true_k);
 }
 
 char const doc_splitlines[] =                                                                             //
-    "Split a string by line breaks.\n"                                                                    //
+    "Split a string by line breaks, like `str.splitlines`.\n"                                             //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  keeplinebreaks (bool, optional): Include line breaks in the results, defaulting to False.\n"       //
     "  maxsplit (int, optional): Maximum number of splits, defaulting to no limit.\n"                     //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Strs: A list of strings split by line breaks.\n"                                                   //
+    "  Strings: The lines, copied onto a tape of their own.\n"                                            //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> list(map(str, sz.Str('a\\nb\\nc').splitlines()))\n"                                            //
+    "  >>> list(map(str, sz.String('a\\nb\\nc').splitlines()))\n"                                         //
     "  ['a', 'b', 'c']";
 
-PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple) {
+PyObject *String_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
     // Check minimum arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     if (positional_args_count < !is_member || positional_args_count > !is_member + 2) {
         PyErr_SetString(PyExc_TypeError, "splitlines() requires at least 1 argument");
         return NULL;
@@ -1670,7 +1794,7 @@ PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t 
 
     sz_string_view_t text;
     int keeplinebreaks;
-    Py_ssize_t maxsplit = PY_SSIZE_T_MAX; // Default value for maxsplit
+    Py_ssize_t maxsplit = -1;
 
     // Validate and convert `text`
     if (!sz_py_export_string_like(text_obj, &text.start, &text.length)) {
@@ -1696,69 +1820,53 @@ PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t 
             return NULL;
         }
     }
+    if (!keeplinebreaks && maxsplit < 0) {
+        sz_allocator_t allocator;
+        sz_strings_span_t tape = {0};
+        sz_status_t status = sz_allocator_init_heap(&allocator);
+        if (status == sz_success_k)
+            status = sz_strings_split_lines_best(text.start, text.length, &allocator, &tape, capabilities, NULL);
+        return Strings_from_tape_(status, &tape, &allocator, "splitlines()");
+    }
 
-    // The Unicode standard defines a number of characters that conforming applications
-    // should recognize as line terminators:
-    //
-    //      LF:    Line Feed, U+000A                            - 1 byte (\n)
-    //      VT:    Vertical Tab, U+000B                         - 1 byte (\v)
-    //      FF:    Form Feed, U+000C                            - 1 byte (\f)
-    //      CR:    Carriage Return, U+000D                      - 1 byte (\r)
-    //      NEL:   Next Line, U+0085                            - 1 byte (\x85)
-    //      LS:    Line Separator, U+2028                       - 2 bytes
-    //      PS:    Paragraph Separator, U+2029                  - 2 bytes
-    //      CR+LF: CR (U+000D) followed by LF (U+000A)          - 2 bytes
-    //
-    // The Python standard is different, it also includes:
-    //
-    //     FS:    File Separator, U+001C                       - 1 byte (\x1C)
-    //     GS:    Group Separator, U+001D                      - 1 byte (\x1D)
-    //     RS:    Record Separator, U+001E                     - 1 byte (\x1E)
-    //
-    // We avoid all 2-byte sequences and only consider 1-byte delimiters.
-    // CPython docs: https://docs.python.org/3/library/stdtypes.html#str.splitlines
+    // CPython breaks lines at LF, VT, FF, CR, FS, GS, RS, CR LF, NEL (C2 85), LS (E2 80 A8) and
+    // PS (E2 80 A9): https://docs.python.org/3/library/stdtypes.html#str.splitlines
     sz_py_split_t split = {
         .start = text.start,
         .end = text.start + text.length,
-        .finder = sz_py_split_find_byteset_,
+        .finder = sz_py_split_find_line_break_,
         .capabilities = capabilities,
         .match_length = 1,
         .max_parts = maxsplit < 0 ? SIZE_MAX : (sz_size_t)maxsplit + 1,
         .include_match = keeplinebreaks ? sz_true_k : sz_false_k,
     };
-    for (char const *terminator = "\x0A\x0B\x0C\x0D\x85\x1C\x1D\x1E"; *terminator; ++terminator)
-        sz_byteset_add(&split.set, *terminator);
-    Strs *result = Str_split_(text_obj, &split);
+    for (char const *lead = "\x0A\x0B\x0C\x0D\x1C\x1D\x1E\xC2\xE2"; *lead; ++lead) sz_byteset_add(&split.set, *lead);
+    sz_string_view_t *parts;
+    Py_ssize_t count = sz_py_split_parts_(&split, &parts);
 
-    // Unlike a plain split, CPython `splitlines` yields no trailing empty line after a final terminator,
-    // and `[]` for an empty input. Drop that single spurious trailing segment (interior blank lines stay).
-    if (result && result->data.fragmented.count > 0) {
-        sz_size_t const last = result->data.fragmented.count - 1;
-        if ((text.length == 0 || sz_byteset_contains(&split.set, text.start[text.length - 1])) &&
-            result->data.fragmented.spans[last].length == 0)
-            result->data.fragmented.count = last;
-    }
-    return (PyObject *)result;
+    // Only an empty input or a final line break leaves an empty last part, which CPython drops.
+    if (count > 0 && parts[count - 1].length == 0) --count;
+    return sz_py_split_gather_(parts, count);
 }
 
 char const doc_lstrip[] =                                                                                 //
     "Remove leading characters from a string.\n"                                                          //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str, optional): Characters to remove, defaulting to whitespace.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Str: A new string with leading characters removed.\n"                                              //
+    "  String: A new string with leading characters removed.\n"                                           //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('  hi').lstrip() == 'hi'\n"                                                             //
+    "  >>> sz.String('  hi').lstrip() == 'hi'\n"                                                          //
     "  True";
 
-PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
+PyObject *String_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     // Check arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t expected_min_args = !is_member;
     Py_ssize_t expected_max_args = !is_member + 1;
     if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
@@ -1822,7 +1930,7 @@ PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t posi
     }
     if (!new_start) {
         // Return empty string
-        Str *result = Str_alloc_();
+        String *result = String_alloc_();
         if (result == NULL) return PyErr_NoMemory();
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -1830,9 +1938,9 @@ PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t posi
         return (PyObject *)result;
     }
 
-    // Create a new Str object for the result
+    // Create a new String object for the result
     sz_size_t new_length = text.length - (new_start - text.start);
-    Str *result = Str_alloc_();
+    String *result = String_alloc_();
     if (result == NULL) return PyErr_NoMemory();
     result->memory.start = new_start;
     result->memory.length = new_length;
@@ -1845,20 +1953,20 @@ char const doc_rstrip[] =                                                       
     "Remove trailing characters from a string.\n"                                                         //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str, optional): Characters to remove, defaulting to whitespace.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Str: A new string with trailing characters removed.\n"                                             //
+    "  String: A new string with trailing characters removed.\n"                                          //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('hi  ').rstrip() == 'hi'\n"                                                             //
+    "  >>> sz.String('hi  ').rstrip() == 'hi'\n"                                                          //
     "  True";
 
-PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                          PyObject *args_names_tuple) {
+PyObject *String_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple) {
     // Check arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t expected_min_args = !is_member;
     Py_ssize_t expected_max_args = !is_member + 1;
     if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
@@ -1922,7 +2030,7 @@ PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t posi
     }
     if (!new_end) {
         // Return empty string
-        Str *result = Str_alloc_();
+        String *result = String_alloc_();
         if (result == NULL) return PyErr_NoMemory();
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -1930,9 +2038,9 @@ PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t posi
         return (PyObject *)result;
     }
 
-    // Create a new Str object for the result
+    // Create a new String object for the result
     sz_size_t new_length = new_end - text.start + 1;
-    Str *result = Str_alloc_();
+    String *result = String_alloc_();
     if (result == NULL) return PyErr_NoMemory();
     result->memory.start = text.start;
     result->memory.length = new_length;
@@ -1945,20 +2053,20 @@ char const doc_strip[] =                                                        
     "Remove leading and trailing characters from a string.\n"                                             //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  text (Str or str or bytes): The string object.\n"                                                  //
+    "  text (String or str or bytes): The string object.\n"                                               //
     "  chars (str, optional): Characters to remove, defaulting to whitespace.\n"                          //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
-    "  Str: A new string with leading and trailing characters removed.\n"                                 //
+    "  String: A new string with leading and trailing characters removed.\n"                              //
     "\n"                                                                                                  //
     "Example:\n"                                                                                          //
-    "  >>> sz.Str('  hi  ').strip() == 'hi'\n"                                                            //
+    "  >>> sz.String('  hi  ').strip() == 'hi'\n"                                                         //
     "  True";
 
-PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *String_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     // Check arguments
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t expected_min_args = !is_member;
     Py_ssize_t expected_max_args = !is_member + 1;
     if (positional_args_count < expected_min_args || positional_args_count > expected_max_args) {
@@ -2022,7 +2130,7 @@ PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t posit
     }
     if (!new_start) {
         // Return empty string
-        Str *result = Str_alloc_();
+        String *result = String_alloc_();
         if (result == NULL) return PyErr_NoMemory();
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -2040,7 +2148,7 @@ PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t posit
     }
     if (!new_end) {
         // Return empty string
-        Str *result = Str_alloc_();
+        String *result = String_alloc_();
         if (result == NULL) return PyErr_NoMemory();
         result->memory.start = NULL;
         result->memory.length = 0;
@@ -2048,9 +2156,9 @@ PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t posit
         return (PyObject *)result;
     }
 
-    // Create a new Str object for the result
+    // Create a new String object for the result
     sz_size_t new_length = new_end - new_start + 1;
-    Str *result = Str_alloc_();
+    String *result = String_alloc_();
     if (result == NULL) return PyErr_NoMemory();
     result->memory.start = new_start;
     result->memory.length = new_length;
@@ -2063,8 +2171,8 @@ static PyObject *FindSplitsType_next(FindSplits *self) {
     sz_string_view_t result_memory;
     if (sz_py_split_next_(&self->split, &result_memory) <= 0) return NULL;
 
-    // Create a new `Str` object
-    Str *result_obj = Str_alloc_();
+    // Create a new `String` object
+    String *result_obj = String_alloc_();
     if (result_obj == NULL) return PyErr_NoMemory();
 
     // Set its properties based on the slice
@@ -2094,10 +2202,10 @@ static char const doc_FindSplits[] =                                            
     "Provides lazy evaluation of string splits without materializing all results.\n"      //
     "\n"                                                                                  //
     "Created by:\n"                                                                       //
-    "  - Str.split_iter()\n"                                                              //
-    "  - Str.rsplit_iter()\n"                                                             //
-    "  - Str.split_byteset_iter()\n"                                                      //
-    "  - Str.rsplit_byteset_iter()\n"                                                     //
+    "  - String.split_iter()\n"                                                           //
+    "  - String.rsplit_iter()\n"                                                          //
+    "  - String.split_byteset_iter()\n"                                                   //
+    "  - String.rsplit_byteset_iter()\n"                                                  //
     "\n"                                                                                  //
     "Features:\n"                                                                         //
     "  - Memory-efficient: yields results one at a time\n"                                //
@@ -2106,7 +2214,7 @@ static char const doc_FindSplits[] =                                            
     "\n"                                                                                  //
     "Example:\n"                                                                          //
     "  >>> # split_iter streams parts lazily - prefer it over split() on large inputs:\n" //
-    "  >>> for field in sz.Str('2024-01-15').split_iter('-'):\n"                          //
+    "  >>> for field in sz.String('2024-01-15').split_iter('-'):\n"                       //
     "  ...     print(field)\n"                                                            //
     "  2024\n"                                                                            //
     "  01\n"                                                                              //

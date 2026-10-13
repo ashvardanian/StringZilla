@@ -7,8 +7,8 @@
  *  The @c stringzilla extension is split into one translation unit per domain - `strings.c`,
  *  `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
  *  `overlap.c`, `substrings.c`, and the `utf8_*.c` files - alongside the CPython object-model files
- *  `file.c`, `str.c`, `strs.c` and the `shared.c` plumbing. This header carries everything more
- *  than one of those files touches: the @c File, @c Str, and @c Strs struct layouts, the full
+ *  `file.c`, `string.c` and the `shared.c` plumbing. This header carries everything more than one
+ *  of those files touches: the @c File, @c String, and @c Strings struct layouts, the full
  *  @c PyTypeObject forward-declaration set the module-init file needs to build its
  *  type-registration table, and the per-interpreter free-list state. Structs read by a single
  *  translation unit live in that file instead.
@@ -58,24 +58,32 @@ typedef SSIZE_T ssize_t;
 
 #include <stringzilla/stringzilla.h>
 
-/** Fast-call with keywords, the calling convention every `Str_like_*` and `Strs_*` method uses. */
+/** Fast-call with keywords, the convention every `String_like_*` and `Strings_*` method uses. */
 #define STRINGZILLA_METHOD_FLAGS METH_FASTCALL | METH_KEYWORDS
 
-/* `strs.c` */
+/* `strings.c` */
 
-/** Views a @c Strs in place: its tapes as tapes, a fragmented one through its array of views. */
+/** Views the tape of a @c Strings in place, or returns false for any other object. */
 extern sz_bool_t sz_py_export_strings_as_view(PyObject *object, sz_strings_view_t *strings);
 
-/** Exports the bytes, the 32-bit offsets and the count of a @c Strs tape with 32-bit offsets. */
+/** Exports the bytes, the 32-bit offsets and the count of a @c Strings tape with 32-bit offsets. */
 extern sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
                                                  sz_size_t *count);
 
-/** Exports the bytes, the 64-bit offsets and the count of a @c Strs tape with 64-bit offsets. */
+/** Exports the bytes, the 64-bit offsets and the count of a @c Strings tape with 64-bit offsets. */
 extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
                                                  sz_size_t *count);
 
-/** Gathers a @c Strs into a tape of blocks from @p allocator, unless it already owns one. */
+/** Gathers a @c Strings into a tape of blocks from @p allocator, unless it already owns one. */
 extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allocator);
+
+/**
+ *  @brief Views a @c Strings in place, or any other iterable of strings through @p views of the
+ *      items a @p snapshot tuple pins, which the caller releases once done reading @p strings.
+ *  @return 0, or -1 with a Python exception set that names @p context and nothing left to release.
+ */
+extern int sz_py_export_strings_like(PyObject *sequence, char const *context, sz_strings_view_t *strings,
+                                     PyObject **snapshot, sz_string_view_t **views);
 
 /* `shared.c` */
 
@@ -95,8 +103,8 @@ extern sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz
 extern int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, Py_ssize_t *result_out);
 
 extern PyTypeObject FileType;
-extern PyTypeObject StrType;
-extern PyTypeObject StrsType;
+extern PyTypeObject StringType;
+extern PyTypeObject StringsType;
 extern PyTypeObject FindSplitsType;
 extern PyTypeObject Utf8SplitNewlinesType;
 extern PyTypeObject Utf8NewlinesType;
@@ -144,17 +152,17 @@ typedef struct {
  *  When a slice is constructed, the @c parent object's reference count is being incremented to
  *  preserve lifetime. It usage in Python would look like:
  *
- *      - Str() # Empty string
- *      - Str("some-string") # Full-range slice of a Python @c str
- *      - Str(File("some-path.txt")) # Full-range view of a persisted file
- *      - Str(File("some-path.txt"), from=0, to=sys.maxsize)
+ *      - String() # Empty string
+ *      - String("some-string") # Full-range slice of a Python @c str
+ *      - String(File("some-path.txt")) # Full-range view of a persisted file
+ *      - String(File("some-path.txt"), from=0, to=sys.maxsize)
  */
 typedef struct {
     PyObject ob_base;
 
     PyObject *parent;
     sz_string_view_t memory;
-} Str;
+} String;
 
 /** The shape of every tiling segmenter's dispatch point, like @c sz_utf8_wordbreaks_best. */
 typedef sz_status_t (*sz_py_segmenter_t)(sz_cptr_t text, sz_size_t length, sz_size_t *lengths, sz_size_t capacity,
@@ -184,75 +192,48 @@ typedef struct {
 
 } Utf8Boundaries;
 
-/** Variable length Python object similar to `Tuple[Union[Str, str]]`, for faster sorting,
- *  shuffling, joins, and lookups. */
+/**
+ *  @brief An immutable collection of strings on one tape, in the Apache Arrow @c String or
+ *      @c LargeString layout, which kernels, engines and Arrow read in place.
+ *
+ *  The tape either borrows the blocks of @c parent, like an Arrow array or the @c Strings it was
+ *  sliced from, with offsets that may start above zero, or owns blocks @c allocator frees.
+ *
+ *  @see Arrow layout: https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
+ */
 typedef struct {
     PyObject ob_base;
 
-    enum {
-        STRS_U32_TAPE_VIEW = 0,
-        STRS_U64_TAPE_VIEW = 1,
-        STRS_U32_TAPE = 2,
-        STRS_U64_TAPE = 3,
-        STRS_FRAGMENTED = 4,
-    } layout;
+    /** 32-bit offsets while the payload fits 4 GiB, 64-bit beyond, the count, and the bytes. */
+    sz_strings_span_t tape;
 
-    union {
+    /** The object whose blocks @c tape borrows, or null when @c allocator owns them. */
+    PyObject *parent;
 
-        /**
-         *  @brief U32 tape view - references existing Arrow array data, owns nothing. The layout
-         *      is identical to Apache Arrow format: N+1 offsets for N strings.
-         *
-         *  @see Arrow layout: https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
-         */
-        struct u32_tape_view_t {
-            sz_size_t count;
-            sz_cptr_t data;
-            sz_u32_t *offsets;
-            PyObject *parent;
-        } u32_tape_view;
+    /** Frees both blocks of @c tape when nothing is borrowed. */
+    sz_allocator_t allocator;
+} Strings;
 
-        /** U32 tape - owns the data and its N+1 offsets for N strings, with a custom allocator. */
-        struct u32_tape_t {
-            sz_size_t count;
-            sz_cptr_t data;
-            sz_u32_t *offsets;
-            sz_allocator_t allocator;
-        } u32_tape;
+/** The view of string @p index of @p tape. */
+static inline sz_string_view_t sz_py_tape_string_(sz_strings_span_t const *tape, sz_size_t index) {
+    sz_string_view_t string;
+    if (tape->layout == sz_strings_u64_tape_k) {
+        sz_u64_t const *offsets = tape->data.u64_tape.offsets + index;
+        string.start = tape->data.u64_tape.data + offsets[0], string.length = (sz_size_t)(offsets[1] - offsets[0]);
+    }
+    else {
+        sz_u32_t const *offsets = tape->data.u32_tape.offsets + index;
+        string.start = tape->data.u32_tape.data + offsets[0], string.length = offsets[1] - offsets[0];
+    }
+    return string;
+}
 
-        /**
-         *  @brief U64 tape view - references existing Arrow array data, owns nothing. The layout
-         *      is identical to Apache Arrow format: N+1 offsets for N strings.
-         *
-         *  @see Arrow layout: https://arrow.apache.org/docs/format/Columnar.html#variable-size-binary-layout
-         */
-        struct u64_tape_view_t {
-            sz_size_t count;
-            sz_cptr_t data;
-            sz_u64_t *offsets;
-            PyObject *parent;
-        } u64_tape_view;
-
-        /** U64 tape - owns the data and its N+1 offsets for N strings, with a custom allocator. */
-        struct u64_tape_t {
-            sz_size_t count;
-            sz_cptr_t data;
-            sz_u64_t *offsets;
-            sz_allocator_t allocator;
-        } u64_tape;
-
-        /** Reordered subviews - owns only the array of individual spans. Each span points to data
-         *  in the parent object, a @c Str, a @c Strs, or any other buffer. */
-        struct fragmented_t {
-            sz_size_t count;
-            sz_string_view_t *spans;
-            PyObject *parent;
-            sz_allocator_t allocator;
-        } fragmented;
-
-    } data;
-
-} Strs;
+/** Bytes from the start of the payload of @p tape to the end of its last string. */
+static inline sz_size_t sz_py_tape_payload_(sz_strings_span_t const *tape) {
+    if (tape->layout == sz_strings_u64_tape_k)
+        return tape->data.u64_tape.offsets ? (sz_size_t)tape->data.u64_tape.offsets[tape->count] : 0;
+    return tape->data.u32_tape.offsets ? tape->data.u32_tape.offsets[tape->count] : 0;
+}
 
 /* A lock some threads take with the GIL released, so a waiter never blocks a holder that needs the
  * GIL. @c PyMutex is zero-initialized by @c tp_alloc and never torn down; before 3.13 it is a
@@ -294,24 +275,24 @@ static inline void sz_py_mutex_unlock_(sz_py_mutex_t *mutex) { PyThread_release_
 enum { sz_freelist_capacity_k = 64 };
 
 /**
- *  @brief Per-interpreter module state, holding the intrusive free-lists for @c Str and @c Strs.
+ *  @brief Per-interpreter module state, holding the intrusive free-lists for @c String and
+ *      @c Strings.
  *
  *  Both objects churn heavily: nearly every @c split or iterate element and every slice mints a
  *  fresh fixed-size header that is torn down moments later. Instead of round-tripping each header
  *  through @c PyObject_Malloc and @c PyObject_Free, dealloc parks the dead header on a
  *  singly-linked free-list and the allocation helper pops it back. The link is threaded through the
- *  dead object's own storage, @c Str::parent and @c Strs::data, so the state needs only a head
- *  pointer and a counter per type, never above @c sz_freelist_capacity_k. Living in module state
- *  keeps it per-interpreter, but on a free-threaded build the module state is shared by every
- *  thread in the interpreter, so all four fields are guarded by @c freelist_mutex: without it,
- *  concurrent @c alloc_ and @c dealloc calls race on the same linked list and can hand out one
- *  header to two live objects at once.
+ *  dead object's own @c parent, so the state needs only a head pointer and a counter per type,
+ *  never above @c sz_freelist_capacity_k. Living in module state keeps it per-interpreter, but on a
+ *  free-threaded build the module state is shared by every thread in the interpreter, so all four
+ *  fields are guarded by @c freelist_mutex: without it, concurrent @c alloc_ and @c dealloc calls
+ *  race on the same linked list and can hand out one header to two live objects at once.
  */
 typedef struct {
-    Str *str_freelist_head;
-    sz_size_t str_freelist_count;
-    Strs *strs_freelist_head;
-    sz_size_t strs_freelist_count;
+    String *string_freelist_head;
+    sz_size_t string_freelist_count;
+    Strings *strings_freelist_head;
+    sz_size_t strings_freelist_count;
 
     /** Zero-initialized with the module state, so it starts unlocked. */
 #if defined(Py_GIL_DISABLED)
@@ -335,79 +316,76 @@ static inline void sz_freelist_unlock_(stringzilla_state_t *state) { sz_unused_(
 /** Reach the per-interpreter free-list state, or @c NULL before registration / during teardown. */
 extern stringzilla_state_t *stringzilla_state_(void);
 
-/** Allocate a blank @c Str header, reusing a cached one from the free-list when available. */
-extern Str *Str_alloc_(void);
+/** Allocate a blank @c String header, reusing a cached one from the free-list when available. */
+extern String *String_alloc_(void);
 
-/** Allocate a blank @c Strs header, reusing a cached one from the free-list when available. */
-extern Strs *Strs_alloc_(void);
-
-/**
- *  @brief Allocates an empty @c Strs in the fragmented layout. Consolidates the count-zero
- *      initialization otherwise inlined across slicing, splitting, and reordering paths.
- *  @return A new empty @c Strs, or @c NULL with a Python exception set on allocation failure.
- */
-extern Strs *strs_make_empty_fragmented_(void);
+/** Allocate a blank @c Strings header, reusing a cached one from the free-list when available. */
+extern Strings *Strings_alloc_(void);
 
 /** Helper function to wrap the current exception with a custom prefix message. */
 extern void wrap_current_exception(sz_cptr_t comment);
 
-/** The dead @c Strs header's @c data union storage doubles as the intrusive @c next link. */
-extern Strs **Strs_freelist_next_(Strs *node);
+/* `strings.c` */
 
-/* `strs.c` */
+/** Wraps a tape that a verb wrote with blocks from @p allocator into a new @c Strings owning them,
+ *  or frees the tape and raises the failed @p status, naming @p context. */
+extern PyObject *Strings_from_tape_(sz_status_t status, sz_strings_span_t *tape, sz_allocator_t *allocator,
+                                    char const *context);
 
-/** Number of live elements in a @c Strs collection, regardless of layout. */
-extern Py_ssize_t Strs_len(Strs *self);
+/** Gathers `strings[order[i]]`, or the first @p count strings without @p order, into a new
+ *  @c Strings owning its tape, or raises naming @p context. */
+extern PyObject *Strings_gather_(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                 char const *context);
 
-/** Wraps a tape that @p allocator made into a new @c Strs owning both its blocks, or frees the tape
- *  and returns @c NULL with a Python exception set. */
-extern PyObject *Strs_from_tape_(sz_strings_span_t *tape, sz_allocator_t *allocator);
-
-/*  Cross-domain function and docstring declarations: every `Str_like_*` and `Strs_*` method and its
- *  `doc_*` docstring constant named by the `Str_methods[]`, `Strs_methods[]`, and
- *  `stringzilla_methods[]` @c PyMethodDef tables in `str.c`, `strs.c`, and `stringzilla.c`. Each
- *  symbol is visible here so those tables can reach the domain file that owns it. */
+/*  Cross-domain function and docstring declarations: every `String_like_*` and `Strings_*` method
+ *  and its `doc_*` docstring constant named by the `String_methods[]`, `Strings_methods[]`, and
+ *  `stringzilla_methods[]` @c PyMethodDef tables in `string.c`, `strings.c`, and `stringzilla.c`.
+ *  Each symbol is visible here so those tables can reach the domain file that owns it. */
 
 /* `strings.c` */
-extern char const doc_translate[], doc_Strs_translate[], doc_Strs_escape[], doc_Strs_unescape[], doc_Strs_normalize[],
-    doc_Strs_to_json[], doc_to_json[], doc_to_csv[];
+extern char const doc_translate[], doc_Strings_translate[], doc_Strings_escape[], doc_Strings_unescape[],
+    doc_Strings_normalize[], doc_Strings_to_json[], doc_to_json[], doc_to_csv[], doc_String_join[];
 
 /** Maps @p length bytes of @p source through @p lut into @p target, which may be @p source. */
 extern sz_status_t sz_py_lookup(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const *lut,
                                 sz_capability_t capabilities);
-extern PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple);
-extern PyObject *Strs_translate(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+extern PyObject *String_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple);
+extern PyObject *Strings_translate(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *Strings_escape(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
-extern PyObject *Strs_escape(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                             PyObject *args_names_tuple);
-extern PyObject *Strs_unescape(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple);
-extern PyObject *Strs_normalize(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Strs_to_json(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple);
+extern PyObject *Strings_unescape(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple);
+extern PyObject *Strings_normalize(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *Strings_to_json(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple);
 extern PyObject *module_to_json(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                 PyObject *args_names_tuple);
 extern PyObject *module_to_csv(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple);
+extern PyObject *String_join(String *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple);
 
 /* `hash.c` */
 extern char const doc_like_hash[], doc_hash_multiseed[], doc_fill_random[], doc_random[], doc_like_bytesum[],
-    doc_like_sha256[], doc_hmac_sha256[];
-extern Py_hash_t Str_hash(Str *self);
-extern PyObject *Str_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple);
-extern PyObject *Str_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+    doc_like_sha256[], doc_hmac_sha256[], doc_Strings_hashes[];
+extern Py_hash_t String_hash(String *self);
+extern PyObject *Strings_hashes(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple);
+extern PyObject *String_like_hash(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple);
+extern PyObject *String_like_hash_multiseed(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple);
+extern PyObject *String_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                          PyObject *args_names_tuple);
-extern PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                      PyObject *args_names_tuple);
 extern PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                PyObject *args_names_tuple);
-extern PyObject *Str_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                  PyObject *args_names_tuple);
-extern PyObject *Str_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple);
+extern PyObject *String_like_bytesum(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                     PyObject *args_names_tuple);
+extern PyObject *String_like_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
 extern PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple);
 
@@ -419,116 +397,120 @@ extern char const doc_AuthenticationError[];
 
 /* `compare.c` */
 extern char const doc_like_equal[];
-extern PyObject *Str_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_richcompare(PyObject *self, PyObject *other, int op);
+extern PyObject *String_like_equal(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_richcompare(PyObject *self, PyObject *other, int op);
 
 /* `find.c` */
 extern char const doc_contains[], doc_find[], doc_index[], doc_rfind[], doc_rindex[], doc_partition[], doc_rpartition[],
     doc_count[], doc_startswith[], doc_endswith[], doc_find_first_of[], doc_find_first_not_of[], doc_find_last_of[],
     doc_find_last_not_of[], doc_count_byteset[], doc_split[], doc_rsplit[], doc_split_byteset[], doc_rsplit_byteset[],
     doc_split_iter[], doc_rsplit_iter[], doc_split_byteset_iter[], doc_rsplit_byteset_iter[], doc_lstrip[],
-    doc_rstrip[], doc_strip[], doc_splitlines[];
-extern int Str_in(Str *self, PyObject *needle_obj);
-extern PyObject *Str_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple);
-extern PyObject *Str_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                               PyObject *args_names_tuple);
-extern PyObject *Str_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple);
-extern PyObject *Str_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple);
-extern PyObject *Str_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple);
-extern PyObject *Str_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple);
-extern PyObject *Str_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple);
-extern PyObject *Str_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *args_names_tuple);
-extern PyObject *Str_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                            PyObject *args_names_tuple);
-extern PyObject *Str_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                       PyObject *args_names_tuple);
-extern PyObject *Str_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                           PyObject *args_names_tuple);
-extern PyObject *Str_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *args_names_tuple);
-extern PyObject *Str_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple);
-extern PyObject *Str_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *args_names_tuple);
-extern PyObject *Str_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple);
-extern PyObject *Str_like_split_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple);
-extern PyObject *Str_like_rsplit_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+    doc_rstrip[], doc_strip[], doc_splitlines[], doc_Strings_find[];
+extern int String_in(String *self, PyObject *needle_obj);
+extern PyObject *Strings_find(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple);
+extern PyObject *String_like_contains(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple);
-extern PyObject *Str_like_split_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                             PyObject *args_names_tuple);
-extern PyObject *Str_like_rsplit_byteset_iter(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+extern PyObject *String_like_find(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                  PyObject *args_names_tuple);
+extern PyObject *String_like_index(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_like_rfind(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_like_rindex(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_like_partition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple);
+extern PyObject *String_like_rpartition(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple);
+extern PyObject *String_like_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_like_startswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple);
+extern PyObject *String_like_endswith(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple);
+extern PyObject *String_like_find_first_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                           PyObject *args_names_tuple);
+extern PyObject *String_like_find_first_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *args_names_tuple);
+extern PyObject *String_like_find_last_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                          PyObject *args_names_tuple);
+extern PyObject *String_like_find_last_not_of(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                               PyObject *args_names_tuple);
-extern PyObject *Str_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple);
-extern PyObject *Str_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                 PyObject *args_names_tuple);
-extern PyObject *Str_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
-extern PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple);
+extern PyObject *String_like_count_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                           PyObject *args_names_tuple);
+extern PyObject *String_like_split(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_like_rsplit(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_like_split_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                           PyObject *args_names_tuple);
+extern PyObject *String_like_rsplit_byteset(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple);
+extern PyObject *String_like_split_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple);
+extern PyObject *String_like_rsplit_iterator(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple);
+extern PyObject *String_like_split_byteset_iterator(PyObject *self, PyObject *const *args,
+                                                    Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_rsplit_byteset_iterator(PyObject *self, PyObject *const *args,
+                                                     Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_lstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_like_rstrip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_like_strip(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
+extern PyObject *String_like_splitlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple);
 
 /* `sort.c` */
 extern char const doc_argsort[];
-extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order,
-                                     sz_size_t top, sz_bool_t reverse, sz_capability_t capabilities);
-extern PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple);
+extern sz_status_t Strings_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order,
+                                        sz_size_t top, sz_bool_t reverse, sz_capability_t capabilities);
+extern PyObject *Strings_argsort(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple);
 
 /* `intersect.c` */
-extern char const doc_Strs_intersect[];
-extern PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                PyObject *args_names_tuple);
+extern char const doc_Strings_intersect[];
+extern PyObject *Strings_intersect(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                   PyObject *args_names_tuple);
 
 /* `utf8_runes.c` */
-extern char const doc_utf8_count[], doc_utf8_codepoints[];
-extern PyObject *Str_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple);
+extern char const doc_utf8_count[], doc_utf8_codepoints[], doc_Strings_utf8_count[];
+extern PyObject *String_like_utf8_count(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple);
+extern PyObject *Strings_utf8_count(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_codepoints(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple);
 
 /* `utf8_tokens.c` */
 extern char const doc_utf8_split_newlines[], doc_utf8_newlines[], doc_utf8_split_whitespaces[], doc_utf8_whitespaces[],
     doc_utf8_split_delimiters[], doc_utf8_delimiters[];
-extern PyObject *Str_like_utf8_split_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                              PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                        PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args,
+extern PyObject *String_like_utf8_split_newlines(PyObject *self, PyObject *const *args,
                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+extern PyObject *String_like_utf8_newlines(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                            PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_split_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                                PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_split_whitespaces(PyObject *self, PyObject *const *args,
+                                                    Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_whitespaces(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                              PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_split_delimiters(PyObject *self, PyObject *const *args,
+                                                   Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_delimiters(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple);
 
 /* `utf8_boundaries.c` */
 
-/** Builds a @c Utf8Boundaries iterator of @p type, segmented by @p segmenter, over the one
- *  positional argument of a `Str_like_*` call named @p name, reading its `capabilities=`. */
-extern PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter,
+/** Builds a @c Utf8Boundaries iterator of @p type, segmented by @p segmenter, over @p self when it
+ *  is a @c String, or else the one positional argument of a `String_like_*` call named @p name. */
+extern PyObject *Utf8Boundaries_make_(PyTypeObject *type, char const *name, sz_py_segmenter_t segmenter, PyObject *self,
                                       PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple);
 
-/** Yields the next segment as a @c Str view, refilling the inline batch when it drains. */
+/** Yields the next segment as a @c String view, refilling the inline batch when it drains. */
 extern PyObject *Utf8Boundaries_next_(Utf8Boundaries *self);
 
 /** Releases the reference to the segmented text and frees the iterator. */
@@ -539,47 +521,47 @@ extern PyObject *Utf8Boundaries_iter_(PyObject *self);
 
 /* `utf8_wordbreaks.c` */
 extern char const doc_utf8_wordbreaks[];
-extern PyObject *Str_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_wordbreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple);
 
 /* `utf8_graphemes.c` */
 extern char const doc_utf8_graphemes[];
-extern PyObject *Str_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_graphemes(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple);
 
 /* `utf8_sentences.c` */
 extern char const doc_utf8_sentences[];
-extern PyObject *Str_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                         PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_sentences(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                            PyObject *args_names_tuple);
 
 /* `utf8_linebreaks.c` */
 extern char const doc_utf8_linebreaks[];
-extern PyObject *Str_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                          PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_linebreaks(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                             PyObject *args_names_tuple);
 
 /* `utf8_uncased_fold.c` */
 extern char const doc_utf8_uncased_fold[];
-extern PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                            PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                               PyObject *args_names_tuple);
 
 /* `utf8_uncased.c` */
 extern char const doc_utf8_uncased_search[], doc_utf8_uncased_order[], doc_utf8_uncased_matches[];
-extern PyObject *Str_like_utf8_uncased_search(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                              PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                             PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                               PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_uncased_search(PyObject *self, PyObject *const *args,
+                                                 Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_uncased_order(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                                PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_uncased_matches(PyObject *self, PyObject *const *args,
+                                                  Py_ssize_t positional_args_count, PyObject *args_names_tuple);
 
 /* `utf8_norm.c` */
 extern char const doc_utf8_norm[], doc_utf8_find_denormalized[];
 
 /** Reads a form name `sz.utf8_norm` accepts, or raises an exception naming @p context. */
 extern int sz_py_export_normal_form(PyObject *form_object, char const *context, sz_normal_form_t *form);
-extern PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                    PyObject *args_names_tuple);
-extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
-                                                 Py_ssize_t positional_args_count, PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                       PyObject *args_names_tuple);
+extern PyObject *String_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
+                                                    Py_ssize_t positional_args_count, PyObject *args_names_tuple);
 
 /* `stringzilla.c` */
 
@@ -594,8 +576,8 @@ extern int sz_py_export_capabilities(PyObject *capabilities_object, sz_capabilit
 /** Raises the Python exception @p status names, blaming @p context; never called on success. */
 extern void sz_py_raise_status(sz_status_t status, char const *context);
 
-/** Views the @c Strs @p object in place, or raises a @c TypeError naming @p name. A device engine
- *  reads only tapes in memory its device reaches, as from @c Strs.copy, and refuses the rest. */
+/** Views the @c Strings @p object in place, or raises a @c TypeError naming @p name. Device engines
+ *  read only tapes in memory their device reaches, as from @c Strings.copy, and refuse the rest. */
 extern int sz_py_export_strings(PyObject *object, char const *name, sz_strings_view_t *strings);
 
 /** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
@@ -621,18 +603,19 @@ extern int sz_py_export_engine_placement(PyObject *capabilities_object, PyObject
 extern int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, int rank,
                                       sz_size_t const *extents, Py_buffer *view, sz_size_t *strides);
 
-/** Binds @p object as a read-only, contiguous input of at least @p count items. */
-extern int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
-                                     Py_buffer *view);
+/** Binds @p object as a contiguous buffer of at least @p count items, read-only for a @p request of
+ *  @c PyBUF_CONTIG_RO and writable for @c PyBUF_CONTIG, like the `out=` of `Strings.argsort`. */
+extern int sz_py_export_contiguous_buffer(PyObject *object, char const *name, int request, Py_ssize_t itemsize,
+                                          sz_size_t count, Py_buffer *view);
 
-/* `str.c` */
+/* `string.c` */
 extern char const doc_offset_within[], doc_write_to[], doc_decode[];
-extern PyObject *Str_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
-extern PyObject *Str_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+extern PyObject *String_new(PyTypeObject *type, PyObject *args, PyObject *kwds);
+extern PyObject *String_like_decode(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                    PyObject *args_names_tuple);
+extern PyObject *String_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                      PyObject *args_names_tuple);
+extern PyObject *String_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                  PyObject *args_names_tuple);
-extern PyObject *Str_offset_within(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                   PyObject *args_names_tuple);
-extern PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                              PyObject *args_names_tuple);
 
 #endif // STRINGZILLA_PYTHON_STRINGZILLA_H_

@@ -5,7 +5,8 @@
  *  @brief Hardware-accelerated conversions and byte transforms over strings and their collections.
  *
  *  Every collection operation reads a @c sz_strings_view_t in any of its three layouts, optionally
- *  reordered or sampled through indices, and writes NUL-padded rows or a @c sz_strings_span_t tape:
+ *  reordered or sampled through indices, or one text, and writes NUL-padded rows, one buffer, or a
+ *  @c sz_strings_span_t tape:
  *
  *  - @c sz_strings_to_tape_best - gathers strings into a tape, reusing its blocks when they fit.
  *  - @c sz_strings_to_rows_best - writes strings into NUL-padded rows, truncating longer ones.
@@ -13,6 +14,9 @@
  *  - @c sz_strings_unescape_best - reverses that escaping, naming the first malformed string.
  *  - @c sz_strings_lookup_best - maps every byte through a 256-entry Look-Up Table @b (LUT).
  *  - @c sz_strings_normalize_best - brings strings into a Unicode form, NFKC_Casefold included.
+ *  - @c sz_strings_split_best - splits a text at the bytes of a set into a tape of its parts.
+ *  - @c sz_strings_split_lines_best - splits a text at Unicode line breaks into a tape of lines.
+ *  - @c sz_strings_join_best - joins columns of strings into one buffer, framing every row.
  *  - @c sz_allocator_init_unified_best - an allocator of blocks the host and a device share.
  *
  *  Unlike many other libraries focusing on trivial SIMD transformations, like converting lowercase
@@ -75,6 +79,30 @@ typedef sz_status_t (*sz_kernel_strings_escape_t)(sz_strings_view_t const *, sz_
 typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
                                                     sz_escape_kind_t, sz_allocator_t *, sz_strings_span_t *,
                                                     sz_size_t *, sz_stream_t);
+
+/** How a split ends its parts. */
+typedef enum sz_split_kind_t {
+
+    /** Every delimiter ends a part, so neighbouring delimiters leave empty parts, as
+     *  `str.split(sep)` does. */
+    sz_split_each_k = 0,
+
+    /** A run of delimiters ends one part and empty parts are skipped, as `str.split()` does. */
+    sz_split_runs_k = 1,
+} sz_split_kind_t;
+
+/** Signature of the @c sz_strings_split_best kernels, kept beside the enum it takes. */
+typedef sz_status_t (*sz_kernel_strings_split_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_split_kind_t,
+                                                 sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
+
+/** Signature of the @c sz_strings_split_lines_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_split_lines_t)(sz_cptr_t, sz_size_t, sz_allocator_t *, sz_strings_span_t *,
+                                                       sz_stream_t);
+
+/** Signature of the @c sz_strings_join_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_join_t)(sz_strings_view_t const *, sz_size_t, sz_size_t,
+                                                sz_string_view_t const *, sz_string_view_t, sz_ptr_t, sz_size_t *,
+                                                sz_stream_t);
 
 /**
  *  @brief Gathers `strings[order[i]]`, or the first @p count strings without @p order, into a tape.
@@ -884,6 +912,308 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_metal(sz_strings_view_t const *
 #endif
 
 /**
+ *  @brief Splits @p text at the bytes of @p delimiters into a tape of the parts between them.
+ *
+ *  With @c sz_split_each_k a text of @c n delimiters always makes @c n + 1 parts, like Python's
+ *  `bytes.split(sep)` for a one-byte @c sep, generalized to a set. With @c sz_split_runs_k leading
+ *  and trailing runs make no parts, like `bytes.split()` when the set is ASCII whitespace. Measures
+ *  the parts first, then writes blocks of exactly their sizes, reusing those of @p tape like
+ *  @c sz_strings_to_tape_best unless @p text lies in them; like every collection verb it is atomic.
+ *
+ *  @param[in] text The bytes to split, null only when @p length is zero.
+ *  @param[in] length Number of bytes in @p text.
+ *  @param[in] delimiters The bytes that separate the parts.
+ *  @param[in] kind Whether every delimiter ends a part, or every run of them.
+ *  @param[in] allocator Where the blocks of @p tape come from and return to.
+ *  @param[inout] tape A zeroed span, or one an earlier call produced.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
+ *  @param[in] stream Null, as only CPUs split.
+ *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
+ */
+STRINGZILLA_API sz_status_t sz_strings_split_best(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                  sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                  sz_stream_t stream);
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                    sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                    sz_strings_span_t *tape, sz_stream_t stream);
+
+#if STRINGZILLA_TARGET_HASWELL
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                     sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                     sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_ICELAKE
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_icelake(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                     sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                     sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_neon(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                  sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_SVE
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_sve(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                 sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                 sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_RVV
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_rvv(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                 sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                 sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_v128(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                  sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128RELAXED
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_v128relaxed(sz_cptr_t text, sz_size_t length,
+                                                         sz_byteset_t const *delimiters, sz_split_kind_t kind,
+                                                         sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                                         sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_LOONGSONASX
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_loongsonasx(sz_cptr_t text, sz_size_t length,
+                                                         sz_byteset_t const *delimiters, sz_split_kind_t kind,
+                                                         sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                                         sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+
+/** @copydoc sz_strings_split_best */
+STRINGZILLA_API sz_status_t sz_strings_split_powervsx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                      sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                      sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+/**
+ *  @brief Splits @p text at Unicode line breaks, CR LF as one, into a tape of lines without breaks.
+ *
+ *  The breaks are those of Python's `str.splitlines()` over UTF-8: LF, VT, FF, CR, FS, GS, RS,
+ *  CR LF, NEL, LS and PS, and a final break leaves no empty line after it. Allocates and reuses
+ *  @p tape like @c sz_strings_split_best, and like every collection verb it is atomic.
+ *
+ *  @param[in] text The UTF-8 bytes to split, null only when @p length is zero.
+ *  @param[in] length Number of bytes in @p text.
+ *  @param[in] allocator Where the blocks of @p tape come from and return to.
+ *  @param[inout] tape A zeroed span, or one an earlier call produced.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
+ *  @param[in] stream Null, as only CPUs split.
+ *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
+ *  @see Python's `str.splitlines`: https://docs.python.org/3/library/stdtypes.html
+ */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_best(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                        sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                        sz_stream_t stream);
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_serial(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                          sz_strings_span_t *tape, sz_stream_t stream);
+
+#if STRINGZILLA_TARGET_HASWELL
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_haswell(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                           sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_ICELAKE
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_icelake(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                           sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_neon(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                        sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_SVE
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_sve(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                       sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_RVV
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_rvv(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                       sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_v128(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                        sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128RELAXED
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_v128relaxed(sz_cptr_t text, sz_size_t length,
+                                                               sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                                               sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_LOONGSONASX
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_loongsonasx(sz_cptr_t text, sz_size_t length,
+                                                               sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                                               sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+
+/** @copydoc sz_strings_split_lines_best */
+STRINGZILLA_API sz_status_t sz_strings_split_lines_powervsx(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                            sz_strings_span_t *tape, sz_stream_t stream);
+#endif
+
+/**
+ *  @brief Writes row r of @p columns as
+ *      `frames[0] + columns[0][r] + frames[1] + … + columns[n-1][r] + frames[n]`, with @p between
+ *      written between rows, into @p output; a null @p output only measures into @p length.
+ *
+ *  Serializes columns as CSV lines, JSON arrays or SQL value lists without a string per cell, and
+ *  joins one column with an empty frame on each side like Python's `str.join`.
+ *
+ *  @param[in] columns The @p columns_count columns of @p rows strings each, in any layouts.
+ *  @param[in] columns_count Number of columns, one less than the number of @p frames.
+ *  @param[in] rows Number of strings in every column.
+ *  @param[in] frames The strings written before, between and after the cells of every row.
+ *  @param[in] between The string written between consecutive rows.
+ *  @param[out] output Room for exactly @p length bytes, or null to measure them.
+ *  @param[inout] length The bytes the join takes: written when @p output is null, read otherwise.
+ *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
+ *  @param[in] stream Null, as only CPUs join.
+ *  @return @c sz_success_k, or @c sz_bad_alloc_k when measuring overflows the length.
+ */
+STRINGZILLA_API sz_status_t sz_strings_join_best(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_capability_t capabilities, sz_stream_t stream);
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_serial(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                   sz_size_t rows, sz_string_view_t const *frames,
+                                                   sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                   sz_stream_t stream);
+
+#if STRINGZILLA_TARGET_HASWELL
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_haswell(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                    sz_size_t rows, sz_string_view_t const *frames,
+                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                    sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_ICELAKE
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_icelake(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                    sz_size_t rows, sz_string_view_t const *frames,
+                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                    sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_neon(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_SVE
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_sve(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                sz_size_t rows, sz_string_view_t const *frames,
+                                                sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_RVV
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_rvv(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                sz_size_t rows, sz_string_view_t const *frames,
+                                                sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_v128(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_V128RELAXED
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_v128relaxed(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                        sz_size_t rows, sz_string_view_t const *frames,
+                                                        sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                        sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_LOONGSONASX
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_loongsonasx(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                        sz_size_t rows, sz_string_view_t const *frames,
+                                                        sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                        sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_POWERVSX
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_powervsx(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                     sz_size_t rows, sz_string_view_t const *frames,
+                                                     sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                     sz_stream_t stream);
+#endif
+/**
  *  @brief Finds the strings kernel of @p kind, from the best of @p capabilities.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
  *  @param[out] capability The capability the kernel belongs to, or zero.
@@ -1091,6 +1421,32 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_best(sz_strings_view_t const *s
                                                       sz_stream_t stream) {
     sz_unused_(strings), sz_unused_(order), sz_unused_(count), sz_unused_(form), sz_unused_(allocator),
         sz_unused_(tape), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_split_best(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                  sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                  sz_stream_t stream) {
+    sz_unused_(text), sz_unused_(length), sz_unused_(delimiters), sz_unused_(kind), sz_unused_(allocator),
+        sz_unused_(tape), sz_unused_(capabilities), sz_unused_(stream);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_split_lines_best(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                        sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                        sz_stream_t stream) {
+    sz_unused_(text), sz_unused_(length), sz_unused_(allocator), sz_unused_(tape), sz_unused_(capabilities),
+        sz_unused_(stream);
+    return sz_missing_library_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_join_best(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_capability_t capabilities, sz_stream_t stream) {
+    sz_unused_(columns), sz_unused_(columns_count), sz_unused_(rows), sz_unused_(frames), sz_unused_(between),
+        sz_unused_(output), sz_unused_(length), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

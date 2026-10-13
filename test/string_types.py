@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Str and Strs containers: construction, indexing, slicing, comparisons, and the buffer protocol.
+"""String and Strings containers: construction, indexing, slicing, comparisons, and the buffer protocol.
 
 Mirrors the C++ test/string.cpp translation unit.
 
-Covers: Str/Strs construction from native str, bytes, and bytearray, indexing, slicing, and rich
+Covers: String/Strings construction from native str, bytes, and bytearray, indexing, slicing, and rich
 comparisons, the read-only buffer protocol, split, rsplit, strip, and splitlines in both eager and
 lazy iterator form, translate, fill_random, and UTF-8 decoding, degenerate and out-of-ssize_t corner
-cases, the pyarrow/numpy interop surface for Str and Strs, and the collection verbs Strs.translate,
-Strs.escape, Strs.unescape and Strs.to_json, with the sz.to_json and sz.to_csv column dumpers.
+cases, the pyarrow/numpy interop surface for String and Strings, and the collection verbs Strings.translate,
+Strings.escape, Strings.unescape, Strings.to_json and Strings.utf8_count, String.join, with the sz.to_json and
+sz.to_csv column dumpers.
 Compares against: CPython str and bytes methods, the json, csv, html and urllib.parse modules,
 pandas when installed, and cross-backend agreement via capability_sweep().
 
@@ -50,7 +51,7 @@ from base import (
 )
 
 import stringzilla as sz
-from stringzilla import Str, Strs
+from stringzilla import String, Strings
 
 # NumPy and PyArrow are optional; the naked `except` also catches PyPy's non-ImportError on import.
 try:
@@ -71,7 +72,27 @@ SPLIT_PARITY_MAXSPLITS = [-1, 0, 1, 2, 99]
 far beyond the number of separators, reused to check lazy/eager split parity."""
 
 
-SPLITLINES_CASES = ["", "a", "a\n", "\n", "\n\n", "a\nb", "a\n\nb", "a\nb\n"]
+SPLITLINES_CASES = [
+    "",
+    "a",
+    "a\n",
+    "\n",
+    "\n\n",
+    "a\nb",
+    "a\n\nb",
+    "a\nb\n",
+    "a\r\nb",
+    "a\r\r\nb",
+    "a\r",
+    "Åsa\nBob",
+    "a\x85b",
+    "a b c",
+    "a\x1cb\x1dc\x1ed",
+    "é—…z",
+    " a b",
+    "a\x0bb\x0cc",
+    "\r\na\r\n",
+]
 
 
 def test_library_properties():
@@ -81,56 +102,56 @@ def test_library_properties():
 
 @pytest.mark.parametrize("native_type", [str, bytes, bytearray])
 def test_unit_construct(native_type):
-    """`Str` construction accepts native `str`, `bytes`, and `bytearray` input and reports the same
+    """`String` construction accepts native `str`, `bytes`, and `bytearray` input and reports the same
     length as the source."""
     native = "aaaaa"
     if native_type is bytes or native_type is bytearray:
         native = native_type(native, "utf-8")
-    big = Str(native)
+    big = String(native)
     assert len(big) == len(native)
 
 
-def test_str_repr():
-    """`repr(Str)` renders as `sz.Str(<repr of the native string>)`, and `str(Str)` round-trips to
+def test_string_repr():
+    """`repr(String)` renders as `sz.String(<repr of the native string>)`, and `str(String)` round-trips to
     the original native string."""
     native = "abcdef"
-    big = Str(native)
-    assert repr(big) == f"sz.Str({repr(native)})"
+    big = String(native)
+    assert repr(big) == f"sz.String({native!r})"
     assert str(big) == native
 
 
 def test_unit_indexing():
-    """Indexing a `Str` by position returns the same character as indexing the native string, for
+    """Indexing a `String` by position returns the same character as indexing the native string, for
     every position."""
     native = "abcdef"
-    big = Str(native)
+    big = String(native)
     for i in range(len(native)):
         assert big[i] == native[i]
 
 
-def test_unit_str_rich_comparisons():
-    """`Str` supports every rich comparison, equality, ordering, and slicing-then-comparison, against
-    both native strings and other `Str` instances, matching CPython `str` ordering."""
+def test_unit_string_rich_comparisons():
+    """`String` supports every rich comparison, equality, ordering, and slicing-then-comparison, against
+    both native strings and other `String` instances, matching CPython `str` ordering."""
     # Equality
-    assert Str("aa") == "aa"
-    assert Str("a") != "b"
-    assert Str("abc") == Str("abc")
-    assert Str("abc") != Str("abd")
+    assert String("aa") == "aa"
+    assert String("a") != "b"
+    assert String("abc") == String("abc")
+    assert String("abc") != String("abd")
 
     # Less than and less than or equal to
-    assert Str("aa") < "b"
-    assert Str("ab") <= "ab"
-    assert Str("a") < Str("b")
-    assert Str("abc") <= Str("abcd")
+    assert String("aa") < "b"
+    assert String("ab") <= "ab"
+    assert String("a") < String("b")
+    assert String("abc") <= String("abcd")
 
     # Greater than and greater than or equal to
-    assert Str("b") > "aa"
-    assert Str("ab") >= "ab"
-    assert Str("b") > Str("a")
-    assert Str("abcd") >= Str("abc")
+    assert String("b") > "aa"
+    assert String("ab") >= "ab"
+    assert String("b") > String("a")
+    assert String("abcd") >= String("abc")
 
     # Slicing and comparisons
-    s2 = Str("abb")
+    s2 = String("abb")
     assert s2[1:] == "bb"
     assert s2[:-1] == "ab"
     assert s2[-1:] == "b"
@@ -141,43 +162,43 @@ def test_unit_str_rich_comparisons():
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
 def test_unit_buffer_protocol():
-    """The buffer protocol round-trips `Str` through a NumPy array via `memoryview`, including
+    """The buffer protocol round-trips `String` through a NumPy array via `memoryview`, including
     multi-dimensional contiguous arrays, and raises on non-contiguous or non-buffer input."""
 
     # Convert from StringZilla string to NumPy array through buffer protocol
-    sz_str = Str("hello")
-    np_array = np.array(sz_str)
+    sz_string = String("hello")
+    np_array = np.array(sz_string)
     assert np_array.dtype == np.dtype("c")
     assert np_array.shape == (len("hello"),)
     assert "".join([c.decode("utf-8") for c in np_array.tolist()]) == "hello"
 
     # Convert from NumPy array to StringZilla string through buffer protocol
     np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)
-    sz_str = sz.Str(memoryview(np_array))
-    assert len(np_array) == len(sz_str)
+    sz_string = sz.String(memoryview(np_array))
+    assert len(np_array) == len(sz_string)
 
     # Make sure multi-dimensional contiguous arrays are supported for image processing
     np_array = np.arange(ord("a"), ord("a") + 8, dtype=np.uint8).reshape((2, 2, 2))
-    sz_str = sz.Str(memoryview(np_array))
-    assert np_array.size == len(sz_str)
+    sz_string = sz.String(memoryview(np_array))
+    assert np_array.size == len(sz_string)
 
     # Expect errors if the data is not contiguous
     np_array = np.arange(ord("a"), ord("z"), dtype=np.uint8)[::2]
     with pytest.raises(ValueError):
-        sz.Str(memoryview(np_array))
+        sz.String(memoryview(np_array))
 
     # Expect errors if the data is not passed through a `memoryview`
     with pytest.raises(TypeError):
-        sz.Str(np.array())
+        sz.String(np.array())
     # Expect errors if the data is not string-like
     with pytest.raises(TypeError):
-        sz.Str(dict())
+        sz.String({})
 
 
-def test_str_write_to():
-    """`Str.write_to` writes the full native content to a file path, byte for byte."""
+def test_string_write_to():
+    """`String.write_to` writes the full native content to a file path, byte for byte."""
     native = "line1\nline2\nline3"
-    big = Str(native)
+    big = String(native)
 
     # Create a temporary file
     with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
@@ -197,7 +218,7 @@ def test_unit_split():
     `str.split`/`str.rsplit` across every `maxsplit` value; unlike CPython, an empty separator leaves the
     text whole instead of raising."""
     native = "line1\nline2\nline3"
-    big = Str(native)
+    big = String(native)
 
     # Splitting using a string
     lines = sz.split(big, "\n")
@@ -255,46 +276,46 @@ def test_unit_split():
 def test_unit_split_skip_empty():
     """`skip_empty=True` drops zero-length segments from byteset/substring splits; the default keeps them."""
 
-    def strs(x):
+    def strings(x):
         return [str(s) for s in x]
 
     # Substring separator: leading/middle/trailing empties are dropped.
-    assert strs(Str("a,,b,").split(",", skip_empty=True)) == ["a", "b"]
-    assert strs(Str(",a,,b,").split(",", skip_empty=True)) == ["a", "b"]
-    assert strs(Str("a,,b,").split(",")) == ["a", "", "b", ""]  # default: keep empties
+    assert strings(String("a,,b,").split(",", skip_empty=True)) == ["a", "b"]
+    assert strings(String(",a,,b,").split(",", skip_empty=True)) == ["a", "b"]
+    assert strings(String("a,,b,").split(",")) == ["a", "", "b", ""]  # default: keep empties
 
     # Reverse eager split reports source order; it reverses internally.
-    assert strs(Str("a,,b,").rsplit(",", skip_empty=True)) == ["a", "b"]
-    assert strs(Str("a,,b,").rsplit(",")) == ["a", "", "b", ""]
+    assert strings(String("a,,b,").rsplit(",", skip_empty=True)) == ["a", "b"]
+    assert strings(String("a,,b,").rsplit(",")) == ["a", "", "b", ""]
 
     # Byteset variants.
-    assert strs(Str("a,;b;").split_byteset(",;", skip_empty=True)) == ["a", "b"]
-    assert strs(Str("a,;b;").rsplit_byteset(",;", skip_empty=True)) == ["a", "b"]
-    assert strs(Str("a,;b;").split_byteset(",;")) == ["a", "", "b", ""]
+    assert strings(String("a,;b;").split_byteset(",;", skip_empty=True)) == ["a", "b"]
+    assert strings(String("a,;b;").rsplit_byteset(",;", skip_empty=True)) == ["a", "b"]
+    assert strings(String("a,;b;").split_byteset(",;")) == ["a", "", "b", ""]
 
     # Lazy iterator variants; rsplit_iter yields reverse order.
-    assert strs(sz.split_iter("a,,b,", ",", skip_empty=True)) == ["a", "b"]
-    assert strs(sz.rsplit_iter("a,,b,", ",", skip_empty=True)) == ["b", "a"]
-    assert strs(sz.split_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["a", "b"]
-    assert strs(sz.rsplit_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["b", "a"]
+    assert strings(sz.split_iter("a,,b,", ",", skip_empty=True)) == ["a", "b"]
+    assert strings(sz.rsplit_iter("a,,b,", ",", skip_empty=True)) == ["b", "a"]
+    assert strings(sz.split_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["a", "b"]
+    assert strings(sz.rsplit_byteset_iter("a,;b;", ",;", skip_empty=True)) == ["b", "a"]
 
     # `skip_empty` composes with `maxsplit`: only non-empty leading segments consume the budget.
-    assert strs(Str("a,,b,c").split(",", maxsplit=1, skip_empty=True)) == ["a", ",b,c"]
+    assert strings(String("a,,b,c").split(",", maxsplit=1, skip_empty=True)) == ["a", ",b,c"]
 
     # An all-separator string collapses to nothing when skipping empties.
-    assert strs(Str(",,,").split(",", skip_empty=True)) == []
-    assert strs(sz.split_iter(",,,", ",", skip_empty=True)) == []
+    assert strings(String(",,,").split(",", skip_empty=True)) == []
+    assert strings(sz.split_iter(",,,", ",", skip_empty=True)) == []
 
     # A kept separator is content, so its part is never empty, eagerly or lazily.
-    assert strs(Str(",a,").split(",", keepseparator=True, skip_empty=True)) == [",", "a,"]
-    assert strs(sz.split_iter(",a,", ",", keepseparator=True, skip_empty=True)) == [",", "a,"]
+    assert strings(String(",a,").split(",", keepseparator=True, skip_empty=True)) == [",", "a,"]
+    assert strings(sz.split_iter(",a,", ",", keepseparator=True, skip_empty=True)) == [",", "a,"]
 
 
 def test_unit_split_iterators():
     """`split_iter`/`rsplit_iter` and their byteset variants preserve `split`/`rsplit` semantics while
     yielding lazily; `rsplit_iter` yields elements in reverse order, unlike the eager `rsplit`."""
     native = "line1\nline2\nline3"
-    big = Str(native)
+    big = String(native)
 
     # Splitting using a string
     lines = list(sz.split_iter(big, "\n"))
@@ -350,11 +371,11 @@ def test_unit_split_iterators():
 
 
 def test_unit_strip():
-    """`sz.lstrip`/`sz.rstrip`/`sz.strip` and the `Str` methods match CPython `str.lstrip`/`rstrip`/
+    """`sz.lstrip`/`sz.rstrip`/`sz.strip` and the `String` methods match CPython `str.lstrip`/`rstrip`/
     `strip`, with and without a custom character set, on `str` and `bytes` input."""
     # Test with whitespace (default behavior)
     native_whitespace = "  \t\n hello world \r\f\v  "
-    big_whitespace = Str(native_whitespace)
+    big_whitespace = String(native_whitespace)
 
     # Test lstrip
     assert native_whitespace.lstrip() == str(sz.lstrip(big_whitespace))
@@ -370,7 +391,7 @@ def test_unit_strip():
 
     # Test with custom character set
     native_custom = "aaabbbhello worldcccaaa"
-    big_custom = Str(native_custom)
+    big_custom = String(native_custom)
     chars = "abc"
 
     # Test lstrip with custom chars
@@ -388,37 +409,37 @@ def test_unit_strip():
     # Test edge cases
     # Empty string
     empty = ""
-    big_empty = Str(empty)
+    big_empty = String(empty)
     assert empty.strip() == str(sz.strip(big_empty))
     assert empty.strip() == str(big_empty.strip())
 
     # String with only whitespace
     only_whitespace = " \t\n\r\f\v "
-    big_only_whitespace = Str(only_whitespace)
+    big_only_whitespace = String(only_whitespace)
     assert only_whitespace.strip() == str(sz.strip(big_only_whitespace))
     assert only_whitespace.strip() == str(big_only_whitespace.strip())
 
     # String with only custom chars
     only_custom = "aaabbbccc"
-    big_only_custom = Str(only_custom)
+    big_only_custom = String(only_custom)
     assert only_custom.strip("abc") == str(sz.strip(big_only_custom, "abc"))
     assert only_custom.strip("abc") == str(big_only_custom.strip("abc"))
 
     # String with no chars to strip
     no_strip = "hello world"
-    big_no_strip = Str(no_strip)
+    big_no_strip = String(no_strip)
     assert no_strip.strip() == str(sz.strip(big_no_strip))
     assert no_strip.strip() == str(big_no_strip.strip())
 
     # Test with bytes
     native_bytes = b"  hello world  "
-    big_bytes = Str(native_bytes)
+    big_bytes = String(native_bytes)
     assert native_bytes.strip() == bytes(sz.strip(big_bytes))
     assert native_bytes.strip() == bytes(big_bytes.strip())
 
     # Test asymmetric stripping
     native_asymmetric = "aaahello worldbbb"
-    big_asymmetric = Str(native_asymmetric)
+    big_asymmetric = String(native_asymmetric)
 
     # Only strip 'a' from left
     assert native_asymmetric.lstrip("a") == str(sz.lstrip(big_asymmetric, "a"))
@@ -430,7 +451,7 @@ def test_unit_strip():
 
     # Test with special characters
     native_special = "!!!###hello world***!!!"
-    big_special = Str(native_special)
+    big_special = String(native_special)
     special_chars = "!#*"
 
     assert native_special.strip(special_chars) == str(sz.strip(big_special, special_chars))
@@ -438,21 +459,21 @@ def test_unit_strip():
 
     # Test with single character
     native_single = "aaa"
-    big_single = Str(native_single)
+    big_single = String(native_single)
     assert native_single.strip("a") == str(sz.strip(big_single, "a"))
     assert native_single.strip("a") == str(big_single.strip("a"))
 
     # Test with no matching characters
     native_no_match = "hello world"
-    big_no_match = Str(native_no_match)
+    big_no_match = String(native_no_match)
     assert native_no_match.strip("xyz") == str(sz.strip(big_no_match, "xyz"))
     assert native_no_match.strip("xyz") == str(big_no_match.strip("xyz"))
 
 
 def test_unit_slicing():
-    """`Str` slicing with positive and negative start/stop indices matches native string slicing."""
+    """`String` slicing with positive and negative start/stop indices matches native string slicing."""
     native = "abcdef"
-    big = Str(native)
+    big = String(native)
     assert big[1:3] == "bc"
     assert big[1:] == "bcdef"
     assert big[:3] == "abc"
@@ -464,16 +485,17 @@ def test_unit_slicing():
 
 @pytest.mark.parametrize("native", SPLITLINES_CASES)
 def test_unit_splitlines_parity(native):
-    """splitlines must match CPython: no trailing empty line after a final terminator, [] for ''."""
-    got = [str(s) for s in Str(native).splitlines()]
-    assert got == native.splitlines()
+    """splitlines must match CPython: CR LF, NEL, LS and PS as single breaks, no break inside a
+    multi-byte character, no trailing empty line after a final break, and [] for ''."""
+    assert [str(s) for s in String(native).splitlines()] == native.splitlines()
+    assert [str(s) for s in String(native).splitlines(keeplinebreaks=True)] == native.splitlines(keepends=True)
 
 
 @pytest.mark.parametrize("maxsplit", SPLIT_PARITY_MAXSPLITS)
 def test_unit_split_iter_parity(maxsplit):
     """Lazy `split_iter` must match eager `split` for every maxsplit, including negative, a
     regression guard for the negative-maxsplit fix."""
-    haystack = Str("a,b,c,d,e")
+    haystack = String("a,b,c,d,e")
     lazy = list(map(str, haystack.split_iter(",", maxsplit)))
     assert lazy == haystack.split(",", maxsplit)
 
@@ -483,7 +505,7 @@ def test_unit_rsplit_iter_parity(maxsplit):
     """`rsplit_iter` yields elements in reverse order relative to `rsplit`; reversing the lazy
     stream must reproduce the eager `rsplit` result for every maxsplit, including negative, a
     regression guard for the negative-maxsplit fix."""
-    haystack = Str("a,b,c,d,e")
+    haystack = String("a,b,c,d,e")
     lazy_reversed = list(reversed(list(map(str, haystack.rsplit_iter(",", maxsplit)))))
     assert lazy_reversed == haystack.rsplit(",", maxsplit)
 
@@ -492,7 +514,7 @@ def test_unit_rsplit_iter_parity(maxsplit):
 def test_unit_split_byteset_iter_parity(maxsplit):
     """Lazy `split_byteset_iter` must match eager `split_byteset` for every maxsplit, including
     negative, a regression guard for the negative-maxsplit fix."""
-    haystack = Str("a,b;c,d;e")
+    haystack = String("a,b;c,d;e")
     lazy = list(map(str, haystack.split_byteset_iter(",;", maxsplit)))
     assert lazy == haystack.split_byteset(",;", maxsplit)
 
@@ -502,21 +524,21 @@ def test_unit_rsplit_byteset_iter_parity(maxsplit):
     """`rsplit_byteset_iter` yields elements in reverse order relative to `rsplit_byteset`;
     reversing the lazy stream must reproduce the eager result for every maxsplit, including
     negative, a regression guard for the negative-maxsplit fix."""
-    haystack = Str("a,b;c,d;e")
+    haystack = String("a,b;c,d;e")
     lazy_reversed = list(reversed(list(map(str, haystack.rsplit_byteset_iter(",;", maxsplit)))))
     assert lazy_reversed == haystack.rsplit_byteset(",;", maxsplit)
 
 
-def test_unit_str_memoryview_is_readonly():
-    """Str exposes a read-only buffer; the buffer protocol must mark it non-writable."""
-    assert memoryview(Str("abc")).readonly is True
+def test_unit_string_memoryview_is_readonly():
+    """String exposes a read-only buffer; the buffer protocol must mark it non-writable."""
+    assert memoryview(String("abc")).readonly is True
 
 
-def test_unit_strs_sequence_slicing():
-    """Slicing a `Strs` sequence, including negative indices, steps, nested slices, and empty or
+def test_unit_strings_sequence_slicing():
+    """Slicing a `Strings` sequence, including negative indices, steps, nested slices, and empty or
     single-element results, matches indexing the equivalent native list."""
     native = "1, 2, 3, 4, 5, 6"
-    big = Str(native)
+    big = String(native)
     big_sequence = big.split(", ")
 
     def to_str(seq):
@@ -556,7 +578,7 @@ def test_unit_strs_sequence_slicing():
     assert big_sequence[1:0] == [], "Empty slice [1:0] (start > end) failed"
     assert big_sequence[3:1] == [], "Empty slice [3:1] (start > end) failed"
 
-    # Test edge cases with pre-constructed Strs objects passed as slices
+    # Test edge cases with pre-constructed Strings objects passed as slices
     single_slice = big_sequence[0:1]  # Length 1 slice
     empty_slice = big_sequence[0:0]  # Length 0 slice
 
@@ -579,16 +601,16 @@ def test_unit_strs_sequence_slicing():
     assert isinstance(str(empty_slice), str), "Empty slice str failed"
 
 
-def test_unit_strs_rich_comparisons():
-    """`Strs` equality and ordering compare correctly against another `Strs`, a native list, a
+def test_unit_strings_rich_comparisons():
+    """`Strings` equality and ordering compare correctly against another `Strings`, a native list, a
     tuple, and a generator of unknown length."""
-    arr: Strs = Str("a b c d e f g h").split()
+    arr: Strings = String("a b c d e f g h").split()
 
-    # Test against another Strs object
-    identical_arr: Strs = Str("a b c d e f g h").split()
-    different_arr: Strs = Str("a b c d e f g i").split()
-    shorter_arr: Strs = Str("a b c d e").split()
-    longer_arr: Strs = Str("a b c d e f g h i j").split()
+    # Test against another Strings object
+    identical_arr: Strings = String("a b c d e f g h").split()
+    different_arr: Strings = String("a b c d e f g i").split()
+    shorter_arr: Strings = String("a b c d e").split()
+    longer_arr: Strings = String("a b c d e f g h i j").split()
 
     assert arr == identical_arr
     assert arr != different_arr
@@ -621,9 +643,9 @@ def test_unit_strs_rich_comparisons():
 
 
 def test_string_lengths():
-    """`len(Str)` counts bytes, not codepoints, so a multi-byte UTF-8 string reports its byte length."""
-    assert 4 == len(sz.Str("abcd"))
-    assert 8 == len(sz.Str("αβγδ"))
+    """`len(String)` counts bytes, not codepoints, so a multi-byte UTF-8 string reports its byte length."""
+    assert 4 == len(sz.String("abcd"))
+    assert 8 == len(sz.String("αβγδ"))
 
 
 @pytest.mark.skipif(not numpy_available, reason="NumPy is not installed")
@@ -729,10 +751,10 @@ def test_fill_random_alphabet(length: int, seed: StreamKey):
     ],
 )
 def test_decoding_valid_strings(byte_string, encoding, expected):
-    """`Str.decode` matches `bytes.decode` for valid input across `utf-8`, `ascii`, and `latin-1`,
+    """`String.decode` matches `bytes.decode` for valid input across `utf-8`, `ascii`, and `latin-1`,
     including an empty string and a multi-byte emoji."""
     assert byte_string.decode(encoding) == expected
-    assert sz.Str(byte_string).decode(encoding) == expected
+    assert sz.String(byte_string).decode(encoding) == expected
 
 
 # endregion Unit
@@ -765,11 +787,11 @@ TRANSLATE_DEGENERATE_STARTS = [0, 3, 100, -3, 10**6]
 def test_unit_slicing_degenerate(start, stop):
     """Degenerate windows must mirror `str`, returning empty rather than crashing on a negative length."""
     native = "abcdef"
-    big = Str(native)
+    big = String(native)
     assert big[start:stop] == native[start:stop]
 
 
-@pytest.mark.parametrize("container", [Str("hello"), Str("hello").split("l")], ids=["str", "strs"])
+@pytest.mark.parametrize("container", [String("hello"), String("hello").split("l")], ids=["str", "strings"])
 @pytest.mark.parametrize("bad_index", OUT_OF_SSIZE_T_INDICES)
 def test_unit_index_out_of_ssize_t(container, bad_index):
     """A huge integer index raises IndexError/OverflowError, not a leaked SystemError."""
@@ -780,7 +802,7 @@ def test_unit_index_out_of_ssize_t(container, bad_index):
 @pytest.mark.parametrize("haystack", DEGENERATE_HAYSTACKS)
 def test_unit_contains_empty_needle(haystack):
     """The empty string is contained in every string, including the empty one, matching CPython."""
-    assert ("" in Str(haystack)) == ("" in haystack) == True  # noqa: E712
+    assert ("" in String(haystack)) == ("" in haystack) == True  # noqa: E712
 
 
 @pytest.mark.parametrize("start", STARTSWITH_ENDSWITH_BOUNDS)
@@ -829,31 +851,31 @@ def test_unit_translate_non_ascii():
 @pytest.mark.parametrize(
     "operation, expected",
     [
-        (lambda strs: list(strs.shuffled()), []),
-        (lambda strs: list(strs.sorted()), []),
-        (lambda strs: tuple(strs.argsort()), ()),
-        (lambda strs: list(strs.sample(5)), []),
+        (lambda strings: list(strings.shuffled()), []),
+        (lambda strings: list(strings.sorted()), []),
+        (lambda strings: tuple(strings.argsort()), ()),
+        (lambda strings: list(strings.sample(5)), []),
     ],
     ids=["shuffled", "sorted", "argsort", "sample"],
 )
-def test_unit_strs_reorder_empty(operation, expected):
-    """sample/shuffled/sorted on an empty Strs return empty, consistent with argsort()."""
-    empty = Str("").split(",", skip_empty=True)
+def test_unit_strings_reorder_empty(operation, expected):
+    """sample/shuffled/sorted on an empty Strings return empty, consistent with argsort()."""
+    empty = String("").split(",", skip_empty=True)
     assert len(empty) == 0
     assert operation(empty) == expected
 
 
-def test_unit_strs_sample_zero():
-    """sample(0) on a non-empty Strs returns an empty result."""
-    assert list(Str("a,b,c").split(",").sample(0)) == []
+def test_unit_strings_sample_zero():
+    """sample(0) on a non-empty Strings returns an empty result."""
+    assert list(String("a,b,c").split(",").sample(0)) == []
 
 
 @pytest.mark.parametrize(
     "needle, haystack",
     [
-        (Str("zzz"), Str("hello world")),
-        (Str(""), Str("hello world")),
-        (Str("hello world"), Str("zzz")),
+        (String("zzz"), String("hello world")),
+        (String(""), String("hello world")),
+        (String("hello world"), String("zzz")),
     ],
     ids=["disjoint", "empty_needle_separate_allocation", "haystack_shorter_than_needle"],
 )
@@ -874,35 +896,35 @@ def test_unit_offset_within_not_contained(needle, haystack):
 def test_unit_write_to_errors_are_catchable(path, expected_exception):
     """A failing write_to raises a catchable exception instead of aborting the interpreter."""
     with pytest.raises(expected_exception):
-        Str("payload").write_to(path)
+        String("payload").write_to(path)
 
 
 @pytest.mark.parametrize("seed_value", OUT_OF_RANGE_SEEDS)
-def test_unit_strs_sample_bad_seed_is_catchable(seed_value):
+def test_unit_strings_sample_bad_seed_is_catchable(seed_value):
     """An out-of-range seed raises a catchable exception instead of leaking a SystemError."""
-    strs = Str("a,b,c").split(",")
+    strings = String("a,b,c").split(",")
     with pytest.raises((OverflowError, ValueError, TypeError)):
-        strs.sample(2, seed=seed_value)
+        strings.sample(2, seed=seed_value)
 
 
 @pytest.mark.parametrize("seed_value", OUT_OF_RANGE_SEEDS)
-def test_unit_strs_shuffled_bad_seed_is_catchable(seed_value):
+def test_unit_strings_shuffled_bad_seed_is_catchable(seed_value):
     """An out-of-range seed raises a catchable exception instead of leaking a SystemError."""
-    strs = Str("a,b,c").split(",")
+    strings = String("a,b,c").split(",")
     with pytest.raises((OverflowError, ValueError, TypeError)):
-        strs.shuffled(seed=seed_value)
+        strings.shuffled(seed=seed_value)
 
 
-def test_unit_str_reinit_rebinds():
+def test_unit_string_reinit_rebinds():
     """Calling `__init__` again rebinds the object to the new content."""
-    s = Str("abc")
+    s = String("abc")
     s.__init__("xyz")
     assert str(s) == "xyz"
 
 
-def test_unit_strs_reinit_rebinds():
-    """Calling `__init__` again rebinds a Strs container to the new content."""
-    ss = Str("a,b").split(",")
+def test_unit_strings_reinit_rebinds():
+    """Calling `__init__` again rebinds a Strings container to the new content."""
+    ss = String("a,b").split(",")
     ss.__init__(("p", "q"))
     assert [str(x) for x in ss] == ["p", "q"]
 
@@ -919,7 +941,7 @@ def test_unit_file_reinit_rebinds():
         file = sz.File(temp_filename)
         file.__init__(temp_filename)
         file.__init__(temp_filename)
-        assert bytes(sz.Str(file)) == b"hello reinit"
+        assert bytes(sz.String(file)) == b"hello reinit"
     finally:
         # Windows refuses to delete a file with a live mapping, so drop it before `os.remove`.
         file = None
@@ -937,16 +959,16 @@ def test_unit_file_reinit_rebinds():
     ],
 )
 def test_decoding_exceptions(byte_string, encoding):
-    """`Str.decode` raises `UnicodeDecodeError` on invalid UTF-8 or a non-ASCII byte in an ASCII
+    """`String.decode` raises `UnicodeDecodeError` on invalid UTF-8 or a non-ASCII byte in an ASCII
     decode, matching `bytes.decode`."""
     with pytest.raises(UnicodeDecodeError):
         byte_string.decode(encoding)
     with pytest.raises(UnicodeDecodeError):
-        sz.Str(byte_string).decode(encoding)
+        sz.String(byte_string).decode(encoding)
 
 
 def test_invalid_utf8_handling():
-    """`repr()` and `str()` on a `Strs` holding invalid UTF-8, mixed with valid strings, never raise
+    """`repr()` and `str()` on a `Strings` holding invalid UTF-8, mixed with valid strings, never raise
     and always return non-empty strings."""
 
     # Test arrays with invalid UTF-8 sequences
@@ -959,11 +981,11 @@ def test_invalid_utf8_handling():
     ]
 
     for test_array in test_arrays:
-        strs_obj = Strs(test_array)
+        strings_obj = Strings(test_array)
 
         # These should never raise exceptions
-        repr_result = repr(strs_obj)
-        str_result = str(strs_obj)
+        repr_result = repr(strings_obj)
+        str_result = str(strings_obj)
 
         # Basic assertions
         assert isinstance(repr_result, str)
@@ -979,11 +1001,11 @@ def test_invalid_utf8_handling():
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_str_to_pyarrow_conversion():
-    """`Str.address`/`Str.nbytes` expose a valid buffer for `pa.foreign_buffer`, which reconstructs
+def test_string_to_pyarrow_conversion():
+    """`String.address`/`String.nbytes` expose a valid buffer for `pa.foreign_buffer`, which reconstructs
     the original bytes."""
     native = "hello"
-    big = Str(native)
+    big = String(native)
     assert isinstance(big.address, int) and big.address != 0
     assert isinstance(big.nbytes, int) and big.nbytes == len(native)
 
@@ -992,48 +1014,49 @@ def test_str_to_pyarrow_conversion():
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_to_pyarrow_conversion():
-    """`Strs.tape_address/offsets_address/tape_nbytes/offsets_nbytes/offsets_are_large` describe a valid
+def test_strings_to_pyarrow_conversion():
+    """`Strings.tape_address/offsets_address/tape_nbytes/offsets_nbytes/offsets_are_large` describe a valid
     tape layout whose sizes match the concatenated string lengths and N+1 offset count, and wrapping
     those buffers in a `pa.Array` reconstructs the original list exactly."""
-    # A list of strings should create the U32_TAPE layout by default
     native_list = ["hello", "world", "test", "", "python"]
-    strs = Strs(native_list)
+    strings = Strings(native_list)
 
     # Check that all properties return valid values
-    assert isinstance(strs.tape_address, int) and strs.tape_address != 0, "tape_address should be non-zero"
-    assert isinstance(strs.offsets_address, int) and strs.offsets_address != 0, "offsets_address should be non-zero"
-    assert isinstance(strs.tape_nbytes, int) and strs.tape_nbytes >= 0, "tape_nbytes should be non-negative"
-    assert isinstance(strs.offsets_nbytes, int) and strs.offsets_nbytes > 0, "offsets_nbytes should be positive"
-    assert isinstance(strs.offsets_are_large, bool), "offsets_are_large should be a boolean"
+    assert isinstance(strings.tape_address, int) and strings.tape_address != 0, "tape_address should be non-zero"
+    assert isinstance(strings.offsets_address, int) and strings.offsets_address != 0, (
+        "offsets_address should be non-zero"
+    )
+    assert isinstance(strings.tape_nbytes, int) and strings.tape_nbytes >= 0, "tape_nbytes should be non-negative"
+    assert isinstance(strings.offsets_nbytes, int) and strings.offsets_nbytes > 0, "offsets_nbytes should be positive"
+    assert isinstance(strings.offsets_are_large, bool), "offsets_are_large should be a boolean"
 
     # Calculate expected tape size (sum of all string lengths)
     expected_tape_nbytes = sum(len(s) for s in native_list)
-    assert strs.tape_nbytes == expected_tape_nbytes, (
-        f"Expected tape_nbytes={expected_tape_nbytes}, got {strs.tape_nbytes}"
+    assert strings.tape_nbytes == expected_tape_nbytes, (
+        f"Expected tape_nbytes={expected_tape_nbytes}, got {strings.tape_nbytes}"
     )
 
     # For 5 strings, we should have 6 offsets (N+1 format)
     # Offsets should be either 4 bytes (u32) or 8 bytes (u64) each
     expected_offsets_count = len(native_list) + 1
-    if strs.offsets_are_large:
+    if strings.offsets_are_large:
         expected_offsets_nbytes = expected_offsets_count * 8
     else:
         expected_offsets_nbytes = expected_offsets_count * 4
-    assert strs.offsets_nbytes == expected_offsets_nbytes, (
-        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strs.offsets_nbytes}"
+    assert strings.offsets_nbytes == expected_offsets_nbytes, (
+        f"Expected offsets_nbytes={expected_offsets_nbytes}, got {strings.offsets_nbytes}"
     )
 
     # Create PyArrow buffers from the properties
-    tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
-    offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
+    tape_buffer = pa.foreign_buffer(strings.tape_address, strings.tape_nbytes, strings)
+    offsets_buffer = pa.foreign_buffer(strings.offsets_address, strings.offsets_nbytes, strings)
 
     # Verify the tape contains the concatenated strings
     concatenated = "".join(native_list)
     assert tape_buffer.to_pybytes() == concatenated.encode("utf-8"), "Tape should contain concatenated strings"
 
     # Create an Arrow array from the buffers
-    if strs.offsets_are_large:
+    if strings.offsets_are_large:
         arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
         arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
@@ -1043,51 +1066,48 @@ def test_strs_to_pyarrow_conversion():
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_pyarrow_empty():
-    """Accessing tape properties on an empty `Strs` auto-converts its FRAGMENTED layout to a tape with
-    zero tape bytes, one u32 offset, and `offsets_are_large` false."""
-    strs = Strs([])
+def test_strings_pyarrow_empty():
+    """An empty `Strings` still holds a tape: zero tape bytes, one u32 offset, and `offsets_are_large` false."""
+    strings = Strings([])
 
-    # Empty Strs starts as FRAGMENTED but tape accessors auto-convert to tape layout
-    # For empty, we get valid values but with 0/empty content
-    tape_addr = strs.tape_address
+    tape_addr = strings.tape_address
     assert tape_addr is not None and tape_addr >= 0
 
-    offsets_addr = strs.offsets_address
+    offsets_addr = strings.offsets_address
     assert offsets_addr is not None and offsets_addr >= 0
 
-    tape_bytes = strs.tape_nbytes
+    tape_bytes = strings.tape_nbytes
     assert tape_bytes == 0  # No strings = no tape content
 
-    offsets_bytes = strs.offsets_nbytes
+    offsets_bytes = strings.offsets_nbytes
     assert offsets_bytes == 4  # Arrow uses N+1 offsets, so 1 offset for 0 strings (u32 = 4 bytes)
 
-    are_large = strs.offsets_are_large
+    are_large = strings.offsets_are_large
     assert are_large == False  # Default to u32 offsets
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_pyarrow_large_strings():
-    """`Strs.offsets_nbytes` sizes correctly for whichever offset width `offsets_are_large` selects as
+def test_strings_pyarrow_large_strings():
+    """`Strings.offsets_nbytes` sizes correctly for whichever offset width `offsets_are_large` selects as
     string sizes approach the u32/u64 threshold, and the resulting Arrow array round-trips the list."""
     # Create strings with total size that could trigger u64 layout
     large_string = "x" * 10000
     native_list = [large_string, "small", large_string, ""]
-    strs = Strs(native_list)
+    strings = Strings(native_list)
 
     # Check properties work correctly
-    assert isinstance(strs.offsets_are_large, bool), "offsets_are_large should be boolean"
-    assert strs.tape_nbytes == sum(len(s) for s in native_list), "tape_nbytes should match total length"
+    assert isinstance(strings.offsets_are_large, bool), "offsets_are_large should be boolean"
+    assert strings.tape_nbytes == sum(len(s) for s in native_list), "tape_nbytes should match total length"
 
     expected_offsets_count = len(native_list) + 1
-    offset_size = 8 if strs.offsets_are_large else 4
-    assert strs.offsets_nbytes == expected_offsets_count * offset_size, "offsets_nbytes should be correct"
+    offset_size = 8 if strings.offsets_are_large else 4
+    assert strings.offsets_nbytes == expected_offsets_count * offset_size, "offsets_nbytes should be correct"
 
     # Create PyArrow array and verify
-    tape_buffer = pa.foreign_buffer(strs.tape_address, strs.tape_nbytes, strs)
-    offsets_buffer = pa.foreign_buffer(strs.offsets_address, strs.offsets_nbytes, strs)
+    tape_buffer = pa.foreign_buffer(strings.tape_address, strings.tape_nbytes, strings)
+    offsets_buffer = pa.foreign_buffer(strings.offsets_address, strings.offsets_nbytes, strings)
 
-    if strs.offsets_are_large:
+    if strings.offsets_are_large:
         arrow_array = pa.Array.from_buffers(pa.large_string(), len(native_list), [None, offsets_buffer, tape_buffer])
     else:
         arrow_array = pa.Array.from_buffers(pa.string(), len(native_list), [None, offsets_buffer, tape_buffer])
@@ -1096,76 +1116,47 @@ def test_strs_pyarrow_large_strings():
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_pyarrow_fragmented_conversion():
-    """Accessing tape properties on a shuffled, FRAGMENTED `Strs` converts it to a tape layout whose byte
-    and offset counts match the shuffled strings, and the resulting Arrow array preserves that order."""
-    # Create a tape-based Strs from split
-    text = Str("apple banana cherry date")
-    tape_strs = text.split(" ")
+def test_strings_pyarrow_gathered_and_borrowed():
+    """`split` and `shuffled` gather onto tapes of their own, while a contiguous slice borrows the bytes and
+    offsets of its source, its first offset past zero; Arrow reads all three back through the tape properties."""
+    parts = String("apple banana cherry date").split(" ")
+    shuffled = parts.shuffled(seed=42)
+    borrowed = parts[1:3]
+    assert not parts.offsets_are_large
+    assert shuffled.tape_address != parts.tape_address
+    assert borrowed.tape_address == parts.tape_address
+    assert borrowed.offsets_address == parts.offsets_address + 4
+    assert borrowed.tape_nbytes == len("applebananacherry")
 
-    # shuffled() returns a FRAGMENTED layout
-    fragmented_strs = tape_strs.shuffled(seed=42)
-
-    # Verify we can access tape properties (triggers conversion)
-    tape_addr = fragmented_strs.tape_address
-    assert tape_addr > 0, "tape_address should be valid"
-
-    offsets_addr = fragmented_strs.offsets_address
-    assert offsets_addr > 0, "offsets_address should be valid"
-
-    tape_bytes = fragmented_strs.tape_nbytes
-    expected_bytes = sum(len(str(fragmented_strs[i])) for i in range(len(fragmented_strs)))
-    assert tape_bytes == expected_bytes, f"tape_nbytes should be {expected_bytes}, got {tape_bytes}"
-
-    offsets_bytes = fragmented_strs.offsets_nbytes
-    expected_offsets = (len(fragmented_strs) + 1) * 4  # u32 offsets
-    assert offsets_bytes == expected_offsets, f"offsets_nbytes should be {expected_offsets}, got {offsets_bytes}"
-
-    are_large = fragmented_strs.offsets_are_large
-    assert are_large == False, "Small strings should use u32 offsets"
-
-    # Verify we can create a valid PyArrow array from the converted data
-    tape_buffer = pa.foreign_buffer(fragmented_strs.tape_address, fragmented_strs.tape_nbytes, fragmented_strs)
-    offsets_buffer = pa.foreign_buffer(fragmented_strs.offsets_address, fragmented_strs.offsets_nbytes, fragmented_strs)
-
-    arrow_array = pa.Array.from_buffers(pa.string(), len(fragmented_strs), [None, offsets_buffer, tape_buffer])
-
-    # The data should match even though the order is shuffled
-    arrow_list = arrow_array.to_pylist()
-    original_list = [str(fragmented_strs[i]) for i in range(len(fragmented_strs))]
-    assert arrow_list == original_list, "Arrow array should match shuffled strings"
+    for strings in (parts, shuffled, borrowed):
+        tape_buffer = pa.foreign_buffer(strings.tape_address, strings.tape_nbytes, strings)
+        offsets_buffer = pa.foreign_buffer(strings.offsets_address, strings.offsets_nbytes, strings)
+        arrow_array = pa.Array.from_buffers(pa.string(), len(strings), [None, offsets_buffer, tape_buffer])
+        assert arrow_array.to_pylist() == [str(part) for part in strings]
 
 
 @pytest.mark.parametrize("container_class", [tuple, list, iter])
-@pytest.mark.parametrize("view", [False, True])
-def test_strs_from_python_basic(container_class: type, view: bool):
-    """`Strs` built from a tuple, list, or iterator, in both view and copy mode, preserves item order and
-    count, except that view mode raises `ValueError` for iterators."""
+def test_strings_from_python_basic(container_class: type):
+    """`Strings` built from a tuple, list, or iterator preserves item order and count."""
     base_items = ["hello", "world", "test", " ", "from", " ", "container", ""]
     container = container_class(base_items)
 
-    # Skip iter+view combination as it's not supported
-    if container_class == iter and view:
-        with pytest.raises(ValueError, match="View mode.*not supported for iterators"):
-            Strs(container, view=view)
-        return
+    strings = Strings(container)
 
-    strs = Strs(container, view=view)
-
-    assert len(strs) == len(base_items)
-    assert strs[0] == "hello"
-    assert strs[1] == "world"
-    assert strs[2] == "test"
-    assert strs[3] == " "
-    assert strs[4] == "from"
-    assert strs[5] == " "
-    assert strs[6] == "container"
-    assert strs[7] == ""
+    assert len(strings) == len(base_items)
+    assert strings[0] == "hello"
+    assert strings[1] == "world"
+    assert strings[2] == "test"
+    assert strings[3] == " "
+    assert strings[4] == "from"
+    assert strings[5] == " "
+    assert strings[6] == "container"
+    assert strings[7] == ""
 
 
 @pytest.mark.skipif(sys.maxsize <= 2**32, reason="64-bit system required for 4GB+ test")
-def test_strs_from_4gb_list():
-    """Growing a `Strs` past 4 GB of total content forces its offset table from u32 to u64, and indexing
+def test_strings_from_4gb_list():
+    """Growing a `Strings` past 4 GB of total content forces its offset table from u32 to u64, and indexing
     still returns the correct first and last strings afterward.
     This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 9 and 13 GB:
 
@@ -1187,7 +1178,7 @@ def test_strs_from_4gb_list():
             long_repeated_string(ctypes, ascii_lowercase[part_index % len(ascii_lowercase)], part_size)
             for part_index in range(parts_count)
         ]
-        parts_stringzilla = Strs(parts_pythonic)
+        parts_stringzilla = Strings(parts_pythonic)
 
         # Basic verification
         last_used_char = ascii_lowercase[(parts_count - 1) % len(ascii_lowercase)]
@@ -1204,7 +1195,7 @@ def test_strs_from_4gb_list():
 
 
 @pytest.mark.skipif(sys.maxsize <= 2**32, reason="64-bit system required for 4GB+ test")
-def test_strs_from_4gb_generator():
+def test_strings_from_4gb_generator():
     """Streaming a generator of strings past 4 GB of total content forces the offset table from u32 to
     u64, and indexing still returns the correct first and last strings afterward.
     This will require over 8 GB of memory. To stress-test the behavior, limit memory per process. For 5 and 13 GB:
@@ -1223,7 +1214,7 @@ def test_strs_from_4gb_generator():
     part_size = 64 * 1024 * 1024
     parts_count = math.ceil(UINT32_MAX / part_size) + 1  # Ensures we exceed UINT32_MAX by a small margin
     try:
-        parts_stringzilla = Strs(
+        parts_stringzilla = Strings(
             long_repeated_string(ctypes, ascii_lowercase[part_index % len(ascii_lowercase)], part_size)
             for part_index in range(parts_count)
         )
@@ -1241,140 +1232,110 @@ def test_strs_from_4gb_generator():
         gc.collect()
 
 
-@pytest.mark.parametrize("container_class", [tuple, list, iter])
-@pytest.mark.parametrize("view", [False, True])
-def test_strs_reference_counting(container_class: type, view: bool):
-    """`Strs` in view mode pins a tuple source directly and a list source through its snapshot, copy mode
-    pins neither, and every refcount drops back once the `Strs` is deleted and collected."""
+@pytest.mark.parametrize("container_class", [tuple, list])
+def test_strings_reference_counting(container_class: type):
+    """`Strings` copies its source, so once constructed it pins neither the container nor any of its items."""
 
     # CPython-only: PyPy and other interpreters may not expose refcounts or use a different GC model
     if not hasattr(sys, "getrefcount"):
         pytest.skip("Reference counting semantics are not available")
 
-    import gc
-
     # Round-tripped through bytes, as string literals are immortal and their refcounts never move
     base_items = [word.encode().decode() for word in ("ref", "count", "test")]
     container = container_class(base_items)
+    initial_refcounts = [sys.getrefcount(container)] + [sys.getrefcount(item) for item in base_items]
 
-    # Skip iter+view combination as it's not supported
-    if container_class == iter and view:
-        with pytest.raises(ValueError, match="View mode.*not supported for iterators"):
-            Strs(container, view=view)
-        return
-
-    initial_refcount = sys.getrefcount(container)
-
-    strs = Strs(container, view=view)
-    during_refcount = sys.getrefcount(container)
-
-    # For iterators, we can't check refcount behavior the same way since iter() creates a new object
-    # and the iterator consumes the original container during iteration
-    if container_class != iter:
-        if not view:
-            assert during_refcount == initial_refcount, "Copy mode should not change refcount"
-        elif container_class == tuple:
-            assert during_refcount == initial_refcount + 1, "A tuple is pinned directly"
-        else:
-            assert during_refcount == initial_refcount, "A list is pinned through its snapshot, not directly"
-
-    # Verify functionality
-    assert len(strs) == 3
-    assert strs[0] == "ref"
-    assert strs[1] == "count"
-    assert strs[2] == "test"
-
-    del strs
-    gc.collect()
-
-    if container_class != iter:
-        final_refcount = sys.getrefcount(container)
-        assert final_refcount == initial_refcount, "Refcount should return to initial value"
+    strings = Strings(container)
+    assert [sys.getrefcount(container)] + [sys.getrefcount(item) for item in base_items] == initial_refcounts
+    assert [str(part) for part in strings] == ["ref", "count", "test"]
 
 
-@pytest.mark.parametrize("view", [False, True])
 @pytest.mark.parametrize("mutation", [list.clear, list.reverse, lambda source: source.__delitem__(slice(1, None))])
-def test_strs_survives_source_mutation(view: bool, mutation):
-    """`Strs(list)` snapshots its source, so clearing, reversing or truncating that list afterwards leaves
-    every element readable - in view mode the spans point into items the snapshot still holds."""
+def test_strings_survives_source_mutation(mutation):
+    """`Strings(list)` copies its source, so clearing, reversing or truncating that list afterwards leaves
+    every element readable."""
     # Built twice rather than copied, so the source list holds the only reference to its own items and
     # mutating it really does free them - a shared list would keep them alive and prove nothing
     expected = ["prefix-" + "x" * 200 + f"-{index}" for index in range(8)]
     source = ["prefix-" + "x" * 200 + f"-{index}" for index in range(8)]
-    strs = Strs(source, view=view)
+    strings = Strings(source)
 
     mutation(source)
     # Churn same-size-class allocations so a freed item is handed straight back out
     churn = [("z" * 208).encode() for _ in range(scale_iterations(5000))]
 
-    assert [str(part) for part in strs] == expected, f"spans went stale across {len(churn)} reuses"
+    assert [str(part) for part in strings] == expected, f"spans went stale across {len(churn)} reuses"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-@pytest.mark.parametrize("view", [False, True])
-def test_strs_from_arrow_basic(view: bool):
-    """`Strs` built from a PyArrow string array, in both view and copy mode, preserves length and element
-    order exactly."""
+def test_strings_from_arrow_basic():
+    """`Strings` borrows the offsets and bytes of a PyArrow string array in place, honors the offset of a sliced
+    array, and keeps the buffers alive once the array itself is gone."""
     arrow_array = pa.array(["hello", "world", "test", "arrow"])
-    strs = Strs(arrow_array, view=view)
+    strings = Strings(arrow_array)
+    _, offsets_buffer, data_buffer = arrow_array.buffers()
+    assert strings.tape_address == data_buffer.address
+    assert strings.offsets_address == offsets_buffer.address
+    assert [str(part) for part in Strings(arrow_array.slice(1, 2))] == ["world", "test"]
+    del arrow_array, offsets_buffer, data_buffer
 
-    assert len(strs) == 4
-    assert strs[0] == "hello"
-    assert strs[1] == "world"
-    assert strs[2] == "test"
-    assert strs[3] == "arrow"
+    assert len(strings) == 4
+    assert strings[0] == "hello"
+    assert strings[1] == "world"
+    assert strings[2] == "test"
+    assert strings[3] == "arrow"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_binary_array():
-    """`Strs` built from a PyArrow binary array preserves each element's raw bytes exactly, whether
+def test_strings_from_arrow_binary_array():
+    """`Strings` built from a PyArrow binary array preserves each element's raw bytes exactly, whether
     returned as `str` or as a byte-like object."""
     binary_data = [b"hello", b"world", b"binary", b"data"]
     arrow_array = pa.array(binary_data, type=pa.binary())
 
-    strs = Strs(arrow_array)
+    strings = Strings(arrow_array)
 
-    assert len(strs) == 4
-    # Strs should handle binary data properly - compare as bytes
+    assert len(strings) == 4
+    # Strings should handle binary data properly - compare as bytes
     for i, expected in enumerate(binary_data):
-        str_bytes = strs[i].encode("latin-1") if isinstance(strs[i], str) else bytes(strs[i])
+        str_bytes = strings[i].encode("latin-1") if isinstance(strings[i], str) else bytes(strings[i])
         assert str_bytes == expected
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_large_strings():
-    """`Strs` built from a PyArrow `large_string` array preserves length and element order exactly."""
+def test_strings_from_arrow_large_strings():
+    """`Strings` built from a PyArrow `large_string` array preserves length and element order exactly."""
     arrow_array = pa.array(["hello", "world", "large", "strings"], type=pa.large_string())
 
-    strs = Strs(arrow_array)
+    strings = Strings(arrow_array)
 
-    assert len(strs) == 4
-    assert strs[0] == "hello"
-    assert strs[1] == "world"
-    assert strs[2] == "large"
-    assert strs[3] == "strings"
+    assert len(strings) == 4
+    assert strings[0] == "hello"
+    assert strings[1] == "world"
+    assert strings[2] == "large"
+    assert strings[3] == "strings"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_error_cases():
-    """`Strs` raises `TypeError` for non-iterable inputs like an int or `None`, and `TypeError` or
+def test_strings_from_arrow_error_cases():
+    """`Strings` raises `TypeError` for non-iterable inputs like an int or `None`, and `TypeError` or
     `ValueError` for a non-string PyArrow array."""
     # Test with non-iterable object
     with pytest.raises(TypeError):
-        Strs(123)  # Integer is not iterable
+        Strings(123)  # Integer is not iterable
 
     with pytest.raises(TypeError):
-        Strs(None)  # None is not iterable
+        Strings(None)  # None is not iterable
 
     # Test with non-string Arrow array
     int_array = pa.array([1, 2, 3, 4])
     with pytest.raises((TypeError, ValueError)):
-        Strs(int_array)
+        Strings(int_array)
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_c_interface():
-    """PyArrow's `__arrow_c_array__` capsules are valid `PyCapsule` objects, and `Strs` built from the
+def test_strings_from_arrow_c_interface():
+    """PyArrow's `__arrow_c_array__` capsules are valid `PyCapsule` objects, and `Strings` built from the
     array through that C Data Interface preserves length and element order."""
     arrow_array = pa.array(["test", "c", "interface"])
 
@@ -1390,45 +1351,45 @@ def test_strs_from_arrow_c_interface():
         assert str(type(array_capsule)) == "<class 'PyCapsule'>"
 
     # Test actual conversion
-    strs = Strs(arrow_array)
-    assert len(strs) == 3
-    assert strs[0] == "test"
-    assert strs[1] == "c"
-    assert strs[2] == "interface"
+    strings = Strings(arrow_array)
+    assert len(strings) == 3
+    assert strings[0] == "test"
+    assert strings[1] == "c"
+    assert strings[2] == "interface"
 
 
 @pytest.mark.skipif(not pyarrow_available, reason="PyArrow is not installed")
-def test_strs_from_arrow_with_nulls():
+def test_strings_from_arrow_with_nulls():
     """Arrow arrays with null values, including all-null and mixed null/empty-string arrays, convert to
-    `Strs` with every null mapped to an empty string."""
+    `Strings` with every null mapped to an empty string."""
     # Create an array with None values
     arrow_array = pa.array(["hello", None, "world", None, "test"])
 
-    strs = Strs(arrow_array)
+    strings = Strings(arrow_array)
 
-    assert len(strs) == 5
-    assert strs[0] == "hello"
-    assert strs[1] == ""  # None values should be converted to empty strings
-    assert strs[2] == "world"
-    assert strs[3] == ""  # None values should be converted to empty strings
-    assert strs[4] == "test"
+    assert len(strings) == 5
+    assert strings[0] == "hello"
+    assert strings[1] == ""  # None values should be converted to empty strings
+    assert strings[2] == "world"
+    assert strings[3] == ""  # None values should be converted to empty strings
+    assert strings[4] == "test"
 
     # Test with all nulls
     all_nulls = pa.array([None, None, None], type=pa.string())
-    strs_nulls = Strs(all_nulls)
-    assert len(strs_nulls) == 3
-    assert all(s == "" for s in strs_nulls)
+    strings_nulls = Strings(all_nulls)
+    assert len(strings_nulls) == 3
+    assert all(s == "" for s in strings_nulls)
 
     # Test with mixed None and empty strings
     mixed = pa.array(["", None, "hello", "", None, "world"])
-    strs_mixed = Strs(mixed)
-    assert len(strs_mixed) == 6
-    assert strs_mixed[0] == ""
-    assert strs_mixed[1] == ""
-    assert strs_mixed[2] == "hello"
-    assert strs_mixed[3] == ""
-    assert strs_mixed[4] == ""
-    assert strs_mixed[5] == "world"
+    strings_mixed = Strings(mixed)
+    assert len(strings_mixed) == 6
+    assert strings_mixed[0] == ""
+    assert strings_mixed[1] == ""
+    assert strings_mixed[2] == "hello"
+    assert strings_mixed[3] == ""
+    assert strings_mixed[4] == ""
+    assert strings_mixed[5] == "world"
 
 
 # endregion Interop
@@ -1496,24 +1457,24 @@ DUMP_COLUMNS = {
 
 
 @pytest.mark.parametrize("kind", sorted(STDLIB_ESCAPERS))
-def test_strs_escape_matches_stdlib(kind: str):
-    """`Strs.escape` writes the bytes the standard library's own writer does, for every kind that has one."""
-    escaped = Strs(ESCAPE_CORPUS).escape(kind)
+def test_strings_escape_matches_stdlib(kind: str):
+    """`Strings.escape` writes the bytes the standard library's own writer does, for every kind that has one."""
+    escaped = Strings(ESCAPE_CORPUS).escape(kind)
     assert [str(text) for text in escaped] == [STDLIB_ESCAPERS[kind](text) for text in ESCAPE_CORPUS]
 
 
 @pytest.mark.parametrize("kind", ESCAPE_KINDS)
-def test_strs_unescape_round_trips(kind: str):
-    """`Strs.unescape` inverts `Strs.escape` for every kind, as the standard library's own readers do, and every
+def test_strings_unescape_round_trips(kind: str):
+    """`Strings.unescape` inverts `Strings.escape` for every kind, as the standard library's own readers do, and every
     kind but `json_ascii`, which writes an ill-formed byte as U+FFFD, carries ill-formed UTF-8 through too."""
     corpus = ESCAPE_CORPUS + ["delete \x7f"]
-    escaped = Strs(corpus).escape(kind=kind)
+    escaped = Strings(corpus).escape(kind=kind)
     assert [str(text) for text in escaped.unescape(kind)] == corpus
     if kind in STDLIB_UNESCAPERS:
         assert [STDLIB_UNESCAPERS[kind](str(text)) for text in escaped] == corpus
     if kind != "json_ascii":
         ill_formed = b"ill-formed \xc3\x28 \xff"
-        assert bytes(Strs([ill_formed]).escape(kind).unescape(kind)[0]) == ill_formed
+        assert bytes(Strings([ill_formed]).escape(kind).unescape(kind)[0]) == ill_formed
 
 
 @pytest.mark.parametrize(
@@ -1527,38 +1488,39 @@ def test_strs_unescape_round_trips(kind: str):
         ("csv", '"unbalanced'),
     ],
 )
-def test_strs_unescape_names_the_malformed_index(kind: str, malformed: str):
-    """`Strs.unescape` raises a `ValueError` naming the index of the first malformed string."""
-    well_formed = str(Strs(['ok, "fine"']).escape(kind)[0])
+def test_strings_unescape_names_the_malformed_index(kind: str, malformed: str):
+    """`Strings.unescape` raises a `ValueError` naming the index of the first malformed string."""
+    well_formed = str(Strings(['ok, "fine"']).escape(kind)[0])
     with pytest.raises(ValueError, match="index 2 "):
-        Strs([well_formed, well_formed, malformed, well_formed, malformed]).unescape(kind)
+        Strings([well_formed, well_formed, malformed, well_formed, malformed]).unescape(kind)
 
 
 @pytest.mark.parametrize("ensure_ascii", [True, False])
-def test_strs_to_json_matches_json_dumps(ensure_ascii: bool):
-    """`Strs.to_json` writes the bytes of a compact `json.dumps`, reading every layout: a tape, a slice of one,
-    and a reordered fragmented collection."""
+def test_strings_to_json_matches_json_dumps(ensure_ascii: bool):
+    """`Strings.to_json` writes the bytes of a compact `json.dumps`, over a tape, a borrowed slice of
+    one, and a strided slice gathered from it."""
 
     def expected(texts):
         return json.dumps(texts, ensure_ascii=ensure_ascii, separators=(",", ":")).encode()
 
-    tape = Strs(ESCAPE_CORPUS)
-    assert tape.to_json(ensure_ascii=ensure_ascii) == expected(ESCAPE_CORPUS)
-    assert tape[3:].to_json(ensure_ascii) == expected(ESCAPE_CORPUS[3:])
-    assert Strs(ESCAPE_CORPUS, view=True)[::-1].to_json(ensure_ascii) == expected(ESCAPE_CORPUS[::-1])
-    assert Strs([]).to_json() == b"[]"
+    tape = Strings(ESCAPE_CORPUS * 6)
+    assert tape.to_json(ensure_ascii=ensure_ascii) == expected(ESCAPE_CORPUS * 6)
+    assert tape[3:].to_json(ensure_ascii) == expected((ESCAPE_CORPUS * 6)[3:])
+    assert tape[::-1].to_json(ensure_ascii) == expected((ESCAPE_CORPUS * 6)[::-1])
+    assert Strings([]).to_json() == b"[]"
 
 
-def test_strs_to_json_ascii_escapes_delete():
+def test_strings_to_json_ascii_escapes_delete():
     """`json.dumps` writes DEL as `\\u007f` once it keeps to ASCII, so `ensure_ascii` must as well."""
-    assert Strs(["delete \x7f"]).to_json() == json.dumps(["delete \x7f"], separators=(",", ":")).encode()
+    assert Strings(["delete \x7f"]).to_json() == json.dumps(["delete \x7f"], separators=(",", ":")).encode()
 
 
 @pytest.mark.parametrize("ensure_ascii", [True, False])
 def test_to_json_matches_json_dumps(ensure_ascii: bool):
-    """`sz.to_json` writes the bytes of a compact `json.dumps` of the records, from `Strs` and lists alike."""
-    records = [dict(zip(DUMP_COLUMNS, row)) for row in zip(*DUMP_COLUMNS.values())]
-    columns = {"name": Strs(DUMP_COLUMNS["name"]), "city, country": DUMP_COLUMNS["city, country"]}
+    """`sz.to_json` writes the bytes of a compact `json.dumps` of the records, from `Strings` and lists alike."""
+    tiled = {name: cells * 30 for name, cells in DUMP_COLUMNS.items()}
+    records = [dict(zip(tiled, row)) for row in zip(*tiled.values())]
+    columns = {"name": Strings(tiled["name"]), "city, country": tiled["city, country"]}
     expected = json.dumps(records, ensure_ascii=ensure_ascii, separators=(",", ":")).encode()
     assert sz.to_json(columns, ensure_ascii=ensure_ascii) == expected
     assert sz.to_json({}) == sz.to_json({"empty": []}) == b"[]"
@@ -1576,8 +1538,9 @@ def test_to_json_matches_pandas(ensure_ascii: bool):
 @pytest.mark.parametrize("lineterminator", ["\n", "\r\n"])
 def test_to_csv_matches_csv_writer(lineterminator: str):
     """`sz.to_csv` writes the bytes of `csv.writer`: a header of the names, then a line per row, a lone empty
-    field quoted as `""` so its line is not mistaken for one of no fields."""
-    for columns in (DUMP_COLUMNS, {"": ["", "x", ""]}, {"empty": []}, {}):
+    field quoted as `""` so its line is not mistaken for one of no fields, over more lines than one block joins."""
+    tiled = {name: cells * 30 for name, cells in DUMP_COLUMNS.items()}
+    for columns in (DUMP_COLUMNS, tiled, {"": ["", "x", ""] * 50}, {"empty": []}, {}):
         buffer = io.StringIO()
         writer = csv.writer(buffer, lineterminator=lineterminator)
         writer.writerow(columns)
@@ -1590,12 +1553,12 @@ def test_to_csv_matches_pandas():
     pandas = pytest.importorskip("pandas")
     for columns in (DUMP_COLUMNS, {"": ["", "x", ""]}):
         expected = pandas.DataFrame(columns).to_csv(index=False, lineterminator="\n").encode()
-        assert sz.to_csv({name: Strs(column) for name, column in columns.items()}) == expected
+        assert sz.to_csv({name: Strings(column) for name, column in columns.items()}) == expected
 
 
 def test_dumps_refuse_malformed_columns():
     """Columns of different lengths, a non-string cell, and a terminator other than LF or CRLF are refused."""
-    ragged = {"a": ["x", "y"], "b": Strs(["z"])}
+    ragged = {"a": ["x", "y"], "b": Strings(["z"])}
     with pytest.raises(ValueError, match="'b'"):
         sz.to_json(ragged)
     with pytest.raises(ValueError, match="'b'"):
@@ -1606,15 +1569,162 @@ def test_dumps_refuse_malformed_columns():
         sz.to_csv({"a": ["x"]}, lineterminator=";")
 
 
-def test_strs_translate_matches_bytes_translate():
-    """`Strs.translate` maps every string as `bytes.translate` does, over a tape, a slice of one, and a fragmented
-    collection, and takes the same dict tables as `Str.translate`."""
+def test_strings_translate_matches_bytes_translate():
+    """`Strings.translate` maps every string as `bytes.translate` does, over a tape and a slice of one,
+    and takes the same dict tables as `String.translate`."""
     table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
     texts = ["cabbage", "", "abc" * 50, "été"]
     expected = [text.encode().translate(table) for text in texts]
-    for strings in (Strs(texts), Strs(["skipped"] + texts)[1:], Strs(texts, view=True)):
+    for strings in (Strings(texts), Strings(["skipped"] + texts)[1:]):
         assert [bytes(text) for text in strings.translate(table)] == expected
-    assert [str(text) for text in Strs(texts).translate({"a": "A"})] == [text.replace("a", "A") for text in texts]
+    assert [str(text) for text in Strings(texts).translate({"a": "A"})] == [text.replace("a", "A") for text in texts]
+
+
+COLUMN_TEXTS = ["hello", "", "help yourself", "élan", "yellow", "el", "ab", "cd", "x" * 300 + "el"] + [
+    "e" * length for length in range(18)
+]
+"""Keys on both sides of the 16 bytes the hash kernels batch, a long one, a two-byte `é`, and the adjacent
+"ab" and "cd" whose seam a search over the whole tape must not match as "bc"."""
+
+
+def column_sources(texts: list) -> list:
+    """`texts` as an owned tape, a slice whose offsets start past zero, a strided gather and, with PyArrow, a
+    sliced Arrow array borrowed in place, each paired with the texts it holds."""
+    sources = [
+        (Strings(texts), texts),
+        (Strings(["skipped"] + texts + ["tail"])[1:-1], texts),
+        (Strings(texts)[::-2], texts[::-2]),
+    ]
+    if pyarrow_available:
+        sources.append((Strings(pa.array(["skipped"] + texts).slice(1)), texts))
+    return sources
+
+
+@pytest.mark.parametrize("needle", ["el", "", "l", "élan", "bc", "zzz", "x" * 40])
+def test_strings_find_matches_bytes_find(backend_results, needle: str):
+    """`Strings.find` returns what `bytes.find` does in every string, -1 where the needle is absent and never
+    a match across the seam of two strings, over every kind of tape, and writes the same into `out`."""
+    for strings, texts in column_sources(COLUMN_TEXTS):
+        expected = tuple(text.encode().find(needle.encode()) for text in texts)
+        results = backend_results(lambda capabilities, strings=strings: strings.find(needle, capabilities=capabilities))
+        assert_backends_agree(results, oracle=expected, format_inputs=lambda: f"needle={needle!r}")
+        assert strings.find(needle.encode()) == strings.find(String(needle)) == expected
+        if numpy_available:
+            out = np.full(len(strings), 7, dtype=np.intp)
+            assert strings.find(needle, out=out) is out and tuple(out.tolist()) == expected
+
+
+@pytest.mark.parametrize("seed", [0, 7, 2**64 - 1])
+def test_strings_hashes_match_hash(backend_results, seed: int):
+    """`Strings.hashes(seed)` returns `sz.hash(text, seed)` for every string, over every kind of tape, and
+    writes the same into `out`."""
+    for strings, texts in column_sources(COLUMN_TEXTS):
+        expected = tuple(sz.hash(text, seed) for text in texts)
+        results = backend_results(lambda capabilities, strings=strings: strings.hashes(seed, capabilities=capabilities))
+        assert_backends_agree(results, oracle=expected, format_inputs=lambda: f"seed={seed}")
+        if numpy_available:
+            out = np.zeros(len(strings), dtype=np.uint64)
+            assert strings.hashes(seed=seed, out=out) is out and tuple(out.tolist()) == expected
+
+
+SPLIT_TEXTS = ["", ",", ",,", " a  b ", ",a,,b,", "Åsa, Bob,,é ,", "\n", "a\n", "\r\n\r\n", "a\r"] + [
+    "x" * offset + delimiter + "y" * 40 + delimiter
+    for offset in (13, 14, 15, 16, 30, 31, 32, 62, 63, 64)
+    for delimiter in (",", " ", "\r\n", "\x85", " ", " ")
+]
+"""Empty parts at either end and in the middle, multi-byte UTF-8 beside the delimiters, and every delimiter and
+line break, multi-byte ones included, straddling the 16, 32 and 64-byte vector boundaries."""
+
+
+def test_strings_split_matches_str_split(backend_results):
+    """Splits at one byte or a byteset and `splitlines` match `str.split` and `str.splitlines` on every backend, with
+    `skip_empty` dropping the empty parts, `rsplit` reporting source order, and a bare `split()` keeping empty parts
+    between single spaces."""
+
+    def split_all(capabilities):
+        return [
+            [
+                [str(part) for part in String(text).split(",", capabilities=capabilities)],
+                [str(part) for part in String(text).rsplit(",", capabilities=capabilities)],
+                [str(part) for part in String(text).split(capabilities=capabilities)],
+                [str(part) for part in String(text).split(" ", skip_empty=True, capabilities=capabilities)],
+                [str(part) for part in String(text).split_byteset(", ", capabilities=capabilities)],
+                [str(part) for part in String(text).splitlines(capabilities=capabilities)],
+            ]
+            for text in SPLIT_TEXTS
+        ]
+
+    oracle = [
+        [
+            text.split(","),
+            text.rsplit(","),
+            text.split(" "),
+            [part for part in text.split(" ") if part],
+            text.replace(" ", ",").split(","),
+            text.splitlines(),
+        ]
+        for text in SPLIT_TEXTS
+    ]
+    assert_backends_agree(backend_results(split_all), oracle=oracle)
+
+
+@pytest.mark.parametrize("separator", ["", ", ", "é"])
+def test_string_join_matches_str_join(backend_results, separator: str):
+    """`String.join` writes what `str.join` does, from every kind of tape read in place, past one 64-row block, and
+    from lists of `str` or `bytes` and generators, refusing an item that is not a string."""
+    texts = COLUMN_TEXTS * 3
+    for strings, column in column_sources(texts):
+        results = backend_results(
+            lambda capabilities, strings=strings: str(String(separator).join(strings, capabilities=capabilities))
+        )
+        assert_backends_agree(results, oracle=separator.join(column))
+    assert str(String(separator).join(texts)) == separator.join(texts)
+    assert str(String(separator).join(text.encode() for text in texts)) == separator.join(texts)
+    assert str(String(separator).join([])) == ""
+    with pytest.raises(TypeError, match="item 1 "):
+        String(separator).join(["a", None])
+
+
+UTF8_ROWS = [text.encode() for text in COLUMN_TEXTS + ["日本語", "\U0001f600" * 20, "c1 control \u0085"]]
+
+
+def test_strings_utf8_count_matches_decode(backend_results):
+    """`Strings.utf8_count` returns `len(row.decode())` for every row, over every kind of tape, and writes the same
+    into `out`."""
+    for strings, rows in column_sources(UTF8_ROWS):
+        expected = tuple(len(row.decode()) for row in rows)
+        results = backend_results(lambda capabilities, strings=strings: strings.utf8_count(capabilities=capabilities))
+        assert_backends_agree(results, oracle=expected)
+        if numpy_available:
+            out = np.zeros(len(strings), dtype=np.uintp)
+            assert strings.utf8_count(out=out) is out and tuple(out.tolist()) == expected
+
+
+@pytest.mark.parametrize(
+    "rows, malformed_index",
+    [
+        ([b"abc", b"\xc3", b"\xa9"], 1),
+        ([b"abc", b"\x80def"], 1),
+        ([b"ok", b"ok", b"tail \xe2\x82"], 2),
+        ([b"\xed\xa0\x80", b"\xff"], 0),
+        ([b"x" * 64 + b"\xf4\x90\x80\x80"], 0),
+    ],
+    ids=["sequence_across_rows", "stray_continuation", "truncated_at_tape_end", "surrogate", "past_u10ffff"],
+)
+def test_strings_utf8_count_names_the_malformed_index(backend_results, rows: list, malformed_index: int):
+    """`Strings.utf8_count` raises a `ValueError` naming the first row `bytes.decode` refuses, even where the bytes
+    of two rows would decode together."""
+    for row in rows[:malformed_index]:
+        row.decode()
+    with pytest.raises(UnicodeDecodeError):
+        rows[malformed_index].decode()
+
+    def message(capabilities):
+        with pytest.raises(ValueError, match=f"index {malformed_index} ") as error:
+            Strings(rows).utf8_count(capabilities=capabilities)
+        return str(error.value)
+
+    assert_backends_agree(backend_results(message))
 
 
 # endregion Escaping and dumping
@@ -1663,13 +1773,13 @@ TRANSLATE_TABLES = (_TRANSLATE_IDENTITY_TABLE, _TRANSLATE_INVERT_TABLE, _TRANSLA
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_equal(backend_results, length: int, rng: Random):
     """`sz.equal` (the compare kernel) must agree across every backend and match Python's byte-level
-    `==`, as must `Str.__eq__`, for random/tiled/all-same-char bodies at every SIMD-relevant length."""
+    `==`, as must `String.__eq__`, for random/tiled/all-same-char bodies at every SIMD-relevant length."""
     for body in differential_bodies(length, rng):
         matching = body
         mismatching = body[:-1] + ("z" if body[-1:] != "z" else "y") if length > 0 else "nonempty"
 
-        assert Str(body) == matching
-        assert Str(body) != mismatching
+        assert String(body) == matching
+        assert String(body) != mismatching
         assert_backends_agree(
             backend_results(
                 lambda capabilities, body=body, matching=matching: sz.equal(body, matching, capabilities=capabilities)
@@ -1723,13 +1833,13 @@ def test_unit_backend_differential_equal_unaligned(backend_results, offset):
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_backend_differential_contains(backend_results, length: int, rng: Random):
-    """`sz.find`, the kernel behind `needle in Str(haystack)`, must agree across every backend, for
+    """`sz.find`, the kernel behind `needle in String(haystack)`, must agree across every backend, for
     present and absent needles, over random/tiled/all-same-char needles at every SIMD-relevant length."""
     for needle in differential_bodies(length, rng):
         haystack = f"head_{needle}_tail"
         absent_needle = needle + "\x01"  # a byte that never appears in any of the three alphabets
 
-        assert needle in Str(haystack) and absent_needle not in Str(haystack)
+        assert needle in String(haystack) and absent_needle not in String(haystack)
         assert_backends_agree(
             backend_results(
                 lambda capabilities, needle=needle, haystack=haystack: sz.find(
@@ -1750,13 +1860,13 @@ def test_unit_backend_differential_contains(backend_results, length: int, rng: R
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_copy_slice(length: int, rng: Random):
-    """`bytes(Str)` and `Str(s)[a:b]` (the copy kernel) must match Python's own byte-level slicing,
+    """`bytes(String)` and `String(s)[a:b]` (the copy kernel) must match Python's own byte-level slicing,
     including overlapping/odd windows, over random/tiled/all-same-char bodies."""
     for body in differential_bodies(length, rng):
         body_bytes = body.encode()
-        assert bytes(Str(body)) == body_bytes
+        assert bytes(String(body)) == body_bytes
         for start, stop in safe_windows(length):
-            assert bytes(Str(body)[start:stop]) == body_bytes[start:stop]
+            assert bytes(String(body)[start:stop]) == body_bytes[start:stop]
 
 
 @pytest.mark.parametrize("offset", [0, 1, 3, 7, 15])
@@ -1769,13 +1879,13 @@ def test_unit_copy_unaligned(offset):
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
 def test_unit_concat(length: int, rng: Random):
-    """`Str + Str` (the concat/copy kernel) must match Python's `+`, over random/tiled/all-same-char
+    """`String + String` (the concat/copy kernel) must match Python's `+`, over random/tiled/all-same-char
     left-hand operands at every SIMD-relevant length."""
     right = get_random_string(rng, length=37)
     for left in differential_bodies(length, rng):
         oracle = (left + right).encode()
-        assert bytes(Str(left) + Str(right)) == oracle
-        assert bytes(Str(left) + right) == oracle
+        assert bytes(String(left) + String(right)) == oracle
+        assert bytes(String(left) + right) == oracle
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)
@@ -1831,14 +1941,14 @@ def test_unit_backend_differential_translate_unaligned(backend_results, offset):
 
 @pytest.mark.parametrize("kind", ESCAPE_KINDS)
 def test_unit_backend_differential_escape(backend_results, kind: str):
-    """`Strs.escape` and `Strs.unescape` must agree across every backend, whose byte-set searches skip the bytes
+    """`Strings.escape` and `Strings.unescape` must agree across every backend, whose byte-set searches skip the bytes
     needing no escape, with a special byte at either end and in the middle of every SIMD-relevant length."""
     texts = []
     for length in VECTOR_WIDTH_LENGTHS:
         body = "a" * length
         for special in '"\\,\n<%\x01\x7f\u202e':
             texts += [special + body, body + special, body[: length // 2] + special + body[length // 2 :]]
-    strings = Strs(texts)
+    strings = Strings(texts)
 
     def escape_and_back(capabilities):
         escaped = strings.escape(kind, capabilities=capabilities)

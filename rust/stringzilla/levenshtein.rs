@@ -35,14 +35,15 @@ pub enum LevenshteinSymbol {
 /// # Examples
 ///
 /// ```rust
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream};
+/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
 ///
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymbol::Bytes, &cpu).unwrap();
 ///
 /// // A `[queries, candidates]` block, query `q` starting at `q * stride`.
 /// let mut distances = [0usize; 4];
-/// cpu.scope(|scope| engine.distances(scope, &["sitting", "sunday"], &mut distances, 2))
+/// let candidates = StringsView::from_slices(&["sitting", "sunday"]);
+/// cpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 2))
 ///     .unwrap();
 /// assert_eq!(distances[0], 3); // kitten vs sitting
 /// assert_eq!(distances[3], 3); // saturday vs sunday
@@ -77,16 +78,16 @@ impl LevenshteinEngine {
         Query: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        with_strings(queries, |strings| unsafe {
+        unsafe {
             sz_levenshtein_engine_init(
                 engine.as_mut_ptr(),
-                strings,
+                &StringsView::from_slices(queries).view,
                 symbol,
                 stream.capabilities().bits(),
                 core::ptr::null(),
                 stream.as_raw(),
             )
-        })
+        }
         .check()?;
         Ok(unsafe { engine.assume_init() })
     }
@@ -109,47 +110,40 @@ impl LevenshteinEngine {
     /// being at least the candidate count. The round's scratch grows here when a batch needs more
     /// than the last one did, and is never shrunk.
     ///
-    /// A GPU engine takes a [`Tape`] and `distances` in memory its device reaches, such as a
-    /// `Vec` in a [`UnifiedAllocator`]. A stream of another group than the engine's is refused
-    /// with [`Status::DeviceMemoryMismatch`].
-    pub fn distances<'scope, Candidates>(
+    /// A GPU engine takes candidates and `distances` in memory its device reaches, such as a
+    /// [`Strings`] and a `Vec` in a [`UnifiedAllocator`]. A stream of another group than the
+    /// engine's is refused with [`Status::DeviceMemoryMismatch`].
+    pub fn distances<'scope>(
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
-        candidates: &'scope Candidates,
+        candidates: StringsView<'scope>,
         distances: &'scope mut [usize],
         distances_stride: usize,
-    ) -> Result<(), Status>
-    where
-        Candidates: Strings + ?Sized,
-    {
+    ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
-        let queries = self.count;
-        let engine = self as *mut Self;
-        candidates.with_strings(stream, |strings| {
-            if distances_stride < strings.count {
-                return Err(Status::UnexpectedDimensions);
-            }
-            let span = match queries {
-                0 => 0,
-                count => (count - 1)
-                    .checked_mul(distances_stride)
-                    .and_then(|rows| rows.checked_add(strings.count))
-                    .ok_or(Status::OverflowRisk)?,
-            };
-            if distances.len() < span {
-                return Err(Status::UnexpectedDimensions);
-            }
-            unsafe {
-                sz_levenshtein_distances(
-                    engine,
-                    strings,
-                    distances.as_mut_ptr(),
-                    distances_stride,
-                    stream.as_raw(),
-                )
-            }
-            .check()
-        })?
+        if distances_stride < candidates.len() {
+            return Err(Status::UnexpectedDimensions);
+        }
+        let span = match self.count {
+            0 => 0,
+            count => (count - 1)
+                .checked_mul(distances_stride)
+                .and_then(|rows| rows.checked_add(candidates.len()))
+                .ok_or(Status::OverflowRisk)?,
+        };
+        if distances.len() < span {
+            return Err(Status::UnexpectedDimensions);
+        }
+        unsafe {
+            sz_levenshtein_distances(
+                self,
+                &candidates.view,
+                distances.as_mut_ptr(),
+                distances_stride,
+                stream.as_raw(),
+            )
+        }
+        .check()
     }
 }
 

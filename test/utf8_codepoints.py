@@ -3,7 +3,7 @@
 
 Mirrors the C++ test/utf8_runes.cpp translation unit.
 
-Covers: utf8_count and utf8_codepoints on ASCII, multi-byte, and mixed-script text, str/Str/bytes
+Covers: utf8_count and utf8_codepoints on ASCII, multi-byte, and mixed-script text, str/String/bytes
 input parity, round-trip fidelity against random valid UTF-8 corpora, malformed-byte safety
 including lossy U+FFFD decoding, and cross-backend agreement on curated, malformed, and random
 corpora.
@@ -40,7 +40,7 @@ import stringzilla as sz
 
 def test_unit_utf8_count():
     """utf8_count returns the Unicode scalar count, not the byte length, across ASCII, multi-byte, and
-    mixed-script text, the Str method form, and bytes input."""
+    mixed-script text, the String method form, and bytes input."""
     # ASCII strings: len == utf8_count
     assert sz.utf8_count("hello") == 5
     assert sz.utf8_count("") == 0
@@ -56,8 +56,8 @@ def test_unit_utf8_count():
     assert sz.utf8_count("hello世界") == 7  # 5 ASCII + 2 CJK
     assert sz.utf8_count("naïve") == 5  # ï is 2 bytes
 
-    # Method form on Str
-    assert sz.Str("café").utf8_count() == 4
+    # Method form on String
+    assert sz.String("café").utf8_count() == 4
 
     # Bytes input
     assert sz.utf8_count(b"caf\xc3\xa9") == 4  # café in UTF-8 bytes
@@ -74,8 +74,8 @@ def test_unit_utf8_codepoints():
     assert list(sz.utf8_codepoints("AB")) == [65, 66]
     for text in ["café", "日本語", "🎉", "αβγδ", "АБВГ", "𐍈", "hello世界"]:
         assert list(sz.utf8_codepoints(text)) == [ord(c) for c in text]
-    # str, Str, and bytes inputs agree.
-    assert list(sz.utf8_codepoints(sz.Str("café"))) == [ord(c) for c in "café"]
+    # str, String, and bytes inputs agree.
+    assert list(sz.utf8_codepoints(sz.String("café"))) == [ord(c) for c in "café"]
     assert list(sz.utf8_codepoints("café".encode())) == [ord(c) for c in "café"]
 
 

@@ -1505,13 +1505,13 @@ def boundary_strings(alphabet: str = "ab") -> list[str]:
 
 
 def unaligned_views(text, offsets=(0, 1, 3, 7, 15)):
-    """Yield ``(offset, sz.Str view)`` pairs that start at small byte offsets into a shared parent buffer.
+    """Yield ``(offset, sz.String view)`` pairs that start at small byte offsets into a shared parent buffer.
 
-    Slicing a ``Str`` shares the parent's allocation at the sliced offset, so the kernel receives a
+    Slicing a ``String`` shares the parent's allocation at the sliced offset, so the kernel receives a
     misaligned base pointer, the cheap way to exercise unaligned loads from Python."""
     import stringzilla as sz
 
-    parent = sz.Str(text)
+    parent = sz.String(text)
     for offset in offsets:
         if offset <= len(parent):
             yield offset, parent[offset:]

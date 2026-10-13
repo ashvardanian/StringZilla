@@ -469,7 +469,7 @@ def test_buffer_protocol_inputs_agree():
     assert counter_key.xor(text, COUNTER_NONCE) == expected
     assert counter_key.xor(bytearray(payload), COUNTER_NONCE) == expected
     assert counter_key.xor(memoryview(payload), COUNTER_NONCE) == expected
-    assert counter_key.xor(sz.Str(text), COUNTER_NONCE) == expected
+    assert counter_key.xor(sz.String(text), COUNTER_NONCE) == expected
 
     expected = authenticated_key.encrypt(payload, AUTHENTICATED_NONCE, payload)
     assert authenticated_key.encrypt(text, AUTHENTICATED_NONCE, text) == expected

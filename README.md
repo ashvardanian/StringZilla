@@ -30,7 +30,7 @@ Reach for it from your language of choice:
 - 🐂 __[C](#c-and-c):__ Upgrade LibC's `<string.h>` to `<stringzilla/stringzilla.h>` in C 99
 - 🐉 __[C++](#c-and-c):__ Upgrade STL's `<string>` to `<stringzilla/stringzilla.hpp>` in C++ 20
 - 🧮 __[CUDA](include/stringzilla/README.md):__ Score batches on a device with engines built for its capabilities in CUDA C++ 20
-- 🐍 __[Python](#python):__ Upgrade your `str` to faster `Str`
+- 🐍 __[Python](#python):__ Upgrade your `str` to faster `String`
 - 🦀 __[Rust](#rust):__ Use the `StringZilla` traits crate
 - 🦫 __[Go](#go):__ Use the `StringZilla` cGo module
 - 🍎 __[Swift](#swift):__ Use the `String+StringZilla` extension
@@ -112,8 +112,8 @@ Because StringZilla mirrors the familiar standard APIs, adoption is mostly a sea
 ─────────────────────────────────────────────────────────────────────────────────
 Python
   Find a substring         "...".find(x)             sz.find("...", x)
-  Sort strings             sorted(items)             sz.Strs(items).sorted()
-  Split on a separator     "...".split(sep)          sz.Str("...").split(sep)
+  Sort strings             sorted(items)             sz.Strings(items).sorted()
+  Split on a separator     "...".split(sep)          sz.String("...").split(sep)
   Case-fold for matching   "...".casefold()          sz.utf8_uncased_fold("...")
   Streaming SHA-256        hashlib.sha256()          sz.Sha256()
 
@@ -188,9 +188,9 @@ The batch engines ship inside the same package and the same crate as the single-
 ```python
 import stringzilla as sz
 
-text = sz.Str("the quick brown fox")
+text = sz.String("the quick brown fox")
 text.find("brown")          # 10
-text.split()                # Strs(['the', 'quick', 'brown', 'fox'])
+text.split()                # sz.Strings(['the', 'quick', 'brown', 'fox'])
 sz.hash("hello")            # fast 64-bit hash
 ```
 

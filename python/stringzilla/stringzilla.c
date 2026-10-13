@@ -6,8 +6,8 @@
  *
  *  - Doesn't use PyBind11, NanoBind, Boost.Python, or any other high-level libs, only CPython API.
  *  - To minimize latency this implementation avoids @c PyArg_ParseTupleAndKeywords calls.
- *  - Reimplements all of the @c str functionality in C as a @c Str type.
- *  - Provides a highly generic @c Strs class for collections of strings, Arrow-style or not.
+ *  - Reimplements all of the @c str functionality in C as a @c String type.
+ *  - Provides a @c Strings class for collections of strings on one Apache Arrow-style tape.
  *
  *  Pandas doesn't provide a C API, and even in 2.0 the Apache Arrow representation is opt-in, not
  *  the default. The PyCapsule protocol, together with the @b __arrow_c_array__ dunder methods, can
@@ -21,15 +21,15 @@
  *  - @c sz_py_replace_strings_allocator.
  *
  *  Function Naming Convention:
- *  - `Str_like_*`: Functions callable both as module-level functions and as member methods.
- *  - `Str_*`: Functions that are member-only methods or have simpler calling conventions.
+ *  - `String_like_*`: Functions callable both as module-level functions and as member methods.
+ *  - `String_*`: Functions that are member-only methods or have simpler calling conventions.
  *
  *  This translation unit owns the module-init glue - @c PyModuleDef, the type-registration table,
- *  and @c PyInit_stringzilla - plus the argument plumbing the three engine files share. The
- *  @c File, @c Str, and @c Strs struct layouts and the @c PyTypeObject forward declarations every
- *  domain file needs live in `stringzilla.h`; the domains themselves are split across `shared.c`,
- *  `file.c`, `str.c`, `strs.c`, `strings.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`,
- *  `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`, and the `utf8_*.c` files.
+ *  and @c PyInit_stringzilla - plus the argument plumbing the three engine files share. The struct
+ *  layouts of @c File, @c String, and @c Strings and the @c PyTypeObject forward declarations every
+ *  domain file needs live in `stringzilla.h`; the domains are split across `shared.c`, `file.c`,
+ *  `string.c`, `strings.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`,
+ *  `levenshtein.c`, `overlap.c`, `substrings.c`, and the `utf8_*.c` files.
  *
  *  @see PyArrow arrays: https://arrow.apache.org/docs/python/generated/pyarrow.array.html
  */
@@ -240,14 +240,14 @@ static char const doc_capabilities_compiled_gpu[] =                             
     "Signature:\n"                                                                                       //
     "    >>> def cuda_capabilities_compiled() -> sz.Capability: ...";
 
-static char const doc_capabilities_enabled_gpu[] =                                                      //
-    "Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and\n"     //
-    "compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,\n"        //
-    "`Strs.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names\n" //
-    "the device.\n\n"                                                                                   //
-    "Raises:\n"                                                                                         //
-    "    RuntimeError: No device with that ordinal answers.\n\n"                                        //
-    "Signature:\n"                                                                                      //
+static char const doc_capabilities_enabled_gpu[] =                                                         //
+    "Get the capabilities kernels run with on a GPU, by its runtime's ordinal, both detected and\n"        //
+    "compiled: `cuda_capabilities_enabled`, and the `rocm_` and `metal_` ones alike. Engines,\n"           //
+    "`Strings.copy` and `synchronize` take this mask, which names the vendor, and a stream, which names\n" //
+    "the device.\n\n"                                                                                      //
+    "Raises:\n"                                                                                            //
+    "    RuntimeError: No device with that ordinal answers.\n\n"                                           //
+    "Signature:\n"                                                                                         //
     "    >>> def cuda_capabilities_enabled(ordinal, /) -> sz.Capability: ...";
 
 static PyObject *device_count_cuda(PyObject *unused_module, PyObject *unused_args) {
@@ -316,15 +316,15 @@ static PyObject *capabilities_enabled_metal(PyObject *unused_module, PyObject *o
     return capabilities_of_ordinal_(sz_capabilities_enabled_metal, ordinal, "metal_capabilities_enabled()");
 }
 
-static char const doc_stream_init_gpu[] =                                                               //
-    "Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,\n"     //
-    "`Strs.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`\n" //
-    "ones alike. Free it with the matching `*_stream_free` once its work is synchronized.\n\n"          //
-    "Returns:\n"                                                                                        //
-    "    int: The `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>` handle.\n\n"                   //
-    "Raises:\n"                                                                                         //
-    "    RuntimeError: No device with that ordinal answers, or this build lacks its vendor.\n\n"        //
-    "Signature:\n"                                                                                      //
+static char const doc_stream_init_gpu[] =                                                                  //
+    "Create a stream on a GPU, by its runtime's ordinal, which names that device to the engines,\n"        //
+    "`Strings.copy` and `synchronize` it is passed to: `cuda_stream_init`, and the `rocm_` and `metal_`\n" //
+    "ones alike. Free it with the matching `*_stream_free` once its work is synchronized.\n\n"             //
+    "Returns:\n"                                                                                           //
+    "    int: The `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>` handle.\n\n"                      //
+    "Raises:\n"                                                                                            //
+    "    RuntimeError: No device with that ordinal answers, or this build lacks its vendor.\n\n"           //
+    "Signature:\n"                                                                                         //
     "    >>> def cuda_stream_init(ordinal, /) -> int: ...";
 
 static char const doc_stream_free_gpu[] =                                                        //
@@ -453,20 +453,20 @@ static void stringzilla_cleanup(PyObject *m) {
     // Drain both free-lists, releasing the headers parked for reuse during the interpreter's lifetime.
     stringzilla_state_t *state = (stringzilla_state_t *)PyModule_GetState(m);
     if (!state) return;
-    for (Str *node = state->str_freelist_head; node;) {
-        Str *next = (Str *)node->parent;
+    for (String *node = state->string_freelist_head; node;) {
+        String *next = (String *)node->parent;
         PyObject_Free(node);
         node = next;
     }
-    for (Strs *node = state->strs_freelist_head; node;) {
-        Strs *next = *Strs_freelist_next_(node);
+    for (Strings *node = state->strings_freelist_head; node;) {
+        Strings *next = (Strings *)node->parent;
         PyObject_Free(node);
         node = next;
     }
-    state->str_freelist_head = NULL;
-    state->str_freelist_count = 0;
-    state->strs_freelist_head = NULL;
-    state->strs_freelist_count = 0;
+    state->string_freelist_head = NULL;
+    state->string_freelist_count = 0;
+    state->strings_freelist_head = NULL;
+    state->strings_freelist_count = 0;
 }
 
 #pragma region Engine Arguments
@@ -494,7 +494,7 @@ void sz_py_raise_status(sz_status_t status, char const *context) {
 
 int sz_py_export_strings(PyObject *object, char const *name, sz_strings_view_t *strings) {
     if (sz_py_export_strings_as_view(object, strings)) return 0;
-    PyErr_Format(PyExc_TypeError, "%s must be a stringzilla.Strs, got %s", name, Py_TYPE(object)->tp_name);
+    PyErr_Format(PyExc_TypeError, "%s must be a stringzilla.Strings, got %s", name, Py_TYPE(object)->tp_name);
     return -1;
 }
 
@@ -543,9 +543,9 @@ int sz_py_export_output_buffer(PyObject *object, char const *name, Py_ssize_t it
     return 0;
 }
 
-int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t itemsize, sz_size_t count,
-                              Py_buffer *view) {
-    if (PyObject_GetBuffer(object, view, PyBUF_CONTIG_RO) != 0) return -1;
+int sz_py_export_contiguous_buffer(PyObject *object, char const *name, int request, Py_ssize_t itemsize,
+                                   sz_size_t count, Py_buffer *view) {
+    if (PyObject_GetBuffer(object, view, request) != 0) return -1;
     if (view->itemsize != itemsize) {
         PyErr_Format(PyExc_TypeError, "%s must hold %zd-byte items, got %zd-byte ones", name, itemsize, view->itemsize);
         PyBuffer_Release(view);
@@ -564,87 +564,89 @@ int sz_py_export_input_buffer(PyObject *object, char const *name, Py_ssize_t ite
 
 static PyMethodDef stringzilla_methods[] = {
     // Basic `str`, `bytes`, and `bytearray`-like functionality
-    {"contains", (PyCFunction)Str_like_contains, STRINGZILLA_METHOD_FLAGS, doc_contains},
-    {"count", (PyCFunction)Str_like_count, STRINGZILLA_METHOD_FLAGS, doc_count},
-    {"splitlines", (PyCFunction)Str_like_splitlines, STRINGZILLA_METHOD_FLAGS, doc_splitlines},
-    {"startswith", (PyCFunction)Str_like_startswith, STRINGZILLA_METHOD_FLAGS, doc_startswith},
-    {"endswith", (PyCFunction)Str_like_endswith, STRINGZILLA_METHOD_FLAGS, doc_endswith},
-    {"decode", (PyCFunction)Str_like_decode, STRINGZILLA_METHOD_FLAGS, doc_decode},
-    {"equal", (PyCFunction)Str_like_equal, STRINGZILLA_METHOD_FLAGS, doc_like_equal},
-    {"lstrip", (PyCFunction)Str_like_lstrip, STRINGZILLA_METHOD_FLAGS, doc_lstrip},
-    {"rstrip", (PyCFunction)Str_like_rstrip, STRINGZILLA_METHOD_FLAGS, doc_rstrip},
-    {"strip", (PyCFunction)Str_like_strip, STRINGZILLA_METHOD_FLAGS, doc_strip},
+    {"contains", (PyCFunction)String_like_contains, STRINGZILLA_METHOD_FLAGS, doc_contains},
+    {"count", (PyCFunction)String_like_count, STRINGZILLA_METHOD_FLAGS, doc_count},
+    {"splitlines", (PyCFunction)String_like_splitlines, STRINGZILLA_METHOD_FLAGS, doc_splitlines},
+    {"startswith", (PyCFunction)String_like_startswith, STRINGZILLA_METHOD_FLAGS, doc_startswith},
+    {"endswith", (PyCFunction)String_like_endswith, STRINGZILLA_METHOD_FLAGS, doc_endswith},
+    {"decode", (PyCFunction)String_like_decode, STRINGZILLA_METHOD_FLAGS, doc_decode},
+    {"equal", (PyCFunction)String_like_equal, STRINGZILLA_METHOD_FLAGS, doc_like_equal},
+    {"lstrip", (PyCFunction)String_like_lstrip, STRINGZILLA_METHOD_FLAGS, doc_lstrip},
+    {"rstrip", (PyCFunction)String_like_rstrip, STRINGZILLA_METHOD_FLAGS, doc_rstrip},
+    {"strip", (PyCFunction)String_like_strip, STRINGZILLA_METHOD_FLAGS, doc_strip},
 
     // Bidirectional operations
-    {"find", (PyCFunction)Str_like_find, STRINGZILLA_METHOD_FLAGS, doc_find},
-    {"index", (PyCFunction)Str_like_index, STRINGZILLA_METHOD_FLAGS, doc_index},
-    {"partition", (PyCFunction)Str_like_partition, STRINGZILLA_METHOD_FLAGS, doc_partition},
-    {"split", (PyCFunction)Str_like_split, STRINGZILLA_METHOD_FLAGS, doc_split},
-    {"rfind", (PyCFunction)Str_like_rfind, STRINGZILLA_METHOD_FLAGS, doc_rfind},
-    {"rindex", (PyCFunction)Str_like_rindex, STRINGZILLA_METHOD_FLAGS, doc_rindex},
-    {"rpartition", (PyCFunction)Str_like_rpartition, STRINGZILLA_METHOD_FLAGS, doc_rpartition},
-    {"rsplit", (PyCFunction)Str_like_rsplit, STRINGZILLA_METHOD_FLAGS, doc_rsplit},
+    {"find", (PyCFunction)String_like_find, STRINGZILLA_METHOD_FLAGS, doc_find},
+    {"index", (PyCFunction)String_like_index, STRINGZILLA_METHOD_FLAGS, doc_index},
+    {"partition", (PyCFunction)String_like_partition, STRINGZILLA_METHOD_FLAGS, doc_partition},
+    {"split", (PyCFunction)String_like_split, STRINGZILLA_METHOD_FLAGS, doc_split},
+    {"rfind", (PyCFunction)String_like_rfind, STRINGZILLA_METHOD_FLAGS, doc_rfind},
+    {"rindex", (PyCFunction)String_like_rindex, STRINGZILLA_METHOD_FLAGS, doc_rindex},
+    {"rpartition", (PyCFunction)String_like_rpartition, STRINGZILLA_METHOD_FLAGS, doc_rpartition},
+    {"rsplit", (PyCFunction)String_like_rsplit, STRINGZILLA_METHOD_FLAGS, doc_rsplit},
 
     // Character search extensions
-    {"find_first_of", (PyCFunction)Str_like_find_first_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_of},
-    {"find_last_of", (PyCFunction)Str_like_find_last_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_of},
-    {"find_first_not_of", (PyCFunction)Str_like_find_first_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_not_of},
-    {"find_last_not_of", (PyCFunction)Str_like_find_last_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_not_of},
-    {"count_byteset", (PyCFunction)Str_like_count_byteset, STRINGZILLA_METHOD_FLAGS, doc_count_byteset},
-    {"split_byteset", (PyCFunction)Str_like_split_byteset, STRINGZILLA_METHOD_FLAGS, doc_split_byteset},
-    {"rsplit_byteset", (PyCFunction)Str_like_rsplit_byteset, STRINGZILLA_METHOD_FLAGS, doc_rsplit_byteset},
+    {"find_first_of", (PyCFunction)String_like_find_first_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_of},
+    {"find_last_of", (PyCFunction)String_like_find_last_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_of},
+    {"find_first_not_of", (PyCFunction)String_like_find_first_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_first_not_of},
+    {"find_last_not_of", (PyCFunction)String_like_find_last_not_of, STRINGZILLA_METHOD_FLAGS, doc_find_last_not_of},
+    {"count_byteset", (PyCFunction)String_like_count_byteset, STRINGZILLA_METHOD_FLAGS, doc_count_byteset},
+    {"split_byteset", (PyCFunction)String_like_split_byteset, STRINGZILLA_METHOD_FLAGS, doc_split_byteset},
+    {"rsplit_byteset", (PyCFunction)String_like_rsplit_byteset, STRINGZILLA_METHOD_FLAGS, doc_rsplit_byteset},
 
     // Lazily evaluated iterators
-    {"split_iter", (PyCFunction)Str_like_split_iter, STRINGZILLA_METHOD_FLAGS, doc_split_iter},
-    {"rsplit_iter", (PyCFunction)Str_like_rsplit_iter, STRINGZILLA_METHOD_FLAGS, doc_rsplit_iter},
-    {"split_byteset_iter", (PyCFunction)Str_like_split_byteset_iter, STRINGZILLA_METHOD_FLAGS, doc_split_byteset_iter},
-    {"rsplit_byteset_iter", (PyCFunction)Str_like_rsplit_byteset_iter, STRINGZILLA_METHOD_FLAGS,
+    {"split_iter", (PyCFunction)String_like_split_iterator, STRINGZILLA_METHOD_FLAGS, doc_split_iter},
+    {"rsplit_iter", (PyCFunction)String_like_rsplit_iterator, STRINGZILLA_METHOD_FLAGS, doc_rsplit_iter},
+    {"split_byteset_iter", (PyCFunction)String_like_split_byteset_iterator, STRINGZILLA_METHOD_FLAGS,
+     doc_split_byteset_iter},
+    {"rsplit_byteset_iter", (PyCFunction)String_like_rsplit_byteset_iterator, STRINGZILLA_METHOD_FLAGS,
      doc_rsplit_byteset_iter},
 
     // UTF-8 aware operations
-    {"utf8_count", (PyCFunction)Str_like_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_utf8_count},
-    {"utf8_split_newlines", (PyCFunction)Str_like_utf8_split_newlines, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_count", (PyCFunction)String_like_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_utf8_count},
+    {"utf8_split_newlines", (PyCFunction)String_like_utf8_split_newlines, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_newlines},
-    {"utf8_newlines", (PyCFunction)Str_like_utf8_newlines, STRINGZILLA_METHOD_FLAGS, doc_utf8_newlines},
-    {"utf8_split_whitespaces", (PyCFunction)Str_like_utf8_split_whitespaces, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_newlines", (PyCFunction)String_like_utf8_newlines, STRINGZILLA_METHOD_FLAGS, doc_utf8_newlines},
+    {"utf8_split_whitespaces", (PyCFunction)String_like_utf8_split_whitespaces, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_whitespaces},
-    {"utf8_whitespaces", (PyCFunction)Str_like_utf8_whitespaces, STRINGZILLA_METHOD_FLAGS, doc_utf8_whitespaces},
-    {"utf8_split_delimiters", (PyCFunction)Str_like_utf8_split_delimiters, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_whitespaces", (PyCFunction)String_like_utf8_whitespaces, STRINGZILLA_METHOD_FLAGS, doc_utf8_whitespaces},
+    {"utf8_split_delimiters", (PyCFunction)String_like_utf8_split_delimiters, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_split_delimiters},
-    {"utf8_delimiters", (PyCFunction)Str_like_utf8_delimiters, STRINGZILLA_METHOD_FLAGS, doc_utf8_delimiters},
-    {"utf8_wordbreaks", (PyCFunction)Str_like_utf8_wordbreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_wordbreaks},
-    {"utf8_codepoints", (PyCFunction)Str_like_utf8_codepoints, STRINGZILLA_METHOD_FLAGS, doc_utf8_codepoints},
-    {"utf8_graphemes", (PyCFunction)Str_like_utf8_graphemes, STRINGZILLA_METHOD_FLAGS, doc_utf8_graphemes},
-    {"utf8_sentences", (PyCFunction)Str_like_utf8_sentences, STRINGZILLA_METHOD_FLAGS, doc_utf8_sentences},
-    {"utf8_linebreaks", (PyCFunction)Str_like_utf8_linebreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_linebreaks},
-    {"utf8_uncased_fold", (PyCFunction)Str_like_utf8_uncased_fold, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_fold},
-    {"utf8_norm", (PyCFunction)Str_like_utf8_norm, STRINGZILLA_METHOD_FLAGS, doc_utf8_norm},
-    {"utf8_find_denormalized", (PyCFunction)Str_like_utf8_find_denormalized, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_delimiters", (PyCFunction)String_like_utf8_delimiters, STRINGZILLA_METHOD_FLAGS, doc_utf8_delimiters},
+    {"utf8_wordbreaks", (PyCFunction)String_like_utf8_wordbreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_wordbreaks},
+    {"utf8_codepoints", (PyCFunction)String_like_utf8_codepoints, STRINGZILLA_METHOD_FLAGS, doc_utf8_codepoints},
+    {"utf8_graphemes", (PyCFunction)String_like_utf8_graphemes, STRINGZILLA_METHOD_FLAGS, doc_utf8_graphemes},
+    {"utf8_sentences", (PyCFunction)String_like_utf8_sentences, STRINGZILLA_METHOD_FLAGS, doc_utf8_sentences},
+    {"utf8_linebreaks", (PyCFunction)String_like_utf8_linebreaks, STRINGZILLA_METHOD_FLAGS, doc_utf8_linebreaks},
+    {"utf8_uncased_fold", (PyCFunction)String_like_utf8_uncased_fold, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_fold},
+    {"utf8_norm", (PyCFunction)String_like_utf8_norm, STRINGZILLA_METHOD_FLAGS, doc_utf8_norm},
+    {"utf8_find_denormalized", (PyCFunction)String_like_utf8_find_denormalized, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_find_denormalized},
-    {"utf8_uncased_search", (PyCFunction)Str_like_utf8_uncased_search, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_uncased_search", (PyCFunction)String_like_utf8_uncased_search, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_uncased_search},
-    {"utf8_uncased_matches", (PyCFunction)Str_like_utf8_uncased_matches, STRINGZILLA_METHOD_FLAGS,
+    {"utf8_uncased_matches", (PyCFunction)String_like_utf8_uncased_matches, STRINGZILLA_METHOD_FLAGS,
      doc_utf8_uncased_matches},
-    {"utf8_uncased_order", (PyCFunction)Str_like_utf8_uncased_order, STRINGZILLA_METHOD_FLAGS, doc_utf8_uncased_order},
+    {"utf8_uncased_order", (PyCFunction)String_like_utf8_uncased_order, STRINGZILLA_METHOD_FLAGS,
+     doc_utf8_uncased_order},
 
     // Dealing with larger-than-memory datasets
-    {"offset_within", (PyCFunction)Str_offset_within, STRINGZILLA_METHOD_FLAGS, doc_offset_within},
-    {"write_to", (PyCFunction)Str_write_to, STRINGZILLA_METHOD_FLAGS, doc_write_to},
+    {"offset_within", (PyCFunction)String_offset_within, STRINGZILLA_METHOD_FLAGS, doc_offset_within},
+    {"write_to", (PyCFunction)String_write_to, STRINGZILLA_METHOD_FLAGS, doc_write_to},
 
     // In-place transforms
-    {"translate", (PyCFunction)Str_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
+    {"translate", (PyCFunction)String_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
 
     // Dumping columns of strings
     {"to_json", (PyCFunction)module_to_json, STRINGZILLA_METHOD_FLAGS, doc_to_json},
     {"to_csv", (PyCFunction)module_to_csv, STRINGZILLA_METHOD_FLAGS, doc_to_csv},
 
     // Global unary extensions
-    {"hash", (PyCFunction)Str_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
-    {"hash_multiseed", (PyCFunction)Str_like_hash_multiseed, STRINGZILLA_METHOD_FLAGS, doc_hash_multiseed},
-    {"bytesum", (PyCFunction)Str_like_bytesum, STRINGZILLA_METHOD_FLAGS, doc_like_bytesum},
-    {"sha256", (PyCFunction)Str_like_sha256, STRINGZILLA_METHOD_FLAGS, doc_like_sha256},
+    {"hash", (PyCFunction)String_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
+    {"hash_multiseed", (PyCFunction)String_like_hash_multiseed, STRINGZILLA_METHOD_FLAGS, doc_hash_multiseed},
+    {"bytesum", (PyCFunction)String_like_bytesum, STRINGZILLA_METHOD_FLAGS, doc_like_bytesum},
+    {"sha256", (PyCFunction)String_like_sha256, STRINGZILLA_METHOD_FLAGS, doc_like_sha256},
     {"hmac_sha256", (PyCFunction)hmac_sha256, STRINGZILLA_METHOD_FLAGS, doc_hmac_sha256},
-    {"fill_random", (PyCFunction)Str_like_fill_random, STRINGZILLA_METHOD_FLAGS, doc_fill_random},
+    {"fill_random", (PyCFunction)String_like_fill_random, STRINGZILLA_METHOD_FLAGS, doc_fill_random},
 
     // Module-level functionality
     {"random", (PyCFunction)module_random, STRINGZILLA_METHOD_FLAGS, doc_random},
@@ -698,9 +700,9 @@ static struct {
     char const *name;
     PyTypeObject *type;
 } const stringzilla_types[] = {
-    {"Str", &StrType},
+    {"String", &StringType},
     {"File", &FileType},
-    {"Strs", &StrsType},
+    {"Strings", &StringsType},
     {"FindSplits", &FindSplitsType},
     {"Utf8SplitNewlines", &Utf8SplitNewlinesType},
     {"Utf8Newlines", &Utf8NewlinesType},

@@ -13,7 +13,7 @@ char const doc_utf8_uncased_fold[] =                                            
     "handling one-to-many expansions, like German sharp S to 'ss'.\n"                                    //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
-    "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
+    "    text (String or str or bytes): The input UTF-8 string.\n"                                       //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
@@ -26,9 +26,9 @@ char const doc_utf8_uncased_fold[] =                                            
     "    >>> sz.utf8_uncased_fold('Stra\\u00dfe')  # German sharp S\n"                                   //
     "    b'strasse'";
 
-PyObject *Str_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                                     PyObject *args_names_tuple) {
-    int is_member = self != NULL && PyObject_TypeCheck(self, &StrType);
+PyObject *String_like_utf8_uncased_fold(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                        PyObject *args_names_tuple) {
+    int is_member = self != NULL && PyObject_TypeCheck(self, &StringType);
     Py_ssize_t nargs_expected = !is_member; // 0 if method, 1 if module function
     int validate = 0;                       // Default: no validation
     PyObject *capabilities_object = NULL;

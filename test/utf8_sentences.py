@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""UAX-29 sentence-boundary segmentation: sz.utf8_sentences and Str.utf8_sentences.
+"""UAX-29 sentence-boundary segmentation: sz.utf8_sentences and String.utf8_sentences.
 
 Mirrors the C++ test/utf8_sentences.cpp translation unit.
 
-Covers: sentence iteration and the Str method mirror across ASCII, Cyrillic, and ideographic
+Covers: sentence iteration and the String method mirror across ASCII, Cyrillic, and ideographic
 terminators, malformed-byte and window-seam tiling safety, full UAX-29 SentenceBreakTest.txt
 conformance and Sentence_Break class-adjacency pairs, differential fuzzing against ICU or pysbd
 and against a pure-Python UAX-29 baseline arbitrated by ICU, realistic multi-script prose, and
@@ -47,7 +47,7 @@ from utf8_helpers import (
 )
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 _byte_boundaries = byte_boundaries
 
@@ -89,10 +89,10 @@ def test_utf8_sentences_unicode():
     assert "".join(result) == "你好。世界。"
 
 
-def test_utf8_sentences_str_method():
-    """The Str.utf8_sentences() method must agree with the module function."""
-    s = Str("Hello. World!")
-    method_result = [str(x) for x in s.utf8_sentences(s)]
+def test_utf8_sentences_string_method():
+    """The String.utf8_sentences() method must agree with the module function."""
+    s = String("Hello. World!")
+    method_result = [str(x) for x in s.utf8_sentences()]
     module_result = [str(x) for x in sz.utf8_sentences(s)]
     assert method_result == module_result
     assert method_result == [str(x) for x in sz.utf8_sentences("Hello. World!")]

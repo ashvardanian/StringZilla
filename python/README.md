@@ -14,8 +14,8 @@ import stringzilla as sz
 import numpy as np
 ```
 
-Almost every `sz` operation is available both as a method on a `Str` object and as a module-level function that accepts a `str`, `bytes`, `bytearray`, or `Str`.
-For example `sz.Str("hello").find("l")` and `sz.find("hello", "l")` are equivalent.
+Almost every `sz` operation is available both as a method on a `String` object and as a module-level function that accepts a `str`, `bytes`, `bytearray`, or `String`.
+For example `sz.String("hello").find("l")` and `sz.find("hello", "l")` are equivalent.
 
 ## Installation
 
@@ -39,23 +39,23 @@ CMAKE_BUILD_PARALLEL_LEVEL=2 pip install .
 
 ## Types
 
-The `stringzilla` module exposes `Str`, `Strs`, and `File`, the incremental hashers `Hasher`, `Sha256` and `Sha256s`, the batch engines `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine`, plus a family of UTF-8 iterator types.
+The `stringzilla` module exposes `String`, `Strings`, and `File`, the incremental hashers `Hasher`, `Sha256` and `Sha256s`, the batch engines `LevenshteinEngine`, `OverlapEngine` and `SubstringsEngine`, plus a family of UTF-8 iterator types.
 
-### `Str`
+### `String`
 
-`Str(source)` is an immutable, zero-copy view over a `str`, `bytes`, `bytearray`, another `Str`, or a memory-mapped `File`.
+`String(source)` is an immutable, zero-copy view over a `str`, `bytes`, `bytearray`, another `String`, or a memory-mapped `File`.
 It implements the read-only half of the `str`/`bytes` protocol — indexing, slicing, iteration, `len`, `in`, rich comparison, hashing, and the buffer protocol — without materializing new Python objects.
-Slicing returns a new `Str` view into the same backing buffer rather than copying bytes.
+Slicing returns a new `String` view into the same backing buffer rather than copying bytes.
 
 Two read-only properties expose its memory layout for zero-copy interop with PyArrow, `ctypes`, and similar:
 
-- `Str.address` — integer memory address of the first byte.
-- `Str.nbytes` — length of the view in bytes.
+- `String.address` — integer memory address of the first byte.
+- `String.nbytes` — length of the view in bytes.
 
 ```python
 import stringzilla as sz
 
-text = sz.Str("the quick brown fox")
+text = sz.String("the quick brown fox")
 assert str(text[4:9]) == "quick"   # a zero-copy view
 assert str(text[10:15]) == "brown"
 assert "quick" in text
@@ -64,54 +64,43 @@ assert text.nbytes == 19
 assert isinstance(text.address, int)
 ```
 
-### `Strs`
+### `Strings`
 
-`Strs(sequence, view=False)` is an ordered, indexable, sliceable collection of `Str` views.
-It is produced by the splitting and sorting methods, and can also be built directly from a `list`, `tuple`, generator, or a `pyarrow.Array`.
-With `view=True` it references the original data instead of copying it.
-`strs.copy(capabilities, stream=None)` copies the strings into one tape in the unified memory of `capabilities`, as [Engines on a GPU](#engines-on-a-gpu) describes; the host reads it as a normal read-only `Strs`.
+`Strings(sequence=())` is an immutable, indexable, sliceable sequence of byte strings, like a `tuple` of `bytes`, kept on one tape: the bytes back to back and an offsets array, the Apache Arrow `string` or `large_string` layout.
+A `pyarrow.Array` of strings or binaries is borrowed in place, while a `list`, `tuple`, generator, or any other iterable of `str` and bytes-like objects is copied once.
+The eager splits return one too, with the parts copied onto a tape of their own.
+`strings.copy(capabilities, stream=None)` copies the strings into one tape in the unified memory of `capabilities`, as [Engines on a GPU](#engines-on-a-gpu) describes; the host reads it as a normal read-only `Strings`.
 
-
-`Strs` keeps its parts on a single contiguous "tape" with an offsets array, so `sorted`, `argsort`, `intersect`, `sample`, and `shuffled` reorder offsets rather than bytes.
-This layout is also dramatically more memory-efficient than a Python `list` of `str`.
-Every part lives on one shared byte tape alongside a compact offsets array, so N substrings cost roughly one allocation, whereas a `list` of `str` holds N separately heap-allocated objects, each carrying a PyObject header, a hash cache, and per-object allocator overhead.
+Indexing yields `String` views into the tape, and slicing with a step of one borrows it, so neither copies any bytes.
+Any other step, `sorted`, `shuffled`, and `sample` gather into a new tape, while `argsort` and `intersect` return indices and copy nothing.
+One tape is also dramatically more memory-efficient than a Python `list` of `str`.
+N strings cost two allocations, whereas a `list` of `str` holds N separately heap-allocated objects, each carrying a PyObject header, a hash cache, and per-object allocator overhead.
 Splitting a large document into millions of tokens therefore stays compact and cache-friendly instead of fragmenting the heap.
-The lazy `split_iter`, `rsplit_iter`, and `*_byteset_iter` forms go a step further and build no collection at all, yielding one `Str` view at a time.
-It carries one of three internal storage layouts:
+The lazy `split_iter`, `rsplit_iter`, and `*_byteset_iter` forms go a step further and build no collection at all, yielding one `String` view at a time.
 
-- `TAPE` — owns a contiguous data buffer with an offsets array; StringTape-compatible.
-- `TAPE_VIEW` — a zero-copy view into existing data, such as an Arrow or StringTape slice.
-- `FRAGMENTED` — non-contiguous strings with individual pointers.
+Five read-only properties expose the tape for Apache Arrow and StringTape interop:
 
-Several read-only properties expose the tape for Apache Arrow / StringTape interop:
+- `Strings.tape_address` — address of the tape's first byte, which the offsets count from.
+- `Strings.tape_nbytes` — bytes from that address to the end of the last string.
+- `Strings.offsets_address` — address of the first offset.
+- `Strings.offsets_nbytes` — length of the offsets array in bytes, one offset more than there are strings.
+- `Strings.offsets_are_large` — `True` for the 64-bit offsets a tape past 4 GiB needs, `False` for 32-bit ones.
 
-| Property                 | Meaning                                    |
-| :----------------------- | :----------------------------------------- |
-| `Strs.tape`              | In-place transform to the Arrow layout.    |
-| `Strs.tape_address`      | Address of the tape buffer's first byte.   |
-| `Strs.tape_nbytes`       | Total tape length in bytes.                |
-| `Strs.offsets_address`   | Address of the offsets array's first byte. |
-| `Strs.offsets_nbytes`    | Offsets array length in bytes.             |
-| `Strs.offsets_are_large` | `True` when 64-bit offsets are needed.     |
-| `Strs.__layout__`        | Internal layout name.                      |
-
-`Strs.tape` rewrites the collection in place into the Arrow string layout — a contiguous buffer plus an offsets array.
-`Strs.offsets_are_large` is `True` when the tape is too large for 32-bit offsets and needs 64-bit ones for Arrow export.
-`Strs.__layout__` is a debug string reporting the internal storage: `TAPE`, `TAPE_VIEW`, or `FRAGMENTED`.
+A borrowed slice shares `tape_address` with its source, while its offsets start past zero.
 
 ```python
 import stringzilla as sz
 
-names = sz.Strs(["banana", "apple", "cherry", "date"])
+names = sz.Strings(["banana", "apple", "cherry", "date"])
 assert len(names) == 4
 assert str(names[0]) == "banana"
-assert [str(x) for x in names[1:3]] == ["apple", "cherry"]   # a sliced view
-names.__layout__                 # e.g. 'TAPE'
+assert [str(x) for x in names[1:3]] == ["apple", "cherry"]   # a borrowed slice
+assert names[1:3].tape_address == names.tape_address
 ```
 
 ### `File`
 
-`File(path, mode='r')` memory-maps a path so a `Str` can view data larger than RAM without reading it into memory.
+`File(path, mode='r')` memory-maps a path so a `String` can view data larger than RAM without reading it into memory.
 The default `mode` is `'r'`, for read-only access.
 
 ```python
@@ -121,14 +110,14 @@ import stringzilla as sz
 path = os.path.join(tempfile.mkdtemp(), "log.txt")
 pathlib.Path(path).write_text("error: disk full\nok\nerror: timeout\n")
 
-mapped = sz.Str(sz.File(path))   # scan in place, no copy into RAM
+mapped = sz.String(sz.File(path))   # scan in place, no copy into RAM
 assert mapped.count("error") == 2
 ```
 
 ## Searching and Counting
 
 All search methods accept optional `start` and `end` indices that bound the search window; `start` defaults to `0` and `end` to the string length.
-They are available both as `Str` methods and as module-level functions.
+They are available both as `String` methods and as module-level functions.
 
 ### Substring Search
 
@@ -144,16 +133,16 @@ They are available both as `Str` methods and as module-level functions.
 ```python
 import stringzilla as sz
 
-text = sz.Str("the quick brown fox")
+text = sz.String("the quick brown fox")
 assert text.find("brown") == 10
 assert text.rfind("o") == 17
 assert text.index("quick") == 4
 assert text.contains("quick")
 assert text.startswith("the")
 assert text.endswith("fox")
-assert sz.Str("banana").count("a") == 3
-assert sz.Str("aaaa").count("aa") == 2                     # non-overlapping
-assert sz.Str("aaaa").count("aa", allowoverlap=True) == 3  # overlapping
+assert sz.String("banana").count("a") == 3
+assert sz.String("aaaa").count("aa") == 2                     # non-overlapping
+assert sz.String("aaaa").count("aa", allowoverlap=True) == 3  # overlapping
 ```
 
 ### Byteset Search
@@ -170,7 +159,7 @@ The `*_of` / `*_not_of` family searches for any byte from a set, the byteset-acc
 ```python
 import stringzilla as sz
 
-text = sz.Str("hello world")
+text = sz.String("hello world")
 assert text.find_first_of("aeiou") == 1
 assert text.find_last_of("aeiou") == 7
 assert text.find_first_not_of("he") == 2
@@ -181,19 +170,19 @@ assert text.count_byteset("lo") == 5
 ### Equality and Offsets
 
 - `sz.equal(first, second)` — module-level fast byte-wise equality, returning `bool`.
-- `offset_within(larger)` — returns the byte offset of this `Str` view inside a larger `Str` it was sliced from, or `-1` if it is not a sub-view.
+- `offset_within(larger)` — returns the byte offset of this `String` view inside a larger `String` it was sliced from, or `-1` if it is not a sub-view.
 
 ```python
 import stringzilla as sz
 
 assert sz.equal("abc", "abc")
-big = sz.Str("hello world")
+big = sz.String("hello world")
 assert big[6:].offset_within(big) == 6
 ```
 
 ## Splitting and Partitioning
 
-### Eager Splits Returning `Strs`
+### Eager Splits Returning `Strings`
 
 - `split(separator, maxsplit=∞, keepseparator=False, skip_empty=False)` — split on a substring separator; unlike `str.split`, an empty separator leaves the text whole instead of raising.
 - `rsplit(separator, maxsplit=∞, keepseparator=False, skip_empty=False)` — same, scanning from the right.
@@ -204,19 +193,20 @@ assert big[6:].offset_within(big) == 6
 `maxsplit` caps the number of separators consumed, so `0` leaves the text whole, while a negative value or the default means unlimited.
 `keepseparator` keeps the matched separator attached to the parts.
 `skip_empty` drops zero-length parts, so a part keeping its separator is never dropped.
+Without `maxsplit` and `keepseparator`, a one-byte separator, a byteset, and `splitlines` split the whole text in one native pass straight into the tape.
 
 ```python
 import stringzilla as sz
 
-assert list(map(str, sz.Str("a,b,c").split(","))) == ["a", "b", "c"]
-assert list(map(str, sz.Str("a,b,c").rsplit(",", maxsplit=1))) == ["a,b", "c"]
-assert list(map(str, sz.Str("a,b;c").split_byteset(",;"))) == ["a", "b", "c"]
-assert list(map(str, sz.Str("a\nb\nc").splitlines())) == ["a", "b", "c"]
+assert list(map(str, sz.String("a,b,c").split(","))) == ["a", "b", "c"]
+assert list(map(str, sz.String("a,b,c").rsplit(",", maxsplit=1))) == ["a,b", "c"]
+assert list(map(str, sz.String("a,b;c").split_byteset(",;"))) == ["a", "b", "c"]
+assert list(map(str, sz.String("a\nb\nc").splitlines())) == ["a", "b", "c"]
 ```
 
 ### Lazy Split Iterators
 
-Each eager split has a lazy counterpart that yields `Str` views one at a time without building the whole `Strs`.
+Each eager split has a lazy counterpart that yields `String` views one at a time without building the whole `Strings`.
 They take the same arguments.
 
 - `split_iter(separator, maxsplit=∞, keepseparator=False, skip_empty=False)`
@@ -229,11 +219,23 @@ The reverse iterators yield the last field first.
 ```python
 import stringzilla as sz
 
-for field in sz.Str("2024-01-15").split_iter("-"):
+for field in sz.String("2024-01-15").split_iter("-"):
     print(field)                                       # 2024, then 01, then 15
 
-assert str(next(iter(sz.Str("a/b/c").rsplit_iter("/")))) == "c"
-assert sum(1 for _ in sz.Str("a,b,c").split_iter(",")) == 3
+assert str(next(iter(sz.String("a/b/c").rsplit_iter("/")))) == "c"
+assert sum(1 for _ in sz.String("a,b,c").split_iter(",")) == 3
+```
+
+### Joining
+
+`join(strings)` concatenates `strings` with the `String` between every two, as `str.join` does, into a new `String`.
+A `Strings` is read in place, any other iterable of `str` and bytes-like objects through a snapshot of it, and the result is measured first and written once.
+
+```python
+import stringzilla as sz
+
+assert str(sz.String(", ").join(["Ada", "Grace", "Linus"])) == "Ada, Grace, Linus"
+assert str(sz.String("\n").join(sz.String("a b c").split())) == "a\nb\nc"
 ```
 
 ### Partitioning
@@ -244,8 +246,8 @@ assert sum(1 for _ in sz.Str("a,b,c").split_iter(",")) == 3
 ```python
 import stringzilla as sz
 
-assert tuple(map(str, sz.Str("a=b=c").partition("="))) == ("a", "=", "b=c")
-assert tuple(map(str, sz.Str("a=b=c").rpartition("="))) == ("a=b", "=", "c")
+assert tuple(map(str, sz.String("a=b=c").partition("="))) == ("a", "=", "b=c")
+assert tuple(map(str, sz.String("a=b=c").rpartition("="))) == ("a=b", "=", "c")
 ```
 
 ## Trimming and Translating
@@ -262,9 +264,9 @@ Pass a byteset to trim an arbitrary set of bytes.
 ```python
 import stringzilla as sz
 
-assert sz.Str("  hi  ").strip() == "hi"
-assert sz.Str("xxhi").lstrip("x") == "hi"
-assert sz.Str("hi!!").rstrip("!") == "hi"
+assert sz.String("  hi  ").strip() == "hi"
+assert sz.String("xxhi").lstrip("x") == "hi"
+assert sz.String("hi!!").rstrip("!") == "hi"
 ```
 
 ### Translating
@@ -278,13 +280,13 @@ A non-256-byte table raises `ValueError`; a non-string, non-dict table raises `T
 ```python
 import stringzilla as sz
 
-assert sz.Str("abc").translate({"a": "A"}) == b"Abc"
+assert sz.String("abc").translate({"a": "A"}) == b"Abc"
 
 table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
-assert sz.Str("cabbage").translate(table) == b"CABBAge"
+assert sz.String("cabbage").translate(table) == b"CABBAge"
 ```
 
-`Strs.translate(table)` takes the same tables and maps every string of a collection in one call, returning a new `Strs`, as [Escaping and Normalizing Collections](#escaping-and-normalizing-collections) describes.
+`Strings.translate(table)` takes the same tables and maps every string of a collection in one call, returning a new `Strings`, as [Escaping and Normalizing Collections](#escaping-and-normalizing-collections) describes.
 
 ### Decoding
 
@@ -293,7 +295,7 @@ assert sz.Str("cabbage").translate(table) == b"CABBAge"
 ```python
 import stringzilla as sz
 
-assert sz.Str("abc").decode() == "abc"
+assert sz.String("abc").decode() == "abc"
 ```
 
 ## Hashing and Checksums
@@ -310,7 +312,7 @@ assert sz.Str("abc").decode() == "abc"
 - `sz.sha256(text)` — 32-byte SHA-256 digest as `bytes`.
 - `sz.hmac_sha256(key, message)` — 32-byte HMAC-SHA256 digest as `bytes`.
 
-`hash`, `hash_multiseed`, `bytesum`, and `sha256` are also available as `Str` methods.
+`hash`, `hash_multiseed`, `bytesum`, and `sha256` are also available as `String` methods.
 
 ```python
 import stringzilla as sz
@@ -372,17 +374,17 @@ Lanes are workers rather than messages: `lanes[i]` reads one as a `Sha256`, and 
 
 `sz.hmac_sha256(key, message, out=None)` takes either one message or a collection, authenticating a batch of tokens sharing a secret through the same kernels.
 
-Both accept a `Strs`, read in place whatever its layout, and an `out` buffer of bytes — a `(count, 32)` `numpy.uint8` matrix receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
+Both accept a `Strings`, read in place, and an `out` buffer of bytes — a `(count, 32)` `numpy.uint8` matrix receives one digest per row with no allocation, since that is byte-for-byte the layout the kernel writes.
 The GIL is released around the kernel, so several threads digest concurrently.
 
 Lanes advance in lockstep within a group, so a group costs as much as its longest message.
-Every length is handled correctly, but throughput is best when messages of similar length share a group, which `Strs.argsort` arranges.
+Every length is handled correctly, but throughput is best when messages of similar length share a group, which `Strings.argsort` arranges.
 
 ```python
 import numpy as np
 import stringzilla as sz
 
-texts = sz.Strs(["alpha", "beta", "gamma"])
+texts = sz.Strings(["alpha", "beta", "gamma"])
 lanes = sz.Sha256s(len(texts))
 digests = np.empty((len(lanes), sz.Sha256.digest_length), np.uint8)
 lanes.update(texts).digest(out=digests)
@@ -393,11 +395,11 @@ assert tags[0] == sz.hmac_sha256(b"secret", "alpha")
 
 ## Sorting, Intersecting, and Sampling
 
-These operate on a `Strs` collection and return new collections or index tuples, leaving the original unchanged.
+These operate on a `Strings` collection and return new collections or tuples of numbers, leaving the original unchanged.
 
 ### Sorting
 
-- `sorted(reverse=False, uncased=False, top=None)` — return a new, stably sorted `Strs`.
+- `sorted(reverse=False, uncased=False, top=None)` — return a new, stably sorted `Strings`.
   `reverse` sorts descending, `uncased` orders by Unicode case-folding, and `top` keeps only the leading `top` elements (a partial top-k, cheaper than a full sort).
 - `argsort(reverse=False, uncased=False, top=None, out=None)` — return the stable permutation of indices that sorts the collection, as a tuple of ints.
   `out` is an optional writable, C-contiguous 64-bit-unsigned buffer such as `numpy.uintp` or `array('Q')`, receiving the indices with zero allocation; when given, `out` itself is returned.
@@ -405,7 +407,7 @@ These operate on a `Strs` collection and return new collections or index tuples,
 ```python
 import stringzilla as sz
 
-names = sz.Strs(["banana", "apple", "cherry"])
+names = sz.Strings(["banana", "apple", "cherry"])
 assert [str(x) for x in names.sorted()] == ["apple", "banana", "cherry"]
 assert [str(x) for x in names.sorted(reverse=True)] == ["cherry", "banana", "apple"]
 assert [str(x) for x in names.sorted(top=2)] == ["apple", "banana"]
@@ -420,32 +422,52 @@ assert names.argsort() == (1, 0, 2)
 ```python
 import stringzilla as sz
 
-ours, theirs = sz.Strs(["banana", "apple", "cherry"]).intersect(sz.Strs(["cherry", "orange", "banana"]))
+ours, theirs = sz.Strings(["banana", "apple", "cherry"]).intersect(sz.Strings(["cherry", "orange", "banana"]))
 assert sorted(ours) == [0, 2]                 # "banana" and "cherry" on our side
 assert len(ours) == len(theirs) == 2
 ```
 
-### Sampling and Shuffling
+### Searching and Hashing Every String
 
-- `sample(size, seed=None)` — return a new `Strs` of `size` elements drawn at random with replacement; `seed` makes it reproducible.
-- `shuffled(seed=None)` — return a new `Strs` with the elements randomly permuted; `seed` makes it reproducible.
+- `find(needle, out=None)` — return the byte offset of the first `needle` in every string, or `-1` where a string holds none, like `str.find` over each; a `str`, `bytes`, or `String` needle is accepted.
+  `out` is an optional writable, C-contiguous pointer-width signed buffer such as `numpy.intp`.
+- `hashes(seed=0, out=None)` — return one unsigned 64-bit hash per string, each equal to `sz.hash(text, seed)`, for group-by keys, joins, and sharding.
+  `out` is an optional writable, C-contiguous 64-bit unsigned buffer such as `numpy.uint64`.
+- `utf8_count(out=None)` — return the codepoints of every string, like `len(text.decode())` over each, validating every string as UTF-8 on the way and raising `ValueError` that names the index of the first ill-formed one.
+  `out` is an optional writable, C-contiguous pointer-width unsigned buffer such as `numpy.uintp`.
+
+All three run once over the whole tape and, like `argsort`, return `out` itself when it is given.
 
 ```python
 import stringzilla as sz
 
-pool = sz.Strs(["a", "b", "c", "d"])
+names = sz.Strings(["hello", "world", "help"])
+assert names.find("el") == (1, -1, 1)
+assert names.hashes(seed=7) == tuple(sz.hash(name, 7) for name in ["hello", "world", "help"])
+assert sz.Strings(["hello", "café", ""]).utf8_count() == (5, 4, 0)
+```
+
+### Sampling and Shuffling
+
+- `sample(size, seed=None)` — return a new `Strings` of `size` elements drawn at random with replacement; `seed` makes it reproducible.
+- `shuffled(seed=None)` — return a new `Strings` with the elements randomly permuted; `seed` makes it reproducible.
+
+```python
+import stringzilla as sz
+
+pool = sz.Strings(["a", "b", "c", "d"])
 assert len(pool.sample(2)) == 2
 assert [str(x) for x in sorted(pool.shuffled(seed=42))] == ["a", "b", "c", "d"]
 ```
 
 ### Random Byte Generation
 
-These module-level functions generate random bytes and are not tied to `Strs`:
+These module-level functions generate random bytes and are not tied to `Strings`:
 
 - `sz.random(length, nonce=0, alphabet=None)` — return a fresh random `bytes` of `length`; if `alphabet` is given, each byte `b` is mapped to `alphabet[b % len(alphabet)]`.
-- `sz.fill_random(buffer, nonce=0, alphabet=None, start=0, end=len)` — fill a writable, contiguous byte buffer such as a `bytearray`, `memoryview`, or `Str` in place with pseudo-random bytes, optionally remapped to `alphabet`, optionally limited to the `[start, end)` slice.
+- `sz.fill_random(buffer, nonce=0, alphabet=None, start=0, end=len)` — fill a writable, contiguous byte buffer such as a `bytearray`, `memoryview`, or `String` in place with pseudo-random bytes, optionally remapped to `alphabet`, optionally limited to the `[start, end)` slice.
   Returns `None`.
-  Also available as the `Str.fill_random` method.
+  Also available as the `String.fill_random` method.
 
 ```python
 import stringzilla as sz
@@ -460,7 +482,7 @@ assert len(buf) == 16
 
 ## Escaping and Normalizing Collections
 
-Every verb below is one native call over the whole collection, in whatever layout it holds, and returns a new `Strs` owning one tape.
+Every verb below is one native call over the whole collection and returns a new `Strings` owning one tape.
 
 - `translate(table)`: maps every byte through a 256-byte table or a `dict`, as `bytes.translate` does for each string.
 - `escape(kind='json')`: escapes every string for a text format.
@@ -480,23 +502,23 @@ The escape kinds follow the standard library's own writers and readers:
 ```python
 import stringzilla as sz
 
-names = sz.Strs(["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds"])
+names = sz.Strings(["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds"])
 assert [str(x) for x in names.escape("csv")] == ["Ada", '"Grace ""Amazing"" Hopper"', '"Linus\nTorvalds"']
 assert [str(x) for x in names.escape("url").unescape("url")] == [str(x) for x in names]
 assert [str(x) for x in names.translate({"a": "A"})][0] == "AdA"
-assert [str(x) for x in sz.Strs(["Straße", "ﬁle"]).normalize("NFKC_Casefold")] == ["strasse", "file"]
+assert [str(x) for x in sz.Strings(["Straße", "ﬁle"]).normalize("NFKC_Casefold")] == ["strasse", "file"]
 ```
 
 ## Dumping JSON and CSV
 
 Writing a column of strings out as JSON or CSV usually costs a Python object per cell: `json.dumps` walks a `list` of `str`, `csv.writer` formats one row at a time, and pandas first builds a `DataFrame` of objects.
-`sz.to_json` and `sz.to_csv` instead escape each column once, in one native pass over the whole column, then interleave the rows straight into a single `bytes` object of exactly the right size.
+`sz.to_json` and `sz.to_csv` instead escape each column once, in one native pass over the whole column, then join the framed rows with one more native call into a single `bytes` object of exactly the right size.
 
-- `Strs.to_json(ensure_ascii=True)`: one compact JSON array, byte for byte what `json.dumps(strings, ensure_ascii=ensure_ascii, separators=(",", ":"))` writes.
+- `Strings.to_json(ensure_ascii=True)`: one compact JSON array, byte for byte what `json.dumps(strings, ensure_ascii=ensure_ascii, separators=(",", ":"))` writes.
 - `sz.to_json(columns, ensure_ascii=True)`: an array of records, one object per row, byte for byte what `json.dumps` writes for those records, and what `pandas.DataFrame(columns).to_json(orient="records")` writes apart from pandas spelling `/` as `\/`.
 - `sz.to_csv(columns, lineterminator="\n")`: a header line of the names, then a line per row, byte for byte what `csv.writer` and `pandas.DataFrame(columns).to_csv(index=False)` write.
 
-`columns` maps every name to a `Strs` or to any sequence of `str`, all of the same length, and the names are escaped the same way as the cells.
+`columns` maps every name to a `Strings` or to any sequence of `str`, all of the same length, and the names are escaped the same way as the cells.
 
 ```python
 import csv, io, json
@@ -505,7 +527,7 @@ import stringzilla as sz
 
 names = ["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds"]
 cities = ["London", "New York, NY", "Helsinki"]
-columns = {"name": sz.Strs(names), "city": cities}
+columns = {"name": sz.Strings(names), "city": cities}
 frame = pd.DataFrame({"name": names, "city": cities})
 
 records = [{"name": name, "city": city} for name, city in zip(names, cities)]
@@ -523,10 +545,10 @@ assert sz.to_csv(columns) == frame.to_csv(index=False, lineterminator="\n").enco
 On an Apple M5 Pro with CPython 3.12 and pandas 3.0, the input is 200,000 English sentences from Leipzig 1M plus a second column holding the first word of each, 27.1 MB of UTF-8 in all.
 Times are the best of 5 runs, each producing the whole `bytes` object:
 
-- A JSON array of the sentences with `ensure_ascii=True`: 39.4 ms for `json.dumps` and 12.0 ms for `Strs.to_json`, 3.3x faster.
+- A JSON array of the sentences with `ensure_ascii=True`: 39.4 ms for `json.dumps` and 12.0 ms for `Strings.to_json`, 3.3x faster.
 - The same array with `ensure_ascii=False`: 75.8 ms and 10.9 ms, 7.0x faster.
-- CSV of both columns: 174.5 ms for `csv.writer` and 188.5 ms for `DataFrame.to_csv`, against 20.8 ms for `sz.to_csv` over `list`s and 17.1 ms over `Strs`, 8.4x and 10.2x faster than `csv.writer`.
-- JSON records of both columns: 94.1 ms for `json.dumps` with the `dict`s built inline and 68.2 ms for `DataFrame.to_json`, against 15.5 ms for `sz.to_json` over `Strs`, 6.1x and 4.4x faster.
+- CSV of both columns: 174.5 ms for `csv.writer` and 188.5 ms for `DataFrame.to_csv`, against 20.8 ms for `sz.to_csv` over `list`s and 17.1 ms over `Strings`, 8.4x and 10.2x faster than `csv.writer`.
+- JSON records of both columns: 94.1 ms for `json.dumps` with the `dict`s built inline and 68.2 ms for `DataFrame.to_json`, against 15.5 ms for `sz.to_json` over `Strings`, 6.1x and 4.4x faster.
 
 ## Batch Engines
 
@@ -540,7 +562,7 @@ Each engine writes into a writable buffer the caller supplies as `out`, so nothi
 | `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out)`                                        |
 | `SubstringsEngine`         | a vocabulary of needles and an overlap policy     | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
 
-Queries, candidates, and haystacks all arrive as `sz.Strs`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
+Queries, candidates, and haystacks all arrive as `sz.Strings`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
 Engine calls release the GIL, and calls into one engine take turns on its lock, so build one engine per thread to score in parallel.
 
 ### Edit Distances
@@ -553,15 +575,15 @@ Engine calls release the GIL, and calls into one engine take turns on its lock, 
 ```python
 import stringzilla as sz
 
-engine = sz.LevenshteinEngine(sz.Strs(["hello", "world"]))
+engine = sz.LevenshteinEngine(sz.Strings(["hello", "world"]))
 out = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
-engine.distances(sz.Strs(["hallo", "word"]), out)
+engine.distances(sz.Strings(["hallo", "word"]), out)
 assert out[0, 0] == 1           # hello -> hallo
 
 # UTF-8 rune distances, where one accented codepoint is one edit rather than two.
-runes = sz.LevenshteinEngine(sz.Strs(["café"]), symbol="runes")
+runes = sz.LevenshteinEngine(sz.Strings(["café"]), symbol="runes")
 out = memoryview(bytearray(8)).cast("Q", (1, 1))
-runes.distances(sz.Strs(["cafe"]), out)
+runes.distances(sz.Strings(["cafe"]), out)
 assert out[0, 0] == 1
 ```
 
@@ -576,9 +598,9 @@ Widths need not form a doubling chain, and a width past a text scores zero for e
 ```python
 import stringzilla as sz
 
-engine = sz.OverlapEngine(sz.Strs(["the quick brown fox"]), [4, 8])
+engine = sz.OverlapEngine(sz.Strings(["the quick brown fox"]), [4, 8])
 out = memoryview(bytearray(1 * 2 * 2 * 4)).cast("f", (1, 2, 2))
-engine.scores(sz.Strs(["the quick brown cat", "nothing alike"]), out)
+engine.scores(sz.Strings(["the quick brown cat", "nothing alike"]), out)
 assert all(0.0 <= out[0, c, w] <= 1.0 for c in range(2) for w in range(2))
 ```
 
@@ -588,7 +610,7 @@ assert all(0.0 <= out[0, c, w] <= 1.0 for c in range(2) for w in range(2))
 
 | Argument           | Default           | Meaning                                                                        |
 | :----------------- | :---------------- | :------------------------------------------------------------------------------ |
-| `needles`          | required          | `sz.Strs` vocabulary; an empty needle is refused, valid UTF-8 needed when folding. |
+| `needles`          | required          | `sz.Strings` vocabulary; an empty needle is refused, valid UTF-8 needed when folding. |
 | `case_sensitivity` | `'cased'`         | `'cased'` matches bytes, `'uncased'` folds both sides under full Unicode folding. |
 | `overlap_policy`   | `'overlapping'`   | `'overlapping'`, `'leftmost-longest'`, or `'leftmost-first'`.                    |
 | `hot_states`       | `None`            | States kept in the dense hot rows; `None` sizes them to a fixed byte budget.     |
@@ -611,8 +633,8 @@ Passing `None` for `matches` or `target` makes the call a pure size query.
 ```python
 import stringzilla as sz
 
-engine = sz.SubstringsEngine(sz.Strs(["he", "she", "his", "hers"]))
-haystacks = sz.Strs(["ushers", "hershey"])
+engine = sz.SubstringsEngine(sz.Strings(["he", "she", "his", "hers"]))
+haystacks = sz.Strings(["ushers", "hershey"])
 
 counts = memoryview(bytearray(2 * 8)).cast("Q")
 engine.counts(haystacks, counts)
@@ -622,10 +644,10 @@ matches = memoryview(bytearray(8 * 4 * 8)).cast("Q", (8, 4))
 offsets = memoryview(bytearray(3 * 8)).cast("Q")
 engine.find(haystacks, matches, offsets)
 
-cover = sz.SubstringsEngine(sz.Strs(["he", "she"]), overlap_policy="leftmost-longest")
+cover = sz.SubstringsEngine(sz.Strings(["he", "she"]), overlap_policy="leftmost-longest")
 target = memoryview(bytearray(32))
 offsets = memoryview(bytearray(3 * 8)).cast("Q")
-cover.replace(haystacks, sz.Strs(["HE", "SHE"]), target, offsets)
+cover.replace(haystacks, sz.Strings(["HE", "SHE"]), target, offsets)
 assert bytes(target[offsets[1]:offsets[2]]) == b"HErSHEy"
 ```
 
@@ -636,11 +658,11 @@ Term frequencies are raw overlapping counts, so the engine's own overlap policy 
 ```python
 import stringzilla as sz
 
-engine = sz.SubstringsEngine(sz.Strs(["cat", "dog"]))
+engine = sz.SubstringsEngine(sz.Strings(["cat", "dog"]))
 weights = memoryview(bytearray(2 * 4)).cast("f")
 weights[0], weights[1] = 1.0, 1.0
 out = memoryview(bytearray(2 * 4)).cast("f")
-engine.bm25_scores(sz.Strs(["cat and dog", "nothing here"]), weights, out, average_document_length=10.0)
+engine.bm25_scores(sz.Strings(["cat and dog", "nothing here"]), weights, out, average_document_length=10.0)
 assert out[1] == 0.0
 ```
 
@@ -657,7 +679,7 @@ Every verb then takes its own keyword-only `stream`, so one engine can be scored
 `LevenshteinEngine` and `OverlapEngine` keep no round state on the device, so their rounds may run on any number of streams at once.
 `SubstringsEngine` rounds share one arena and one report, so the caller orders them, on one stream or with events between two.
 
-A device engine reads its inputs in place, so they come from `sz.Strs(texts).copy(gpu)`, and a host `Strs` raises `BufferError`, while a host engine reads a copy made for any capabilities.
+A device engine reads its inputs in place, so they come from `sz.Strings(texts).copy(gpu)`, and a host `Strings` raises `BufferError`, while a host engine reads a copy made for any capabilities.
 `sz.cuda_stream_init(ordinal)` makes a stream on any device, and `sz.cuda_stream_free(stream)` frees it once synchronized, with `rocm_` and `metal_` twins.
 
 ```python
@@ -665,8 +687,8 @@ import stringzilla as sz
 
 gpu = sz.cuda_capabilities_enabled(0)
 stream = sz.cuda_stream_init(0)
-engine = sz.LevenshteinEngine(sz.Strs(["kitten", "saturday"]), capabilities=gpu, stream=stream)
-candidates = sz.Strs(["sitting", "sunday"]).copy(gpu, stream)
+engine = sz.LevenshteinEngine(sz.Strings(["kitten", "saturday"]), capabilities=gpu, stream=stream)
+candidates = sz.Strings(["sitting", "sunday"]).copy(gpu, stream)
 engine.distances(candidates, unified_out, stream=stream)
 sz.synchronize(gpu, stream)  # before `unified_out` is read or `candidates` dropped
 sz.cuda_stream_free(stream)
@@ -679,8 +701,8 @@ A host engine ignores `stream`, imposes no such requirement, and has always fini
 
 ## UTF-8 Segmentation
 
-`Str`, along with the matching module-level functions, exposes lazy iterators over Unicode boundaries.
-Each yields `Str` views into the original buffer, so segmentation stays allocation-free, except `utf8_codepoints`, which yields `int` code points.
+`String`, along with the matching module-level functions, exposes lazy iterators over Unicode boundaries.
+Each yields `String` views into the original buffer, so segmentation stays allocation-free, except `utf8_codepoints`, which yields `int` code points.
 
 | Method / function                                                         | Standard                         | Yields                                                                                 |
 | :------------------------------------------------------------------------ | :------------------------------- | :------------------------------------------------------------------------------------- |
@@ -703,23 +725,23 @@ Naming follows one rule: the bare name (`newlines`/`whitespaces`/`delimiters`) y
 import stringzilla as sz
 
 assert list(sz.utf8_codepoints("AB")) == [65, 66]
-assert [str(g) for g in sz.Str("a👍🏽b").utf8_graphemes()] == ["a", "👍🏽", "b"]
+assert [str(g) for g in sz.String("a👍🏽b").utf8_graphemes()] == ["a", "👍🏽", "b"]
 [str(w) for w in sz.utf8_wordbreaks("Hi, world")]    # all UAX-29 segments
-assert sum(1 for _ in sz.Str("first\nsecond\nthird").utf8_split_newlines()) == 3
+assert sum(1 for _ in sz.String("first\nsecond\nthird").utf8_split_newlines()) == 3
 assert [str(t) for t in sz.utf8_split_whitespaces("foo  bar baz", skip_empty=True)] == ["foo", "bar", "baz"]
 assert "".join(str(s) for s in sz.utf8_split_newlines("a\nb", with_separators=True)) == "a\nb"
 ```
 
 ### Counting Code Points
 
-`utf8_count(string)` counts Unicode characters rather than bytes, unlike `len`, which counts bytes:
+`utf8_count(string)` counts Unicode characters rather than bytes, unlike `len`, which counts bytes, and `Strings.utf8_count()` counts every string of a collection in one pass:
 
 ```python
 import stringzilla as sz
 
 assert sz.utf8_count("hello") == 5
 assert sz.utf8_count("é") == 1
-assert len(sz.Str("é")) == 2      # bytes
+assert len(sz.String("é")) == 2      # bytes
 ```
 
 ### Unicode Case Folding for Uncased Matching
@@ -730,7 +752,7 @@ These apply Unicode case folding, correctly handling one-to-many expansions such
 - `utf8_uncased_search(haystack, needle, start=0, end=len, validate=False)` — index of the first uncased match, or `-1`.
   For `str` inputs `start`/`end` and the result are codepoint offsets; for `bytes` inputs they are byte offsets.
 - `utf8_uncased_order(a, b, validate=False)` — uncased lexicographic comparison: negative, zero, or positive `int`.
-- `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `Str` view whose length may differ from `needle` due to folding expansions; an empty `needle` matches at every codepoint boundary, the end included.
+- `utf8_uncased_matches(haystack, needle, include_overlapping=False)` — iterate over all uncased matches, yielding each matched region as a `String` view whose length may differ from `needle` due to folding expansions; an empty `needle` matches at every codepoint boundary, the end included.
 
 Pass `validate=True` to validate UTF-8 before processing.
 

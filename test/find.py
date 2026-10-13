@@ -5,7 +5,7 @@ Mirrors the C++ test/find.cpp translation unit.
 
 Covers: find/rfind/count and the find_first_of/find_last_of/find_first_not_of/find_last_not_of/
 count_byteset byteset family, partition/rpartition, the `in` operator, and the global-function
-mirrors of every Str method; empty-needle and empty-byteset degenerate offsets across find, rfind,
+mirrors of every String method; empty-needle and empty-byteset degenerate offsets across find, rfind,
 count, and utf8_uncased_search; fuzzed substring search over random alphabets; and cross-backend
 agreement across SIMD lane boundaries, vector-width haystacks, unaligned views, and random fuzzing.
 Compares against: CPython str find/rfind/count/in/partition/split, hand-written non-SIMD oracle
@@ -39,7 +39,7 @@ from base import (
 )
 
 import stringzilla as sz
-from stringzilla import Str, Strs
+from stringzilla import String, Strings
 
 # region Unit
 
@@ -56,7 +56,7 @@ FIND_BYTESET_EMPTY_SET_CASES = [
 def test_unit_count():
     """`count` matches CPython `str.count` with and without overlap for a repeated single-character body."""
     native = "aaaaa"
-    big = Str(native)
+    big = String(native)
     assert big.count("a") == 5
     assert big.count("aa") == 2
     assert big.count("aa", allowoverlap=True) == 4
@@ -65,7 +65,7 @@ def test_unit_count():
 def test_unit_count_byteset():
     """`count_byteset` counts bytes in a set across repeated patterns, start/end bounds, and empty inputs."""
     native = "abcdef"
-    big = Str(native)
+    big = String(native)
 
     assert big.count_byteset("abc") == 3  # a, b, c
     assert big.count_byteset("xyz") == 0  # no matches
@@ -86,7 +86,7 @@ def test_unit_count_byteset():
 
     # Test start/end bounds
     native = "abcdefghij"
-    big = Str(native)
+    big = String(native)
 
     assert big.count_byteset("abc", 0, 3) == 3  # "abc"
     assert big.count_byteset("abc", 1, 3) == 2  # "bc"
@@ -102,8 +102,8 @@ def test_unit_count_byteset():
 
 
 def test_unit_contains():
-    """The `in` operator on `Str` matches CPython substring containment for a present and an absent needle."""
-    big = Str("abcdef")
+    """The `in` operator on `String` matches CPython substring containment for a present and an absent needle."""
+    big = String("abcdef")
     assert "a" in big
     assert "ab" in big
     assert "xxx" not in big
@@ -223,12 +223,12 @@ def test_unit_globals():
 
 
 def test_slice_of_split():
-    """Slices returned by `Str.split()` match CPython `str.split()` element-wise, including with a
+    """Slices returned by `String.split()` match CPython `str.split()` element-wise, including with a
     64-bit-scale repeated body."""
 
     def impl(native_str: str):
         native_split = native_str.split()
-        text = sz.Str(native_str)
+        text = sz.String(native_str)
         sz_split = text.split()
         for slice_idx in range(len(native_split)):
             assert str(sz_split[slice_idx]) == native_split[slice_idx]
@@ -308,7 +308,7 @@ def test_unit_empty_needle_uncased_search_degenerate_bytes(haystack, needle, sta
 
 def check_identical(
     native: str,
-    big: Str,
+    big: String,
     needle: str,
     check_iterators: bool = False,
 ) -> None:
@@ -327,7 +327,7 @@ def check_identical(
 
     # Check splits and other sequence operations
     native_strings = native.split(needle)
-    big_strings: Strs = big.split(needle)
+    big_strings: Strings = big.split(needle)
     assert len(native_strings) == len(big_strings)
 
     if check_iterators:
@@ -343,10 +343,10 @@ def check_identical(
 
 @pytest.mark.parametrize("repetitions", range(1, 10))
 def test_fuzzy_repetitions(repetitions: int):
-    """`Str` matches CPython `str` for find, rfind, count, contains, and split across every prefix of
+    """`String` matches CPython `str` for find, rfind, count, contains, and split across every prefix of
     a repeated `"abcd"` body, including a needle longer than the periodic unit."""
     native = "abcd" * repetitions
-    big = Str(native)
+    big = String(native)
 
     check_identical(native, big, "a", True)
     check_identical(native, big, "ab", True)
@@ -359,10 +359,10 @@ def test_fuzzy_repetitions(repetitions: int):
 @pytest.mark.parametrize("haystack_length", [n for n in VECTOR_WIDTH_LENGTHS if n <= 65])
 @pytest.mark.parametrize("variability", [1, 2, 4, 26])
 def test_fuzzy_substrings(pattern_length: int, haystack_length: int, variability: int, rng: Random):
-    """`Str.contains` and `Str.find` match CPython `str` across random alphabets, seeds, and
+    """`String.contains` and `String.find` match CPython `str` across random alphabets, seeds, and
     haystack/pattern lengths bracketing the SIMD vector widths."""
     native = get_random_string(rng, variability=variability, length=haystack_length)
-    big = Str(native)
+    big = String(native)
     pattern = get_random_string(rng, variability=variability, length=pattern_length)
     assert (pattern in native) == big.contains(pattern), (
         f"Failed to check if {pattern} at offset {native.find(pattern)} is present in {native}"
@@ -526,7 +526,7 @@ def test_unit_backend_differential_boundary_lengths(backend_results, haystack_le
 @pytest.mark.parametrize("needle", UNALIGNED_VIEW_NEEDLES)
 def test_unit_backend_differential_unaligned_views(backend_results, needle):
     """The whole `find` family agrees across every `capability_sweep()` backend and with CPython `str`
-    for a `Str` slice sharing its parent buffer at a misaligned base pointer; a divergence is a kernel
+    for a `String` slice sharing its parent buffer at a misaligned base pointer; a divergence is a kernel
     bug, not a binding bug."""
     parent_text = ("ab" * 40)[:77]
     for offset, view in unaligned_views(parent_text):

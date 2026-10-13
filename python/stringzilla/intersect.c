@@ -6,39 +6,39 @@
  */
 #include "stringzilla.h"
 
-char const doc_Strs_intersect[] =                                                                         //
+char const doc_Strings_intersect[] =                                                                      //
     "intersect(other, *, seed=0, capabilities=None) -> tuple[tuple[int, ...], tuple[int, ...]]\n"         //
     "\n"                                                                                                  //
     "Return the positions of strings present in both collections.\n"                                      //
     "Each distinct shared value is matched exactly once, even if either side has duplicates.\n"           //
     "\n"                                                                                                  //
     "Args:\n"                                                                                             //
-    "  other (Strs): The collection to intersect with.\n"                                                 //
+    "  other (Strings): The collection to intersect with.\n"                                              //
     "  seed (int, optional): Seed for the hash table to avoid attacks. Defaults to 0.\n"                  //
     "  capabilities (Capability, optional): Capabilities to run, defaulting to the CPU's enabled ones.\n" //
     "Returns:\n"                                                                                          //
     "  tuple[tuple[int, ...], tuple[int, ...]]: Parallel position tuples - `result[0][i]` in\n"           //
     "  this collection and `result[1][i]` in `other` point to equal strings.\n"                           //
     "Example:\n"                                                                                          //
-    "  >>> ours, theirs = sz.Strs(['banana', 'apple', 'cherry']).intersect(\n"                            //
-    "  ...     sz.Strs(['cherry', 'banana']))\n"                                                          //
+    "  >>> ours, theirs = sz.Strings(['banana', 'apple', 'cherry']).intersect(\n"                         //
+    "  ...     sz.Strings(['cherry', 'banana']))\n"                                                       //
     "  >>> sorted(ours)\n"                                                                                //
     "  [0, 2]";
 
-/** Returns the positions of strings shared between two @c Strs objects. Duplicates within either
+/** Returns the positions of strings shared between two @c Strings objects. Duplicates within either
  *  side are tolerated: each distinct shared value is matched exactly once. */
-PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
-                         PyObject *args_names_tuple) {
+PyObject *Strings_intersect(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                            PyObject *args_names_tuple) {
     if (positional_args_count != 1) {
-        PyErr_SetString(PyExc_TypeError, "intersect() takes exactly one positional argument: the other Strs");
+        PyErr_SetString(PyExc_TypeError, "intersect() takes exactly one positional argument: the other Strings");
         return NULL;
     }
     PyObject *other_obj = args[0];
-    if (!PyObject_TypeCheck(other_obj, &StrsType)) {
-        PyErr_SetString(PyExc_TypeError, "intersect(): the other collection must be a Strs");
+    if (!PyObject_TypeCheck(other_obj, &StringsType)) {
+        PyErr_SetString(PyExc_TypeError, "intersect(): the other collection must be a Strings");
         return NULL;
     }
-    Strs *other = (Strs *)other_obj;
+    Strings *other = (Strings *)other_obj;
 
     sz_u64_t seed = 0;
     PyObject *seed_obj = NULL, *capabilities_object = NULL;
@@ -64,8 +64,8 @@ PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positiona
         if (PyErr_Occurred()) return NULL; // Reject negative / oversized seed
     }
 
-    sz_size_t const first_count = Strs_len(self);
-    sz_size_t const second_count = Strs_len(other);
+    sz_size_t const first_count = self->tape.count;
+    sz_size_t const second_count = other->tape.count;
     sz_size_t const max_size = sz_min_of_two(first_count, second_count);
     if (max_size == 0) {
         PyObject *const empty = PyTuple_New(0);
@@ -82,8 +82,8 @@ PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positiona
     }
 
     sz_strings_view_t first, second;
-    sz_py_export_strings_as_view((PyObject *)self, &first);
-    sz_py_export_strings_as_view(other_obj, &second);
+    sz_strings_from_span(&self->tape, &first);
+    sz_strings_from_span(&other->tape, &second);
     sz_size_t intersection_count = 0;
     sz_status_t status = sz_intersect_best(&first, &second, NULL, seed, &intersection_count, positions,
                                            positions + max_size, capabilities, NULL);

@@ -7,7 +7,7 @@ Mirrors the C++ test/utf8_tokens.cpp translation unit.
 Covers: utf8_split_newlines across ASCII, CRLF, and the Unicode line terminators NEL, line separator,
 and paragraph separator, plus vertical tab and form feed; utf8_split_whitespaces across ASCII and the
 Unicode whitespace code points NBSP, ideographic space, and en/em space; the with_separators lossless
-reconstruction and skip_empty pruning on both splitters; the Str method forms; and malformed-byte
+reconstruction and skip_empty pruning on both splitters; the String method forms; and malformed-byte
 safety across both splitters.
 Compares against: CPython str.splitlines() and str.split() under skip_empty, and cross-backend
 self-consistency across every capability_sweep() backend.
@@ -34,7 +34,7 @@ from base import (
 from utf8_helpers import adversarial_utf8_inputs
 
 import stringzilla as sz
-from stringzilla import Str
+from stringzilla import String
 
 # region Unit
 
@@ -45,41 +45,41 @@ def test_utf8_lines():
     `with_separators=True` reconstructs the input losslessly, and `skip_empty=True` drops every empty
     segment including middle ones, unlike Python's `splitlines()`."""
     # Basic newline characters
-    assert list(sz.utf8_split_newlines("a\nb\nc")) == [Str("a"), Str("b"), Str("c")]
-    assert list(sz.utf8_split_newlines("a\rb\rc")) == [Str("a"), Str("b"), Str("c")]
-    assert list(sz.utf8_split_newlines("a\r\nb\r\nc")) == [Str("a"), Str("b"), Str("c")]
+    assert list(sz.utf8_split_newlines("a\nb\nc")) == [String("a"), String("b"), String("c")]
+    assert list(sz.utf8_split_newlines("a\rb\rc")) == [String("a"), String("b"), String("c")]
+    assert list(sz.utf8_split_newlines("a\r\nb\r\nc")) == [String("a"), String("b"), String("c")]
 
     # CRLF treated as single delimiter
     result = list(sz.utf8_split_newlines("line1\r\nline2"))
     assert len(result) == 2
-    assert result[0] == Str("line1")
-    assert result[1] == Str("line2")
+    assert result[0] == String("line1")
+    assert result[1] == String("line2")
 
-    # Empty string: yields one empty Str; Python's splitlines() returns [] instead.
-    assert list(sz.utf8_split_newlines("")) == [Str("")]
+    # Empty string: yields one empty String; Python's splitlines() returns [] instead.
+    assert list(sz.utf8_split_newlines("")) == [String("")]
 
     # No newlines
-    assert list(sz.utf8_split_newlines("hello")) == [Str("hello")]
+    assert list(sz.utf8_split_newlines("hello")) == [String("hello")]
 
     # Consecutive newlines create empty lines
     result = list(sz.utf8_split_newlines("a\n\nb"))
     assert len(result) == 3
-    assert result[1] == Str("")  # Empty line between
+    assert result[1] == String("")  # Empty line between
 
     # Trailing newline: includes trailing empty; Python omits it.
     result = list(sz.utf8_split_newlines("a\nb\n"))
     assert len(result) == 3
-    assert result[2] == Str("")
+    assert result[2] == String("")
 
     # There is no `keepends` parameter; `with_separators=True` is the lossless alternative, interleaving
     # the newline runs as their own segments so concatenation reproduces the input.
     result = list(sz.utf8_split_newlines("a\nb\nc", with_separators=True))
     assert "".join(str(s) for s in result) == "a\nb\nc"
-    assert result == [Str("a"), Str("\n"), Str("b"), Str("\n"), Str("c")]
+    assert result == [String("a"), String("\n"), String("b"), String("\n"), String("c")]
 
     # CRLF stays a single separator segment under with_separators.
     result = list(sz.utf8_split_newlines("a\r\nb", with_separators=True))
-    assert result == [Str("a"), Str("\r\n"), Str("b")]
+    assert result == [String("a"), String("\r\n"), String("b")]
 
     # Unicode newlines: vertical tab, form feed
     assert len(list(sz.utf8_split_newlines("a\vb\fc"))) == 3
@@ -92,16 +92,16 @@ def test_utf8_lines():
     assert len(list(sz.utf8_split_newlines(f"a{line_sep}b"))) == 2
     assert len(list(sz.utf8_split_newlines(f"a{para_sep}b"))) == 2
 
-    # Method form on Str
-    result = list(sz.Str("a\nb").utf8_split_newlines())
-    assert result == [Str("a"), Str("b")]
+    # Method form on String
+    result = list(sz.String("a\nb").utf8_split_newlines())
+    assert result == [String("a"), String("b")]
 
     # skip_empty=True skips every empty segment, leading, middle, and trailing.
     # Python's splitlines() keeps middle empty lines.
     assert list(sz.utf8_split_newlines("", skip_empty=True)) == []
-    assert list(sz.utf8_split_newlines("a\nb\n", skip_empty=True)) == [Str("a"), Str("b")]
-    assert list(sz.utf8_split_newlines("a\n\nb", skip_empty=True)) == [Str("a"), Str("b")]  # skips middle empty
-    assert list(sz.utf8_split_newlines("\na\n", skip_empty=True)) == [Str("a")]  # skips leading & trailing
+    assert list(sz.utf8_split_newlines("a\nb\n", skip_empty=True)) == [String("a"), String("b")]
+    assert list(sz.utf8_split_newlines("a\n\nb", skip_empty=True)) == [String("a"), String("b")]  # skips middle empty
+    assert list(sz.utf8_split_newlines("\na\n", skip_empty=True)) == [String("a")]  # skips leading & trailing
 
 
 def test_utf8_tokens():
@@ -110,13 +110,13 @@ def test_utf8_tokens():
     empty segments instead of being collapsed away."""
     # Basic whitespace: space, tab, newline
     result = list(sz.utf8_split_whitespaces("hello world"))
-    assert result == [Str("hello"), Str("world")]
+    assert result == [String("hello"), String("world")]
 
     result = list(sz.utf8_split_whitespaces("a\tb\nc"))
-    assert result == [Str("a"), Str("b"), Str("c")]
+    assert result == [String("a"), String("b"), String("c")]
 
-    # Empty string: yields one empty Str; Python's split() returns [] instead.
-    assert list(sz.utf8_split_whitespaces("")) == [Str("")]
+    # Empty string: yields one empty String; Python's split() returns [] instead.
+    assert list(sz.utf8_split_whitespaces("")) == [String("")]
 
     # String with only whitespace: yields empty strings between delimiters; Python's split() returns
     # [] for whitespace-only strings.
@@ -135,7 +135,7 @@ def test_utf8_tokens():
     assert "hello" in [str(s) for s in result]
 
     # No whitespace
-    assert list(sz.utf8_split_whitespaces("hello")) == [Str("hello")]
+    assert list(sz.utf8_split_whitespaces("hello")) == [String("hello")]
 
     # Unicode whitespace: NO-BREAK SPACE (U+00A0)
     nbsp = "\u00a0"
@@ -160,8 +160,8 @@ def test_utf8_tokens():
     assert str(result[1]) == "b"
     assert str(result[2]) == "c"
 
-    # Method form on Str
-    result = list(sz.Str("hello world").utf8_split_whitespaces())
+    # Method form on String
+    result = list(sz.String("hello world").utf8_split_whitespaces())
     assert len(result) == 2
     assert str(result[0]) == "hello"
     assert str(result[1]) == "world"
