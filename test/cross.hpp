@@ -781,20 +781,11 @@ inline void check_strings_split_safety_(strings_backend_t const &backend) {
             for (std::string const &part : expected) payload_bytes += part.size();
             for_each_cacheline_offset_(text.size(), [&](sz_ptr_t data, std::size_t) {
                 std::memcpy(data, text.data(), text.size());
-                with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
-                    with_guarded_buffer_(
-                        (expected.size() + 1) * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
-                            sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
-                            std::fill(offsets, offsets + expected.size(), 0u);
-                            offsets[expected.size()] = static_cast<sz_u32_t>(payload_bytes);
-                            sz_strings_span_t borrowed {};
-                            borrowed.layout = sz_strings_u32_tape_k, borrowed.count = expected.size();
-                            borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
-                            if (split_outcome_(backend, verb, data, text.size(), nullptr, borrowed).strings != expected)
-                                fail_backend_(backend.name, fmt::format("{} of {} bytes into borrowed blocks differs",
-                                                                        split_verb_name_(verb), text.size())
-                                                                .c_str());
-                        });
+                with_guarded_span_(expected.size(), payload_bytes, [&](sz_strings_span_t &borrowed) {
+                    if (split_outcome_(backend, verb, data, text.size(), nullptr, borrowed).strings == expected) return;
+                    fail_backend_(backend.name, fmt::format("{} of {} bytes into borrowed blocks differs",
+                                                            split_verb_name_(verb), text.size())
+                                                    .c_str());
                 });
             });
         }
@@ -1352,11 +1343,12 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
             }
         }
 
-    // Strings ending on and around the 64-byte blocks that kernels step through to escape a whole
-    // tape at once, escaped, then unescaped from what they escaped.
+    // Strings of every ladder length, each before an empty one, so their ends fall on and around
+    // the 64-byte blocks that kernels step through to escape a whole tape at once, escaped, then
+    // unescaped from what they escaped.
     std::vector<std::string> edges;
-    for (std::size_t const length : {64, 0, 63, 1, 3968, 0, 4096, 1, 63})
-        edges.push_back(random_string(generator, length, escapes));
+    for (sz_size_t const length : span_over(backend_ladder_lengths_))
+        edges.push_back(random_string(generator, length, escapes)), edges.emplace_back();
     std::vector<sz_size_t> const edges_order = random_order(edges.size());
     strings_layouts_t const edges_layouts(edges);
     for (sz_escape_kind_t const kind : escape_kinds_) {
@@ -1373,93 +1365,84 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
     if (candidate.split) check_strings_split_equivalence_(context, candidate);
 }
 
-/** Feeds one strings backend empty collections, borrowed blocks flanked by canaries at every input
- *  alignment, allocators that run dry or refuse a growth at every step, escapes cut short, and
- *  strings long enough to normalize through scratch, asserting it stays in bounds, refuses as
- *  stated, leaves spans whose blocks match their offsets, and names the first malformed string. */
-inline void check_strings_safety_(strings_backend_t const &backend) {
+/** What @p verb reads: @p strings themselves, or those escaped for its kind by @p backend when it
+ *  unescapes them. */
+inline std::vector<std::string> strings_input_for_(strings_backend_t const &backend, strings_verb_t verb,
+                                                   std::vector<std::string> const &strings) {
+    if (verb.kernel != sz_kernel_strings_unescape_k) return strings;
     sized_heap_t heap;
-    std::vector<strings_verb_t> const verbs = strings_verbs_();
+    strings_layouts_t const layouts(strings);
+    sz_strings_span_t escaped {};
+    verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, verb.kind}, layouts.u32_tape(), nullptr,
+                            strings.size(), &heap.allocator, escaped)
+               .status == sz_success_k);
+    std::vector<std::string> input = strings_in_(escaped);
+    sz_strings_span_free(&escaped, &heap.allocator, nullptr);
+    return input;
+}
 
-    // What each verb reads: the strings themselves, or escaped for its kind when it unescapes them.
-    auto const input_for = [&](strings_verb_t verb, std::vector<std::string> const &strings) {
-        if (verb.kernel != sz_kernel_strings_unescape_k) return strings;
-        strings_layouts_t const layouts(strings);
-        sz_strings_span_t escaped {};
-        verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, verb.kind}, layouts.u32_tape(), nullptr,
-                                strings.size(), &heap.allocator, escaped)
-                   .status == sz_success_k);
-        std::vector<std::string> input = strings_in_(escaped);
-        sz_strings_span_free(&escaped, &heap.allocator, nullptr);
-        return input;
-    };
-
-    // Nothing to write, and only empty strings, more than one block of 64 views of them.
-    for (strings_verb_t const verb : verbs)
-        for (std::size_t const count : {(std::size_t)0, (std::size_t)70}) {
-            strings_layouts_t const layouts {std::vector<std::string>(count)};
+/** Converts nothing, and only empty strings, more than one block of 64 views of them, in every
+ *  layout. */
+inline void check_strings_empty_(strings_backend_t const &backend) {
+    sized_heap_t heap;
+    for (std::size_t const count : {(std::size_t)0, (std::size_t)70}) {
+        strings_layouts_t const layouts {std::vector<std::string>(count)};
+        for (strings_verb_t const verb : strings_verbs_())
             for (named_strings_t const &layout : layouts.all()) {
                 sz_strings_span_t tape {};
                 verify(strings_outcome_(backend, verb, layout.view, nullptr, count, &heap.allocator, tape).status ==
                        sz_success_k);
                 sz_strings_span_free(&tape, &heap.allocator, nullptr);
             }
-        }
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
 
-    // Borrowed blocks of exactly the sizes written, between canaries, and rows whose gaps must stay
-    // untouched, for every input alignment and every length a vector ladder switches at.
-    std::string const pattern = "e\xCC\x81\"<,%\\\x01\xff\xC3\xA9\xEF\xAC\x81";
+/** Converts @p text with @p verb from every input alignment into borrowed blocks of exactly the
+ *  sizes written, between canaries; only normalization may take scratch from @p heap. */
+inline void check_strings_borrowed_exactly_(strings_backend_t const &backend, strings_verb_t verb,
+                                            std::string const &text, sized_heap_t &heap) {
+    std::string const input = strings_input_for_(backend, verb, {text}).front();
+    strings_layouts_t const layouts({input});
+    sz_strings_span_t sizing {};
+    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 1, &heap.allocator, sizing).status ==
+           sz_success_k);
+    sz_u32_t const payload_bytes = sizing.data.u32_tape.offsets[1];
+    sz_strings_span_free(&sizing, &heap.allocator, nullptr);
+    sz_allocator_t *const allocator = verb.kernel == sz_kernel_strings_normalize_k ? &heap.allocator : nullptr;
+    sz_u32_t const input_offsets[2] = {0, static_cast<sz_u32_t>(input.size())};
+    for_each_cacheline_offset_(input.size(), [&](sz_ptr_t data, std::size_t) {
+        std::memcpy(data, input.data(), input.size());
+        with_guarded_span_(1, payload_bytes, [&](sz_strings_span_t &borrowed) {
+            sz_strings_view_t const source = strings_tape_over_(data, input_offsets);
+            verify(strings_outcome_(backend, verb, source, nullptr, 1, allocator, borrowed).status == sz_success_k);
+        });
+    });
+}
+
+/** Writes two copies of a string of every ladder length into rows a byte narrower and a byte wider,
+ *  leaving the gaps between the rows untouched. */
+inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
     for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
-        std::string text;
-        for (std::size_t index = 0; index != length; ++index) text.push_back(pattern[index % pattern.size()]);
-        for (strings_verb_t const verb : verbs) {
-            std::string const input = input_for(verb, {text}).front();
-            strings_layouts_t const layouts({input});
-            sz_strings_span_t sizing {};
-            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 1, &heap.allocator, sizing).status ==
-                   sz_success_k);
-            sz_u32_t const payload_bytes = sizing.data.u32_tape.offsets[1];
-            sz_strings_span_free(&sizing, &heap.allocator, nullptr);
-            for_each_cacheline_offset_(input.size(), [&](sz_ptr_t data, std::size_t) {
-                std::memcpy(data, input.data(), input.size());
-                sz_u32_t const input_offsets[2] = {0, static_cast<sz_u32_t>(input.size())};
-                sz_strings_view_t source;
-                source.layout = sz_strings_u32_tape_k, source.count = 1;
-                source.data.u32_tape.data = data, source.data.u32_tape.offsets = input_offsets;
-                with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
-                    with_guarded_buffer_(2 * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
-                        sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
-                        offsets[0] = 0, offsets[1] = payload_bytes;
-                        sz_strings_span_t borrowed {};
-                        borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 1;
-                        borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
-                        sz_allocator_t *const allocator = verb.kernel == sz_kernel_strings_normalize_k ? &heap.allocator
-                                                                                                       : nullptr;
-                        verify(strings_outcome_(backend, verb, source, nullptr, 1, allocator, borrowed).status ==
-                               sz_success_k);
-                    });
-                });
-            });
-        }
-        strings_layouts_t const pair({text, text});
+        strings_layouts_t const pair({std::string(length, 'r'), std::string(length, 'r')});
         sz_strings_view_t const view = pair.u32_tape();
-        for (sz_size_t const width : {length - 1, length + 1}) {
-            sz_size_t const stride = width + 5;
-            with_guarded_buffer_(stride + width, [&](sz_ptr_t rows_data, std::size_t usable_length) {
+        for (sz_size_t const width : {length - 1, length + 1})
+            with_guarded_buffer_(width + 5 + width, [&](sz_ptr_t rows_data, std::size_t usable_length) {
                 std::memset(rows_data, '#', usable_length);
-                sz_strings_rows_t const rows {rows_data, stride, width};
+                sz_strings_rows_t const rows {rows_data, width + 5, width};
                 sz_size_t longest = 0;
                 verify(backend.to_rows(&view, nullptr, 2, &rows, &longest, nullptr) == sz_success_k);
-                for (sz_size_t gap = width; gap != stride; ++gap) verify(rows_data[gap] == '#');
+                for (sz_size_t gap = width; gap != width + 5; ++gap) verify(rows_data[gap] == '#');
             });
-        }
     }
+}
 
-    // An arena with room for a small tape refuses a large one, leaving the small one readable, and
-    // an allocator that refuses everything leaves a zeroed span empty.
-    for (strings_verb_t const verb : verbs) {
-        std::vector<std::string> const small = input_for(verb, {"ab"}),
-                                       large = input_for(verb, {std::string(1024, '"')});
+/** Has an arena with room for a small tape refuse a large one, leaving the small one readable, and
+ *  an allocator refusing everything leave a zeroed span empty. */
+inline void check_strings_arena_refusals_(strings_backend_t const &backend) {
+    for (strings_verb_t const verb : strings_verbs_()) {
+        std::vector<std::string> const small = strings_input_for_(backend, verb, {"ab"});
+        std::vector<std::string> const large = strings_input_for_(backend, verb, {std::string(1024, '"')});
         strings_layouts_t const small_layouts(small), large_layouts(large);
         alignas(64) char buffer[512];
         sz_allocator_t arena;
@@ -1478,91 +1461,105 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
                sz_bad_alloc_k);
         verify(untouched.count == 0);
     }
+}
 
-    // Refusing the first growth, then the second and so on until none is, with every shrink granted
-    // or every shrink refused, and with or without `reallocate`, leaves a zeroed span, reused spans
-    // whose payload must grow or shrink, and the span the input views exactly as they were.
+/** How a rationed allocator grows a block: in place through @c reallocate, or by moving it. */
+enum class rationed_growth_t { reallocating_k, moving_k };
+
+/** The first outcome of @p verb over all of @p strings but the last that an allocator refusing its
+ *  first growths, one more each call, lets through, granting @p shrinks and growing as @p growth
+ *  says; the span starts zeroed, holding @p start, or as the very tape the input views when
+ *  @p start is @p strings, and every refused call must leave the span's blocks as recorded. */
+inline strings_outcome_t strings_first_granted_(strings_backend_t const &backend, strings_verb_t verb,
+                                                std::vector<std::string> const &strings,
+                                                std::vector<std::string> const *start, std::size_t shrinks,
+                                                rationed_growth_t growth) {
+    strings_layouts_t const layouts(strings);
+    for (std::size_t growths = 0; growths != 16; ++growths) {
+        sized_heap_t rationed;
+        if (growth == rationed_growth_t::moving_k) rationed.allocator.reallocate = nullptr;
+        sz_strings_span_t tape {};
+        if (start) tape = span_from_(*start, sz_strings_u32_tape_k, rationed.allocator);
+        sz_strings_view_t input = layouts.u32_tape();
+        if (start == &strings) sz_strings_from_span(&tape, &input);
+        rationed.growths_left = growths, rationed.shrinks_left = shrinks;
+        strings_outcome_t const outcome = strings_outcome_(backend, verb, input, nullptr, strings.size() - 1,
+                                                           &rationed.allocator, tape);
+        sz_strings_span_free(&tape, &rationed.allocator, nullptr);
+        if (rationed.mismatches != 0 || !rationed.blocks.empty())
+            fail_backend_(backend.name, fmt::format("{} refused after {} growths left unrecorded blocks",
+                                                    strings_verb_name_(verb), growths)
+                                            .c_str());
+        if (outcome.status != sz_bad_alloc_k) return outcome;
+    }
+    fail_backend_(backend.name, "a kernel must succeed once the allocator grants it enough");
+    return {};
+}
+
+/** Refuses the first growth, then the second and so on until none is, granting every shrink or
+ *  none, through @c reallocate or without it, from a zeroed span, reused spans whose payload must
+ *  grow or shrink, and the span the input views, expecting the call let through to match a call
+ *  under no rationing at all. */
+inline void check_strings_rationed_growths_(strings_backend_t const &backend) {
     std::vector<std::string> const growing {"Grow \"me\" & <you>", "", "e\xCC\x81\xE2\x84\xAB\xEF\xAC\x81\xC2\xAD",
                                             "%41 \xC3\xA9", "dropped"};
     std::vector<std::string> const shorter {"r"}, longer {std::string(100, 'r')};
-    for (strings_verb_t const verb : verbs) {
-        std::vector<std::string> const strings = input_for(verb, growing);
+    for (strings_verb_t const verb : strings_verbs_()) {
+        std::vector<std::string> const strings = strings_input_for_(backend, verb, growing);
         strings_layouts_t const layouts(strings);
-        sz_size_t const count = strings.size() - 1;
+        sized_heap_t heap;
         sz_strings_span_t reference {};
-        strings_outcome_t const expected = strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, count,
-                                                            &heap.allocator, reference);
+        strings_outcome_t const expected = strings_outcome_(backend, verb, layouts.u32_tape(), nullptr,
+                                                            strings.size() - 1, &heap.allocator, reference);
         sz_strings_span_free(&reference, &heap.allocator, nullptr);
         std::vector<std::string> const *const starts[] = {nullptr, &shorter, &longer, &strings};
-        for (bool const reallocates : {true, false})
+        for (std::vector<std::string> const *start : starts)
             for (std::size_t const shrinks : {std::numeric_limits<std::size_t>::max(), std::size_t {0}})
-                for (std::vector<std::string> const *start : starts)
-                    for (std::size_t growths = 0;; ++growths) {
-                        verify(growths != 16 && "A kernel must succeed once the allocator grants it enough");
-                        sized_heap_t rationed;
-                        if (!reallocates) rationed.allocator.reallocate = nullptr;
-                        sz_strings_span_t tape {};
-                        if (start) tape = span_from_(*start, sz_strings_u32_tape_k, rationed.allocator);
-                        sz_strings_view_t input = layouts.u32_tape();
-                        if (start == &strings) sz_strings_from_span(&tape, &input);
-                        rationed.growths_left = growths, rationed.shrinks_left = shrinks;
-                        strings_outcome_t const outcome = strings_outcome_(backend, verb, input, nullptr, count,
-                                                                           &rationed.allocator, tape);
-                        sz_strings_span_free(&tape, &rationed.allocator, nullptr);
-                        if (rationed.mismatches != 0 || !rationed.blocks.empty()) {
-                            fmt::println(stderr, "{} refused after {} growths left blocks of other sizes than recorded",
-                                         strings_verb_name_(verb), growths);
-                            fail_backend_(backend.name, "a refused allocation left a span its blocks do not match");
-                        }
-                        if (outcome.status == sz_bad_alloc_k) continue;
-                        verify(outcome == expected);
-                        break;
-                    }
+                for (rationed_growth_t const growth : {rationed_growth_t::reallocating_k, rationed_growth_t::moving_k})
+                    verify(strings_first_granted_(backend, verb, strings, start, shrinks, growth) == expected);
     }
+}
 
-    // A run of 400 combining marks out of canonical order, and a clean prefix before a dirty part
-    // over 256 bytes, normalize as each does alone, through scratch the allocator must give, into
-    // fresh blocks and into exact borrowed ones between canaries alike.
-    {
-        std::string marks = "a", dirty(64, 'x');
-        for (std::size_t index = 0; index != 200; ++index) marks += "\xCC\x81\xCC\x96";
-        for (std::size_t index = 0; index != 100; ++index) dirty += "e\xCC\x81";
-        std::vector<std::string> const long_strings {marks, "", dirty};
-        strings_layouts_t const layouts(long_strings);
-        for (sz_normal_form_t const form : normal_forms_) {
-            strings_verb_t const verb {sz_kernel_strings_normalize_k, {}, form};
-            std::vector<std::string> const expected = normalized_alone_(long_strings, form);
-            sz_strings_span_t tape {};
-            if (strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, tape).strings !=
-                expected)
-                fail_backend_(backend.name, fmt::format("long strings normalized to {} differ from each alone",
-                                                        strings_verb_name_(verb))
-                                                .c_str());
-            sz_strings_span_free(&tape, &heap.allocator, nullptr);
+/** Normalizes 400 combining marks out of canonical order, and a clean prefix before a dirty part
+ *  over 256 bytes, as each does alone, through scratch the allocator must give, into fresh blocks
+ *  and into exact borrowed ones between canaries alike. */
+inline void check_strings_long_normalization_(strings_backend_t const &backend) {
+    sized_heap_t heap;
+    std::string marks = "a", dirty(64, 'x');
+    for (std::size_t index = 0; index != 200; ++index) marks += "\xCC\x81\xCC\x96";
+    for (std::size_t index = 0; index != 100; ++index) dirty += "e\xCC\x81";
+    std::vector<std::string> const long_strings {marks, "", dirty};
+    strings_layouts_t const layouts(long_strings);
+    for (sz_normal_form_t const form : normal_forms_) {
+        strings_verb_t const verb {sz_kernel_strings_normalize_k, {}, form};
+        std::vector<std::string> const expected = normalized_alone_(long_strings, form);
+        sz_strings_span_t tape {};
+        if (strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, tape).strings != expected)
+            fail_backend_(
+                backend.name,
+                fmt::format("long strings normalized to {} differ from each alone", strings_verb_name_(verb)).c_str());
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
 
-            std::size_t payload_bytes = 0;
-            for (std::string const &string : expected) payload_bytes += string.size();
-            with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
-                with_guarded_buffer_(4 * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
-                    sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
-                    offsets[0] = 0, offsets[1] = 0, offsets[2] = 0, offsets[3] = static_cast<sz_u32_t>(payload_bytes);
-                    sz_strings_span_t borrowed {};
-                    borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 3;
-                    borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
-                    heap.growths_left = 0;
-                    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed)
-                               .status == sz_bad_alloc_k);
-                    heap.growths_left = std::numeric_limits<std::size_t>::max();
-                    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed)
-                               .strings == expected);
-                    verify(borrowed.data.u32_tape.data == payload && borrowed.data.u32_tape.offsets == offsets);
-                });
-            });
-        }
+        std::size_t payload_bytes = 0;
+        for (std::string const &string : expected) payload_bytes += string.size();
+        with_guarded_span_(3, payload_bytes, [&](sz_strings_span_t &borrowed) {
+            sz_strings_span_t const lent = borrowed;
+            heap.growths_left = 0;
+            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).status ==
+                   sz_bad_alloc_k);
+            heap.growths_left = std::numeric_limits<std::size_t>::max();
+            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed).strings ==
+                   expected);
+            verify(borrowed.data.u32_tape.data == lent.data.u32_tape.data &&
+                   borrowed.data.u32_tape.offsets == lent.data.u32_tape.offsets);
+        });
     }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
 
-    // An escape cut short at the end of its string is malformed there, after a string that is not,
-    // even when the next string starts with the digits it lacks.
+/** Unescapes an escape cut short at the end of its string, after a string that is not and before
+ *  one that is empty or starts with the digits it lacks, naming it the first malformed. */
+inline void check_strings_cut_short_escapes_(strings_backend_t const &backend) {
     struct cut_short_t {
         sz_escape_kind_t kind;
         char const *text;
@@ -1586,6 +1583,7 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
         {sz_escape_csv_k, R"(")"},
         {sz_escape_csv_k, R"("open)"},
     };
+    sized_heap_t heap;
     for (cut_short_t const &malformed : span_over(cut_short))
         for (char const *next : {"", "41"}) {
             strings_layouts_t const layouts({"", malformed.text, next});
@@ -1596,6 +1594,27 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
             sz_strings_span_free(&tape, &heap.allocator, nullptr);
         }
     verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/** Feeds one strings backend empty collections, borrowed blocks flanked by canaries at every input
+ *  alignment, allocators that run dry or refuse a growth at every step, escapes cut short, and
+ *  strings long enough to normalize through scratch, asserting it stays in bounds, refuses as
+ *  stated, leaves spans whose blocks match their offsets, and names the first malformed string. */
+inline void check_strings_safety_(strings_backend_t const &backend) {
+    std::string const pattern = "e\xCC\x81\"<,%\\\x01\xff\xC3\xA9\xEF\xAC\x81";
+    sized_heap_t heap;
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        std::string text;
+        for (std::size_t index = 0; index != length; ++index) text.push_back(pattern[index % pattern.size()]);
+        for (strings_verb_t const verb : strings_verbs_()) check_strings_borrowed_exactly_(backend, verb, text, heap);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+    check_strings_empty_(backend);
+    check_strings_rows_gaps_(backend);
+    check_strings_arena_refusals_(backend);
+    check_strings_rationed_growths_(backend);
+    check_strings_long_normalization_(backend);
+    check_strings_cut_short_escapes_(backend);
     if (backend.split) check_strings_split_safety_(backend);
 }
 

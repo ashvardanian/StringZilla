@@ -632,6 +632,23 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
     }
 }
 
+/** Runs @p body on a span of @p count strings over @p payload_bytes, borrowed from blocks of
+ *  exactly those sizes between canaries, its offsets zeroed but the last, the payload size. */
+template <typename body_type_>
+inline void with_guarded_span_(std::size_t count, std::size_t payload_bytes, body_type_ &&body) {
+    with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
+        with_guarded_buffer_((count + 1) * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
+            sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
+            std::memset(offsets, 0, count * sizeof(sz_u32_t));
+            offsets[count] = static_cast<sz_u32_t>(payload_bytes);
+            sz_strings_span_t borrowed {};
+            borrowed.layout = sz_strings_u32_tape_k, borrowed.count = count;
+            borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
+            body(borrowed);
+        });
+    });
+}
+
 /** An allocator refusing every request, for asserting a kernel reports @c sz_bad_alloc_k and leaves
  *  its outputs alone. */
 inline sz_allocator_t refusing_allocator_() noexcept {

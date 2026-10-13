@@ -68,7 +68,7 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
                                            sz_strings_lookup_metal,
                                            sz_strings_normalize_metal};
     check_device_strings_(check, runtime, strings_metal);
-    return capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
+    return capability_failures + check.failures + test_cross_dispatch_device(env, runtime, nullptr, nullptr);
 #else
     sz_unused_(env);
     sz_unused_(ordinal);

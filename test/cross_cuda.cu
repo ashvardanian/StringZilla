@@ -110,7 +110,10 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     check_device_levenshtein_(check, blackwell);
     check_device_overlap_(check, blackwell);
 #endif
-    auto const failures = capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
+    auto const failures = capability_failures + check.failures +
+                          test_cross_dispatch_device(env, runtime,
+                                                     gpu_best<sz_sha256_multistate_update_best>(runtime.capabilities),
+                                                     gpu_best<sz_sha256_multistate_digest_best>(runtime.capabilities));
     return failures;
 #else
     sz_unused_(env);
