@@ -468,7 +468,8 @@ This results in much better vectorization for intra-core parallelism, and parall
 Strings in data pipelines travel in columns: log streams, Arrow arrays, Pandas series, the nodes of a parsed document.
 StringZilla converts a whole collection in one call, reading any layout, from Arrow `String` and `LargeString` tapes to an accessor over arbitrary records, and writing an Arrow-compatible tape it sizes exactly once.
 Escaping covers JSON, JSON in ASCII the way Python's `json.dumps` writes it, RFC 4180 CSV, hexadecimal, HTML, URL percent-encoding, and terminal-safe logs that neutralize bidirectional overrides, and unescaping reverses each, naming the first malformed string.
-Every kernel skips the bytes that need no work with the SIMD byte-set search, measures its output exactly before writing it, and works in place when it converts a tape onto itself, growing or shrinking the blocks through the caller's allocator.
+Every kernel skips the bytes that need no work with the SIMD byte-set search and measures its output exactly before writing it.
+Every conversion is also atomic: it leaves the output tape holding the whole result, or fails with the tape exactly as it was, so a refused allocation or a malformed string never strands a half-converted column.
 Normalization adds NFKC_Casefold to the four UAX #15 forms, the caseless key that search engines match on, folding clean runs with the case-folding kernels and rewriting only the segments that change.
 
 Single-threaded on an Apple M5 Pro, over 4 MiB of English sentences, the NEON kernels move:

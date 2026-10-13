@@ -5,10 +5,11 @@
  *  @brief Serial backend for collections of strings, and the drivers every other tier shares.
  *
  *  Every verb but normalization measures its output, sizes the tape once, and then writes it, while
- *  normalization writes each string once into a payload it grows. Tiers differ only in the
- *  @ref sz_strings_walks_t they hand to the drivers: a byte-set search that skips the bytes needing
- *  no escaping, and a lookup-table kernel. Normalization takes the tier's own quick check and
- *  normalizer from `utf8_norm/` instead.
+ *  normalization writes each string once into a payload of its own that it grows. Every failure
+ *  comes before the first write into a block the tape holds, so a failed call leaves the tape as it
+ *  was. Tiers differ only in the @ref sz_strings_walks_t they hand to the drivers: a byte-set
+ *  search that skips the bytes needing no escaping, and a lookup-table kernel. Normalization takes
+ *  the tier's own normalizer from `utf8_norm/` instead.
  *
  *  @sa include/stringzilla/strings.h
  */
@@ -137,105 +138,81 @@ STRINGZILLA_INLINE sz_bool_t sz_strings_aliases_(sz_strings_view_t const *string
                        strings->data.u32_tape.offsets == tape->data.u32_tape.offsets);
 }
 
-/** Gives @p block @p new_bytes, keeping it when the size matches and allocating it when null; a
- *  zero-byte block may come back null, and on failure @p resized keeps its value. */
+/** Gives @p block @p new_bytes and keeps its first bytes: through @c reallocate when the allocator
+ *  has one and it succeeds, or else through a fresh block. On failure @p block stays unchanged. */
 STRINGZILLA_INLINE sz_bool_t sz_strings_resize_(void *block, sz_size_t old_bytes, sz_size_t new_bytes,
                                                 sz_allocator_t *allocator, sz_stream_t stream, void **resized) {
     if (old_bytes == new_bytes) {
         *resized = block;
         return sz_true_k;
     }
-    void *const result = block ? allocator->reallocate(block, old_bytes, new_bytes, allocator->handle, stream)
-                               : allocator->allocate(new_bytes, allocator->handle, stream);
-    if (!result && new_bytes) return sz_false_k;
-    *resized = result;
-    return sz_true_k;
-}
-
-/** Gives @p block @p new_bytes like @c sz_strings_resize_, or else moves its leading bytes into an
- *  exact fresh block, as an allocator may refuse to resize a block even to shrink it. */
-STRINGZILLA_INLINE sz_bool_t sz_strings_refit_(void *block, sz_size_t old_bytes, sz_size_t new_bytes,
-                                               sz_allocator_t *allocator, sz_stream_t stream, void **resized) {
-    if (sz_strings_resize_(block, old_bytes, new_bytes, allocator, stream, resized)) return sz_true_k;
-    void *const exact = block ? allocator->allocate(new_bytes, allocator->handle, stream) : STRINGZILLA_NULL;
-    if (!exact) return sz_false_k;
-    memcpy(exact, block, sz_min_of_two(old_bytes, new_bytes));
-    allocator->free(block, old_bytes, allocator->handle, stream);
-    *resized = exact;
-    return sz_true_k;
-}
-
-/** Rewrites the offsets of @p tape to never fall and to end at @p payload_bytes, the size of its
- *  payload block, so a span an allocator refused to resize still frees at the sizes it holds. */
-STRINGZILLA_INLINE void sz_strings_settle_(sz_strings_span_t *tape, sz_size_t payload_bytes) {
-    sz_size_t previous = 0;
-    for (sz_size_t index = 0; index != tape->count; ++index) {
-        previous = sz_min_of_two(sz_max_of_two(sz_strings_offset_(tape, index), previous), payload_bytes);
-        sz_strings_offset_set_(tape, index, previous);
+    if (block && allocator->reallocate) {
+        void *const result = allocator->reallocate(block, old_bytes, new_bytes, allocator->handle, stream);
+        if (result || !new_bytes) {
+            *resized = result;
+            return sz_true_k;
+        }
     }
-    sz_strings_offset_set_(tape, tape->count, payload_bytes);
+    void *const fresh = new_bytes ? allocator->allocate(new_bytes, allocator->handle, stream) : STRINGZILLA_NULL;
+    if (new_bytes && !fresh) return sz_false_k;
+    if (block && fresh) memcpy(fresh, block, sz_min_of_two(old_bytes, new_bytes));
+    if (block) allocator->free(block, old_bytes, allocator->handle, stream);
+    *resized = fresh;
+    return sz_true_k;
+}
+
+/** Whether the blocks @p tape holds fit @p count strings over @p payload bytes exactly, and
+ *  @p strings does not read them, so a call may write straight into them. */
+STRINGZILLA_INLINE sz_bool_t sz_strings_reusable_(sz_strings_view_t const *strings, sz_strings_span_t const *tape,
+                                                  sz_size_t count, sz_size_t payload) {
+    return (sz_bool_t)(sz_strings_offsets_block_(tape) && !sz_strings_shares_(strings, tape) &&
+                       tape->layout == sz_strings_layout_for_(payload) && tape->count == count &&
+                       sz_strings_offset_(tape, count) == payload);
 }
 
 /**
- *  @brief Points @p output at blocks for @p count strings over @p payload bytes: fresh ones when
- *      @p fresh, or else the blocks of @p tape, resized on @p stream.
- *  @return @c sz_success_k, or @c sz_bad_alloc_k leaving @p tape holding valid blocks.
+ *  @brief Points @p output at blocks for @p count strings over @p payload bytes without touching
+ *      @p tape: its blocks when reusable, or else fresh ones from @p allocator on @p stream.
+ *  @return @c sz_success_k, or @c sz_bad_alloc_k holding no new block.
  */
-STRINGZILLA_INLINE sz_status_t sz_strings_acquire_(sz_strings_span_t *tape, sz_bool_t fresh, sz_size_t count,
-                                                   sz_size_t payload, sz_allocator_t *allocator,
+STRINGZILLA_INLINE sz_status_t sz_strings_acquire_(sz_strings_view_t const *strings, sz_strings_span_t const *tape,
+                                                   sz_size_t count, sz_size_t payload, sz_allocator_t *allocator,
                                                    sz_strings_span_t *output, sz_stream_t stream) {
-    void *const old_offsets = fresh ? STRINGZILLA_NULL : sz_strings_offsets_block_(tape);
-    void *const old_payload = old_offsets ? sz_strings_payload_(tape) : STRINGZILLA_NULL;
-    sz_size_t const old_payload_bytes = old_offsets ? sz_strings_offset_(tape, tape->count) : 0;
-    sz_size_t const old_offsets_bytes = old_offsets ? sz_strings_offsets_bytes_(tape->layout, tape->count) : 0;
     if (count >= STRINGZILLA_SIZE_MAX / sizeof(sz_u64_t)) return sz_bad_alloc_k;
-    output->layout = sz_strings_layout_for_(payload);
-    output->count = count;
-    void *data = old_payload, *offsets = old_offsets;
-    if (!sz_strings_refit_(old_payload, old_payload_bytes, payload, allocator, stream, &data)) return sz_bad_alloc_k;
-    if (!sz_strings_refit_(old_offsets, old_offsets_bytes, sz_strings_offsets_bytes_(output->layout, count), allocator,
-                           stream, &offsets)) {
-        if (!old_offsets && data) allocator->free(data, payload, allocator->handle, stream);
-        else if (old_offsets) {
-            sz_bool_t const restored = sz_strings_refit_(data, payload, old_payload_bytes, allocator, stream, &data);
-            sz_strings_point_(tape, data, old_offsets);
-            if (!restored) sz_strings_settle_(tape, payload);
-        }
+    output->layout = sz_strings_layout_for_(payload), output->count = count;
+    if (sz_strings_reusable_(strings, tape, count, payload)) {
+        *output = *tape;
+        return sz_success_k;
+    }
+    void *const data = payload ? allocator->allocate(payload, allocator->handle, stream) : STRINGZILLA_NULL;
+    if (payload && !data) return sz_bad_alloc_k;
+    void *const offsets = allocator->allocate(sz_strings_offsets_bytes_(output->layout, count), allocator->handle,
+                                              stream);
+    if (!offsets) {
+        if (data) allocator->free(data, payload, allocator->handle, stream);
         return sz_bad_alloc_k;
     }
     sz_strings_point_(output, data, offsets);
     return sz_success_k;
 }
 
-/** Hands @p output to @p tape, first releasing the old blocks on @p stream when @p output was built
- *  fresh. */
-STRINGZILLA_INLINE void sz_strings_commit_(sz_strings_span_t *tape, sz_bool_t fresh, sz_strings_span_t const *output,
+/** Hands the written @p output to @p tape, freeing the blocks @p tape held on @p stream unless
+ *  @p output reuses them. */
+STRINGZILLA_INLINE void sz_strings_commit_(sz_strings_span_t *tape, sz_strings_span_t const *output,
                                            sz_allocator_t *allocator, sz_stream_t stream) {
-    if (fresh) sz_strings_span_free(tape, allocator, stream);
+    if (sz_strings_offsets_block_(tape) != sz_strings_offsets_block_(output))
+        sz_strings_span_free(tape, allocator, stream);
     *tape = *output;
 }
 
-/** Shrinks or grows the blocks of @p tape on @p stream, rewritten where they lie, to hold its first
- *  @p count strings, from a payload block of @p payload_bytes. When no exact block can be had, the
- *  span keeps its old count, its offsets settled onto the blocks it still holds. */
-STRINGZILLA_INLINE sz_status_t sz_strings_fit_(sz_strings_span_t *tape, sz_size_t payload_bytes, sz_size_t count,
-                                               sz_allocator_t *allocator, sz_stream_t stream) {
-    void *data = sz_strings_payload_(tape), *offsets = sz_strings_offsets_block_(tape);
-    sz_size_t const end = sz_strings_offset_(tape, count);
-    sz_size_t const offsets_bytes = sz_strings_offsets_bytes_(tape->layout, tape->count);
-    if (!sz_strings_refit_(data, payload_bytes, end, allocator, stream, &data)) {
-        sz_strings_settle_(tape, payload_bytes);
-        return sz_bad_alloc_k;
-    }
-    sz_strings_point_(tape, data, offsets);
-    if (!sz_strings_refit_(offsets, offsets_bytes, sz_strings_offsets_bytes_(tape->layout, count), allocator, stream,
-                           &offsets)) {
-        sz_strings_settle_(tape, end);
-        return sz_bad_alloc_k;
-    }
-    sz_strings_point_(tape, data, offsets);
-    tape->count = count;
-    return sz_success_k;
+/** Frees the blocks a failed call acquired into @p output, @p payload bytes of them, unless it
+ *  holds none, as when acquiring failed or never ran, or the very blocks @p tape holds. */
+STRINGZILLA_INLINE void sz_strings_release_(sz_strings_span_t const *tape, sz_strings_span_t const *output,
+                                            sz_size_t payload, sz_allocator_t *allocator, sz_stream_t stream) {
+    void *const offsets = sz_strings_offsets_block_(output);
+    if (!offsets || offsets == sz_strings_offsets_block_(tape)) return;
+    if (sz_strings_payload_(output)) allocator->free(sz_strings_payload_(output), payload, allocator->handle, stream);
+    allocator->free(offsets, sz_strings_offsets_bytes_(output->layout, output->count), allocator->handle, stream);
 }
 
 /** Moves the first @p written offsets of @p span into a new block of @p layout and frees the old
@@ -256,7 +233,7 @@ STRINGZILLA_INLINE sz_bool_t sz_strings_relayout_(sz_strings_span_t *span, sz_si
     return sz_true_k;
 }
 
-/** Gathers strings into fresh or resized blocks, mapping every byte through a non-null @p lut. */
+/** Gathers strings into a tape, mapping every byte through a non-null @p lut. */
 STRINGZILLA_INLINE sz_status_t sz_strings_gather_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                   sz_size_t count, char const *lut, sz_allocator_t *allocator,
                                                   sz_strings_span_t *tape, sz_strings_walks_t const *walks) {
@@ -271,9 +248,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_gather_(sz_strings_view_t const *strin
             payload += views[position].length;
         }
     }
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
     sz_strings_span_t output;
-    sz_status_t const status = sz_strings_acquire_(tape, fresh, count, payload, allocator, &output, STRINGZILLA_NULL);
+    sz_status_t const status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, STRINGZILLA_NULL);
     if (status != sz_success_k) return status;
 
     // A tape read in its own order is one run of bytes, mapped in a single call.
@@ -293,7 +269,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_gather_(sz_strings_view_t const *strin
     }
     if (flat && payload && lut) walks->lookup_bytes(data, first, payload, lut);
     else if (flat && payload) memcpy(data, first, payload);
-    sz_strings_commit_(tape, fresh, &output, allocator, STRINGZILLA_NULL);
+    sz_strings_commit_(tape, &output, allocator, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
@@ -691,23 +667,13 @@ STRINGZILLA_INLINE sz_size_t sz_strings_unescape_one_(sz_escape_kind_t kind, sz_
 
 #pragma region Drivers
 
-/** Gathers strings into a tape, compacting the tape @p strings views where it lies. */
+/** Gathers strings into a tape, leaving a whole tape gathered onto itself where it lies. */
 STRINGZILLA_INLINE sz_status_t sz_strings_to_tape_with_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                         sz_size_t count, sz_allocator_t *allocator,
                                                         sz_strings_span_t *tape) {
-    if (order || !sz_strings_aliases_(strings, tape))
-        return sz_strings_gather_(strings, order, count, STRINGZILLA_NULL, allocator, tape, STRINGZILLA_NULL);
-    sz_size_t const first = sz_strings_offset_(tape, 0), end = sz_strings_offset_(tape, count);
-    if (!first && count == tape->count) return sz_success_k;
-    // Narrower offsets would overwrite wider ones before they are read, so they take fresh blocks.
-    if (sz_strings_layout_for_(end - first) != tape->layout)
-        return sz_strings_gather_(strings, order, count, STRINGZILLA_NULL, allocator, tape, STRINGZILLA_NULL);
-    sz_size_t const payload_bytes = sz_strings_offset_(tape, tape->count);
-    sz_ptr_t const data = sz_strings_payload_(tape);
-    if (end != first) memmove(data, data + first, end - first);
-    for (sz_size_t index = 0; index <= count; ++index)
-        sz_strings_offset_set_(tape, index, sz_strings_offset_(tape, index) - first);
-    return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
+    if (!order && sz_strings_aliases_(strings, tape) && count == tape->count && !sz_strings_offset_(tape, 0))
+        return sz_success_k;
+    return sz_strings_gather_(strings, order, count, STRINGZILLA_NULL, allocator, tape, STRINGZILLA_NULL);
 }
 
 /** Writes strings into NUL-padded rows, truncating longer ones and reporting the longest. */
@@ -731,39 +697,32 @@ STRINGZILLA_INLINE sz_status_t sz_strings_to_rows_with_(sz_strings_view_t const 
     return sz_success_k;
 }
 
-/** Maps every byte of strings through @p lut into a tape, in place when @p strings views it. */
+/** Maps every byte of @p strings through @p lut into a tape, in place when they view all of it. */
 STRINGZILLA_INLINE sz_status_t sz_strings_lookup_with_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                        sz_size_t count, char const lut[sz_at_least_(256)],
                                                        sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                        sz_strings_walks_t const *walks) {
-    if (order || !sz_strings_aliases_(strings, tape))
+    if (order || !sz_strings_aliases_(strings, tape) || count != tape->count)
         return sz_strings_gather_(strings, order, count, lut, allocator, tape, walks);
     sz_size_t const first = sz_strings_offset_(tape, 0), end = sz_strings_offset_(tape, count);
     sz_ptr_t const data = sz_strings_payload_(tape);
     if (end != first) walks->lookup_bytes(data + first, data + first, end - first, lut);
-    if (count == tape->count) return sz_success_k;
-    return sz_strings_fit_(tape, sz_strings_offset_(tape, tape->count), count, allocator, STRINGZILLA_NULL);
+    return sz_success_k;
 }
 
-/** Escapes the first @p count strings of @p tape where they lie, into @p payload bytes in all: the
- *  payload moves to the end of its grown block, then escapes front to back, so the writer never
- *  overtakes bytes it has yet to read. */
-STRINGZILLA_INLINE sz_status_t sz_strings_escape_in_place_(sz_strings_span_t *tape, sz_size_t count,
-                                                           sz_escape_kind_t kind, sz_size_t payload,
-                                                           sz_allocator_t *allocator, sz_strings_walks_t const *walks) {
-    sz_size_t const first = sz_strings_offset_(tape, 0), length = sz_strings_offset_(tape, count) - first;
-    sz_size_t payload_bytes = sz_strings_offset_(tape, tape->count);
+/** Escapes the whole of @p tape where it lies, into @p payload bytes, no fewer than its block
+ *  holds: the block grows first, so nothing can fail once writing starts, then its bytes move to
+ *  the end and escape front to back, the writer never overtaking bytes it has yet to read. */
+STRINGZILLA_INLINE sz_status_t sz_strings_escape_in_place_(sz_strings_span_t *tape, sz_escape_kind_t kind,
+                                                           sz_size_t payload, sz_allocator_t *allocator,
+                                                           sz_strings_walks_t const *walks) {
+    sz_size_t const count = tape->count, first = sz_strings_offset_(tape, 0), end = sz_strings_offset_(tape, count);
     void *data = sz_strings_payload_(tape);
-    if (!data) return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
-    if (payload > payload_bytes) {
-        if (!sz_strings_resize_(data, payload_bytes, payload, allocator, STRINGZILLA_NULL, &data))
-            return sz_bad_alloc_k;
-        sz_strings_point_(tape, data, sz_strings_offsets_block_(tape));
-        payload_bytes = payload;
-    }
+    if (!sz_strings_resize_(data, end, payload, allocator, STRINGZILLA_NULL, &data)) return sz_bad_alloc_k;
+    sz_strings_point_(tape, data, sz_strings_offsets_block_(tape));
     sz_ptr_t const bytes = (sz_ptr_t)data;
-    memmove(bytes + payload - length, bytes + first, length);
-    sz_cptr_t reader = bytes + payload - length;
+    if (end != first) memmove(bytes + payload - (end - first), bytes + first, end - first);
+    sz_cptr_t reader = bytes + payload - (end - first);
     sz_size_t offset = 0, old_start = first;
     for (sz_size_t index = 0; index != count; ++index) {
         sz_size_t const old_end = sz_strings_offset_(tape, index + 1);
@@ -772,7 +731,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_escape_in_place_(sz_strings_span_t *ta
         sz_strings_offset_set_(tape, index + 1, offset);
     }
     sz_strings_offset_set_(tape, 0, 0);
-    return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
+    return sz_success_k;
 }
 
 /** Escapes strings for @p kind into a tape, growing the tape @p strings views where it lies. */
@@ -791,13 +750,13 @@ STRINGZILLA_INLINE sz_status_t sz_strings_escape_with_(sz_strings_view_t const *
             payload += escaped;
         }
     }
-    // Wider offsets would overwrite narrower ones before they are read, so they take fresh blocks.
-    if (!order && sz_strings_aliases_(strings, tape) && sz_strings_layout_for_(payload) == tape->layout)
-        return sz_strings_escape_in_place_(tape, count, kind, payload, allocator, walks);
+    // Only a whole tape that keeps its offsets width and never shrinks escapes where it lies.
+    if (!order && sz_strings_aliases_(strings, tape) && count == tape->count &&
+        sz_strings_layout_for_(payload) == tape->layout && payload >= sz_strings_offset_(tape, count))
+        return sz_strings_escape_in_place_(tape, kind, payload, allocator, walks);
 
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
     sz_strings_span_t output;
-    sz_status_t const status = sz_strings_acquire_(tape, fresh, count, payload, allocator, &output, STRINGZILLA_NULL);
+    sz_status_t const status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, STRINGZILLA_NULL);
     if (status != sz_success_k) return status;
     sz_ptr_t const data = sz_strings_payload_(&output);
     sz_size_t offset = 0;
@@ -810,31 +769,12 @@ STRINGZILLA_INLINE sz_status_t sz_strings_escape_with_(sz_strings_view_t const *
             sz_strings_offset_set_(&output, start + position + 1, offset);
         }
     }
-    sz_strings_commit_(tape, fresh, &output, allocator, STRINGZILLA_NULL);
+    sz_strings_commit_(tape, &output, allocator, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
-/** Unescapes the first @p count strings of @p tape where they lie, compacting front to back, as no
- *  string ever grows. */
-STRINGZILLA_INLINE sz_status_t sz_strings_unescape_in_place_(sz_strings_span_t *tape, sz_size_t count,
-                                                             sz_escape_kind_t kind, sz_allocator_t *allocator,
-                                                             sz_strings_walks_t const *walks) {
-    sz_size_t const payload_bytes = sz_strings_offset_(tape, tape->count);
-    sz_ptr_t const data = sz_strings_payload_(tape);
-    if (!data) return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
-    sz_size_t offset = 0, old_start = sz_strings_offset_(tape, 0);
-    for (sz_size_t index = 0; index != count; ++index) {
-        sz_size_t const old_end = sz_strings_offset_(tape, index + 1);
-        offset += sz_strings_unescape_one_(kind, data + old_start, old_end - old_start, data + offset, walks);
-        old_start = old_end;
-        sz_strings_offset_set_(tape, index + 1, offset);
-    }
-    sz_strings_offset_set_(tape, 0, 0);
-    return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
-}
-
-/** Unescapes strings from @p kind into a tape up to the first malformed one, compacting the tape
- *  @p strings views where it lies. */
+/** Unescapes strings from @p kind into a tape, writing nothing when any string is malformed. A tape
+ *  unescaped onto itself only shrinks, so it takes fresh blocks rather than shrink once written. */
 STRINGZILLA_INLINE sz_status_t sz_strings_unescape_with_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                          sz_size_t count, sz_escape_kind_t kind,
                                                          sz_allocator_t *allocator, sz_strings_span_t *tape,
@@ -850,31 +790,26 @@ STRINGZILLA_INLINE sz_status_t sz_strings_unescape_with_(sz_strings_view_t const
             payload += unescaped;
         }
     }
-    sz_status_t status = valid == count ? sz_success_k : sz_invalid_utf8_k;
-    if (status != sz_success_k) *malformed_index = valid;
-
-    if (!order && sz_strings_aliases_(strings, tape) && sz_strings_layout_for_(payload) == tape->layout) {
-        sz_status_t const fit_status = sz_strings_unescape_in_place_(tape, valid, kind, allocator, walks);
-        return fit_status != sz_success_k ? fit_status : status;
+    if (valid != count) {
+        *malformed_index = valid;
+        return sz_invalid_utf8_k;
     }
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
     sz_strings_span_t output;
-    sz_status_t const acquire_status = sz_strings_acquire_(tape, fresh, valid, payload, allocator, &output,
-                                                           STRINGZILLA_NULL);
-    if (acquire_status != sz_success_k) return acquire_status;
+    sz_status_t const status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, STRINGZILLA_NULL);
+    if (status != sz_success_k) return status;
     sz_ptr_t const data = sz_strings_payload_(&output);
     sz_size_t offset = 0;
     sz_strings_offset_set_(&output, 0, 0);
-    for (sz_size_t start = 0; start < valid; start += 64) {
-        sz_size_t const block_count = sz_strings_block_(strings, order, valid, start, views);
+    for (sz_size_t start = 0; start < count; start += 64) {
+        sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
         for (sz_size_t position = 0; position != block_count; ++position) {
             sz_ptr_t const target = data ? data + offset : STRINGZILLA_NULL;
             offset += sz_strings_unescape_one_(kind, views[position].start, views[position].length, target, walks);
             sz_strings_offset_set_(&output, start + position + 1, offset);
         }
     }
-    sz_strings_commit_(tape, fresh, &output, allocator, STRINGZILLA_NULL);
-    return status;
+    sz_strings_commit_(tape, &output, allocator, STRINGZILLA_NULL);
+    return sz_success_k;
 }
 
 /** Normalizes one string into @p target, which has room for @c sz_utf8_norm_decomp_max_k bytes per
@@ -919,29 +854,9 @@ STRINGZILLA_INLINE sz_ptr_t sz_strings_scratch_reserve_(sz_strings_scratch_t *sc
     return (sz_ptr_t)scratch->heap;
 }
 
-/**
- *  @brief Measures one string by normalizing into @p scratch only the part past the prefix that
- *      the quick check clears, which keeps its @p clean length.
- *  @return The @p normalized rest, empty for a string the quick check clears, or null when
- *      @p scratch cannot grow to its worst case.
- */
-STRINGZILLA_INLINE sz_cptr_t sz_strings_measure_one_(sz_cptr_t source, sz_size_t length, sz_normal_form_t form,
-                                                     sz_strings_scratch_t *scratch, sz_kernel_utf8_norm_t normalize,
-                                                     sz_kernel_utf8_find_denormalized_t find_denormalized,
-                                                     sz_size_t *clean, sz_size_t *normalized) {
-    sz_cptr_t dirty = STRINGZILLA_NULL;
-    find_denormalized(source, length, form, &dirty, STRINGZILLA_NULL);
-    *clean = dirty ? (sz_size_t)(dirty - source) : length, *normalized = 0;
-    if (!dirty) return scratch->stack;
-    sz_size_t const rest = length - *clean;
-    sz_ptr_t const target = sz_strings_scratch_reserve_(scratch, rest);
-    if (target) normalize(dirty, rest, form, target, normalized, STRINGZILLA_NULL);
-    return target;
-}
-
 /** Grows the payload of @p output from @p capacity bytes to hold @p needed, at least doubling it
  *  and to no fewer than @p least. Its @p written offsets widen once 32 bits cannot reach
- *  @p needed, and 32-bit ones keep the block within reach, so a later refusal settles onto it. */
+ *  @p needed, and 32-bit ones keep the block within their reach. */
 STRINGZILLA_INLINE sz_bool_t sz_strings_grow_(sz_strings_span_t *output, sz_size_t *capacity, sz_size_t needed,
                                               sz_size_t least, sz_size_t written, sz_allocator_t *allocator) {
     if (output->layout == sz_strings_u32_tape_k && sz_strings_layout_for_(needed) != sz_strings_u32_tape_k &&
@@ -957,109 +872,42 @@ STRINGZILLA_INLINE sz_bool_t sz_strings_grow_(sz_strings_span_t *output, sz_size
     return sz_true_k;
 }
 
-/** Normalizes the first @p count strings of @p tape where they lie: the payload moves @p lead bytes
- *  in, the most any output ends past where its string's input starts, then normalizes front to
- *  back, so no output reaches its own input or a later one. */
-STRINGZILLA_INLINE sz_status_t sz_strings_normalize_in_place_(sz_strings_span_t *tape, sz_size_t count,
-                                                              sz_normal_form_t form, sz_size_t lead,
-                                                              sz_allocator_t *allocator,
-                                                              sz_kernel_utf8_norm_t normalize) {
-    sz_size_t const first = sz_strings_offset_(tape, 0), length = sz_strings_offset_(tape, count) - first;
-    sz_size_t const needed = lead + length;
-    sz_size_t payload_bytes = sz_strings_offset_(tape, tape->count);
-    void *data = sz_strings_payload_(tape);
-    if (needed > payload_bytes) {
-        if (!sz_strings_resize_(data, payload_bytes, needed, allocator, STRINGZILLA_NULL, &data)) return sz_bad_alloc_k;
-        sz_strings_point_(tape, data, sz_strings_offsets_block_(tape));
-        payload_bytes = needed;
-    }
-    sz_ptr_t const bytes = (sz_ptr_t)data;
-    memmove(bytes + lead, bytes + first, length);
-    sz_size_t offset = 0, old_start = first, reader = lead;
-    for (sz_size_t index = 0; index != count; ++index) {
-        sz_size_t const old_end = sz_strings_offset_(tape, index + 1), old_length = old_end - old_start;
-        offset += sz_strings_normalize_one_(bytes + reader, old_length, form, bytes + offset, normalize);
-        reader += old_length, old_start = old_end;
-        sz_strings_offset_set_(tape, index + 1, offset);
-    }
-    sz_strings_offset_set_(tape, 0, 0);
-    return sz_strings_fit_(tape, payload_bytes, count, allocator, STRINGZILLA_NULL);
-}
-
 /**
- *  @brief Normalizes strings into @p form through a tier's @p normalize and @p find_denormalized,
- *      in place when @p strings views the tape.
+ *  @brief Normalizes strings into @p form through a tier's @p normalize, writing each string once.
  *
- *  Writes every string once, straight into a payload that starts at the total input length, or at
- *  the block a reused span holds, while it has room for the string's worst case of
- *  @c sz_utf8_norm_decomp_max_k bytes per byte. A string it lacks that room for is normalized into
- *  scratch and copied, and the payload grows only when even the normalized string does not fit, so
- *  a borrowed span of the final sizes never grows. Offsets stay 32-bit until the payload outgrows
- *  them. A tape read in place is measured whole first, as its payload moves just far enough for no
- *  output to reach its input, and is left as it is when the quick check clears it.
+ *  Writes into blocks of its own, never the ones @p tape holds, as they grow while being written:
+ *  a payload that starts at the total input length takes a string straight while it has room for
+ *  the worst case of @c sz_utf8_norm_decomp_max_k bytes per byte, and through scratch otherwise,
+ *  growing only when even the normalized string does not fit. Fitted to its exact size, the
+ *  payload is handed to @p tape last, so a failure leaves @p tape as it was.
  */
 STRINGZILLA_INLINE sz_status_t sz_strings_normalize_with_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                           sz_size_t count, sz_normal_form_t form,
                                                           sz_allocator_t *allocator, sz_strings_span_t *tape,
-                                                          sz_kernel_utf8_norm_t normalize,
-                                                          sz_kernel_utf8_find_denormalized_t find_denormalized) {
+                                                          sz_kernel_utf8_norm_t normalize) {
     sz_string_view_t views[64];
+    sz_size_t read = 0;
+    for (sz_size_t start = 0; start < count; start += 64) {
+        sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
+        for (sz_size_t position = 0; position != block_count; ++position) {
+            if (views[position].length > STRINGZILLA_SIZE_MAX - read) return sz_bad_alloc_k;
+            read += views[position].length;
+        }
+    }
+    sz_strings_span_t none, output;
+    memset(&none, 0, sizeof(none));
+    sz_status_t status = sz_strings_acquire_(strings, &none, count, read, allocator, &output, STRINGZILLA_NULL);
+    if (status != sz_success_k) return status;
     sz_strings_scratch_t scratch;
     scratch.allocator = allocator, scratch.heap = STRINGZILLA_NULL, scratch.heap_bytes = 0;
-    sz_size_t read = 0;
-    sz_bool_t flagged = sz_false_k;
-    sz_status_t status = sz_success_k;
-    if (!order && sz_strings_aliases_(strings, tape)) {
-        sz_size_t payload = 0, lead = 0;
-        for (sz_size_t start = 0; status == sz_success_k && start < count; start += 64) {
-            sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
-            for (sz_size_t position = 0; position != block_count; ++position) {
-                sz_size_t const length = views[position].length;
-                sz_size_t clean = 0, normalized = 0;
-                sz_cptr_t const rest = sz_strings_measure_one_(views[position].start, length, form, &scratch, normalize,
-                                                               find_denormalized, &clean, &normalized);
-                sz_size_t const written = clean + normalized;
-                if (!rest || written > STRINGZILLA_SIZE_MAX - payload) {
-                    status = sz_bad_alloc_k;
-                    break;
-                }
-                if (clean != length) flagged = sz_true_k;
-                if (payload + written > read) lead = sz_max_of_two(lead, payload + written - read);
-                payload += written, read += length;
-            }
-        }
-        if (scratch.heap) allocator->free(scratch.heap, scratch.heap_bytes, allocator->handle, STRINGZILLA_NULL);
-        scratch.heap = STRINGZILLA_NULL, scratch.heap_bytes = 0;
-        if (status != sz_success_k) return status;
-        if (!flagged) return sz_strings_to_tape_with_(strings, order, count, allocator, tape);
-        // Offsets of another width would overwrite ones yet to be read, so they take fresh blocks.
-        if (sz_strings_layout_for_(payload) == tape->layout)
-            return sz_strings_normalize_in_place_(tape, count, form, lead, allocator, normalize);
-    }
-    else
-        for (sz_size_t start = 0; start < count; start += 64) {
-            sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
-            for (sz_size_t position = 0; position != block_count; ++position) {
-                if (views[position].length > STRINGZILLA_SIZE_MAX - read) return sz_bad_alloc_k;
-                read += views[position].length;
-            }
-        }
-
-    // A reused payload keeps its size until a string outgrows it, as a borrowed one may be exact.
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
-    void *const old_offsets = fresh ? STRINGZILLA_NULL : sz_strings_offsets_block_(tape);
-    sz_size_t capacity = old_offsets ? sz_strings_offset_(tape, tape->count) : read;
-    sz_strings_span_t output;
-    status = sz_strings_acquire_(tape, fresh, count, capacity, allocator, &output, STRINGZILLA_NULL);
-    if (status != sz_success_k) return status;
-    sz_ptr_t data = sz_strings_payload_(&output);
-    sz_size_t cursor = 0, index = 0;
+    sz_size_t capacity = read, cursor = 0;
     sz_strings_offset_set_(&output, 0, 0);
     for (sz_size_t start = 0; status == sz_success_k && start < count; start += 64) {
         sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
-        for (sz_size_t position = 0; position != block_count; ++position, ++index) {
+        for (sz_size_t position = 0; position != block_count; ++position) {
             sz_cptr_t const source = views[position].start;
             sz_size_t const length = views[position].length;
+            sz_ptr_t const data = sz_strings_payload_(&output);
             if (length && length <= (capacity - cursor) / sz_utf8_norm_decomp_max_k)
                 cursor += sz_strings_normalize_one_(source, length, form, data + cursor, normalize);
             else if (length) {
@@ -1069,34 +917,44 @@ STRINGZILLA_INLINE sz_status_t sz_strings_normalize_with_(sz_strings_view_t cons
                                               : 0;
                 if (!normalized || written > STRINGZILLA_SIZE_MAX - cursor ||
                     (written > capacity - cursor &&
-                     !sz_strings_grow_(&output, &capacity, cursor + written, read, index + 1, allocator))) {
+                     !sz_strings_grow_(&output, &capacity, cursor + written, read, start + position + 1, allocator))) {
                     status = sz_bad_alloc_k;
                     break;
                 }
-                data = sz_strings_payload_(&output);
-                memcpy(data + cursor, normalized, written);
+                memcpy(sz_strings_payload_(&output) + cursor, normalized, written);
                 cursor += written;
             }
-            sz_strings_offset_set_(&output, index + 1, cursor);
+            sz_strings_offset_set_(&output, start + position + 1, cursor);
         }
     }
     if (scratch.heap) allocator->free(scratch.heap, scratch.heap_bytes, allocator->handle, STRINGZILLA_NULL);
+
+    // Fit the payload exactly, then the offsets to the width that payload takes.
+    void *data = sz_strings_payload_(&output);
+    if (status == sz_success_k) {
+        if (sz_strings_resize_(data, capacity, cursor, allocator, STRINGZILLA_NULL, &data)) {
+            sz_strings_point_(&output, data, sz_strings_offsets_block_(&output));
+            capacity = cursor;
+            if (output.layout != sz_strings_layout_for_(cursor) &&
+                !sz_strings_relayout_(&output, count + 1, sz_strings_layout_for_(cursor), allocator))
+                status = sz_bad_alloc_k;
+        }
+        else status = sz_bad_alloc_k;
+    }
     if (status != sz_success_k) {
-        // The strings never written stay empty, and the last one spans the rest of the block.
-        for (sz_size_t unwritten = index + 1; unwritten < count; ++unwritten)
-            sz_strings_offset_set_(&output, unwritten, cursor);
-        sz_strings_offset_set_(&output, count, capacity);
-        if (old_offsets) *tape = output;
-        else sz_strings_span_free(&output, allocator, STRINGZILLA_NULL);
+        sz_strings_release_(&none, &output, capacity, allocator, STRINGZILLA_NULL);
         return status;
     }
-    sz_strings_commit_(tape, fresh, &output, allocator, STRINGZILLA_NULL);
-    status = sz_strings_fit_(tape, capacity, count, allocator, STRINGZILLA_NULL);
-    // Started past 4 GiB, from the input or a reused block, the payload may end in 32-bit reach.
-    if (status == sz_success_k && tape->layout != sz_strings_layout_for_(cursor) &&
-        !sz_strings_relayout_(tape, count + 1, sz_strings_layout_for_(cursor), allocator))
-        status = sz_bad_alloc_k;
-    return status;
+    // Blocks of exactly the final sizes, like a borrowed span's, are filled rather than replaced.
+    if (sz_strings_reusable_(strings, tape, count, cursor)) {
+        if (cursor) memcpy(sz_strings_payload_(tape), sz_strings_payload_(&output), cursor);
+        memcpy(sz_strings_offsets_block_(tape), sz_strings_offsets_block_(&output),
+               sz_strings_offsets_bytes_(output.layout, count));
+        sz_strings_release_(&none, &output, cursor, allocator, STRINGZILLA_NULL);
+        return sz_success_k;
+    }
+    sz_strings_commit_(tape, &output, allocator, STRINGZILLA_NULL);
+    return sz_success_k;
 }
 
 #pragma endregion Drivers
@@ -1148,8 +1006,7 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_serial(sz_strings_view_t const 
                                                         sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_serial,
-                                      &sz_utf8_find_denormalized_serial);
+    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_serial);
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator) {

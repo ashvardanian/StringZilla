@@ -216,8 +216,7 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_haswell(sz_strings_view_t const
                                                          sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_haswell,
-                                      &sz_utf8_find_denormalized_haswell);
+    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_haswell);
 }
 
 #endif // STRINGZILLA_TARGET_HASWELL

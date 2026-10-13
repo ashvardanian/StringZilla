@@ -98,8 +98,7 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_rvv(sz_strings_view_t const *st
                                                      sz_size_t count, sz_normal_form_t form, sz_allocator_t *allocator,
                                                      sz_strings_span_t *tape, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_rvv,
-                                      &sz_utf8_find_denormalized_rvv);
+    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_rvv);
 }
 
 #endif // STRINGZILLA_TARGET_RVV

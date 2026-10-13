@@ -7,10 +7,10 @@
  *
  *  Every block a verb reads or keeps must come from @ref sz_allocator_init_unified_metal on the
  *  device of its stream, and the strings it reads must be tapes. A verb measures in one command
- *  buffer, waits for it, reads the payload size straight out of the shared scratch, resizes the
- *  output through the allocator, and writes in a second command buffer, which it leaves running. A
- *  tape the output shares a block with is read into fresh blocks, and the command buffer reading
- *  the old ones keeps them alive past their release.
+ *  buffer, waits for it, reads the payload size straight out of the shared scratch, takes the
+ *  output's blocks, and writes in a second command buffer, which it leaves running. The output
+ *  reuses the tape's blocks only when their sizes match and nothing reads them, and the command
+ *  buffer reading the old ones keeps them alive past their release.
  *
  *  @sa include/stringzilla/strings/metal.metal, the kernels this embeds
  *  @sa include/stringzilla/strings/cuda.cuh, the CUDA sibling
@@ -269,35 +269,31 @@ STRINGZILLA_INLINE sz_status_t sz_strings_write_metal_(char const *write, sz_siz
 }
 
 /** Rewrites @p count strings for @p mode, an escape kind or a normal form, into @p tape through the
- *  @p measure and @p write kernels, up to the first string @p measure finds malformed, reporting
- *  how many in @p valid. */
+ *  @p measure and @p write kernels, or names the first string @p measure finds malformed in
+ *  @p malformed_index. */
 STRINGZILLA_INLINE sz_status_t sz_strings_rewrite_metal_(char const *measure, char const *write,
                                                          sz_strings_view_t const *strings, sz_size_t const *order,
                                                          sz_size_t count, sz_u64_t mode, sz_allocator_t *allocator,
-                                                         sz_strings_span_t *tape, sz_size_t *valid,
+                                                         sz_strings_span_t *tape, sz_size_t *malformed_index,
                                                          sz_stream_t stream) {
     sz_strings_arguments_metal_t arguments;
     sz_strings_span_t output;
     void *scratch = STRINGZILLA_NULL;
-    sz_size_t payload = 0;
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
-    sz_status_t status = sz_strings_check_metal_(strings, tape, stream);
-    memset(&arguments, 0, sizeof(arguments));
+    sz_size_t valid = 0, payload = 0;
+    memset(&arguments, 0, sizeof(arguments)), memset(&output, 0, sizeof(output));
     arguments.count = count, arguments.order = (sz_u64_t)order, arguments.layout = strings->layout;
     arguments.mode = mode, arguments.tiles = sz_size_divide_round_up(count, (sz_size_t)sz_strings_threads_metal_k);
-    *valid = 0;
+    sz_status_t status = sz_strings_check_metal_(strings, tape, stream);
     if (status == sz_success_k)
-        status = sz_strings_measure_metal_(measure, &arguments, strings, order, &scratch, valid, &payload, stream);
-    if (status == sz_success_k) status = sz_strings_acquire_(tape, fresh, *valid, payload, allocator, &output, stream);
-    if (status == sz_success_k) {
-        sz_strings_offset_set_(&output, 0, 0);
-        arguments.count = *valid, arguments.target_layout = output.layout;
-        if (*valid)
-            status = sz_strings_write_metal_(write,
-                                             sz_size_divide_round_up(*valid, (sz_size_t)sz_strings_threads_metal_k),
-                                             &arguments, strings, order, scratch, &output, payload, stream);
-        sz_strings_commit_(tape, fresh, &output, allocator, stream);
-    }
+        status = sz_strings_measure_metal_(measure, &arguments, strings, order, &scratch, &valid, &payload, stream);
+    if (status == sz_success_k && valid != count) *malformed_index = valid, status = sz_invalid_utf8_k;
+    if (status == sz_success_k) status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, stream);
+    if (status == sz_success_k) sz_strings_offset_set_(&output, 0, 0), arguments.target_layout = output.layout;
+    if (status == sz_success_k && count)
+        status = sz_strings_write_metal_(write, arguments.tiles, &arguments, strings, order, scratch, &output, payload,
+                                         stream);
+    if (status == sz_success_k) sz_strings_commit_(tape, &output, allocator, stream);
+    else sz_strings_release_(tape, &output, payload, allocator, stream);
     if (scratch) sz_metal_do_(scratch, "release");
     return status;
 }
@@ -314,7 +310,6 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_metal_(sz_strings_view_t const *st
     sz_metal_call_t call;
     void *scratch = STRINGZILLA_NULL;
     sz_size_t valid = count, payload = end - first;
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
     sz_status_t status = sz_success_k;
     memset(&arguments, 0, sizeof(arguments));
     memcpy(arguments.lut, lut, sizeof(arguments.lut));
@@ -323,7 +318,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_metal_(sz_strings_view_t const *st
     if (order)
         status = sz_strings_measure_metal_("sz_strings_lengths_metal_kernel_", &arguments, strings, order, &scratch,
                                            &valid, &payload, stream);
-    if (status == sz_success_k) status = sz_strings_acquire_(tape, fresh, count, payload, allocator, &output, stream);
+    if (status == sz_success_k) status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, stream);
     if (status != sz_success_k) {
         if (scratch) sz_metal_do_(scratch, "release");
         return status;
@@ -351,7 +346,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_metal_(sz_strings_view_t const *st
                 sizeof(arguments), sz_size_divide_round_up(count + 1, (sz_size_t)sz_strings_threads_metal_k));
         status = sz_metal_commit_(&call, status);
     }
-    sz_strings_commit_(tape, fresh, &output, allocator, stream);
+    if (status == sz_success_k) sz_strings_commit_(tape, &output, allocator, stream);
+    else sz_strings_release_(tape, &output, payload, allocator, stream);
     if (scratch) sz_metal_do_(scratch, "release");
     return status;
 }
@@ -392,12 +388,9 @@ STRINGZILLA_API sz_status_t sz_strings_lookup_metal(sz_strings_view_t const *str
     sz_status_t status = sz_strings_check_metal_(strings, tape, stream);
     if (status == sz_success_k && !order) status = sz_strings_bounds_metal_(strings, count, &first, &end, stream);
     if (status != sz_success_k) return status;
-    if (order || !sz_strings_aliases_(strings, tape))
+    if (order || !sz_strings_aliases_(strings, tape) || count != tape->count)
         return sz_strings_map_metal_(strings, order, count, (sz_u8_t const *)lut, first, end, allocator, tape, stream);
-    // Shrinking first leaves the host no offsets to read while the kernel runs.
-    if (count != tape->count)
-        status = sz_strings_fit_(tape, sz_strings_offset_(tape, tape->count), count, allocator, stream);
-    if (status != sz_success_k || end == first) return status;
+    if (end == first) return status;
     memset(&arguments, 0, sizeof(arguments));
     memcpy(arguments.lut, lut, sizeof(arguments.lut));
     arguments.length = end - first;
@@ -454,30 +447,26 @@ STRINGZILLA_API sz_status_t sz_strings_to_rows_metal(sz_strings_view_t const *st
 STRINGZILLA_API sz_status_t sz_strings_escape_metal(sz_strings_view_t const *strings, sz_size_t const *order,
                                                     sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
                                                     sz_strings_span_t *tape, sz_stream_t stream) {
-    sz_size_t valid = 0;
+    sz_size_t malformed_index = 0;
     return sz_strings_rewrite_metal_("sz_strings_escape_lengths_metal_kernel_", "sz_strings_escape_metal_kernel_",
-                                     strings, order, count, kind, allocator, tape, &valid, stream);
+                                     strings, order, count, kind, allocator, tape, &malformed_index, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_strings_unescape_metal(sz_strings_view_t const *strings, sz_size_t const *order,
                                                       sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
                                                       sz_strings_span_t *tape, sz_size_t *malformed_index,
                                                       sz_stream_t stream) {
-    sz_size_t valid = 0;
-    sz_status_t status = sz_strings_rewrite_metal_("sz_strings_unescape_lengths_metal_kernel_",
-                                                   "sz_strings_unescape_metal_kernel_", strings, order, count, kind,
-                                                   allocator, tape, &valid, stream);
-    if (status == sz_success_k && valid != count) *malformed_index = valid, status = sz_invalid_utf8_k;
-    return status;
+    return sz_strings_rewrite_metal_("sz_strings_unescape_lengths_metal_kernel_", "sz_strings_unescape_metal_kernel_",
+                                     strings, order, count, kind, allocator, tape, malformed_index, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_strings_normalize_metal(sz_strings_view_t const *strings, sz_size_t const *order,
                                                        sz_size_t count, sz_normal_form_t form,
                                                        sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                        sz_stream_t stream) {
-    sz_size_t valid = 0;
+    sz_size_t malformed_index = 0;
     return sz_strings_rewrite_metal_("sz_strings_normalize_lengths_metal_kernel_", "sz_strings_normalize_metal_kernel_",
-                                     strings, order, count, form, allocator, tape, &valid, stream);
+                                     strings, order, count, form, allocator, tape, &malformed_index, stream);
 }
 
 #ifdef __cplusplus

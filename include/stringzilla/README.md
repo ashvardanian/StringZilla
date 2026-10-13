@@ -811,7 +811,9 @@ sz_status_t sz_strings_to_rows_best(sz_strings_view_t const *strings, sz_size_t 
                                     sz_capability_t capabilities, sz_stream_t stream);
 ```
 
-Like `realloc`, a zeroed span receives fresh blocks from the allocator, a span an earlier call produced is resized, blocks of matching sizes are kept, and a view of the span itself is converted in place.
+Every conversion is atomic: it succeeds with the whole result in the tape, or fails and leaves the tape, its blocks and their bytes exactly as they were, whether an allocation was refused or a string was malformed.
+A zeroed span receives fresh blocks from the allocator, blocks that already have the result's sizes are written in place, and any other span's old blocks go back only once the result is written.
+The allocator's `reallocate` is an optional fast path; without it, a block that must change size moves through `allocate`, `memcpy` and `free`.
 Escaping covers JSON, JSON in ASCII the way Python's `json.dumps` writes it, RFC 4180 CSV, hexadecimal, HTML, URL percent-encoding, and terminal-safe logs, and unescaping reports the first malformed string.
 Normalization brings every string into NFC, NFD, NFKC, NFKD or NFKC_Casefold, and NUL-padded rows serve NumPy `S` arrays and fixed-width record fields.
 A single buffer is a tape of one string, so lowercasing in place looks like this:

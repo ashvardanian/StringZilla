@@ -157,8 +157,7 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_icelake(sz_strings_view_t const
                                                          sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_icelake,
-                                      &sz_utf8_find_denormalized_icelake);
+    return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_icelake);
 }
 
 #if defined(__clang__)

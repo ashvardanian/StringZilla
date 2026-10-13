@@ -2,6 +2,8 @@
 
 This directory holds the collection kernels behind `sz_strings_to_tape_best`, `sz_strings_to_rows_best`, `sz_strings_escape_best`, `sz_strings_unescape_best`, `sz_strings_lookup_best` and `sz_strings_normalize_best`.
 Every one reads a `sz_strings_view_t` in any layout, optionally reordered through indices, and writes a tape or NUL-padded rows.
+Every one that writes a tape is atomic: it succeeds and leaves the tape holding the whole result, or fails and leaves the tape, its blocks and their bytes exactly as they were.
+Calls measure first and finish every fallible step, like a refused allocation or a malformed string, before the first write into a block the tape holds, and the allocator's `reallocate` is an optional fast path.
 Each operation has a serial baseline plus per-ISA backends, like `haswell` and `icelake` on x86.
 The backends share one set of drivers and differ only in their byte-set search, which skips the bytes needing no escaping, their lookup-table kernel, and their normalization kernels.
 `sz_strings_lookup_best` and its siblings run the best kernel the capability mask they are passed names.

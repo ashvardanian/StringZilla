@@ -7,10 +7,10 @@
  *  Every collection operation reads a @c sz_strings_view_t in any of its three layouts, optionally
  *  reordered or sampled through indices, and writes NUL-padded rows or a @c sz_strings_span_t tape:
  *
- *  - @c sz_strings_to_tape_best - gathers strings into a tape, reusing or resizing its blocks.
+ *  - @c sz_strings_to_tape_best - gathers strings into a tape, reusing its blocks when they fit.
  *  - @c sz_strings_to_rows_best - writes strings into NUL-padded rows, truncating longer ones.
  *  - @c sz_strings_escape_best - escapes strings for JSON, CSV, hex, HTML, URLs or terminals.
- *  - @c sz_strings_unescape_best - reverses that escaping, in place on the tape it reads.
+ *  - @c sz_strings_unescape_best - reverses that escaping, naming the first malformed string.
  *  - @c sz_strings_lookup_best - maps every byte through a 256-entry Look-Up Table @b (LUT).
  *  - @c sz_strings_normalize_best - brings strings into a Unicode form, NFKC_Casefold included.
  *  - @c sz_allocator_init_unified_best - an allocator of blocks the host and a device share.
@@ -83,10 +83,11 @@ typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, s
  *  GPU kernels and Apache Arrow read directly. The payload and the offsets are two blocks, exactly
  *  as large as they must be, with 32-bit offsets while the payload fits in 4 GiB and 64-bit beyond.
  *
- *  Like @c realloc, a zeroed @p tape receives new blocks from @p allocator, while a span an earlier
- *  call produced is resized through it and overwritten; blocks whose sizes already match are kept,
- *  so a borrowed span of the right sizes needs no allocator. When @p strings views the tape of
- *  @p tape, the call works in place, resizing its blocks where the allocator can.
+ *  Every collection verb is atomic: it succeeds and leaves @p tape holding the whole result, or it
+ *  fails and leaves @p tape, its blocks and their bytes as they were. Blocks of exactly the sizes
+ *  the result needs are written in place, so a borrowed span of the right sizes needs no
+ *  allocator; any other @p tape receives fresh blocks from @p allocator, and its old ones go back
+ *  only once the result is written. A whole tape gathered onto itself is left as it is.
  *
  *  @param[in] strings The strings to gather, in any layout.
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
@@ -96,7 +97,7 @@ typedef sz_status_t (*sz_kernel_strings_unescape_t)(sz_strings_view_t const *, s
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_bad_alloc_k when a block cannot grow.
- *  @note A GPU call reads the payload size back before resizing, synchronizing @p stream once.
+ *  @note A GPU call reads the payload size back before allocating, synchronizing @p stream once.
  */
 STRINGZILLA_API sz_status_t sz_strings_to_tape_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                     sz_size_t count, sz_allocator_t *allocator, sz_strings_span_t *tape,
@@ -322,9 +323,9 @@ STRINGZILLA_API sz_status_t sz_strings_to_rows_metal(sz_strings_view_t const *st
 /**
  *  @brief Escapes `strings[order[i]]`, or the first @p count strings, for @p kind into a tape.
  *
- *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. When @p strings views the tape of
- *  @p tape, the payload grows in place and moves to the end of its grown block, then escapes front
- *  to back into it, so the writer never overtakes bytes it has yet to read.
+ *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. When @p strings views all of
+ *  @p tape, its payload block grows first, through @c reallocate when the allocator has one, then
+ *  its bytes move to the end and escape front to back, the writer never overtaking unread bytes.
  *
  *  @param[in] strings The strings to escape, in any layout.
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
@@ -448,8 +449,8 @@ STRINGZILLA_API sz_status_t sz_strings_escape_metal(sz_strings_view_t const *str
 /**
  *  @brief Unescapes `strings[order[i]]`, or the first @p count strings, from @p kind into a tape.
  *
- *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. When @p strings views the tape of
- *  @p tape, the payload compacts front to back and then shrinks, as no string ever grows.
+ *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. Every string is checked before
+ *  anything is written, so one malformed string leaves @p tape as it was.
  *
  *  @param[in] strings The strings to unescape, in any layout.
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.
@@ -749,15 +750,14 @@ STRINGZILLA_API sz_status_t sz_strings_lookup_metal(sz_strings_view_t const *str
  *  @brief Brings `strings[order[i]]`, or the first @p count strings, into the Unicode @p form,
  *      writing them into a tape.
  *
- *  Allocates and reuses @p tape like @c sz_strings_to_tape_best. Strings already in @p form keep
- *  their length, so a first pass measures through the quick check, and only the strings it flags
- *  are rewritten. @c sz_normal_form_nfkc_casefold_k gives the keys search engines match on: NFKC
- *  with full case folding and without default-ignorable codepoints, the Unicode toNFKC_Casefold.
+ *  @c sz_normal_form_nfkc_casefold_k gives the keys search engines match on: NFKC with full case
+ *  folding and without default-ignorable codepoints, the Unicode toNFKC_Casefold.
  *
- *  On the CPU a flagged string is normalized twice, to measure and to write it, the first time into
- *  scratch from @p allocator once its flagged part outgrows 256 bytes. When @p strings views the
- *  tape of @p tape, the payload moves up its block just far enough for no string's output to reach
- *  its input, then normalizes front to back. GPUs read only tapes, a string to a thread.
+ *  On the CPU every string is normalized once, into blocks of the call's own from @p allocator: a
+ *  payload starting at the total input length, grown through @c reallocate when the allocator has
+ *  one, and fitted to its exact size at the end. That needs an allocator even when @p tape holds
+ *  blocks of exactly the final sizes, which are then filled rather than replaced. Like every
+ *  collection verb it is atomic. GPUs measure first and read only tapes, a string to a thread.
  *
  *  @param[in] strings The strings to normalize, in any layout.
  *  @param[in] order Indices into @p strings, possibly repeated, or null for the first @p count.

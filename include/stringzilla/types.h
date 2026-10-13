@@ -1220,8 +1220,9 @@ typedef void (*sz_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_strea
  *
  *  Every function takes the caller's stream, which on a GPU names the device a block is made on and
  *  the work a release waits behind; host allocators ignore it, and on the CPU it is null. The
- *  @c reallocate function keeps the first `min(old_bytes, new_bytes)` bytes, resizing the block
- *  where it lies when it can and moving it otherwise; a null pointer makes it allocate.
+ *  optional @c reallocate keeps the first `min(old_bytes, new_bytes)` bytes, resizing the block
+ *  where it lies when it can and moving it otherwise, and leaves the block as it was on failure.
+ *  Without it, a block that must change size moves through @c allocate and @c free.
  *
  *  @sa sz_allocator_init_arena, sz_allocator_init_unified_best
  */

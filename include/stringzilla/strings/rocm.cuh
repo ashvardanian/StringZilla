@@ -6,9 +6,9 @@
  *      checks, the scratch, the one readback a verb waits for, and the @c _rocm exports.
  *
  *  Every verb reads tapes and writes tapes the device reaches. It measures, reads the payload size
- *  back, resizes the output through the allocator, and writes, so a call synchronizes its stream
- *  once, and only before it resizes. A tape the output shares a block with is read into fresh
- *  blocks, whose predecessors return to the allocator once the write is queued.
+ *  back, takes the output's blocks, and writes, so a call synchronizes its stream once, before it
+ *  allocates. The output reuses the tape's blocks only when their sizes match and nothing reads
+ *  them, and fresh blocks replace the old ones only once the write is queued.
  *
  *  @sa include/stringzilla/strings/simt.cuh
  *  @sa include/stringzilla/strings/cuda.cuh
@@ -126,31 +126,31 @@ STRINGZILLA_INLINE sz_status_t sz_strings_open_rocm_(sz_strings_span_t const *ta
 
 /** Rewrites @p count strings into @p tape through the @p measure and @p write kernels, which take
  *  the strings, their order and count, the escape kind or normal form @p mode points at, and a
- *  scratch block, up to the first string @p measure finds malformed, counted in @p valid. */
+ *  scratch block, or names the first string @p measure finds malformed in @p malformed_index. */
 STRINGZILLA_INLINE sz_status_t sz_strings_rewrite_rocm_(void const *measure, void const *write,
                                                         sz_strings_view_t const *strings, sz_size_t const *order,
                                                         sz_size_t count, void *mode, sz_allocator_t *allocator,
-                                                        sz_strings_span_t *tape, sz_size_t *valid, sz_stream_t stream) {
+                                                        sz_strings_span_t *tape, sz_size_t *malformed_index,
+                                                        sz_stream_t stream) {
     sz_strings_view_t launch_strings = *strings;
-    sz_size_t launch_count = count, payload = 0;
+    sz_size_t launch_count = count, valid = 0, payload = 0;
     sz_u64_t *scratch = STRINGZILLA_NULL;
     sz_strings_span_t output;
+    memset(&output, 0, sizeof(output));
     void *measure_arguments[] = {&launch_strings, &order, &launch_count, mode, &scratch};
-    void *write_arguments[] = {&launch_strings, &order, valid, mode, &scratch, &output};
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
+    void *write_arguments[] = {&launch_strings, &order, &launch_count, mode, &scratch, &output};
     sz_status_t status = sz_strings_check_rocm_(strings, order, count, tape);
-    *valid = 0;
     if (status == sz_success_k) status = sz_strings_scratch_rocm_(count, &scratch, stream);
     if (status == sz_success_k && count)
         status = sz_strings_launch_rocm_(measure, count, sz_strings_threads_simt_k, measure_arguments, stream);
-    if (status == sz_success_k) status = sz_strings_measured_rocm_(scratch, count, valid, &payload, stream);
-    if (status == sz_success_k) status = sz_strings_acquire_(tape, fresh, *valid, payload, allocator, &output, stream);
-    if (status == sz_success_k) {
-        status = sz_strings_open_rocm_(&output, stream);
-        if (status == sz_success_k && *valid)
-            status = sz_strings_launch_rocm_(write, *valid, sz_strings_threads_simt_k, write_arguments, stream);
-        sz_strings_commit_(tape, fresh, &output, allocator, stream);
-    }
+    if (status == sz_success_k) status = sz_strings_measured_rocm_(scratch, count, &valid, &payload, stream);
+    if (status == sz_success_k && valid != count) *malformed_index = valid, status = sz_invalid_utf8_k;
+    if (status == sz_success_k) status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, stream);
+    if (status == sz_success_k) status = sz_strings_open_rocm_(&output, stream);
+    if (status == sz_success_k && count)
+        status = sz_strings_launch_rocm_(write, count, sz_strings_threads_simt_k, write_arguments, stream);
+    if (status == sz_success_k) sz_strings_commit_(tape, &output, allocator, stream);
+    else sz_strings_release_(tape, &output, payload, allocator, stream);
     if (scratch && hipFreeAsync(scratch, (hipStream_t)stream) != hipSuccess && status == sz_success_k)
         status = sz_device_code_mismatch_k;
     return status;
@@ -175,7 +175,6 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_rocm_(sz_strings_view_t const *str
     void *gather_arguments[] = {&launch_strings, &order, &launch_count, &launch_lut, &scratch, &output};
     void *lookup_arguments[] = {&source, &payload, &launch_lut, &target};
     void *rebase_arguments[] = {&launch_strings, &launch_count, &output};
-    sz_bool_t const fresh = sz_strings_shares_(strings, tape);
     sz_status_t status = sz_success_k;
     if (order) {
         status = sz_strings_scratch_rocm_(count, &scratch, stream);
@@ -184,7 +183,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_rocm_(sz_strings_view_t const *str
                                              sz_strings_threads_simt_k, measure_arguments, stream);
         if (status == sz_success_k) status = sz_strings_measured_rocm_(scratch, count, &valid, &payload, stream);
     }
-    if (status == sz_success_k) status = sz_strings_acquire_(tape, fresh, count, payload, allocator, &output, stream);
+    if (status == sz_success_k) status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, stream);
     if (status == sz_success_k) {
         target = (sz_u8_t *)sz_strings_payload_(&output);
         status = sz_strings_open_rocm_(&output, stream);
@@ -198,7 +197,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_map_rocm_(sz_strings_view_t const *str
         if (status == sz_success_k && !order && count)
             status = sz_strings_launch_rocm_((void const *)&sz_strings_rebase_simt_kernel_, count + 1,
                                              sz_strings_threads_simt_k, rebase_arguments, stream);
-        sz_strings_commit_(tape, fresh, &output, allocator, stream);
+        if (status == sz_success_k) sz_strings_commit_(tape, &output, allocator, stream);
+        else sz_strings_release_(tape, &output, payload, allocator, stream);
     }
     if (scratch && hipFreeAsync(scratch, (hipStream_t)stream) != hipSuccess && status == sz_success_k)
         status = sz_device_code_mismatch_k;
@@ -230,13 +230,10 @@ STRINGZILLA_INLINE sz_status_t sz_strings_lookup_rocm_(sz_strings_view_t const *
     sz_status_t status = sz_strings_check_rocm_(strings, order, count, tape);
     if (status == sz_success_k && !order) status = sz_strings_bounds_rocm_(strings, count, &first, &end, stream);
     if (status != sz_success_k) return status;
-    if (order || !sz_strings_aliases_(strings, tape))
+    if (order || !sz_strings_aliases_(strings, tape) || count != tape->count)
         return sz_strings_map_rocm_(strings, order, count, &table, first, end, allocator, tape, stream);
-    // Shrinking first leaves the host no offsets to read while the kernel runs.
-    if (count != tape->count)
-        status = sz_strings_fit_(tape, sz_strings_offset_(tape, tape->count), count, allocator, stream);
     bytes = (sz_u8_t *)sz_strings_payload_(tape) + first, length = end - first;
-    if (status == sz_success_k && length)
+    if (length)
         status = sz_strings_launch_rocm_((void const *)&sz_strings_lookup_simt_kernel_, length,
                                          sz_strings_threads_simt_k, arguments, stream);
     return status;
@@ -286,12 +283,12 @@ STRINGZILLA_API sz_status_t sz_strings_escape_rocm(sz_strings_view_t const *stri
                                                    sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
                                                    sz_strings_span_t *tape, sz_stream_t stream) {
     int caller = 0;
-    sz_size_t valid = 0;
+    sz_size_t malformed_index = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_strings_rewrite_rocm_((void const *)&sz_strings_escape_lengths_simt_kernel_,
                                       (void const *)&sz_strings_escape_simt_kernel_, strings, order, count, &kind,
-                                      allocator, tape, &valid, stream);
+                                      allocator, tape, &malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
 }
@@ -301,13 +298,11 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_rocm(sz_strings_view_t const *st
                                                      sz_strings_span_t *tape, sz_size_t *malformed_index,
                                                      sz_stream_t stream) {
     int caller = 0;
-    sz_size_t valid = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_strings_rewrite_rocm_((void const *)&sz_strings_unescape_lengths_simt_kernel_,
                                       (void const *)&sz_strings_unescape_simt_kernel_, strings, order, count, &kind,
-                                      allocator, tape, &valid, stream);
-    if (status == sz_success_k && valid != count) *malformed_index = valid, status = sz_invalid_utf8_k;
+                                      allocator, tape, malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
 }
@@ -328,14 +323,14 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_rocm(sz_strings_view_t const *s
                                                       sz_size_t count, sz_normal_form_t form, sz_allocator_t *allocator,
                                                       sz_strings_span_t *tape, sz_stream_t stream) {
     int caller = 0;
-    sz_size_t valid = 0;
+    sz_size_t malformed_index = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
     status = sz_utf8_norm_upload_rocm_(stream);
     if (status == sz_success_k)
         status = sz_strings_rewrite_rocm_((void const *)&sz_strings_normalize_lengths_simt_kernel_,
                                           (void const *)&sz_strings_normalize_simt_kernel_, strings, order, count,
-                                          &form, allocator, tape, &valid, stream);
+                                          &form, allocator, tape, &malformed_index, stream);
     sz_device_leave_rocm_(caller);
     return status;
 }
