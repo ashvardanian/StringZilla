@@ -835,8 +835,8 @@ STRINGZILLA_API sz_status_t sz_fill_random_skylake(sz_ptr_t target, sz_size_t le
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states,
+                                                                sz_strings_view_t const *texts, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t const lanes_count = texts->count;
 
@@ -846,14 +846,19 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_
         sz_u8_t const *cursors[16];
         sz_size_t remaining[16], blocks_per_lane[16];
         sz_u32_t buffered_bitmask = 0;
+        sz_size_t lane_indices[16];
+        sz_string_view_t lane_views[16];
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+            lane_indices[lane_index] = first_lane_index + lane_index;
+        sz_strings_get_(texts, lane_indices, active_lanes_count, lane_views);
 
         // Top up any buffered partial block into the state's own 64-byte buffer, which then serves
         // as that lane's first block source. Every lane's whole chunk is charged to `total_length`
         // here, once, so the head, body and tail below only move bytes.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &states[first_lane_index + lane_index];
-            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
-            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+            cursors[lane_index] = (sz_u8_t const *)lane_views[lane_index].start;
+            remaining[lane_index] = lane_views[lane_index].length;
 
             // The countdown rides in 32-bit lanes, so a chunk longer than that many blocks goes
             // through the single-state kernel over the very same state, and its lane sits out.

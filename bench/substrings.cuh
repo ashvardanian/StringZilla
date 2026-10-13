@@ -224,20 +224,23 @@ struct substrings_dictionary_t {
             written += view.length;
         }
     }
-    sz_sequence_t needle_sequence() const noexcept {
-        return {needles.data(), needles.size(),
-                [](void const *handle, sz_size_t index) -> sz_cptr_t {
-                    auto const *strings = static_cast<std::string const *>(handle);
-                    return strings[index].data();
-                },
-                [](void const *handle, sz_size_t index) -> sz_size_t {
-                    auto const *strings = static_cast<std::string const *>(handle);
-                    return strings[index].size();
-                }};
+    sz_strings_view_t needle_strings() const noexcept {
+        sz_strings_view_t result {};
+        result.layout = sz_strings_accessor_k, result.count = needles.size();
+        result.data.accessor.handle = needles.data();
+        result.data.accessor.get = [](void const *handle, sz_size_t const *indices, sz_size_t count,
+                                      sz_string_view_t *views) {
+            auto const *strings = static_cast<std::string const *>(handle);
+            for (sz_size_t position = 0; position != count; ++position) {
+                std::string const &needle = strings[indices[position]];
+                views[position] = {needle.data(), needle.size()};
+            }
+        };
+        return result;
     }
-    sz_sequence_t replacements() const noexcept {
-        sz_sequence_t result {};
-        sz_sequence_from_string_views(replacement_views.data(), replacement_views.size(), &result);
+    sz_strings_view_t replacements() const noexcept {
+        sz_strings_view_t result {};
+        sz_strings_from_string_views(replacement_views.data(), replacement_views.size(), &result);
         return result;
     }
     std::size_t needle_bytes() const noexcept {
@@ -259,7 +262,7 @@ struct substrings_engine_t {
                         init_type_ init, sz_allocator_t allocator, sz_size_t matches_budget = 0,
                         sz_size_t haystacks_budget = 0, sz_stream_t stream = nullptr)
         : stream(stream) {
-        sz_sequence_t const needles = dictionary.needle_sequence();
+        sz_strings_view_t const needles = dictionary.needle_strings();
         if (init(&engine, &needles, dictionary.sensitivity, policy, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO,
                  matches_budget, haystacks_budget, &allocator, stream) != sz_success_k)
             throw std::runtime_error("The vocabulary would not compile.");
@@ -294,9 +297,9 @@ struct substrings_corpus_t {
         for (std::size_t index = 0; index != spans.size(); ++index) views[index] = spans[index];
     }
 
-    sz_sequence_t haystacks() const noexcept {
-        sz_sequence_t result {};
-        sz_sequence_from_string_views(views.data(), views.size(), &result);
+    sz_strings_view_t haystacks() const noexcept {
+        sz_strings_view_t result {};
+        sz_strings_from_string_views(views.data(), views.size(), &result);
         return result;
     }
 
@@ -330,7 +333,7 @@ struct substrings_counts_from_sz {
     substrings_corpus_t const &corpus;
 
     /** Borrowed view of the strings read by this arm. */
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
 
     /** @b [haystacks], what a round fills, on a device with memory of its own. */
     device_vector<sz_size_t> device_counts;
@@ -340,7 +343,7 @@ struct substrings_counts_from_sz {
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
     substrings_counts_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                              sz_sequence_t const &haystacks,
+                              sz_strings_view_t const &haystacks,
                               std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks), runtime(runtime) {
         bool const separate = runtime && runtime->get().separate();
@@ -354,8 +357,8 @@ struct substrings_counts_from_sz {
     }
 
     call_result_t operator()(std::size_t) {
-        if (counts_kernel(&engine.engine, &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(), 1,
-                          engine.stream) != sz_success_k)
+        if (counts_kernel(&engine.engine, &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(),
+                          1, engine.stream) != sz_success_k)
             throw std::runtime_error("The counting round failed.");
         if (device_counts.size() != 0 &&
             copy_device_to_host(device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
@@ -379,7 +382,7 @@ struct substrings_find_from_sz {
     substrings_corpus_t const &corpus;
 
     /** Borrowed view of the strings read by this arm. */
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
 
     /** @b [haystacks + 1] boundaries into @c matches. */
     unified_vector<sz_size_t> offsets;
@@ -389,7 +392,7 @@ struct substrings_find_from_sz {
     bool sized = false;
 
     substrings_find_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                            sz_sequence_t const &haystacks)
+                            sz_strings_view_t const &haystacks)
         : engine(engine), find_kernel(kernel), corpus(corpus), haystacks(haystacks),
           offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
           matches(unified_alloc<sz_substrings_match_t>(engine.engine.allocator, engine.stream)) {}
@@ -426,10 +429,10 @@ struct substrings_replace_from_sz {
     substrings_corpus_t const &corpus;
 
     /** Borrowed view of the strings read by this arm. */
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
 
-    /** Accessors over the replacements, of the same kind. */
-    sz_sequence_t replacements;
+    /** Borrowed view of the replacements, of the same kind. */
+    sz_strings_view_t replacements;
 
     /** @b [haystacks + 1] rewritten boundaries, the last the total. */
     unified_vector<sz_size_t> offsets;
@@ -439,7 +442,7 @@ struct substrings_replace_from_sz {
     bool sized = false;
 
     substrings_replace_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                               sz_sequence_t const &haystacks, sz_sequence_t const &replacements)
+                               sz_strings_view_t const &haystacks, sz_strings_view_t const &replacements)
         : engine(engine), replace_kernel(kernel), corpus(corpus), haystacks(haystacks), replacements(replacements),
           offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
           tape(unified_alloc<char>(engine.engine.allocator, engine.stream)) {}
@@ -476,7 +479,7 @@ struct substrings_bm25_from_sz {
     substrings_corpus_t const &corpus;
 
     /** Borrowed view of the strings read by this arm. */
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
 
     /** The customary @c k1 and @c b, over the corpus's mean bytes. */
     sz_substrings_bm25_t parameters;
@@ -492,7 +495,7 @@ struct substrings_bm25_from_sz {
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
 
     substrings_bm25_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
-                            sz_sequence_t const &haystacks,
+                            sz_strings_view_t const &haystacks,
                             std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : engine(engine), scores_kernel(kernel), corpus(corpus), haystacks(haystacks), parameters {1.2f, 0.75f, 0},
           weights(engine.engine.needles_count, 1.0f, unified_alloc<sz_f32_t>(engine.engine.allocator, engine.stream)),
@@ -511,7 +514,8 @@ struct substrings_bm25_from_sz {
 
     call_result_t operator()(std::size_t) {
         if (scores_kernel(&engine.engine, &haystacks, nullptr, &parameters, weights.data(),
-                          device_scores.size() == 0 ? scores.data() : device_scores.data(), 1, engine.stream) != sz_success_k)
+                          device_scores.size() == 0 ? scores.data() : device_scores.data(), 1,
+                          engine.stream) != sz_success_k)
             throw std::runtime_error("The scoring round failed.");
         if (device_scores.size() != 0 &&
             copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)

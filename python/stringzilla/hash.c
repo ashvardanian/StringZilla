@@ -7,30 +7,24 @@
 #include "stringzilla.h"
 
 /**
- *  @brief Points @p sequence at the strings in @p texts, borrowing them in place.
+ *  @brief Points @p strings at the strings in @p texts, borrowing them in place.
  *
- *  A @c Strs is read through its own layout-aware accessors, so a tape-backed corpus never leaves
- *  its buffer. Any other sequence is snapshotted into a tuple and unpacked into @p scratch, which
- *  must hold @p scratch_capacity views. The snapshot is what pins the chunks: holding the
- *  caller's list would keep the container alive while leaving each chunk free to be dropped from
- *  under the exported pointers.
+ *  A @c Strs is viewed in its own layout, so a tape-backed corpus never leaves its buffer. Any
+ *  other sequence is snapshotted into a tuple and unpacked into @p scratch, which must hold
+ *  @p scratch_capacity views. The snapshot is what pins the chunks: holding the caller's list
+ *  would keep the container alive while any chunk could be dropped from under its view.
  *
  *  @return A new reference pinning the strings, to outlive the kernel call, or @c NULL on failure.
  */
-static PyObject *Sha256_bind_texts_(PyObject *texts, sz_sequence_t *sequence, sz_string_view_t *scratch,
+static PyObject *Sha256_bind_texts_(PyObject *texts, sz_strings_view_t *strings, sz_string_view_t *scratch,
                                     sz_size_t scratch_capacity) {
 
-    if (PyObject_TypeCheck(texts, &StrsType)) {
-        sz_size_t const count = (sz_size_t)Strs_len((Strs *)texts);
-        if (count > scratch_capacity) {
-            PyErr_Format(PyExc_ValueError, "Expected exactly one chunk per lane, got %zu for %zu lanes", count,
+    if (sz_py_export_strings_as_view(texts, strings)) {
+        if (strings->count > scratch_capacity) {
+            PyErr_Format(PyExc_ValueError, "Expected exactly one chunk per lane, got %zu for %zu lanes", strings->count,
                          scratch_capacity);
             return NULL;
         }
-        sequence->handle = texts;
-        sequence->count = count;
-        sequence->get_start = Strs_get_start_;
-        sequence->get_length = Strs_get_length_;
         Py_INCREF(texts);
         return texts;
     }
@@ -56,7 +50,7 @@ static PyObject *Sha256_bind_texts_(PyObject *texts, sz_sequence_t *sequence, sz
             return NULL;
         }
 
-    sz_sequence_from_string_views(scratch, count, sequence);
+    sz_strings_from_string_views(scratch, count, strings);
     return snapshot;
 }
 
@@ -459,8 +453,7 @@ PyObject *Str_like_fill_random(PyObject *self, PyObject *const *args, Py_ssize_t
     if (alphabet_obj && status == sz_success_k) {
         sz_align_(64) char look_up_table[256];
         for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
-        status = sz_lookup_best((sz_ptr_t)buf.start, (sz_cptr_t)buf.start, buf.length, look_up_table, capabilities,
-                                NULL);
+        status = sz_py_lookup((sz_ptr_t)buf.start, buf.start, buf.length, look_up_table, capabilities);
     }
     if (status != sz_success_k) {
         sz_py_raise_status(status, "fill_random()");
@@ -561,7 +554,7 @@ PyObject *module_random(PyObject *self, PyObject *const *args, Py_ssize_t positi
     sz_align_(64) char look_up_table[256];
     for (int i = 0; i < 256; ++i) look_up_table[i] = alphabet.start[i % alphabet.length];
     sz_ptr_t buf_ptr = (sz_ptr_t)PyBytes_AS_STRING(bytes_obj);
-    sz_status_t const status = sz_lookup_best(buf_ptr, buf_ptr, length, look_up_table, capabilities, NULL);
+    sz_status_t const status = sz_py_lookup(buf_ptr, buf_ptr, length, look_up_table, capabilities);
     if (status != sz_success_k) {
         Py_DECREF(bytes_obj);
         sz_py_raise_status(status, "random()");
@@ -697,7 +690,7 @@ static sz_status_t Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *oute
 
     // Keys longer than one block are replaced by their digest; shorter ones are zero-padded.
     sz_u8_t key_pad[STRINGZILLA_SHA256_BLOCK_LENGTH] = {0};
-    sz_status_t status;
+    sz_status_t status = sz_success_k;
     if (key_length > STRINGZILLA_SHA256_BLOCK_LENGTH) {
         sz_sha256_state_t key_state;
         status = sz_sha256_state_init_best(&key_state, capabilities, NULL);
@@ -705,7 +698,7 @@ static sz_status_t Hmac_prime_(sz_sha256_state_t *inner, sz_sha256_state_t *oute
             status = sz_sha256_state_update_best(&key_state, key, key_length, capabilities, NULL);
         if (status == sz_success_k) status = sz_sha256_state_digest_best(&key_state, key_pad, capabilities, NULL);
     }
-    else { status = sz_copy_best((sz_ptr_t)key_pad, key, key_length, capabilities, NULL); }
+    else { memcpy(key_pad, key, key_length); }
 
     sz_u8_t block[STRINGZILLA_SHA256_BLOCK_LENGTH];
     if (status == sz_success_k) status = sz_sha256_state_init_best(inner, capabilities, NULL);
@@ -753,7 +746,7 @@ static sz_status_t Hmac_digest_one_(sz_sha256_state_t const *inner, sz_sha256_st
  *  @param[out] views Scratch of at least `texts->count` views, reused for the inner digests.
  *  @note Runs with the GIL released, so it must touch no Python object.
  */
-static sz_status_t Hmac_digest_many_(sz_sequence_t const *texts, sz_sha256_state_t const *inner,
+static sz_status_t Hmac_digest_many_(sz_strings_view_t const *texts, sz_sha256_state_t const *inner,
                                      sz_sha256_state_t const *outer, sz_sha256_state_t *states, sz_string_view_t *views,
                                      sz_u8_t *digests, sz_capability_t capabilities) {
 
@@ -767,8 +760,8 @@ static sz_status_t Hmac_digest_many_(sz_sequence_t const *texts, sz_sha256_state
         states[index] = *outer, views[index].start = (sz_cptr_t)&digests[index * STRINGZILLA_SHA256_DIGEST_LENGTH],
         views[index].length = STRINGZILLA_SHA256_DIGEST_LENGTH;
 
-    sz_sequence_t inner_digests;
-    sz_sequence_from_string_views(views, count, &inner_digests);
+    sz_strings_view_t inner_digests;
+    sz_strings_from_string_views(views, count, &inner_digests);
     status = sz_sha256_multistate_update_best(states, &inner_digests, capabilities, NULL);
 
     // Safe to overwrite in place: every inner digest has already been absorbed into its lane.
@@ -908,7 +901,7 @@ PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t position
         }
     }
 
-    sz_sequence_t texts;
+    sz_strings_view_t texts;
     PyObject *pin = Sha256_bind_texts_(message_obj, &texts, views, (sz_size_t)messages_count);
     if (!pin) {
         free(views), free(states);
@@ -936,10 +929,8 @@ PyObject *hmac_sha256(PyObject *self, PyObject *const *args, Py_ssize_t position
     sz_status_t status = sz_success_k;
     if (texts.count) {
         // The `Strs` fast path leaves `views` unfilled, so materialize the spans the wrap will reuse.
-        for (sz_size_t index = 0; index != texts.count; ++index)
-            views[index].start = texts.get_start(texts.handle, index),
-            views[index].length = texts.get_length(texts.handle, index);
-        sz_sequence_from_string_views(views, texts.count, &texts);
+        for (sz_size_t index = 0; index < texts.count;) index += sz_strings_get_block_(&texts, index, views + index);
+        sz_strings_from_string_views(views, texts.count, &texts);
 
         sz_sha256_state_t inner_state, outer_state;
         status = Hmac_prime_(&inner_state, &outer_state, key.start, key.length, capabilities);
@@ -1471,7 +1462,7 @@ static int Sha256s_init(Sha256s *self, PyObject *args, PyObject *kwargs) {
 
 static PyObject *Sha256s_update(PyObject *self_obj, PyObject *arg) {
     Sha256s *self = (Sha256s *)self_obj;
-    sz_sequence_t texts;
+    sz_strings_view_t texts;
     PyObject *pin = Sha256_bind_texts_(arg, &texts, self->chunks, self->lanes_count);
     if (!pin) return NULL;
     if (texts.count != self->lanes_count) {
@@ -1622,13 +1613,7 @@ static PyObject *Sha256s_copy(PyObject *self_obj, PyObject *noargs) {
             Py_DECREF(copy);
             return PyErr_NoMemory();
         }
-        sz_status_t const status = sz_copy_best((sz_ptr_t)copy->states, (sz_cptr_t)self->states, states_bytes,
-                                                self->capabilities, NULL);
-        if (status != sz_success_k) {
-            Py_DECREF(copy);
-            sz_py_raise_status(status, "copy()");
-            return NULL;
-        }
+        memcpy(copy->states, self->states, (size_t)states_bytes);
     }
     return (PyObject *)copy;
 }

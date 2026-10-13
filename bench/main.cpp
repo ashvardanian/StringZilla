@@ -63,8 +63,8 @@ int main() {
         if constexpr (!STRINGZILLA_HEADER_ONLY) {
             bench_find(env);
             bench_token(env);
-            bench_sequence(env);
-            bench_memory(env);
+            bench_sort(env);
+            bench_strings(env);
             bench_cipher(env);
             bench_container(env);
             bench_levenshtein(env);

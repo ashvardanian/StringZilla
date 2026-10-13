@@ -1298,8 +1298,8 @@ std::optional<double> bench_baseline(environment_t const &env, corpus_t const &c
 /*  The families, one file each, time the dispatch points against the standard baselines. */
 void bench_find(environment_t &env);
 void bench_token(environment_t &env);
-void bench_sequence(environment_t &env);
-void bench_memory(environment_t &env);
+void bench_sort(environment_t &env);
+void bench_strings(environment_t &env);
 void bench_cipher(environment_t &env);
 void bench_container(environment_t &env);
 void bench_levenshtein(environment_t &env);

@@ -25,6 +25,7 @@
 #include <algorithm>   // `std::min`, `std::max`
 #include <array>       // `std::array`
 #include <limits>      // `std::numeric_limits`
+#include <map>         // `std::map`, the block sizes a sized heap remembers
 #include <random>      // `std::mt19937`, `std::uniform_int_distribution`
 #include <set>         // `std::set`, the window-overlap oracle and intersection pairs
 #include <string>      // `std::string`
@@ -99,258 +100,1037 @@ inline void check_compare_unit_(compare_backend_t const &backend) {
 
 #pragma endregion Compare
 
-#pragma region Memory
+#pragma region Strings
 
-/** The copy, move and fill kernels of one capability, or the dispatch points in their shape. */
-struct memory_backend_t {
+/** One backend's collection kernels: a capability's, or the dispatch points in their shape. */
+struct strings_backend_t {
     char const *name;
-    sz_kernel_copy_t copy = nullptr;
-    sz_kernel_move_t move = nullptr;
-    sz_kernel_fill_t fill = nullptr;
+    sz_kernel_strings_to_tape_t to_tape = nullptr;
+    sz_kernel_strings_to_rows_t to_rows = nullptr;
+    sz_kernel_strings_escape_t escape = nullptr;
+    sz_kernel_strings_unescape_t unescape = nullptr;
+    sz_kernel_strings_lookup_t lookup = nullptr;
+    sz_kernel_strings_normalize_t normalize = nullptr;
 };
 
-/** One backend's byte-lookup kernel: a capability's, or the dispatch point in its shape. */
-struct lookup_backend_t {
+/** The serial collection kernels, every other backend's reference. */
+inline strings_backend_t strings_serial_backend_() noexcept {
+    return {"serial",
+            sz_strings_to_tape_serial,
+            sz_strings_to_rows_serial,
+            sz_strings_escape_serial,
+            sz_strings_unescape_serial,
+            sz_strings_lookup_serial,
+            sz_strings_normalize_serial};
+}
+
+/** Every escape kind, in the order of @c sz_escape_kind_t. */
+inline constexpr sz_escape_kind_t escape_kinds_[] = {
+    sz_escape_json_k,    sz_escape_hex_k, sz_escape_html_k,       sz_escape_url_k,
+    sz_escape_console_k, sz_escape_csv_k, sz_escape_json_ascii_k,
+};
+
+/** The name failures report @p kind by. */
+inline char const *escape_kind_name_(sz_escape_kind_t kind) noexcept {
+    char const *const names[] = {"json", "hex", "html", "url", "console", "csv", "json_ascii"};
+    return names[kind];
+}
+
+/** Every normalization form, in the order of @c sz_normal_form_t. */
+inline constexpr sz_normal_form_t normal_forms_[] = {
+    sz_normal_form_nfd_k,  sz_normal_form_nfc_k,           sz_normal_form_nfkd_k,
+    sz_normal_form_nfkc_k, sz_normal_form_nfkc_casefold_k,
+};
+
+/** A verb that writes a tape, as the checks loop over them: gathering, a lookup through a table
+ *  that changes every byte, escaping and unescaping, the only ones that read @c kind, or
+ *  normalizing, the only one that reads @c form. */
+struct strings_verb_t {
+    sz_kernel_kind_t kernel;
+    sz_escape_kind_t kind = sz_escape_json_k;
+    sz_normal_form_t form = sz_normal_form_nfd_k;
+};
+
+/** The name failures report @p verb by: its kernel, then the kind or the form it reads. */
+inline std::string strings_verb_name_(strings_verb_t verb) {
+    char const *const forms[] = {"nfd", "nfc", "nfkd", "nfkc", "nfkc_casefold"};
+    std::string name = sz_kernel_name(verb.kernel);
+    if (verb.kernel == sz_kernel_strings_escape_k || verb.kernel == sz_kernel_strings_unescape_k)
+        name += fmt::format(" {}", escape_kind_name_(verb.kind));
+    else if (verb.kernel == sz_kernel_strings_normalize_k) name += fmt::format(" {}", forms[verb.form]);
+    return name;
+}
+
+/** Every verb that writes a tape: gathering, the lookup, every escape kind both ways, and every
+ *  normalization form. */
+inline std::vector<strings_verb_t> strings_verbs_() {
+    std::vector<strings_verb_t> verbs {{sz_kernel_strings_to_tape_k}, {sz_kernel_strings_lookup_k}};
+    for (sz_escape_kind_t const kind : escape_kinds_)
+        verbs.push_back({sz_kernel_strings_escape_k, kind}), verbs.push_back({sz_kernel_strings_unescape_k, kind});
+    for (sz_normal_form_t const form : normal_forms_)
+        verbs.push_back({sz_kernel_strings_normalize_k, sz_escape_json_k, form});
+    return verbs;
+}
+
+/** Each of @p strings brought into @p form alone by @c sz_utf8_norm_serial, the oracle a normalized
+ *  collection must match, demanding it stay within the bound the collection sizes scratch by. */
+inline std::vector<std::string> normalized_alone_(std::vector<std::string> const &strings, sz_normal_form_t form) {
+    std::vector<std::string> normalized;
+    for (std::string const &string : strings) {
+        std::string output((string.size() + 1) * sz_utf8_norm_decomp_max_k, '\0');
+        sz_size_t const length = kernel_result<sz_size_t>(sz_utf8_norm_serial, string.data(), string.size(), form,
+                                                          output.data());
+        verify(length <= string.size() * sz_utf8_norm_decomp_max_k);
+        output.resize(length);
+        normalized.push_back(std::move(output));
+    }
+    return normalized;
+}
+
+/** What a call that writes a tape left behind: its status, the first malformed string of a failed
+ *  unescape, and the strings the tape holds. */
+struct strings_outcome_t {
+    sz_status_t status = sz_success_k;
+    sz_size_t malformed_index = 0;
+    std::vector<std::string> strings;
+
+    bool operator==(strings_outcome_t const &) const = default;
+};
+
+/** Spells @p outcome out in the report of a failed check. */
+inline std::string format_as(strings_outcome_t const &outcome) {
+    return fmt::format("{{status {}, malformed index {}, strings {}}}", fmt::underlying(outcome.status),
+                       outcome.malformed_index, outcome.strings);
+}
+
+/**
+ *  @brief A heap that remembers each block's size and counts every call naming another one, since
+ *      a span's blocks are sized by its offsets alone and sized deallocators rely on that.
+ *
+ *  Zero-byte blocks are null, as with @c sz_allocator_init_heap, so a kernel must not mistake one
+ *  for a failed allocation. A pointer it never handed out is left alone and counted. Growths and
+ *  shrinks can be rationed, to refuse one at every step a kernel takes; freeing always succeeds.
+ */
+struct sized_heap_t {
+    std::map<void *, sz_size_t> blocks;
+    std::size_t mismatches = 0;
+
+    /** Calls that allocate or grow a block left to grant, refusing every one after them. */
+    std::size_t growths_left = std::numeric_limits<std::size_t>::max();
+
+    /** Calls that shrink a block but keep it left to grant, refusing every one after them. */
+    std::size_t shrinks_left = std::numeric_limits<std::size_t>::max();
+    sz_allocator_t allocator {};
+
+    sized_heap_t() noexcept {
+        allocator.allocate = +[](sz_size_t bytes, void *handle, sz_stream_t) -> void * {
+            return static_cast<sized_heap_t *>(handle)->resize(nullptr, 0, bytes);
+        };
+        allocator.reallocate = +[](void *pointer, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                   sz_stream_t) -> void * {
+            return static_cast<sized_heap_t *>(handle)->resize(pointer, old_bytes, new_bytes);
+        };
+        allocator.free = +[](void *pointer, sz_size_t bytes, void *handle, sz_stream_t) {
+            static_cast<sized_heap_t *>(handle)->resize(pointer, bytes, 0);
+        };
+        allocator.handle = this;
+    }
+    sized_heap_t(sized_heap_t const &) = delete;
+    sized_heap_t &operator=(sized_heap_t const &) = delete;
+
+    /** Resizes the block at @p pointer, null when empty, from @p old_bytes to @p new_bytes. */
+    void *resize(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes) noexcept {
+        auto const block = blocks.find(pointer);
+        bool const known = pointer ? block != blocks.end() && block->second == old_bytes : old_bytes == 0;
+        mismatches += !known;
+        std::size_t &left = new_bytes > old_bytes ? growths_left : shrinks_left;
+        if (new_bytes && new_bytes != old_bytes) {
+            if (!left) return nullptr;
+            --left;
+        }
+        if (pointer && block == blocks.end()) return nullptr;
+        if (pointer) blocks.erase(block);
+        void *resized = nullptr;
+        if (new_bytes) resized = std::realloc(pointer, new_bytes);
+        else std::free(pointer);
+        if (resized) blocks[resized] = new_bytes;
+        return resized;
+    }
+};
+
+/** Offset @p index of @p tape, whichever its width. */
+inline sz_u64_t span_offset_(sz_strings_span_t const &tape, sz_size_t index) noexcept {
+    return tape.layout == sz_strings_u32_tape_k ? tape.data.u32_tape.offsets[index] : tape.data.u64_tape.offsets[index];
+}
+
+/** The strings @p tape holds, copied out. */
+inline std::vector<std::string> strings_in_(sz_strings_span_t const &tape) {
+    sz_cptr_t const data = tape.layout == sz_strings_u32_tape_k ? tape.data.u32_tape.data : tape.data.u64_tape.data;
+    std::vector<std::string> strings;
+    for (sz_size_t index = 0; index != tape.count; ++index) {
+        sz_u64_t const start = span_offset_(tape, index), end = span_offset_(tape, index + 1);
+        strings.emplace_back(data + start, (std::size_t)(end - start));
+    }
+    return strings;
+}
+
+/** Copies @p strings into a span of @p layout whose blocks come from @p allocator, sized as kernels
+ *  size them, to reuse as an output or to read in place. */
+inline sz_strings_span_t span_from_(std::vector<std::string> const &strings, sz_strings_layout_t layout,
+                                    sz_allocator_t &allocator) {
+    std::size_t payload_bytes = 0;
+    for (std::string const &string : strings) payload_bytes += string.size();
+    sz_ptr_t const data = static_cast<sz_ptr_t>(allocator.allocate(payload_bytes, allocator.handle, nullptr));
+    auto const filled = [&]<typename offset_type_>(offset_type_ *offsets) {
+        std::size_t offset = 0;
+        for (std::size_t index = 0; index != strings.size(); ++index) {
+            offsets[index] = static_cast<offset_type_>(offset);
+            std::copy(strings[index].begin(), strings[index].end(), data + offset);
+            offset += strings[index].size();
+        }
+        offsets[strings.size()] = static_cast<offset_type_>(offset);
+        return offsets;
+    };
+    sz_size_t const offsets_count = strings.size() + 1;
+    sz_strings_span_t span {};
+    span.layout = layout, span.count = strings.size();
+    if (layout == sz_strings_u32_tape_k)
+        span.data.u32_tape.data = data, span.data.u32_tape.offsets = filled(static_cast<sz_u32_t *>(allocator.allocate(
+                                            offsets_count * sizeof(sz_u32_t), allocator.handle, nullptr)));
+    else
+        span.data.u64_tape.data = data, span.data.u64_tape.offsets = filled(static_cast<sz_u64_t *>(allocator.allocate(
+                                            offsets_count * sizeof(sz_u64_t), allocator.handle, nullptr)));
+    return span;
+}
+
+/** A view and the name failures report it by. */
+struct named_strings_t {
     char const *name;
-    sz_kernel_lookup_t lookup = nullptr;
+    sz_strings_view_t view;
 };
 
 /**
- *  @brief Runs one movement backend through hand-verifiable known-answer vectors.
+ *  @brief The same strings in every layout a kernel reads: a tape of 32-bit offsets, one of 64-bit
+ *      offsets, an accessor over views, and a slice of a tape whose first offset is above zero.
  *
- *  Guard bytes past @c length catch stray writes, and @c move shifts a buffer into itself.
+ *  Its views point into it, so it never copies or moves.
  */
-inline void check_memory_unit_(memory_backend_t const &backend) {
+class strings_layouts_t {
+    std::string payload_; // A string only the slice skips, then every string back to back
+    std::vector<sz_u32_t> u32_offsets_, prefixed_offsets_;
+    std::vector<sz_u64_t> u64_offsets_;
+    std::vector<sz_string_view_t> views_;
 
-    // `copy` duplicates a known buffer byte-for-byte. We over-allocate the target so a stray write
-    // past `length` is visible as a corrupted guard byte.
-    {
-        char const source[] = "The quick brown fox"; // 19 bytes + terminator
-        sz_size_t const length = (sz_size_t)(sizeof(source) - 1);
-        char target[sizeof(source) + 1];
-        std::memset(target, '#', sizeof(target));
-        verify(backend.copy(target, source, length, nullptr) == sz_success_k);
-        verify(std::memcmp(target, source, length) == 0 && "Copy backend diverged from the known-answer source");
-        verify(target[length] == '#' && "Copy backend wrote past the requested length");
+  public:
+    explicit strings_layouts_t(std::vector<std::string> const &strings) : payload_("skipped") {
+        prefixed_offsets_ = {0, static_cast<sz_u32_t>(payload_.size())};
+        u32_offsets_ = {0}, u64_offsets_ = {0};
+        for (std::string const &string : strings) {
+            payload_ += string;
+            prefixed_offsets_.push_back(static_cast<sz_u32_t>(payload_.size()));
+            u32_offsets_.push_back(prefixed_offsets_.back() - prefixed_offsets_[1]);
+            u64_offsets_.push_back(u32_offsets_.back());
+        }
+        for (std::size_t index = 0; index != strings.size(); ++index)
+            views_.push_back({payload_.data() + prefixed_offsets_[index + 1], strings[index].size()});
+    }
+    strings_layouts_t(strings_layouts_t const &) = delete;
+    strings_layouts_t &operator=(strings_layouts_t const &) = delete;
+
+    /** The tape of 32-bit offsets, the layout every kernel writes. */
+    sz_strings_view_t u32_tape() const noexcept {
+        sz_strings_view_t view;
+        view.layout = sz_strings_u32_tape_k, view.count = views_.size();
+        view.data.u32_tape.data = payload_.data() + prefixed_offsets_[1];
+        view.data.u32_tape.offsets = u32_offsets_.data();
+        return view;
     }
 
-    // `move` handles overlapping regions: shifting "abcdef" into itself by two yields "cdef" first.
-    {
-        char const expected[] = "cdef"; // After moving "cdef" (offset 2, 4 bytes) to offset 0
-        char buffer[] = "abcdef";
-        verify(backend.move(buffer, buffer + 2, 4, nullptr) == sz_success_k);
-        verify(std::memcmp(buffer, expected, 4) == 0 && "Move backend produced wrong bytes for overlapping shift");
+    /** Every layout, by name. */
+    std::array<named_strings_t, 4> all() const noexcept {
+        sz_strings_view_t u64_tape, accessor, prefixed, slice;
+        u64_tape.layout = sz_strings_u64_tape_k, u64_tape.count = views_.size();
+        u64_tape.data.u64_tape.data = payload_.data() + prefixed_offsets_[1];
+        u64_tape.data.u64_tape.offsets = u64_offsets_.data();
+        sz_strings_from_string_views(views_.data(), views_.size(), &accessor);
+        prefixed.layout = sz_strings_u32_tape_k, prefixed.count = views_.size() + 1;
+        prefixed.data.u32_tape.data = payload_.data(), prefixed.data.u32_tape.offsets = prefixed_offsets_.data();
+        sz_strings_slice(&prefixed, 1, 1, views_.size(), nullptr, &slice);
+        return {{{"a 32-bit tape", u32_tape()},
+                 {"a 64-bit tape", u64_tape},
+                 {"an accessor", accessor},
+                 {"a slice", slice}}};
     }
+};
 
-    // `fill` writes a known byte across a known span, leaving a guard byte untouched.
-    {
-        char const expected[] = "*****"; // Five asterisks
-        char target[5 + 1];
-        std::memset(target, '#', sizeof(target));
-        verify(backend.fill(target, 5, (sz_u8_t)'*', nullptr) == sz_success_k);
-        verify(std::memcmp(target, expected, 5) == 0 && "Fill backend produced wrong bytes for the known pattern");
-        verify(target[5] == '#' && "Fill backend wrote past the requested length");
+/** Calls @p verb of @p backend into @p tape and reads back what it left, checking that a tape it
+ *  wrote holds what it should: every selected string, or those before the first malformed one, at
+ *  32-bit offsets from zero, and that a call that failed left offsets that never fall. A @p device
+ *  kernel runs on its stream, joined before the read. */
+inline strings_outcome_t strings_outcome_(strings_backend_t const &backend, strings_verb_t verb,
+                                          sz_strings_view_t const &strings, sz_size_t const *order, sz_size_t count,
+                                          sz_allocator_t *allocator, sz_strings_span_t &tape,
+                                          device_backend_t const *device = nullptr) {
+    static std::array<char, 256> const rotation = [] {
+        std::array<char, 256> table {};
+        for (std::size_t index = 0; index != table.size(); ++index) table[index] = static_cast<char>(index + 1);
+        return table;
+    }();
+    sz_stream_t const stream = device ? device->stream : nullptr;
+    strings_outcome_t outcome;
+    switch (verb.kernel) {
+    case sz_kernel_strings_to_tape_k:
+        outcome.status = backend.to_tape(&strings, order, count, allocator, &tape, stream);
+        break;
+    case sz_kernel_strings_escape_k:
+        outcome.status = backend.escape(&strings, order, count, verb.kind, allocator, &tape, stream);
+        break;
+    case sz_kernel_strings_unescape_k:
+        outcome.status = backend.unescape(&strings, order, count, verb.kind, allocator, &tape, &outcome.malformed_index,
+                                          stream);
+        break;
+    case sz_kernel_strings_normalize_k:
+        outcome.status = backend.normalize(&strings, order, count, verb.form, allocator, &tape, stream);
+        break;
+    default: outcome.status = backend.lookup(&strings, order, count, rotation.data(), allocator, &tape, stream);
     }
+    if (device) verify(sz_stream_synchronize_best(device->capabilities, stream) == sz_success_k);
+    if (outcome.status != sz_invalid_utf8_k) outcome.malformed_index = 0;
+    if (outcome.status == sz_success_k || outcome.status == sz_invalid_utf8_k) {
+        verify(tape.count == (outcome.status == sz_success_k ? count : outcome.malformed_index));
+        verify(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr);
+        verify(tape.data.u32_tape.offsets[0] == 0);
+    }
+    for (sz_size_t index = 0; index < tape.count; ++index)
+        verify(span_offset_(tape, index) <= span_offset_(tape, index + 1));
+    outcome.strings = strings_in_(tape);
+    return outcome;
 }
 
-/**
- *  @brief Runs one byte-lookup backend through a hand-verifiable known-answer vector.
- *
- *  The upper-casing table maps "Hello, World!" to "HELLO, WORLD!" while leaving punctuation and
- *  digits intact; a guard byte past @c length catches stray writes.
- */
-inline void check_lookup_unit_(lookup_backend_t const &backend) {
-    // An ASCII upper-casing table built locally, so the known answer has an external ground truth.
-    char upper_table[256];
-    for (sz_size_t byte_value = 0; byte_value != 256; ++byte_value) {
-        char const character = (char)(unsigned char)byte_value;
-        upper_table[byte_value] = (character >= 'a' && character <= 'z') ? (char)(character - 'a' + 'A') : character;
+/** Holds one strings backend to known answers: every escape kind both ways, by the RFC 8259, 4180
+ *  and 3986 rules and the HTML and terminal ones, the first malformed string and those before it,
+ *  gathering from every layout and in place, rows, a lookup, and every normalization form. */
+inline void check_strings_unit_(strings_backend_t const &backend) {
+    using strings_t = std::vector<std::string>;
+    auto const malformed_at = [](sz_size_t index, strings_t strings) {
+        return strings_outcome_t {sz_invalid_utf8_k, index, std::move(strings)};
+    };
+    sized_heap_t heap;
+    auto const unescaped = [&](sz_escape_kind_t kind, strings_t const &strings) {
+        strings_layouts_t const layouts(strings);
+        sz_strings_span_t tape {};
+        strings_outcome_t outcome = strings_outcome_(backend, {sz_kernel_strings_unescape_k, kind}, layouts.u32_tape(),
+                                                     nullptr, strings.size(), &heap.allocator, tape);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        return outcome;
+    };
+    auto const decoded = [&](sz_escape_kind_t kind, strings_t const &strings) {
+        strings_outcome_t const outcome = unescaped(kind, strings);
+        verify(outcome.status == sz_success_k);
+        return outcome.strings;
+    };
+    auto const escaped = [&](sz_escape_kind_t kind, strings_t const &strings) {
+        strings_layouts_t const layouts(strings);
+        sz_strings_span_t tape {};
+        strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_escape_k, kind},
+                                                           layouts.u32_tape(), nullptr, strings.size(), &heap.allocator,
+                                                           tape);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        verify(outcome.status == sz_success_k);
+        return outcome.strings;
+    };
+    auto const normalized = [&](sz_normal_form_t form, strings_t const &strings) {
+        strings_layouts_t const layouts(strings);
+        sz_strings_span_t tape {};
+        strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_normalize_k, {}, form},
+                                                           layouts.u32_tape(), nullptr, strings.size(), &heap.allocator,
+                                                           tape);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        verify(outcome.status == sz_success_k);
+        return outcome.strings;
+    };
+
+    // RFC 8259: two-character escapes where they exist, lowercase `\u00XX` for the other controls,
+    // every other byte verbatim, DEL and UTF-8 included. Decoding takes `\/`, either hex case and
+    // surrogate pairs, refusing lone or reversed surrogates, unknown letters and short escapes.
+    verify(escaped(sz_escape_json_k, {"a\"b\\c\n\x1f", "\b\f\r\t", std::string(1, '\0'), "/\x7f\xC3\xA9", ""}) ==
+           strings_t({R"(a\"b\\c\n\u001f)", R"(\b\f\r\t)", R"(\u0000)", "/\x7f\xC3\xA9", ""}));
+    verify(decoded(sz_escape_json_k, {R"(a\"b\\c\/\n\u001F)", "\\u00e9\\u00E9", "\\ud83d\\ude00", "\xC3\xA9"}) ==
+           strings_t({"a\"b\\c/\n\x1f", "\xC3\xA9\xC3\xA9", "\xF0\x9F\x98\x80", "\xC3\xA9"}));
+    for (char const *text :
+         {R"(\ud83d)", "\\ud83d\\u0041", R"(\ude00\ud83d)", R"(\q)", R"(\u12)", R"(\u12g4)", R"(abc\)"})
+        verify(unescaped(sz_escape_json_k, {text}) == malformed_at(0, {}));
+
+    // Python's `json.dumps` default: non-ASCII codepoints as `\uXXXX`, a surrogate pair past the
+    // Basic Multilingual Plane, and a U+FFFD escape per byte that starts no well-formed sequence.
+    verify(escaped(sz_escape_json_ascii_k, {"\xC3\xA9\xF0\x9F\x98\x80", "\xE2\x82\xAC\"\x1f"}) ==
+           strings_t({"\\u00e9\\ud83d\\ude00", "\\u20ac\\\"\\u001f"}));
+
+    // DEL as well, since Python escapes every character outside printable ASCII, while plain JSON
+    // keeps it as it is, like Python's `ensure_ascii=False`, as the RFC 8259 case above shows.
+    verify(escaped(sz_escape_json_ascii_k, {"\x7f", "a\x7fz"}) == strings_t({"\\u007f", "a\\u007fz"}));
+    verify(decoded(sz_escape_json_ascii_k, {"\\u007f"}) == strings_t {"\x7f"});
+    verify(escaped(sz_escape_json_ascii_k, {"a\xFFz", "\xC0\x80", "\xED\xA0\x80", "\xF0\x9F\x98"}) ==
+           strings_t({"a\\ufffdz", "\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd", "\\ufffd\\ufffd\\ufffd"}));
+    verify(decoded(sz_escape_json_ascii_k, {"\\u00e9\\ud83d\\ude00"}) == strings_t {"\xC3\xA9\xF0\x9F\x98\x80"});
+    verify(unescaped(sz_escape_json_ascii_k, {R"(\ud83d)"}) == malformed_at(0, {}));
+
+    // Two lowercase digits per byte out, either case in, and nothing but whole digit pairs.
+    std::string const bytes("\x00\xffZz", 4);
+    verify(escaped(sz_escape_hex_k, {bytes, ""}) == strings_t({"00ff5a7a", ""}));
+    verify(decoded(sz_escape_hex_k, {"00FF5A7A", "00ff5a7a"}) == strings_t({bytes, bytes}));
+    for (char const *text : {"abc", "0g"}) verify(unescaped(sz_escape_hex_k, {text}) == malformed_at(0, {}));
+
+    // The five markup characters out; the five entities, `&apos;` and numeric references in, with
+    // U+FFFD for zero, surrogates and anything past U+10FFFF, and every other `&` kept as it is.
+    verify(escaped(sz_escape_html_k, {R"(<a href="x">'&'</a>)"}) ==
+           strings_t {"&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;"});
+    verify(decoded(sz_escape_html_k, {"&amp;&lt;&gt;&quot;&apos;&#39;", "&#x1F600;&#X1f600;&#128512;",
+                                      "&#0;&#xD800;&#x110000;&#4294967361;", "AT&T &nope; &#; &#x; &#65"}) ==
+           strings_t({R"(&<>"'')", "\xF0\x9F\x98\x80\xF0\x9F\x98\x80\xF0\x9F\x98\x80",
+                      "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD", "AT&T &nope; &#; &#x; &#65"}));
+
+    // RFC 3986: everything but `A-Z a-z 0-9 - . _ ~` as uppercase `%XX`, either case in, `+` kept.
+    verify(escaped(sz_escape_url_k, {"a b/c~d-e.f_g", "\xC3\xA9"}) == strings_t({"a%20b%2Fc~d-e.f_g", "%C3%A9"}));
+    verify(decoded(sz_escape_url_k, {"%2f%2F", "a+b", "%C3%a9"}) == strings_t({"//", "a+b", "\xC3\xA9"}));
+    for (char const *text : {"%", "%2", "%zz", "a%2"})
+        verify(unescaped(sz_escape_url_k, {text}) == malformed_at(0, {}));
+
+    // Terminals: three short forms, `\xHH` for other controls, DEL and ill-formed bytes, `\uXXXX`
+    // for C1 controls and the bidirectional overrides of Trojan Source, U+202F and U+206A kept.
+    verify(escaped(sz_escape_console_k, {"\n\t\r\\\"", "\x1b[31m", "\x7f\x08", std::string(1, '\0'), "\xff\xC0\x80"}) ==
+           strings_t({R"(\n\t\r\\\")", R"(\x1b[31m)", R"(\x7f\x08)", R"(\x00)", R"(\xff\xc0\x80)"}));
+    verify(escaped(sz_escape_console_k, {"\xE2\x80\xAExyz", "\xE2\x81\xA6\xE2\x81\xA9", "\xC2\x80\xC2\x85\xC2\x9F",
+                                         "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}) ==
+           strings_t(
+               {"\\u202exyz", "\\u2066\\u2069", "\\u0080\\u0085\\u009f", "\xE2\x80\xAF\xE2\x81\xAA\xC2\xA0\xC3\xA9"}));
+    verify(decoded(sz_escape_console_k, {R"(\n\t\r\\\")", R"(\x1b[31m\xff)", "\\u202e\\u0085"}) ==
+           strings_t({"\n\t\r\\\"", "\x1b[31m\xff", "\xE2\x80\xAE\xC2\x85"}));
+    for (char const *text : {R"(\q)", R"(\x4)", R"(\ud800)", R"(abc\)"})
+        verify(unescaped(sz_escape_console_k, {text}) == malformed_at(0, {}));
+
+    // RFC 4180: quoted only around a comma, a quote, CR or LF, with inner quotes doubled.
+    verify(escaped(sz_escape_csv_k, {"a,b", R"(a"b)", "a\nb", "a\rb", "plain", "", " x "}) ==
+           strings_t({R"("a,b")", R"("a""b")", "\"a\nb\"", "\"a\rb\"", "plain", "", " x "}));
+    verify(decoded(sz_escape_csv_k, {R"("a,b")", R"("a""b")", "plain", R"("")", R"(a"b)"}) ==
+           strings_t({"a,b", R"(a"b)", "plain", "", R"(a"b)"}));
+    for (char const *text : {R"(")", R"("open)", R"("a"b")"})
+        verify(unescaped(sz_escape_csv_k, {text}) == malformed_at(0, {}));
+
+    // Unescaping stops at the first malformed string, keeping those before it, and names its place
+    // in the output, which an order can move away from its place in the input.
+    verify(unescaped(sz_escape_json_k, {R"(ok\n)", "\\u00e9", R"(bad\q)", "never"}) ==
+           malformed_at(2, {"ok\n", "\xC3\xA9"}));
+    verify(unescaped(sz_escape_hex_k, {"00", "0", "zz"}) == malformed_at(1, {bytes.substr(0, 1)}));
+    {
+        strings_layouts_t const layouts({R"(\q)", "ok"});
+        sz_size_t const order[] = {1, 1, 0, 1};
+        sz_strings_span_t tape {};
+        verify(strings_outcome_(backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, layouts.u32_tape(), order, 4,
+                                &heap.allocator, tape) == malformed_at(2, {"ok", "ok"}));
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
-    char const source[] = "Hello, World!"; // 13 bytes
-    char const expected[] = "HELLO, WORLD!";
-    sz_size_t const length = (sz_size_t)(sizeof(source) - 1);
-    char target[sizeof(source) + 1];
-    std::memset(target, '#', sizeof(target));
-    verify(backend.lookup(target, source, length, upper_table, nullptr) == sz_success_k);
-    verify(std::memcmp(target, expected, length) == 0 && "Lookup backend diverged from the known-answer upper-casing");
-    verify(target[length] == '#' && "Lookup backend wrote past the requested length");
-}
 
-/** A representative spread of lengths covering 0, tiny, the SWAR/SIMD-width neighborhood, and
- *  larger, so a kernel's head/body/tail handling is exercised on every backend. */
-inline std::vector<sz_size_t> memory_equivalence_lengths() noexcept {
-    return {0,  1,  2,  3,  7,  8,  9,   15,  16,  17,  31,  32,  33,   47,
-            48, 63, 64, 65, 95, 96, 127, 128, 129, 255, 256, 257, 1024, 4096};
-}
+    // Gathering reads every layout alike, and an order picks, repeats and skips strings.
+    {
+        strings_t const fruits {"apple", "", "cherry", "kiwi"};
+        strings_layouts_t const layouts(fruits);
+        sz_size_t const order[] = {3, 1, 3, 0};
+        sz_strings_span_t tape {};
+        for (named_strings_t const &layout : layouts.all()) {
+            verify(
+                strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, nullptr, 4, &heap.allocator, tape)
+                    .strings == fruits);
+            verify(
+                strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, order, 4, &heap.allocator, tape)
+                    .strings == strings_t({"kiwi", "", "kiwi", "apple"}));
+            verify(
+                strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, layout.view, nullptr, 2, &heap.allocator, tape)
+                    .strings == strings_t({"apple", ""}));
+        }
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
 
-/**
- *  @brief Copies, moves and fills buffers with a @p candidate backend, comparing against serial.
- *
- *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
- *  every sub-cache-line alignment, across the representative length set, with embedded-NUL content
- *  and overlapping @c move regions, so a misaligned head or tail bug on any backend is caught
- *  against the reference.
- */
-inline void check_memory_equivalence_(test_context_t &context, memory_backend_t const &candidate) {
+    // Gathering a span into itself keeps its blocks, and a prefix of it shrinks them.
+    {
+        strings_t const words {"keep", "these", "two"};
+        sz_strings_span_t tape = span_from_(words, sz_strings_u32_tape_k, heap.allocator);
+        sz_ptr_t const data = tape.data.u32_tape.data;
+        sz_u32_t *const offsets = tape.data.u32_tape.offsets;
+        sz_strings_view_t own;
+        sz_strings_from_span(&tape, &own);
+        verify(
+            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 3, &heap.allocator, tape).strings ==
+            words);
+        verify(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
+        sz_strings_from_span(&tape, &own);
+        verify(
+            strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &heap.allocator, tape).strings ==
+            strings_t({"keep", "these"}));
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
 
-    memory_backend_t const reference {"serial", sz_copy_serial, sz_move_serial, sz_fill_serial};
-    sz_size_t const inputs = (sz_size_t)context.iterations(2);
-    std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
-    sz_size_t const max_length = lengths.back();
+    // A span over a slice, its first offset above zero, compacts down to zero in place.
+    {
+        alignas(64) char buffer[256];
+        sz_allocator_t arena;
+        verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
+        sz_ptr_t const data = static_cast<sz_ptr_t>(arena.allocate(12, arena.handle, nullptr));
+        sz_u32_t *const offsets = static_cast<sz_u32_t *>(arena.allocate(4 * sizeof(sz_u32_t), arena.handle, nullptr));
+        std::memcpy(data, "dropkeepsake", 12);
+        offsets[0] = 0, offsets[1] = 4, offsets[2] = 8, offsets[3] = 12;
+        sz_strings_span_t tape {};
+        tape.layout = sz_strings_u32_tape_k, tape.count = 2;
+        tape.data.u32_tape.data = data, tape.data.u32_tape.offsets = offsets + 1;
+        sz_strings_view_t own;
+        sz_strings_from_span(&tape, &own);
+        verify(strings_outcome_(backend, {sz_kernel_strings_to_tape_k}, own, nullptr, 2, &arena, tape).strings ==
+               strings_t({"keep", "sake"}));
+    }
 
-    for (sz_size_t length : lengths) {
-        for (sz_size_t input = 0; input != inputs; ++input) {
+    // A span escapes into itself, growing, and unescapes back, shrinking.
+    {
+        strings_t const plain {"a\"b", "", "c\nd"};
+        strings_t const json {R"(a\"b)", "", R"(c\nd)"};
+        sz_strings_span_t tape = span_from_(plain, sz_strings_u32_tape_k, heap.allocator);
+        sz_strings_view_t own;
+        sz_strings_from_span(&tape, &own);
+        verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, sz_escape_json_k}, own, nullptr, 3,
+                                &heap.allocator, tape)
+                   .strings == json);
+        sz_strings_from_span(&tape, &own);
+        let_verify(
+            strings_outcome_t const outcome = strings_outcome_(
+                backend, {sz_kernel_strings_unescape_k, sz_escape_json_k}, own, nullptr, 3, &heap.allocator, tape),
+            outcome.status == sz_success_k && outcome.strings == plain);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
 
-            // A randomized source with embedded NULs - the byte primitives must stay length-driven.
-            // It is read from a cache-line-shifted span, so the load alignment varies too.
-            std::vector<char> source_storage(length + sz_default_alignment_k, '\0');
-            sz_cptr_t const source = source_storage.data() + (input % sz_default_alignment_k);
-            if (length) randomize_string(context.generator, {const_cast<char *>(source), length});
-
-            // `copy` and `fill`: place the destination at every sub-cache-line alignment, comparing
-            // the candidate output against a serial reference run at the same alignment.
-            sz_u8_t const fill_value = (sz_u8_t)(0xA5u ^ (sz_u8_t)length);
-            for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
-                std::vector<char> reference_output(length, '\0');
-                verify(reference.copy(reference_output.data(), source, length, nullptr) == sz_success_k);
-                verify(candidate.copy(target, source, length, nullptr) == sz_success_k);
-                if (length)
-                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                           "Candidate copy backend diverged from the serial reference");
-
-                verify(reference.fill(reference_output.data(), length, fill_value, nullptr) == sz_success_k);
-                verify(candidate.fill(target, length, fill_value, nullptr) == sz_success_k);
-                if (length)
-                    verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                           "Candidate fill backend diverged from the serial reference");
-            });
-
-            // `move` with overlapping regions: shift the source pattern within one buffer by a
-            // small offset, both forwards and backwards, at every alignment of the buffer.
-            for (sz_size_t shift : {(sz_size_t)1, (sz_size_t)7, (sz_size_t)16}) {
-                if (length <= shift) continue;
-                sz_size_t const moved = length - shift;
-                for_each_cacheline_offset_(max_length + shift, [&](sz_ptr_t buffer, std::size_t) {
-                    std::vector<char> reference_buffer(length + shift, '\0');
-
-                    // Forward overlap: destination ahead of the source.
-                    std::memcpy(buffer, source, length);
-                    std::memcpy(reference_buffer.data(), source, length);
-                    verify(candidate.move(buffer + shift, buffer, moved, nullptr) == sz_success_k);
-                    verify(reference.move(reference_buffer.data() + shift, reference_buffer.data(), moved, nullptr) ==
-                           sz_success_k);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
-                           "Candidate move backend diverged from reference on forward overlap");
-
-                    // Backward overlap: destination behind the source.
-                    std::memcpy(buffer, source, length);
-                    std::memcpy(reference_buffer.data(), source, length);
-                    verify(candidate.move(buffer, buffer + shift, moved, nullptr) == sz_success_k);
-                    verify(reference.move(reference_buffer.data(), reference_buffer.data() + shift, moved, nullptr) ==
-                           sz_success_k);
-                    verify(std::memcmp(buffer, reference_buffer.data(), length) == 0 &&
-                           "Candidate move backend diverged from reference on backward overlap");
-                });
-            }
+    // Rows truncate at their width and pad with NUL bytes, leave the gap to the stride alone, and
+    // report the longest string before truncation.
+    {
+        strings_layouts_t const layouts({"abc", "abcdef", ""});
+        sz_size_t const order[] = {2, 0};
+        for (named_strings_t const &layout : layouts.all()) {
+            char buffer[18];
+            sz_strings_rows_t const rows {buffer, 6, 4};
+            sz_size_t longest = 0;
+            std::memset(buffer, '.', sizeof(buffer));
+            verify(backend.to_rows(&layout.view, nullptr, 3, &rows, &longest, nullptr) == sz_success_k);
+            verify(std::string_view(buffer, 18) == std::string_view("abc\0..abcd..\0\0\0\0..", 18));
+            verify(longest == 6);
+            std::memset(buffer, '.', sizeof(buffer));
+            verify(backend.to_rows(&layout.view, order, 2, &rows, &longest, nullptr) == sz_success_k);
+            verify(std::string_view(buffer, 18) == std::string_view("\0\0\0\0..abc\0........", 18));
+            verify(longest == 3);
+            verify(backend.to_rows(&layout.view, nullptr, 0, &rows, &longest, nullptr) == sz_success_k);
+            verify(longest == 0);
         }
     }
+
+    // An upper-casing table built here, so the answer has an external ground truth, maps every
+    // layout alike, and maps a span in place, keeping its blocks and offsets.
+    {
+        char upper_table[256];
+        for (sz_size_t byte_value = 0; byte_value != 256; ++byte_value) {
+            char const character = (char)(unsigned char)byte_value;
+            upper_table[byte_value] = (character >= 'a' && character <= 'z') ? (char)(character - 'a' + 'A')
+                                                                             : character;
+        }
+        strings_t const greeting {"Hello,", "dear", "World!", ""};
+        strings_t const shouted {"HELLO,", "DEAR", "WORLD!", ""};
+        strings_layouts_t const layouts(greeting);
+        for (named_strings_t const &layout : layouts.all()) {
+            sz_strings_span_t tape {};
+            verify(backend.lookup(&layout.view, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr) ==
+                   sz_success_k);
+            verify(strings_in_(tape) == shouted);
+            sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        }
+        sz_strings_span_t tape = span_from_(greeting, sz_strings_u32_tape_k, heap.allocator);
+        sz_ptr_t const data = tape.data.u32_tape.data;
+        sz_u32_t *const offsets = tape.data.u32_tape.offsets;
+        sz_strings_view_t own;
+        sz_strings_from_span(&tape, &own);
+        verify(backend.lookup(&own, nullptr, 4, upper_table, &heap.allocator, &tape, nullptr) == sz_success_k);
+        verify(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
+        verify(strings_in_(tape) == shouted);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
+
+    // UAX #15: NFD and NFKD split precomposed letters and Hangul syllables, NFC and NFKC put them
+    // back together, and only the compatibility forms rewrite ligatures and fractions.
+    verify(normalized(sz_normal_form_nfd_k, {"\xC3\xA9", "", "\xEA\xB0\x80", "\xEF\xAC\x81"}) ==
+           strings_t({"e\xCC\x81", "", "\xE1\x84\x80\xE1\x85\xA1", "\xEF\xAC\x81"}));
+    verify(normalized(sz_normal_form_nfc_k, {"e\xCC\x81", "\xE1\x84\x80\xE1\x85\xA1", "", "\xE2\x84\xAB"}) ==
+           strings_t({"\xC3\xA9", "\xEA\xB0\x80", "", "\xC3\x85"}));
+    verify(normalized(sz_normal_form_nfkd_k, {"\xEF\xAC\x81", "\xC2\xBD", ""}) ==
+           strings_t({"fi", "1\xE2\x81\x84\x32", ""}));
+    verify(normalized(sz_normal_form_nfkc_k, {"", "\xEF\xAC\x81\xC3\xA9", "\xC2\xBD"}) ==
+           strings_t({"", "fi\xC3\xA9", "1\xE2\x81\x84\x32"}));
+
+    // NFKC_Casefold also folds case and drops default ignorables, the U+00AD between J and its
+    // caron too, so the two still compose into U+01F0, and ignorables alone into nothing. Bytes
+    // starting no codepoint stay barriers, keeping an ignorable whose loss would fuse them.
+    verify(normalized(sz_normal_form_nfkc_casefold_k,
+                      {"J\xC2\xAD\xCC\x8C", "\xC2\xAD\xE2\x80\x8B\xEF\xBB\xBF", "",
+                       "Gro\xC3\x9F \xEF\xAC\x81 \xE2\x84\xAB", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}) ==
+           strings_t({"\xC7\xB0", "", "", "gross fi \xC3\xA5", "\xC3\xEF\xB8\x8F\x80", "\xE2\x82\xE2\x80\x8B\x80"}));
+    verify(normalized(sz_normal_form_nfkc_casefold_k, {"\xC2\xAD", "", "\xE2\x80\x8B"}) == strings_t({"", "", ""}));
+
+    // A span normalizes into itself, a string growing ahead of one that shrinks.
+    {
+        strings_t const mixed {"\xC2\xBD", "", "\xEF\xAC\x81\xC2\xAD", "Plain"};
+        sz_strings_span_t tape = span_from_(mixed, sz_strings_u32_tape_k, heap.allocator);
+        sz_strings_view_t own;
+        sz_strings_from_span(&tape, &own);
+        verify(strings_outcome_(backend, {sz_kernel_strings_normalize_k, {}, sz_normal_form_nfkc_casefold_k}, own,
+                                nullptr, 4, &heap.allocator, tape)
+                   .strings == strings_t({"1\xE2\x81\x84\x32", "", "fi", "plain"}));
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/** Writes @p strings into rows of widths around a vector's through @p candidate and serial, from
+ *  every layout and through @p order, demanding the same bytes, stride gaps and longest length. */
+inline void check_strings_rows_equivalence_(strings_backend_t const &candidate, std::vector<std::string> const &strings,
+                                            std::vector<sz_size_t> const &order) {
+    strings_layouts_t const layouts(strings);
+    sz_size_t const *const selections[] = {nullptr, order.data()};
+    sz_size_t const widths[] = {0, 1, 7, 16, 33, 64};
+    for (named_strings_t const &layout : layouts.all())
+        for (sz_size_t const *selection : selections)
+            for (sz_size_t const width : widths) {
+                sz_size_t const count = selection ? order.size() : strings.size(), stride = width + 3;
+                std::vector<char> expected(count * stride, '#'), written = expected;
+                sz_strings_rows_t const expected_rows {expected.data(), stride, width};
+                sz_strings_rows_t const written_rows {written.data(), stride, width};
+                sz_size_t expected_longest = 0, written_longest = 0;
+                verify(sz_strings_to_rows_serial(&layout.view, selection, count, &expected_rows, &expected_longest,
+                                                 nullptr) == sz_success_k);
+                verify(candidate.to_rows(&layout.view, selection, count, &written_rows, &written_longest, nullptr) ==
+                       sz_success_k);
+                if (written != expected || written_longest != expected_longest)
+                    fail_backend_(candidate.name, fmt::format("rows {} wide from {} {} differ from serial", width,
+                                                              layout.name, selection ? "reordered" : "in order")
+                                                      .c_str());
+            }
 }
 
 /**
- *  @brief Applies byte-lookup tables with a @p candidate backend, comparing against serial.
+ *  @brief Runs one verb of @p candidate and of serial over @p strings from every layout, in order
+ *      and through @p order, into every kind of span, demanding the same outcome from both.
  *
- *  Runs over @c for_each_cacheline_offset_ so the destination and source buffers are exercised at
- *  every sub-cache-line alignment, across the representative length set, against the upper, lower
- *  and ASCII tables.
+ *  A zeroed span takes fresh blocks, a reused one of either offset width resizes its own, one
+ *  borrowed at the final sizes needs no allocator, and a span the input views is written in place.
+ *  The sized heap behind them fails the check on any block given back at a size it was not given.
+ *  Normalizing must also match each string normalized alone, and normalizing again change nothing.
  */
-inline void check_lookup_equivalence_(test_context_t &context, lookup_backend_t const &candidate) {
+inline void check_strings_verb_equivalence_(strings_backend_t const &candidate, strings_verb_t verb,
+                                            std::vector<std::string> const &strings,
+                                            std::vector<sz_size_t> const &order) {
+    strings_backend_t const serial = strings_serial_backend_();
+    std::vector<std::string> const reused {"a reused span", "", "of other sizes"};
+    sized_heap_t heap;
+    strings_layouts_t const layouts(strings);
+    sz_size_t const *const selections[] = {nullptr, order.data()};
+    bool const normalizes = verb.kernel == sz_kernel_strings_normalize_k;
+    // A string over 256 bytes may normalize through scratch from the allocator, borrowed or not.
+    bool const needs_scratch = normalizes && std::any_of(strings.begin(), strings.end(),
+                                                         [](std::string const &string) { return string.size() > 256; });
+    for (sz_size_t const *selection : selections) {
+        sz_size_t const count = selection ? order.size() : strings.size();
+        sz_strings_span_t reference_tape {};
+        strings_outcome_t const expected = strings_outcome_(serial, verb, layouts.u32_tape(), selection, count,
+                                                            &heap.allocator, reference_tape);
+        sz_strings_span_free(&reference_tape, &heap.allocator, nullptr);
+        auto const demand = [&](char const *layout, char const *span, strings_outcome_t const &outcome) {
+            if (outcome == expected && heap.mismatches == 0) return;
+            fmt::println(stderr, "{} from {} {} into {}: {} instead of {}, {} blocks resized by the wrong size",
+                         strings_verb_name_(verb), layout, selection ? "reordered" : "in order", span, outcome,
+                         expected, heap.mismatches);
+            fail_backend_(candidate.name, "a strings kernel disagreed with serial");
+        };
 
-    lookup_backend_t const reference {"serial", sz_lookup_serial};
-    sz_size_t const inputs = (sz_size_t)context.iterations(2);
-    char upper_table[256], lower_table[256], ascii_table[256];
-    sz_lookup_init_upper(upper_table);
-    sz_lookup_init_lower(lower_table);
-    sz_lookup_init_ascii(ascii_table);
-    char const *const tables[] = {upper_table, lower_table, ascii_table};
+        if (normalizes) {
+            std::vector<std::string> selected;
+            for (sz_size_t position = 0; position != count; ++position)
+                selected.push_back(strings[selection ? selection[position] : position]);
+            if (expected.strings != normalized_alone_(selected, verb.form))
+                fail_backend_(serial.name, "a normalized collection differs from its strings normalized alone");
+            strings_layouts_t const normalized(expected.strings);
+            demand("its own output", "a zeroed span", [&] {
+                sz_strings_span_t again {};
+                strings_outcome_t const outcome = strings_outcome_(candidate, verb, normalized.u32_tape(), nullptr,
+                                                                   count, &heap.allocator, again);
+                sz_strings_span_free(&again, &heap.allocator, nullptr);
+                return outcome;
+            }());
+        }
 
-    std::vector<sz_size_t> const lengths = memory_equivalence_lengths();
-    sz_size_t const max_length = lengths.back();
+        for (named_strings_t const &layout : layouts.all()) {
+            sz_strings_span_t fresh {};
+            demand(layout.name, "a zeroed span",
+                   strings_outcome_(candidate, verb, layout.view, selection, count, &heap.allocator, fresh));
+            sz_strings_span_free(&fresh, &heap.allocator, nullptr);
 
-    for (char const *table : tables)
-        for (sz_size_t length : lengths) {
-            for (sz_size_t input = 0; input != inputs; ++input) {
+            for (sz_strings_layout_t const width : {sz_strings_u32_tape_k, sz_strings_u64_tape_k}) {
+                sz_strings_span_t tape = span_from_(reused, width, heap.allocator);
+                demand(layout.name, width == sz_strings_u32_tape_k ? "a reused 32-bit span" : "a reused 64-bit span",
+                       strings_outcome_(candidate, verb, layout.view, selection, count, &heap.allocator, tape));
+                sz_strings_span_free(&tape, &heap.allocator, nullptr);
+            }
 
-                std::vector<char> source_storage(length + sz_default_alignment_k, '\0');
-                sz_cptr_t const source = source_storage.data() + (input % sz_default_alignment_k);
-                if (length) randomize_string(context.generator, {const_cast<char *>(source), length});
+            // Blocks of the very sizes the result needs, so the call has no reason to resize them.
+            if (expected.status != sz_success_k) continue;
+            std::size_t payload_bytes = 0;
+            for (std::string const &string : expected.strings) payload_bytes += string.size();
+            std::vector<char> payload(payload_bytes, '#');
+            std::vector<sz_u32_t> offsets(count + 1, 0);
+            offsets.back() = static_cast<sz_u32_t>(payload_bytes);
+            sz_strings_span_t borrowed {};
+            borrowed.layout = sz_strings_u32_tape_k, borrowed.count = count;
+            borrowed.data.u32_tape.data = payload.data(), borrowed.data.u32_tape.offsets = offsets.data();
+            demand(layout.name, "a borrowed span",
+                   strings_outcome_(candidate, verb, layout.view, selection, count,
+                                    needs_scratch ? &heap.allocator : nullptr, borrowed));
+            verify(borrowed.data.u32_tape.data == payload.data() && borrowed.data.u32_tape.offsets == offsets.data());
+        }
 
-                for_each_cacheline_offset_(max_length, [&](sz_ptr_t target, std::size_t) {
-                    std::vector<char> reference_output(length, '\0');
-                    verify(reference.lookup(reference_output.data(), source, length, table, nullptr) == sz_success_k);
-                    verify(candidate.lookup(target, source, length, table, nullptr) == sz_success_k);
-                    if (length)
-                        verify(std::memcmp(reference_output.data(), target, length) == 0 &&
-                               "Candidate lookup output diverged from reference for this lookup table");
-                });
+        sz_strings_span_t aliased = span_from_(strings, sz_strings_u32_tape_k, heap.allocator);
+        sz_strings_view_t own;
+        sz_strings_from_span(&aliased, &own);
+        demand("the tape it writes", "itself",
+               strings_outcome_(candidate, verb, own, selection, count, &heap.allocator, aliased));
+        sz_strings_span_free(&aliased, &heap.allocator, nullptr);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/**
+ *  @brief Demands that a @p candidate strings backend write what serial writes, over random strings
+ *      of well-formed text, of escape-shaped ASCII, of arbitrary bytes, and of text to normalize.
+ *
+ *  Every verb runs through every layout and kind of span, as @c check_strings_verb_equivalence_
+ *  does. Unescaping what the candidate escaped must give back the strings, unless JSON in ASCII
+ *  replaced ill-formed bytes, and spoiling one escaped string must fail at that very string.
+ */
+inline void check_strings_equivalence_(test_context_t &context, strings_backend_t const &candidate) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> text = alphabet_characters(
+        "aZ09 ,;&#%+~-._/<>'\"\\\n\r\t\x01\x1f\x7f\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80\xC2\x85\xE2\x80\xAE");
+    text.push_back(std::string(1, '\0'));
+    std::vector<std::string> const escapes = alphabet_characters("\\\"/ubfnrtxX%&#;0aAfF9dD8gq, ");
+    std::vector<std::string> bytes(256);
+    for (std::size_t value = 0; value != bytes.size(); ++value) bytes[value] = std::string(1, static_cast<char>(value));
+    // Both cases, accents precomposed and combining in and out of canonical order, Hangul
+    // syllables and jamo, ligatures, fractions and other compatibility forms, default ignorables,
+    // and ill-formed bytes.
+    std::vector<std::string> composing = alphabet_characters("aAeEjJsS ");
+    for (char const *character :
+         {"\xC3\xA9",     "\xC3\x89",     "\xCC\x81",     "\xCC\x96",     "\xCC\x8C",     "\xC3\x9F",
+          "\xE1\xBA\x9E", "\xCE\xA3",     "\xEA\xB0\x80", "\xE1\x84\x80", "\xE1\x85\xA1", "\xE1\x86\xA8",
+          "\xEF\xAC\x81", "\xC2\xBD",     "\xE2\x84\xAB", "\xE2\x84\xA6", "\xC2\xAD",     "\xE2\x80\x8B",
+          "\xEF\xB8\x8F", "\xEF\xBB\xBF", "\xFF",         "\xC3",         "\x80",         "\xE2\x82"})
+        composing.push_back(character);
+    std::vector<std::string> const *const alphabets[] = {&text, &escapes, &bytes, &composing};
+
+    // Up to 150 strings, crossing the blocks of 64 views kernels read, some empty and one in 41
+    // long enough to cross every vector width.
+    auto const random_strings = [&](std::vector<std::string> const &characters) {
+        std::uniform_int_distribution<std::size_t> count_distribution(0, 150), length_distribution(0, 40);
+        std::vector<std::string> strings(count_distribution(generator));
+        for (std::string &string : strings) {
+            std::size_t const length = length_distribution(generator);
+            string = random_string(generator, length == 40 ? 300 : length, characters);
+        }
+        return strings;
+    };
+    // Up to twice as many indices as strings, repeating some and skipping others.
+    auto const random_order = [&](std::size_t count) {
+        std::vector<sz_size_t> order;
+        if (!count) return order;
+        std::uniform_int_distribution<std::size_t> length_distribution(1, 2 * count), index_distribution(0, count - 1);
+        order.resize(length_distribution(generator));
+        for (sz_size_t &index : order) index = index_distribution(generator);
+        return order;
+    };
+    // A prefix that spoils any string escaped for a kind but HTML, which nothing spoils.
+    auto const spoiling_prefix = [](sz_escape_kind_t kind) -> char const * {
+        switch (kind) {
+        case sz_escape_hex_k: return "g";
+        case sz_escape_html_k: return "";
+        case sz_escape_url_k: return "%g";
+        case sz_escape_csv_k: return "\"";
+        default: return "\\q";
+        }
+    };
+
+    for (std::size_t iteration = 0; iteration != context.iterations(3); ++iteration)
+        for (std::vector<std::string> const *characters : alphabets) {
+            std::vector<std::string> const strings = random_strings(*characters);
+            std::vector<sz_size_t> const order = random_order(strings.size());
+            strings_layouts_t const layouts(strings);
+            check_strings_rows_equivalence_(candidate, strings, order);
+            check_strings_verb_equivalence_(candidate, {sz_kernel_strings_to_tape_k}, strings, order);
+            check_strings_verb_equivalence_(candidate, {sz_kernel_strings_lookup_k}, strings, order);
+            for (sz_normal_form_t const form : normal_forms_)
+                check_strings_verb_equivalence_(candidate, {sz_kernel_strings_normalize_k, {}, form}, strings, order);
+            for (sz_escape_kind_t const kind : escape_kinds_) {
+                check_strings_verb_equivalence_(candidate, {sz_kernel_strings_escape_k, kind}, strings, order);
+                check_strings_verb_equivalence_(candidate, {sz_kernel_strings_unescape_k, kind}, strings, order);
+
+                sized_heap_t heap;
+                sz_strings_span_t escaped {}, recovered {};
+                verify(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, layouts.u32_tape(), nullptr,
+                                        strings.size(), &heap.allocator, escaped)
+                           .status == sz_success_k);
+                sz_strings_view_t escaped_view;
+                sz_strings_from_span(&escaped, &escaped_view);
+                strings_outcome_t const round_trip = strings_outcome_(candidate, {sz_kernel_strings_unescape_k, kind},
+                                                                      escaped_view, nullptr, strings.size(),
+                                                                      &heap.allocator, recovered);
+                bool const replaces_bytes = kind == sz_escape_json_ascii_k &&
+                                            (characters == &bytes || characters == &composing);
+                if (round_trip.status != sz_success_k || (!replaces_bytes && round_trip.strings != strings))
+                    fail_backend_(candidate.name, fmt::format("unescaping {} did not give back what escaping wrote",
+                                                              escape_kind_name_(kind))
+                                                      .c_str());
+
+                std::vector<std::string> spoiled = strings_in_(escaped);
+                sz_strings_span_free(&escaped, &heap.allocator, nullptr);
+                sz_strings_span_free(&recovered, &heap.allocator, nullptr);
+                verify(heap.mismatches == 0 && heap.blocks.empty());
+                if (spoiled.empty()) continue;
+                std::size_t const spoiled_index = std::uniform_int_distribution<std::size_t>(
+                    0, spoiled.size() - 1)(generator);
+                spoiled[spoiled_index].insert(0, spoiling_prefix(kind));
+                check_strings_verb_equivalence_(candidate, {sz_kernel_strings_unescape_k, kind}, spoiled, order);
             }
         }
 }
 
-/** Runs one movement backend through adversarial inputs guarded by canary bytes, asserting no
- *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
-inline void check_memory_safety_(memory_backend_t const &backend) {
+/** Feeds one strings backend empty collections, borrowed blocks flanked by canaries at every input
+ *  alignment, allocators that run dry or refuse a growth at every step, escapes cut short, and
+ *  strings long enough to normalize through scratch, asserting it stays in bounds, refuses as
+ *  stated, leaves spans whose blocks match their offsets, and names the first malformed string. */
+inline void check_strings_safety_(strings_backend_t const &backend) {
+    sized_heap_t heap;
+    std::vector<strings_verb_t> const verbs = strings_verbs_();
 
-    // Zero-length: copy/move/fill must touch nothing, including NULL targets.
-    verify(backend.copy(nullptr, nullptr, 0, nullptr) == sz_success_k);
-    verify(backend.move(nullptr, nullptr, 0, nullptr) == sz_success_k);
-    verify(backend.fill(nullptr, 0, (sz_u8_t)'!', nullptr) == sz_success_k);
+    // What each verb reads: the strings themselves, or escaped for its kind when it unescapes them.
+    auto const input_for = [&](strings_verb_t verb, std::vector<std::string> const &strings) {
+        if (verb.kernel != sz_kernel_strings_unescape_k) return strings;
+        strings_layouts_t const layouts(strings);
+        sz_strings_span_t escaped {};
+        verify(strings_outcome_(backend, {sz_kernel_strings_escape_k, verb.kind}, layouts.u32_tape(), nullptr,
+                                strings.size(), &heap.allocator, escaped)
+                   .status == sz_success_k);
+        std::vector<std::string> input = strings_in_(escaped);
+        sz_strings_span_free(&escaped, &heap.allocator, nullptr);
+        return input;
+    };
 
-    // A canary-guarded destination: writes outside [0, length) corrupt a guard byte.
-    for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
-        with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
-            std::vector<char> source(usable_length, (char)0xC3);
-            verify(backend.copy(destination, source.data(), usable_length, nullptr) == sz_success_k);
-            verify(backend.fill(destination, usable_length, (sz_u8_t)0x7E, nullptr) == sz_success_k);
-            verify(backend.move(destination, source.data(), usable_length, nullptr) == sz_success_k); // Disjoint
-        });
+    // Nothing to write, and only empty strings, more than one block of 64 views of them.
+    for (strings_verb_t const verb : verbs)
+        for (std::size_t const count : {(std::size_t)0, (std::size_t)70}) {
+            strings_layouts_t const layouts {std::vector<std::string>(count)};
+            for (named_strings_t const &layout : layouts.all()) {
+                sz_strings_span_t tape {};
+                verify(strings_outcome_(backend, verb, layout.view, nullptr, count, &heap.allocator, tape).status ==
+                       sz_success_k);
+                sz_strings_span_free(&tape, &heap.allocator, nullptr);
+            }
+        }
 
-    // Overlapping move inside one canary-guarded buffer, plus embedded-NUL content. The usable
-    // window spans `length + shift`, so both shifted overlaps stay inside the guards.
-    {
-        std::size_t const length = 257;
-        std::size_t const shift = 16;
-        with_guarded_buffer_(length + shift, [&](sz_ptr_t buffer, std::size_t) {
-            for (std::size_t byte = 0; byte != length; ++byte) buffer[byte] = (char)((byte % 2) ? (byte & 0xFF) : 0);
-            verify(backend.move(buffer + shift, buffer, length, nullptr) == sz_success_k); // Forward overlap
-            verify(backend.move(buffer, buffer + shift, length, nullptr) == sz_success_k); // Backward overlap
-        });
-    }
-}
-
-/** Runs one lookup backend through adversarial inputs guarded by canary bytes, asserting no
- *  out-of-bounds write occurs (the canaries stay intact) and the operation does not crash. */
-inline void check_lookup_safety_(lookup_backend_t const &backend) {
-
-    char upper_table[256], lower_table[256], ascii_table[256];
-    sz_lookup_init_upper(upper_table);
-    sz_lookup_init_lower(lower_table);
-    sz_lookup_init_ascii(ascii_table);
-    char const *const tables[] = {upper_table, lower_table, ascii_table};
-
-    for (char const *table : tables) {
-        verify(backend.lookup(nullptr, nullptr, 0, table, nullptr) == sz_success_k); // Zero-length touches nothing
-
-        for (std::size_t length : {(std::size_t)1, (std::size_t)8, (std::size_t)64, (std::size_t)257})
-            with_guarded_buffer_(length, [&](sz_ptr_t destination, std::size_t usable_length) {
-                std::vector<char> source(usable_length, '\0');
-                for (std::size_t byte = 0; byte != usable_length; ++byte)
-                    source[byte] = (char)((byte % 3) ? 'a' + (byte % 26) : 0);
-                verify(backend.lookup(destination, source.data(), usable_length, table, nullptr) == sz_success_k);
+    // Borrowed blocks of exactly the sizes written, between canaries, and rows whose gaps must stay
+    // untouched, for every input alignment and every length a vector ladder switches at.
+    std::string const pattern = "e\xCC\x81\"<,%\\\x01\xff\xC3\xA9\xEF\xAC\x81";
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        std::string text;
+        for (std::size_t index = 0; index != length; ++index) text.push_back(pattern[index % pattern.size()]);
+        for (strings_verb_t const verb : verbs) {
+            std::string const input = input_for(verb, {text}).front();
+            strings_layouts_t const layouts({input});
+            sz_strings_span_t sizing {};
+            verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 1, &heap.allocator, sizing).status ==
+                   sz_success_k);
+            sz_u32_t const payload_bytes = sizing.data.u32_tape.offsets[1];
+            sz_strings_span_free(&sizing, &heap.allocator, nullptr);
+            for_each_cacheline_offset_(input.size(), [&](sz_ptr_t data, std::size_t) {
+                std::memcpy(data, input.data(), input.size());
+                sz_u32_t const input_offsets[2] = {0, static_cast<sz_u32_t>(input.size())};
+                sz_strings_view_t source;
+                source.layout = sz_strings_u32_tape_k, source.count = 1;
+                source.data.u32_tape.data = data, source.data.u32_tape.offsets = input_offsets;
+                with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
+                    with_guarded_buffer_(2 * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
+                        sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
+                        offsets[0] = 0, offsets[1] = payload_bytes;
+                        sz_strings_span_t borrowed {};
+                        borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 1;
+                        borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
+                        verify(strings_outcome_(backend, verb, source, nullptr, 1, nullptr, borrowed).status ==
+                               sz_success_k);
+                    });
+                });
             });
+        }
+        strings_layouts_t const pair({text, text});
+        sz_strings_view_t const view = pair.u32_tape();
+        for (sz_size_t const width : {length - 1, length + 1}) {
+            sz_size_t const stride = width + 5;
+            with_guarded_buffer_(stride + width, [&](sz_ptr_t rows_data, std::size_t usable_length) {
+                std::memset(rows_data, '#', usable_length);
+                sz_strings_rows_t const rows {rows_data, stride, width};
+                sz_size_t longest = 0;
+                verify(backend.to_rows(&view, nullptr, 2, &rows, &longest, nullptr) == sz_success_k);
+                for (sz_size_t gap = width; gap != stride; ++gap) verify(rows_data[gap] == '#');
+            });
+        }
     }
+
+    // An arena with room for a small tape refuses a large one, leaving the small one readable, and
+    // an allocator that refuses everything leaves a zeroed span empty.
+    for (strings_verb_t const verb : verbs) {
+        std::vector<std::string> const small = input_for(verb, {"ab"}),
+                                       large = input_for(verb, {std::string(1024, '"')});
+        strings_layouts_t const small_layouts(small), large_layouts(large);
+        alignas(64) char buffer[512];
+        sz_allocator_t arena;
+        verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
+        sz_strings_span_t tape {};
+        verify(strings_outcome_(backend, verb, small_layouts.u32_tape(), nullptr, 1, &arena, tape).status ==
+               sz_success_k);
+        std::vector<std::string> const kept = strings_in_(tape);
+        strings_outcome_t const refused = strings_outcome_(backend, verb, large_layouts.u32_tape(), nullptr, 1, &arena,
+                                                           tape);
+        verify(refused.status == sz_bad_alloc_k && refused.strings == kept);
+
+        sz_allocator_t refusing = refusing_allocator_();
+        sz_strings_span_t untouched {};
+        verify(strings_outcome_(backend, verb, small_layouts.u32_tape(), nullptr, 1, &refusing, untouched).status ==
+               sz_bad_alloc_k);
+        verify(untouched.count == 0);
+    }
+
+    // Refusing the first growth, then the second and so on until none is, with every shrink granted
+    // or every shrink refused, leaves a zeroed span, reused spans whose payload must grow or
+    // shrink, and the span the input views each holding blocks of the very sizes it records.
+    std::vector<std::string> const growing {"Grow \"me\" & <you>", "", "e\xCC\x81\xE2\x84\xAB\xEF\xAC\x81\xC2\xAD",
+                                            "%41 \xC3\xA9", "dropped"};
+    std::vector<std::string> const shorter {"r"}, longer {std::string(100, 'r')};
+    for (strings_verb_t const verb : verbs) {
+        std::vector<std::string> const strings = input_for(verb, growing);
+        strings_layouts_t const layouts(strings);
+        sz_size_t const count = strings.size() - 1;
+        sz_strings_span_t reference {};
+        strings_outcome_t const expected = strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, count,
+                                                            &heap.allocator, reference);
+        sz_strings_span_free(&reference, &heap.allocator, nullptr);
+        std::vector<std::string> const *const starts[] = {nullptr, &shorter, &longer, &strings};
+        for (std::size_t const shrinks : {std::numeric_limits<std::size_t>::max(), std::size_t {0}})
+            for (std::vector<std::string> const *start : starts)
+                for (std::size_t growths = 0;; ++growths) {
+                    verify(growths != 16 && "A kernel must succeed once the allocator grants it enough");
+                    sized_heap_t rationed;
+                    sz_strings_span_t tape {};
+                    if (start) tape = span_from_(*start, sz_strings_u32_tape_k, rationed.allocator);
+                    sz_strings_view_t input = layouts.u32_tape();
+                    if (start == &strings) sz_strings_from_span(&tape, &input);
+                    rationed.growths_left = growths, rationed.shrinks_left = shrinks;
+                    strings_outcome_t const outcome = strings_outcome_(backend, verb, input, nullptr, count,
+                                                                       &rationed.allocator, tape);
+                    sz_strings_span_free(&tape, &rationed.allocator, nullptr);
+                    if (rationed.mismatches != 0 || !rationed.blocks.empty()) {
+                        fmt::println(stderr, "{} refused after {} growths left blocks of other sizes than recorded",
+                                     strings_verb_name_(verb), growths);
+                        fail_backend_(backend.name, "a refused allocation left a span its blocks do not match");
+                    }
+                    if (outcome.status == sz_bad_alloc_k) continue;
+                    verify(outcome == expected);
+                    break;
+                }
+    }
+
+    // A run of 400 combining marks out of canonical order, and a clean prefix before a dirty part
+    // over 256 bytes, normalize as each does alone, through scratch the allocator must give, into
+    // fresh blocks and into exact borrowed ones between canaries alike.
+    {
+        std::string marks = "a", dirty(64, 'x');
+        for (std::size_t index = 0; index != 200; ++index) marks += "\xCC\x81\xCC\x96";
+        for (std::size_t index = 0; index != 100; ++index) dirty += "e\xCC\x81";
+        std::vector<std::string> const long_strings {marks, "", dirty};
+        strings_layouts_t const layouts(long_strings);
+        for (sz_normal_form_t const form : normal_forms_) {
+            strings_verb_t const verb {sz_kernel_strings_normalize_k, {}, form};
+            std::vector<std::string> const expected = normalized_alone_(long_strings, form);
+            sz_strings_span_t tape {};
+            if (strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, tape).strings !=
+                expected)
+                fail_backend_(backend.name, fmt::format("long strings normalized to {} differ from each alone",
+                                                        strings_verb_name_(verb))
+                                                .c_str());
+            sz_strings_span_free(&tape, &heap.allocator, nullptr);
+
+            std::size_t payload_bytes = 0;
+            for (std::string const &string : expected) payload_bytes += string.size();
+            with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
+                with_guarded_buffer_(4 * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
+                    sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
+                    offsets[0] = 0, offsets[1] = 0, offsets[2] = 0, offsets[3] = static_cast<sz_u32_t>(payload_bytes);
+                    sz_strings_span_t borrowed {};
+                    borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 3;
+                    borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
+                    heap.growths_left = 0;
+                    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed)
+                               .status == sz_bad_alloc_k);
+                    heap.growths_left = std::numeric_limits<std::size_t>::max();
+                    verify(strings_outcome_(backend, verb, layouts.u32_tape(), nullptr, 3, &heap.allocator, borrowed)
+                               .strings == expected);
+                    verify(borrowed.data.u32_tape.data == payload && borrowed.data.u32_tape.offsets == offsets);
+                });
+            });
+        }
+    }
+
+    // An escape cut short at the end of its string is malformed there, after a string that is not.
+    struct cut_short_t {
+        sz_escape_kind_t kind;
+        char const *text;
+    };
+    cut_short_t const cut_short[] = {
+        {sz_escape_json_k, R"(\)"},
+        {sz_escape_json_k, R"(\u)"},
+        {sz_escape_json_k, R"(\u00e)"},
+        {sz_escape_json_k, R"(\ud83d)"},
+        {sz_escape_json_k, R"(\ud83d\)"},
+        {sz_escape_json_k, R"(\ud83d\ude0)"},
+        {sz_escape_json_ascii_k, R"(\ud83d\u)"},
+        {sz_escape_hex_k, "0"},
+        {sz_escape_hex_k, "00f"},
+        {sz_escape_url_k, "%"},
+        {sz_escape_url_k, "%0"},
+        {sz_escape_console_k, R"(\)"},
+        {sz_escape_console_k, R"(\x)"},
+        {sz_escape_console_k, R"(\x1)"},
+        {sz_escape_console_k, R"(\u20)"},
+        {sz_escape_csv_k, R"(")"},
+        {sz_escape_csv_k, R"("open)"},
+    };
+    for (cut_short_t const &malformed : span_over(cut_short)) {
+        strings_layouts_t const layouts({"", malformed.text, ""});
+        sz_strings_span_t tape {};
+        strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_unescape_k, malformed.kind},
+                                                           layouts.u32_tape(), nullptr, 3, &heap.allocator, tape);
+        verify(outcome.status == sz_invalid_utf8_k && outcome.malformed_index == 1);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
 }
 
-#pragma endregion Memory
+#pragma endregion Strings
 
 #pragma region Find
 
@@ -727,7 +1507,7 @@ struct sha256_multistate_backend_t {
     sz_kernel_sha256_multistate_update_t update_kernel;
     sz_kernel_sha256_multistate_digest_t digest_kernel;
 
-    void update(sz_sha256_state_t *states, sz_sequence_t const *texts) const {
+    void update(sz_sha256_state_t *states, sz_strings_view_t const *texts) const {
         verify(update_kernel(states, texts, nullptr) == sz_success_k);
     }
     void digest(sz_sha256_state_t const *states, sz_size_t states_count, sz_u8_t *digests) const {
@@ -773,8 +1553,8 @@ inline void check_sha256_multistate_unit_(sha256_multistate_backend_t const &bac
         messages[lane_index].start = known_sha256_vectors_[lane_index].message;
         messages[lane_index].length = (sz_size_t)std::strlen(known_sha256_vectors_[lane_index].message);
     }
-    sz_sequence_t texts;
-    sz_sequence_from_string_views(messages.data(), vectors_count, &texts);
+    sz_strings_view_t texts;
+    sz_strings_from_string_views(messages.data(), vectors_count, &texts);
     backend.update(states.data(), &texts);
     backend.digest(states.data(), (sz_size_t)vectors_count, produced.data());
     for (std::size_t lane_index = 0; lane_index != vectors_count; ++lane_index) {
@@ -1106,7 +1886,7 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
         init_lanes();
 
         // One-shot: every lane consumes its whole message in a single call
-        sz_sequence_t const texts = sequence_from_(messages);
+        sz_strings_view_t const texts = strings_from_(messages);
         reference.update(reference_states.data(), &texts);
         candidate.update(candidate_states.data(), &texts);
         reference.digest(reference_states.data(), lanes_count, reference_digests.data());
@@ -1133,8 +1913,8 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
                 offsets[lane_index] += take;
                 if (offsets[lane_index] != messages[lane_index].size()) ++remaining_lanes;
             }
-            sz_sequence_t slice_texts;
-            sz_sequence_from_string_views(slices.data(), slices.size(), &slice_texts);
+            sz_strings_view_t slice_texts;
+            sz_strings_from_string_views(slices.data(), slices.size(), &slice_texts);
             reference.update(reference_states.data(), &slice_texts);
             candidate.update(candidate_states.data(), &slice_texts);
         }
@@ -1162,8 +1942,8 @@ inline void check_sha256_multistate_equivalence_(test_context_t &context,
                 slices[lane_index].start = messages[lane_index].data() + offset;
                 slices[lane_index].length = (sz_size_t)length;
             }
-            sz_sequence_t parked_texts;
-            sz_sequence_from_string_views(slices.data(), slices.size(), &parked_texts);
+            sz_strings_view_t parked_texts;
+            sz_strings_from_string_views(slices.data(), slices.size(), &parked_texts);
             reference.update(reference_states.data(), &parked_texts);
             candidate.update(candidate_states.data(), &parked_texts);
         }
@@ -1614,19 +2394,19 @@ inline void check_cipher_equivalence_(test_context_t &context, ctr_backend_t con
 
 #pragma region Sort
 
-/** One backend's byte and uncased sequence arg-sort kernels. */
+/** One backend's byte and uncased arg-sort kernels. */
 struct sort_backend_t {
     char const *name;
-    sz_kernel_sequence_argsort_t argsort;
-    sz_kernel_sequence_argsort_t argsort_uncased;
+    sz_kernel_sort_order_t argsort;
+    sz_kernel_sort_order_t argsort_uncased;
 };
 
-/** Runs one arg-sort kernel over @c sequence, asserting the permutation matches @c expected. */
-inline void check_argsort_order_(sz_kernel_sequence_argsort_t argsort, sz_sequence_t const *sequence,
-                                 std::vector<sz_sorted_idx_t> const &expected) {
-    std::vector<sz_sorted_idx_t> order(expected.size());
+/** Runs one arg-sort kernel over @c strings, asserting the permutation matches @c expected. */
+inline void check_argsort_order_(sz_kernel_sort_order_t argsort, sz_strings_view_t const *strings,
+                                 std::vector<sz_size_t> const &expected) {
+    std::vector<sz_size_t> order(expected.size());
     handle_checked_heap_t heap;
-    verify(argsort(sequence, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
+    verify(argsort(strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
            "Kernel call failed");
     verify(heap.live_allocations == 0);
     verify(order == expected);
@@ -1636,18 +2416,22 @@ inline void check_argsort_order_(sz_kernel_sequence_argsort_t argsort, sz_sequen
  *  {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}. */
 inline void check_sort_unit_(sort_backend_t const &backend) {
     std::vector<std::string> const fruits = {"banana", "apple", "cherry"};
-    sz_sequence_t const fruits_sequence = sequence_from_(fruits);
-    check_argsort_order_(backend.argsort, &fruits_sequence, {1u, 0u, 2u});
+    sz_strings_view_t const fruits_strings = strings_from_(fruits);
+    check_argsort_order_(backend.argsort, &fruits_strings, {1u, 0u, 2u});
+    std::string payload;
+    std::vector<sz_u32_t> offsets;
+    sz_strings_view_t const fruits_tape = strings_tape_from_(fruits, payload, offsets);
+    check_argsort_order_(backend.argsort, &fruits_tape, {1u, 0u, 2u});
 
     std::vector<std::string> const words = {"Banana", "apple"};
-    sz_sequence_t const words_sequence = sequence_from_(words);
-    check_argsort_order_(backend.argsort_uncased, &words_sequence, {1u, 0u});
+    sz_strings_view_t const words_strings = strings_from_(words);
+    check_argsort_order_(backend.argsort_uncased, &words_strings, {1u, 0u});
 }
 
 /**
- *  @brief Degenerate sequences for one backend's arg-sorts, whose output must stay a permutation.
+ *  @brief Degenerate collections for one backend's arg-sorts, whose output must stay a permutation.
  *
- *  An empty sequence, a single element, and one where every string is identical each have a
+ *  An empty collection, a single element, and one where every string is identical each have a
  *  defensible answer, and what is asserted here is the shape of the reply rather than its order:
  *  the output must be a permutation of the input indices, every index present exactly once. An
  *  all-equal input is the one that catches a comparator returning a strict order where it should
@@ -1655,15 +2439,15 @@ inline void check_sort_unit_(sort_backend_t const &backend) {
  */
 inline void check_sort_safety_(sort_backend_t const &backend) {
     using strs_t = std::vector<std::string>;
-    auto check_is_permutation_ = [&](sz_kernel_sequence_argsort_t argsort, strs_t const &input) {
-        sz_sequence_t const sequence = sequence_from_(input);
-        std::vector<sz_sorted_idx_t> order(input.size());
+    auto check_is_permutation_ = [&](sz_kernel_sort_order_t argsort, strs_t const &input) {
+        sz_strings_view_t const strings = strings_from_(input);
+        std::vector<sz_size_t> order(input.size());
         handle_checked_heap_t heap;
-        verify(argsort(&sequence, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
+        verify(argsort(&strings, 0, sz_false_k, &heap.allocator, order.data(), nullptr) == sz_success_k &&
                "Kernel call failed");
         verify(heap.live_allocations == 0);
         std::vector<bool> seen(input.size(), false);
-        for (sz_sorted_idx_t const index : order) {
+        for (sz_size_t const index : order) {
             if ((std::size_t)index >= input.size() || seen[(std::size_t)index]) {
                 fmt::println(stderr, "{}: argsort produced {} for a {}-element input", backend.name,
                              (std::size_t)index >= input.size() ? "an out-of-range index" : "a repeated index",
@@ -1675,7 +2459,7 @@ inline void check_sort_safety_(sort_backend_t const &backend) {
     };
 
     strs_t degenerate_inputs[] = {
-        strs_t {},                                  // Empty sequence
+        strs_t {},                                  // Empty collection
         strs_t {"only"},                            // One element
         strs_t(17, "same"),                         // All equal, so only the shape can fail
         strs_t(129, "same"),                        // Past the insertion-sort cutover, still equal
@@ -1686,7 +2470,7 @@ inline void check_sort_safety_(sort_backend_t const &backend) {
     embedded.push_back(std::string("a\0b", 3));
     embedded.push_back(std::string("a\0a", 3));
 
-    for (sz_kernel_sequence_argsort_t argsort : {backend.argsort, backend.argsort_uncased}) {
+    for (sz_kernel_sort_order_t argsort : {backend.argsort, backend.argsort_uncased}) {
         for (strs_t const &input : span_over(degenerate_inputs)) check_is_permutation_(argsort, input);
         check_is_permutation_(argsort, embedded);
     }
@@ -1701,7 +2485,7 @@ inline void check_sort_safety_(sort_backend_t const &backend) {
  */
 inline void check_sort_equivalence_(test_context_t &context, sort_backend_t const &candidate) {
     std::size_t const repetition_count = context.iterations(4);
-    sort_backend_t const reference {"serial", sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial};
+    sort_backend_t const reference {"serial", sz_sort_order_serial, sz_sort_uncased_order_serial};
 
     using strs_t = std::vector<std::string>;
     std::mt19937 &generator = context.generator;
@@ -1736,28 +2520,34 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
             datasets.push_back(mixed);
         }
 
-        for (strs_t const &dataset : datasets) {
+        for (std::size_t dataset_index = 0; dataset_index != datasets.size(); ++dataset_index) {
+            strs_t const &dataset = datasets[dataset_index];
             std::size_t const count = dataset.size();
-            sz_sequence_t const sequence = sequence_from_(dataset);
+            sz_strings_view_t const accessed = strings_from_(dataset);
+            // Every other dataset reaches the candidate as a tape, so both layouts meet every tier.
+            std::string payload;
+            std::vector<sz_u32_t> offsets;
+            sz_strings_view_t const taped = strings_tape_from_(dataset, payload, offsets);
+            sz_strings_view_t const &strings = dataset_index % 2 ? taped : accessed;
 
-            std::vector<sz_sorted_idx_t> order_reference(count), order_candidate(count);
+            std::vector<sz_size_t> order_reference(count), order_candidate(count);
             sz_size_t const top_modes[] = {0, 1, (sz_size_t)(count / 3), (sz_size_t)count};
             sz_size_t const top = top_modes[repetition % 4];
             for (sz_bool_t reverse : {sz_false_k, sz_true_k}) {
                 std::size_t const head = (top != 0 && top < count) ? top : count;
 
                 // Byte arg-sort is stable, so the permutations must match exactly over the prefix.
-                verify(reference.argsort(&sequence, top, reverse, &heap.allocator, order_reference.data(), nullptr) ==
+                verify(reference.argsort(&accessed, top, reverse, &heap.allocator, order_reference.data(), nullptr) ==
                        sz_success_k);
-                verify(candidate.argsort(&sequence, top, reverse, &heap.allocator, order_candidate.data(), nullptr) ==
+                verify(candidate.argsort(&strings, top, reverse, &heap.allocator, order_candidate.data(), nullptr) ==
                        sz_success_k);
                 for (std::size_t i = 0; i < head; ++i)
                     verify(order_reference[i] == order_candidate[i] && "SIMD byte arg-sort disagrees with serial");
 
                 // Uncased arg-sort: also stable, same exact-match requirement.
-                verify(reference.argsort_uncased(&sequence, top, reverse, &heap.allocator, order_reference.data(),
+                verify(reference.argsort_uncased(&accessed, top, reverse, &heap.allocator, order_reference.data(),
                                                  nullptr) == sz_success_k);
-                verify(candidate.argsort_uncased(&sequence, top, reverse, &heap.allocator, order_candidate.data(),
+                verify(candidate.argsort_uncased(&strings, top, reverse, &heap.allocator, order_candidate.data(),
                                                  nullptr) == sz_success_k);
                 for (std::size_t i = 0; i < head; ++i)
                     verify(order_reference[i] == order_candidate[i] && "SIMD uncased arg-sort disagrees with serial");
@@ -1771,7 +2561,7 @@ inline void check_sort_equivalence_(test_context_t &context, sort_backend_t cons
 
 #pragma region Intersect
 
-/** One matched pair from an intersection: @c first_index into the first sequence, @c second_index
+/** One matched pair from an intersection: @c first_index into the first collection, @c second_index
  *  into the second. */
 struct intersect_match_t {
     std::size_t first_index;
@@ -1785,31 +2575,35 @@ struct intersect_match_t {
     }
 };
 
-/** Runs one intersect kernel over both inputs and compares the matched index pairs as a set, since
- *  their order is unspecified. */
-inline void check_intersect_pairs_(sz_kernel_sequence_intersect_t intersect, std::vector<std::string> const &first,
+/** Runs one intersect kernel over both inputs, the first as an accessor and then as a tape, and
+ *  compares the matched index pairs as a set, since their order is unspecified. */
+inline void check_intersect_pairs_(sz_kernel_intersect_t intersect, std::vector<std::string> const &first,
                                    std::vector<std::string> const &second,
                                    std::set<intersect_match_t> const &expected_pairs) {
-    sz_sequence_t const first_sequence = sequence_from_(first);
-    sz_sequence_t const second_sequence = sequence_from_(second);
+    std::string payload;
+    std::vector<sz_u32_t> offsets;
+    sz_strings_view_t const first_layouts[] = {strings_from_(first), strings_tape_from_(first, payload, offsets)};
+    sz_strings_view_t const second_strings = strings_from_(second);
     sz_size_t const capacity = std::min(first.size(), second.size());
-    std::vector<sz_sorted_idx_t> first_positions(capacity), second_positions(capacity);
-    sz_size_t intersection_count = 0;
-    handle_checked_heap_t heap;
-    verify(intersect(&first_sequence, &second_sequence, &heap.allocator, 0u, &intersection_count, //
-                     first_positions.data(), second_positions.data(), nullptr) == sz_success_k &&
-           "Kernel call failed");
-    verify(heap.live_allocations == 0);
-    verify(intersection_count == expected_pairs.size() && "Kernel reported the wrong intersection size");
-    std::set<intersect_match_t> produced;
-    for (sz_size_t index = 0; index != intersection_count; ++index)
-        produced.insert({(std::size_t)first_positions[index], (std::size_t)second_positions[index]});
-    verify(produced == expected_pairs);
+    for (sz_strings_view_t const &first_strings : first_layouts) {
+        std::vector<sz_size_t> first_positions(capacity), second_positions(capacity);
+        sz_size_t intersection_count = 0;
+        handle_checked_heap_t heap;
+        verify(intersect(&first_strings, &second_strings, &heap.allocator, 0u, &intersection_count, //
+                         first_positions.data(), second_positions.data(), nullptr) == sz_success_k &&
+               "Kernel call failed");
+        verify(heap.live_allocations == 0);
+        verify(intersection_count == expected_pairs.size() && "Kernel reported the wrong intersection size");
+        std::set<intersect_match_t> produced;
+        for (sz_size_t index = 0; index != intersection_count; ++index)
+            produced.insert({(std::size_t)first_positions[index], (std::size_t)second_positions[index]});
+        verify(produced == expected_pairs);
+    }
 }
 
 /** Holds one intersect kernel to known pairs: a shared pair of fruits, an identity, a reversal, and
  *  two sets sharing a prefix. */
-inline void check_intersect_unit_(sz_kernel_sequence_intersect_t intersect) {
+inline void check_intersect_unit_(sz_kernel_intersect_t intersect) {
     using strs_t = std::vector<std::string>;
     // Banana sits at (1, 2) and cherry at (2, 0).
     check_intersect_pairs_(intersect, strs_t {"apple", "banana", "cherry"}, strs_t {"cherry", "date", "banana"},
@@ -1874,7 +2668,7 @@ struct levenshtein_engine_t {
     handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
 
-    levenshtein_engine_t(levenshtein_backend_t const &backend, sz_sequence_t const &queries,
+    levenshtein_engine_t(levenshtein_backend_t const &backend, sz_strings_view_t const &queries,
                          sz_levenshtein_symbol_t symbol) {
         if (backend.init(&engine, &queries, symbol, &heap.allocator, nullptr) != sz_success_k)
             fail_backend_(backend.name, "the builder refused a well-formed batch of queries");
@@ -1892,11 +2686,11 @@ struct levenshtein_engine_t {
 inline void check_levenshtein_distances_(levenshtein_backend_t const &backend, std::vector<std::string> const &queries,
                                          std::vector<std::string> const &candidates,
                                          std::vector<sz_size_t> const &expected, sz_levenshtein_symbol_t symbol) {
-    sz_sequence_t const query_sequence = sequence_from_(queries);
-    sz_sequence_t const candidate_sequence = sequence_from_(candidates);
-    levenshtein_engine_t prepared(backend, query_sequence, symbol);
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const candidate_strings = strings_from_(candidates);
+    levenshtein_engine_t prepared(backend, query_strings, symbol);
     std::vector<sz_size_t> computed(queries.size() * candidates.size(), STRINGZILLA_SIZE_MAX);
-    if (backend.distances(&prepared.engine, &candidate_sequence, computed.data(), candidates.size(), nullptr) !=
+    if (backend.distances(&prepared.engine, &candidate_strings, computed.data(), candidates.size(), nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the cross-product verb refused a well-formed batch");
     if (computed != expected)
@@ -1984,21 +2778,21 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
     std::vector<std::string> const words = {"sitting", "kitten"};
     std::vector<std::string> const empty = {""};
     std::vector<std::string> const none;
-    sz_sequence_t const query_sequence = sequence_from_(queries);
-    sz_sequence_t const words_sequence = sequence_from_(words);
-    sz_sequence_t const empty_sequence = sequence_from_(empty);
-    sz_sequence_t const none_sequence = sequence_from_(none);
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const words_strings = strings_from_(words);
+    sz_strings_view_t const empty_strings = strings_from_(empty);
+    sz_strings_view_t const none_strings = strings_from_(none);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
-        levenshtein_engine_t prepared(backend, query_sequence, symbol);
+        levenshtein_engine_t prepared(backend, query_strings, symbol);
         sz_size_t answers[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
-        if (backend.distances(&prepared.engine, &words_sequence, answers, 2, nullptr) != sz_success_k)
+        if (backend.distances(&prepared.engine, &words_strings, answers, 2, nullptr) != sz_success_k)
             fail_backend_(backend.name, "a batch holding an empty query was refused");
-        if (backend.distances(&prepared.engine, &empty_sequence, answers, 1, nullptr) != sz_success_k)
+        if (backend.distances(&prepared.engine, &empty_strings, answers, 1, nullptr) != sz_success_k)
             fail_backend_(backend.name, "an empty candidate was refused");
-        if (backend.distances(&prepared.engine, &none_sequence, answers, 0, nullptr) != sz_success_k)
+        if (backend.distances(&prepared.engine, &none_strings, answers, 0, nullptr) != sz_success_k)
             fail_backend_(backend.name, "an empty batch of candidates was refused");
         sz_size_t narrow[4] = {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
-        if (backend.distances(&prepared.engine, &words_sequence, narrow, 1, nullptr) != sz_unexpected_dimensions_k)
+        if (backend.distances(&prepared.engine, &words_strings, narrow, 1, nullptr) != sz_unexpected_dimensions_k)
             fail_backend_(backend.name, "a stride too narrow for one row was not refused");
         for (sz_size_t const written : narrow)
             if (written != STRINGZILLA_SIZE_MAX)
@@ -2007,10 +2801,10 @@ inline void check_levenshtein_safety_(levenshtein_backend_t const &backend) {
 
     sz_allocator_t refusing = refusing_allocator_();
     std::vector<std::string> const refused_queries = {"kitten", "sitting"};
-    sz_sequence_t const refused_sequence = sequence_from_(refused_queries);
+    sz_strings_view_t const refused_strings = strings_from_(refused_queries);
     for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
         sz_levenshtein_engine_t engine {};
-        if (backend.init(&engine, &refused_sequence, symbol, &refusing, nullptr) != sz_bad_alloc_k)
+        if (backend.init(&engine, &refused_strings, symbol, &refusing, nullptr) != sz_bad_alloc_k)
             fail_backend_(backend.name, "the builder did not report the refused allocation");
         if (engine.memory != nullptr) fail_backend_(backend.name, "a refused build still kept a block");
     }
@@ -2083,16 +2877,16 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
                 std::size_t const query_length = std::uniform_int_distribution<std::size_t>(1, 700)(generator);
                 queries.push_back(random_string(generator, query_length, alphabet_characters(alphabet)));
             }
-            sz_sequence_t const query_sequence = sequence_from_(queries);
-            sz_sequence_t const candidate_sequence = sequence_from_(candidates);
+            sz_strings_view_t const query_strings = strings_from_(queries);
+            sz_strings_view_t const candidate_strings = strings_from_(candidates);
             std::size_t const cells = queries.size() * candidates.size();
 
             for (sz_levenshtein_symbol_t const symbol : {sz_levenshtein_bytes_k, sz_levenshtein_runes_k}) {
-                levenshtein_engine_t prepared(backend, query_sequence, symbol);
+                levenshtein_engine_t prepared(backend, query_strings, symbol);
                 from_reference.assign(cells, STRINGZILLA_SIZE_MAX), from_candidate.assign(cells, STRINGZILLA_SIZE_MAX);
-                verify(sz_levenshtein_distances_serial(&prepared.engine, &candidate_sequence, from_reference.data(),
+                verify(sz_levenshtein_distances_serial(&prepared.engine, &candidate_strings, from_reference.data(),
                                                        candidates.size(), nullptr) == sz_success_k);
-                if (backend.distances(&prepared.engine, &candidate_sequence, from_candidate.data(), candidates.size(),
+                if (backend.distances(&prepared.engine, &candidate_strings, from_candidate.data(), candidates.size(),
                                       nullptr) != sz_success_k)
                     fail_backend_(backend.name, "a batch serial accepted was refused");
                 if (from_reference != from_candidate) fail_backend_(backend.name, "distances disagreed with serial");
@@ -2128,14 +2922,14 @@ inline std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, s
                                              std::vector<std::string> const &candidates,
                                              std::vector<std::size_t> const &widths) {
     handle_checked_heap_t heap;
-    sz_sequence_t const query_sequence = sequence_from_(queries);
-    sz_sequence_t const candidate_sequence = sequence_from_(candidates);
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const candidate_strings = strings_from_(candidates);
     sz_overlap_engine_t engine {};
-    if (backend.init(&engine, &query_sequence, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
     std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
-    if (backend.scores(&engine, &candidate_sequence, scores.data(), candidates.size() * widths.size(), widths.size(),
+    if (backend.scores(&engine, &candidate_strings, scores.data(), candidates.size() * widths.size(), widths.size(),
                        nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine, nullptr);
@@ -2231,23 +3025,23 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
     check_overlap_scores_(backend, none, words, widths);
     check_overlap_scores_(backend, kitten, narrow, widths);
 
-    sz_sequence_t const kitten_sequence = sequence_from_(kitten);
-    sz_sequence_t const words_sequence = sequence_from_(words);
+    sz_strings_view_t const kitten_strings = strings_from_(kitten);
+    sz_strings_view_t const words_strings = strings_from_(words);
     sz_overlap_engine_t engine {};
-    if (backend.init(&engine, &kitten_sequence, widths.data(), 0, 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &kitten_strings, widths.data(), 0, 0, &heap.allocator, nullptr) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted zero widths");
-    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, &refusing, nullptr) != sz_bad_alloc_k)
+    if (backend.init(&engine, &kitten_strings, widths.data(), widths.size(), 0, &refusing, nullptr) != sz_bad_alloc_k)
         fail_backend_(backend.name, "the engine did not report the refused allocation");
-    if (backend.init(&engine, &kitten_sequence, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
+    if (backend.init(&engine, &kitten_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
     sz_f32_t refused[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
-    if (backend.scores(&engine, &words_sequence, refused, words.size() * widths.size(), widths.size() - 1, nullptr) !=
+    if (backend.scores(&engine, &words_strings, refused, words.size() * widths.size(), widths.size() - 1, nullptr) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a candidate stride under its widths");
-    if (backend.scores(&engine, &words_sequence, refused, words.size() * widths.size() - 1, widths.size(), nullptr) !=
+    if (backend.scores(&engine, &words_strings, refused, words.size() * widths.size() - 1, widths.size(), nullptr) !=
         sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
     for (sz_f32_t const untouched : refused)
@@ -2289,14 +3083,14 @@ struct substrings_tier_t {
     sz_kernel_substrings_bm25_scores_t bm25_scores;
 };
 
-/** Binds a sequence over a vector of strings, which is what every verb here takes. */
-inline sz_sequence_t sequence_over_(std::vector<std::string> const &strings, std::vector<sz_string_view_t> &views) {
-    views.resize(strings.size());
-    for (std::size_t index = 0; index != strings.size(); ++index)
-        views[index].start = strings[index].data(), views[index].length = strings[index].size();
-    sz_sequence_t sequence;
-    sz_sequence_from_string_views(views.data(), views.size(), &sequence);
-    return sequence;
+/** Binds a collection over a vector of strings through @p views, as every verb here takes one. */
+inline sz_strings_view_t strings_over_(std::vector<std::string> const &texts, std::vector<sz_string_view_t> &views) {
+    views.resize(texts.size());
+    for (std::size_t index = 0; index != texts.size(); ++index)
+        views[index].start = texts[index].data(), views[index].length = texts[index].size();
+    sz_strings_view_t strings;
+    sz_strings_from_string_views(views.data(), views.size(), &strings);
+    return strings;
 }
 
 /** Folds @p text with the serial folder, which is the stream an uncased automaton walks. */
@@ -2461,7 +3255,7 @@ inline std::vector<double> oracle_bm25_(std::vector<substrings_case_t> const &ov
 /** One tier's BM25 against the oracle, by byte lengths and by caller-given ones, with and without
  *  length normalization. */
 inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *engine,
-                        sz_sequence_t const *haystack_sequence, std::vector<std::string> const &haystacks,
+                        sz_strings_view_t const *haystack_strings, std::vector<std::string> const &haystacks,
                         std::vector<substrings_case_t> const &overlapping) {
     std::size_t const needles_count = engine->needles_count;
     std::vector<sz_f32_t> weights(needles_count), given_lengths(haystacks.size());
@@ -2480,7 +3274,7 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
             std::vector<double> const expected = oracle_bm25_(overlapping, haystacks, needles_count, lengths,
                                                               parameters, weights);
             std::vector<sz_f32_t> scores(haystacks.size(), -1);
-            verify(tier.bm25_scores(engine, haystack_sequence, lengths.empty() ? nullptr : lengths.data(), &parameters,
+            verify(tier.bm25_scores(engine, haystack_strings, lengths.empty() ? nullptr : lengths.data(), &parameters,
                                     weights.data(), scores.data(), 1, nullptr) == sz_success_k);
             for (std::size_t index = 0; index != haystacks.size(); ++index)
                 verify(std::fabs(scores[index] - expected[index]) <= 1e-5 * std::max(1.0, std::fabs(expected[index])));
@@ -2490,7 +3284,7 @@ inline void check_bm25_(substrings_tier_t const &tier, sz_substrings_engine_t *e
 
 /** Reads every match the engine reports, sizing the array by the report the sizing call leaves. */
 inline std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tier, sz_substrings_engine_t *engine,
-                                                    sz_sequence_t const *haystacks) {
+                                                    sz_strings_view_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
     verify(tier.find(engine, haystacks, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
     sz_size_t const total = engine->report->matches_emitted;
@@ -2517,11 +3311,11 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
                           std::size_t hot_states = STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO) {
     handle_checked_heap_t heap;
     std::vector<sz_string_view_t> haystack_views, needle_views, replacement_views;
-    sz_sequence_t const haystack_sequence = sequence_over_(haystacks, haystack_views);
-    sz_sequence_t const needle_sequence = sequence_over_(needles, needle_views);
+    sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
+    sz_strings_view_t const needle_strings = strings_over_(needles, needle_views);
 
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &needle_sequence, sensitivity, policy, hot_states, 0, 0, &heap.allocator, nullptr) ==
+    verify(tier.init(&engine, &needle_strings, sensitivity, policy, hot_states, 0, 0, &heap.allocator, nullptr) ==
            sz_success_k);
     verify(engine.needles_count == needles.size());
     verify(engine.root == 0);
@@ -2532,13 +3326,13 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
                                                         : oracle_leftmost_(overlapping, haystacks.size(), policy);
 
     // Every match, located the same way the oracle locates it.
-    std::vector<substrings_case_t> const reported = backend_find_(tier, &engine, &haystack_sequence);
+    std::vector<substrings_case_t> const reported = backend_find_(tier, &engine, &haystack_strings);
     verify(reported.size() == expected.size());
     for (std::size_t index = 0; index != reported.size(); ++index) verify(reported[index] == expected[index]);
 
     // The per-haystack counts, which a separate walk answers and so can disagree with the matches.
     std::vector<sz_size_t> counts(haystacks.size(), 0);
-    verify(tier.counts(&engine, &haystack_sequence, counts.data(), 1, nullptr) == sz_success_k);
+    verify(tier.counts(&engine, &haystack_strings, counts.data(), 1, nullptr) == sz_success_k);
     for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
         std::size_t owned = 0;
         for (substrings_case_t const &match : expected) owned += match.haystack_index == haystack_index;
@@ -2546,22 +3340,22 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
     }
 
     // BM25 reads raw overlapping frequencies, so it is checked once per corpus, not per policy.
-    if (policy == sz_substrings_overlapping_k) check_bm25_(tier, &engine, &haystack_sequence, haystacks, overlapping);
+    if (policy == sz_substrings_overlapping_k) check_bm25_(tier, &engine, &haystack_strings, haystacks, overlapping);
 
     // The rewrite, which only a cover admits.
     if (policy != sz_substrings_overlapping_k) {
         std::vector<std::string> replacements;
         for (std::size_t needle_index = 0; needle_index != needles.size(); ++needle_index)
             replacements.push_back(needle_index % 3 == 0 ? std::string() : "<" + std::to_string(needle_index) + ">");
-        sz_sequence_t const replacement_sequence = sequence_over_(replacements, replacement_views);
+        sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
 
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
-        verify(tier.replace(&engine, &haystack_sequence, &replacement_sequence, nullptr, 0, offsets.data(), nullptr) ==
+        verify(tier.replace(&engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr) ==
                sz_success_k);
         verify(engine.report->target_length == offsets[haystacks.size()]);
 
         std::vector<char> tape(offsets[haystacks.size()]);
-        verify(tier.replace(&engine, &haystack_sequence, &replacement_sequence, tape.empty() ? nullptr : tape.data(),
+        verify(tier.replace(&engine, &haystack_strings, &replacement_strings, tape.empty() ? nullptr : tape.data(),
                             tape.size(), offsets.data(), nullptr) == sz_success_k);
         verify(engine.report->shortfall == 0);
         for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
@@ -2664,10 +3458,10 @@ inline void check_substrings_unit_(substrings_tier_t const &tier) {
     handle_checked_heap_t heap;
     std::vector<std::string> const needles {"he", "she", "his", "hers"};
     std::vector<sz_string_view_t> views;
-    sz_sequence_t const sequence = sequence_over_(needles, views);
+    sz_strings_view_t const needle_strings = strings_over_(needles, views);
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &sequence, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0, 0, &heap.allocator,
-                     nullptr) == sz_success_k);
+    verify(tier.init(&engine, &needle_strings, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0, 0,
+                     &heap.allocator, nullptr) == sz_success_k);
     verify(engine.hot_count == 0);
     sz_substrings_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);

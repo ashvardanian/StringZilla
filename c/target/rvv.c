@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/rvv.h"
-#include "stringzilla/memory/rvv.h"
+#include "stringzilla/strings/rvv.h"
 #include "stringzilla/hash/rvv.h"
 #include "stringzilla/find/rvv.h"
 #include "stringzilla/sort/rvv.h"

@@ -85,13 +85,12 @@ STRINGZILLA_DEVICE void sz_sha256_load_block_simt_(sz_u8_t const *bytes, sz_u32_
 
 #pragma region Kernels
 
-static __global__ void sz_sha256_multistate_update_simt_kernel_(sz_sha256_state_t *states, void const *tape,
-                                                                sz_size_t count) {
+static __global__ void sz_sha256_multistate_update_simt_kernel_(sz_sha256_state_t *states, sz_strings_view_t texts) {
     sz_size_t const lane = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (lane >= count) return;
+    if (lane >= texts.count) return;
     sz_sha256_state_t *state = states + lane;
-    sz_u8_t const *text = (sz_u8_t const *)sz_sequence_tape_start_simt_(tape, lane);
-    sz_size_t length = sz_sequence_tape_length_simt_(tape, lane);
+    sz_u8_t const *text = (sz_u8_t const *)sz_strings_start_simt_(texts, lane);
+    sz_size_t length = sz_strings_length_simt_(texts, lane);
     sz_size_t const buffered = state->block_length;
     state->total_length += length;
     if (buffered + length < STRINGZILLA_SHA256_BLOCK_LENGTH) {

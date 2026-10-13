@@ -16,17 +16,17 @@ std::size_t test_cross_arm64(environment_t const &env) {
 
     check("test_compare_unit_neon", [] { check_compare_unit_({"neon", sz_equal_neon, sz_order_neon}); });
 
-    constexpr memory_backend_t memory_neon {"neon", sz_copy_neon, sz_move_neon, sz_fill_neon};
-    check("test_memory_unit_neon", [&] { check_memory_unit_(memory_neon); });
-    check("test_memory_equivalence_neon",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_neon); });
-    check("test_memory_safety_neon", [&] { check_memory_safety_(memory_neon); });
-
-    constexpr lookup_backend_t lookup_neon {"neon", sz_lookup_neon};
-    check("test_lookup_unit_neon", [&] { check_lookup_unit_(lookup_neon); });
-    check("test_lookup_equivalence_neon",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_neon); });
-    check("test_lookup_safety_neon", [&] { check_lookup_safety_(lookup_neon); });
+    constexpr strings_backend_t strings_neon {"neon",
+                                              sz_strings_to_tape_neon,
+                                              sz_strings_to_rows_neon,
+                                              sz_strings_escape_neon,
+                                              sz_strings_unescape_neon,
+                                              sz_strings_lookup_neon,
+                                              sz_strings_normalize_neon};
+    check("test_strings_unit_neon", [&] { check_strings_unit_(strings_neon); });
+    check("test_strings_equivalence_neon",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_neon); });
+    check("test_strings_safety_neon", [&] { check_strings_safety_(strings_neon); });
 
     constexpr find_backend_t find_neon {
         .name = "neon",
@@ -44,7 +44,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_hash_equivalence_neon",
           [](test_context_t &context) { check_bytesum_equivalence_(context, sz_bytesum_neon); });
 
-    constexpr sort_backend_t sort_neon {"neon", sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon};
+    constexpr sort_backend_t sort_neon {"neon", sz_sort_order_neon, sz_sort_uncased_order_neon};
     check("test_sort_unit_neon", [&] { check_sort_unit_(sort_neon); });
     check("test_sort_equivalence_neon", [&](test_context_t &context) { check_sort_equivalence_(context, sort_neon); });
     check("test_sort_safety_neon", [&] { check_sort_safety_(sort_neon); });
@@ -178,7 +178,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_cipher_equivalence_neonaes",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_neonaes, gcm_neonaes); });
 
-    check("test_intersect_unit_neonaes", [] { check_intersect_unit_(sz_sequence_intersect_neonaes); });
+    check("test_intersect_unit_neonaes", [] { check_intersect_unit_(sz_intersect_neonaes); });
 #endif // STRINGZILLA_TARGET_NEONAES
 
 #if STRINGZILLA_TARGET_NEONSHA
@@ -204,17 +204,17 @@ std::size_t test_cross_arm64(environment_t const &env) {
 
     check("test_compare_unit_sve", [] { check_compare_unit_({"sve", sz_equal_sve, sz_order_sve}); });
 
-    constexpr memory_backend_t memory_sve {"sve", sz_copy_sve, sz_move_sve, sz_fill_sve};
-    check("test_memory_unit_sve", [&] { check_memory_unit_(memory_sve); });
-    check("test_memory_equivalence_sve",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_sve); });
-    check("test_memory_safety_sve", [&] { check_memory_safety_(memory_sve); });
-
-    constexpr lookup_backend_t lookup_sve {"sve", sz_lookup_sve};
-    check("test_lookup_unit_sve", [&] { check_lookup_unit_(lookup_sve); });
-    check("test_lookup_equivalence_sve",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_sve); });
-    check("test_lookup_safety_sve", [&] { check_lookup_safety_(lookup_sve); });
+    constexpr strings_backend_t strings_sve {"sve",
+                                             sz_strings_to_tape_sve,
+                                             sz_strings_to_rows_sve,
+                                             sz_strings_escape_sve,
+                                             sz_strings_unescape_sve,
+                                             sz_strings_lookup_sve,
+                                             sz_strings_normalize_sve};
+    check("test_strings_unit_sve", [&] { check_strings_unit_(strings_sve); });
+    check("test_strings_equivalence_sve",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_sve); });
+    check("test_strings_safety_sve", [&] { check_strings_safety_(strings_sve); });
 
     constexpr find_backend_t find_sve {
         .name = "sve",
@@ -230,7 +230,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_hash_equivalence_sve",
           [](test_context_t &context) { check_bytesum_equivalence_(context, sz_bytesum_sve); });
 
-    constexpr sort_backend_t sort_sve {"sve", sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve};
+    constexpr sort_backend_t sort_sve {"sve", sz_sort_order_sve, sz_sort_uncased_order_sve};
     check("test_sort_unit_sve", [&] { check_sort_unit_(sort_sve); });
     check("test_sort_equivalence_sve", [&](test_context_t &context) { check_sort_equivalence_(context, sort_sve); });
     check("test_sort_safety_sve", [&] { check_sort_safety_(sort_sve); });

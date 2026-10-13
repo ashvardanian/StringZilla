@@ -337,7 +337,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *
  *  @param[inout] states Array of at least `texts->count` states, each initialized with
  *      @c sz_sha256_state_init_best.
- *  @param[in] texts Sequence supplying the next chunk of each lane's message, with @c count lanes.
+ *  @param[in] texts Strings supplying the next chunk of each lane's message, with @c count lanes;
+ *      on a GPU, a tape the device addresses, like @c sz_strings_to_tape_best writes.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
  *  @param[in] stream Null on the CPU, or the GPU stream of that device to queue on.
  *  @return @c sz_success_k, or @c sz_missing_kernel_k when no capability in @p capabilities has it.
@@ -357,10 +358,10 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *          sz_cptr_t chunks[2] = {"hello", "world"};
  *          sz_sha256_state_t states[2];
  *          sz_u8_t digests[2 * STRINGZILLA_SHA256_DIGEST_LENGTH];
- *          sz_sequence_t texts;
+ *          sz_strings_view_t texts;
  *          sz_capability_t capabilities;
  *          sz_capabilities_enabled_cpu(&capabilities);
- *          sz_sequence_from_null_terminated_strings(chunks, 2, &texts);
+ *          sz_strings_from_null_terminated_strings(chunks, 2, &texts);
  *          sz_sha256_state_init_best(&states[0], capabilities, NULL);
  *          sz_sha256_state_init_best(&states[1], capabilities, NULL);
  *          sz_sha256_multistate_update_best(states, &texts, capabilities, NULL);
@@ -376,9 +377,9 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
  *
  *  Lanes are grouped by vector width and a group advances in lockstep, so it costs as much as its
  *  longest member. Inputs sorted by length put similar lengths in the same group, and
- *  @c sz_sequence_argsort_best gives that ordering.
+ *  @c sz_sort_order_best gives that ordering.
  */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_capability_t capabilities, sz_stream_t stream);
 
 /**
@@ -439,8 +440,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_serial(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                               sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states,
+                                                               sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_serial(sz_sha256_state_t const *states, sz_size_t states_count,
@@ -488,8 +489,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_goldmont(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                 sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_goldmont(sz_sha256_state_t *states,
+                                                                 sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_goldmont(sz_sha256_state_t const *states,
@@ -505,8 +506,8 @@ STRINGZILLA_API sz_status_t sz_bytesum_haswell(sz_cptr_t text, sz_size_t length,
                                                sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_haswell(sz_sha256_state_t *states,
+                                                                sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_haswell(sz_sha256_state_t const *states, sz_size_t states_count,
@@ -541,8 +542,8 @@ STRINGZILLA_API sz_status_t sz_hash_state_digest_skylake(sz_hash_state_t const *
                                                          sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_skylake(sz_sha256_state_t *states,
+                                                                sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_skylake(sz_sha256_state_t const *states, sz_size_t states_count,
@@ -631,8 +632,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_neonsha(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_neonsha(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_neonsha(sz_sha256_state_t *states,
+                                                                sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_neonsha(sz_sha256_state_t const *states, sz_size_t states_count,
@@ -747,8 +748,8 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_rvvcrypto(
     sz_sha256_state_t const *state, sz_u8_t digest[sz_at_least_(STRINGZILLA_SHA256_DIGEST_LENGTH)], sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                  sz_stream_t stream);
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_state_t *states,
+                                                                  sz_strings_view_t const *texts, sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
 STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_rvvcrypto(sz_sha256_state_t const *states,
@@ -919,7 +920,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_powervsx(
 #if STRINGZILLA_TARGET_CUDA
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_cuda(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_cuda(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
@@ -931,7 +932,7 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_cuda(sz_sha256_state_t c
 #if STRINGZILLA_TARGET_ROCM
 
 /** @copydoc sz_sha256_multistate_update_best */
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rocm(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rocm(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_stream_t stream);
 
 /** @copydoc sz_sha256_multistate_digest_best */
@@ -1058,7 +1059,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
     return sz_missing_library_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_unused_(states), sz_unused_(texts), sz_unused_(capabilities), sz_unused_(stream);
     return sz_missing_library_k;

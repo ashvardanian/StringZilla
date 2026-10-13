@@ -14,7 +14,7 @@
  *  A shared buffer's host address is never its GPU address, so a kernel gets every block it reads
  *  as a buffer of its own, at the offset @ref sz_metal_resolve_ finds in the registry. A block
  *  points inside itself by host address, which the kernel turns into its own against the host
- *  address the block was bound at. No block points into another, which is why sequences are tapes.
+ *  address the block was bound at. No block points into another, which is why kernels read tapes.
  *
  *  Encoders live on each call's stack, so any number of threads may encode into any queues; the
  *  registry, the pending command buffers and the pipelines sit under the context's lock.
@@ -30,7 +30,6 @@
 #define STRINGZILLA_METAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/serial.h"  // `sz_move_serial_`
 #include "stringzilla/compare/serial.h" // `sz_equal_serial_`
 
 #if STRINGZILLA_WITH_METAL
@@ -388,8 +387,8 @@ STRINGZILLA_INLINE void *sz_allocate_unified_metal_(sz_size_t bytes, void *handl
     else registered = sz_false_k;
     if (registered) {
         sz_size_t const position = sz_metal_blocks_upto_(context, host);
-        sz_move_serial_((char *)(context->blocks + position + 1), (char const *)(context->blocks + position),
-                        (context->blocks_count - position) * sizeof(sz_metal_block_t));
+        memmove(context->blocks + position + 1, context->blocks + position,
+                (context->blocks_count - position) * sizeof(sz_metal_block_t));
         sz_metal_block_t *const block = context->blocks + position;
         block->buffer = buffer, block->host = host, block->bytes = bytes;
         ++context->blocks_count;
@@ -411,8 +410,7 @@ STRINGZILLA_INLINE sz_bool_t sz_metal_free_in_(sz_metal_context_t *context, void
     sz_bool_t const held = block && block->host == pointer ? sz_true_k : sz_false_k;
     if (held) {
         released = block->buffer;
-        sz_move_serial_((char *)block, (char const *)(block + 1),
-                        (context->blocks_count - upto) * sizeof(sz_metal_block_t));
+        memmove(block, block + 1, (context->blocks_count - upto) * sizeof(sz_metal_block_t));
         --context->blocks_count;
     }
     os_unfair_lock_unlock(&context->lock);
@@ -435,36 +433,6 @@ STRINGZILLA_INLINE void sz_free_unified_metal_(void *pointer, sz_size_t bytes, v
     os_unfair_lock_unlock(contexts_lock);
     for (sz_size_t index = 0; index != live; ++index)
         if (contexts + index != context && sz_metal_free_in_(contexts + index, pointer)) return;
-}
-
-STRINGZILLA_INLINE sz_status_t sz_allocator_init_unified_metal_(sz_allocator_t *allocator) {
-    allocator->allocate = sz_allocate_unified_metal_;
-    allocator->free = sz_free_unified_metal_;
-    allocator->handle = STRINGZILLA_NULL;
-    return sz_success_k;
-}
-
-STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_metal_(sz_sequence_t *target, sz_sequence_t const *source,
-                                                          sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                          sz_stream_t stream) {
-    sz_metal_context_t *const context = sz_metal_context_(stream);
-    if (!context) return sz_missing_gpu_k;
-    sz_metal_bound_t bound;
-    sz_sequence_t next = *source;
-    sz_u64_t const *const source_offsets = (sz_u64_t const *)source->handle;
-    sz_size_t bytes = 0;
-    sz_status_t status = sz_success_k;
-    if (source->get_start != sz_sequence_tape_start || source->get_length != sz_sequence_tape_length ||
-        !sz_metal_resolve_(context, source->handle, (sz_size_t)source_offsets[source->count], &bound))
-        status = sz_sequence_realloc_serial_(&next, source, allocator, &bytes, stream);
-    sz_u64_t const *const next_offsets = (sz_u64_t const *)next.handle;
-    if (status == sz_success_k &&
-        !sz_metal_resolve_(context, next.handle, (sz_size_t)next_offsets[next.count], &bound)) {
-        if (bytes) allocator->free((void *)next.handle, bytes, allocator->handle, stream);
-        status = sz_device_memory_mismatch_k;
-    }
-    if (status == sz_success_k) *target = next, *allocated_bytes = bytes;
-    return status;
 }
 
 STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) {
@@ -505,8 +473,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) 
         sz_metal_do_(pending->commands[completed++], "release");
     if (completed) {
         pending->commands_count -= completed;
-        sz_move_serial_((char *)pending->commands, (char const *)(pending->commands + completed),
-                        pending->commands_count * sizeof(void *));
+        memmove(pending->commands, pending->commands + completed, pending->commands_count * sizeof(void *));
     }
     if (--pending->waiters == 0 && pending->commands_count == 0) {
         drained = pending->queue;
@@ -517,6 +484,32 @@ STRINGZILLA_INLINE sz_status_t sz_stream_synchronize_metal_(sz_stream_t stream) 
 
     if (drained) sz_metal_do_(drained, "release");
     return status;
+}
+
+/** Moves a block once @p stream drains, so no queued kernel still writes the old one. */
+STRINGZILLA_INLINE void *sz_reallocate_unified_metal_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes,
+                                                      void *handle, sz_stream_t stream) {
+    if (!new_bytes) {
+        sz_free_unified_metal_(pointer, old_bytes, handle, stream);
+        return STRINGZILLA_NULL;
+    }
+    void *const moved = sz_allocate_unified_metal_(new_bytes, handle, stream);
+    if (!moved || !pointer) return moved;
+    if (sz_stream_synchronize_metal_(stream) != sz_success_k) {
+        sz_free_unified_metal_(moved, new_bytes, handle, stream);
+        return STRINGZILLA_NULL;
+    }
+    memcpy(moved, pointer, sz_min_of_two(old_bytes, new_bytes));
+    sz_free_unified_metal_(pointer, old_bytes, handle, stream);
+    return moved;
+}
+
+STRINGZILLA_INLINE sz_status_t sz_allocator_init_unified_metal_(sz_allocator_t *allocator) {
+    allocator->allocate = sz_allocate_unified_metal_;
+    allocator->reallocate = sz_reallocate_unified_metal_;
+    allocator->free = sz_free_unified_metal_;
+    allocator->handle = STRINGZILLA_NULL;
+    return sz_success_k;
 }
 
 /** Kernel @p name's pipeline from the library built out of @p source, built on first use under the
@@ -671,32 +664,29 @@ STRINGZILLA_INLINE sz_status_t sz_metal_commit_(sz_metal_call_t *call, sz_status
 }
 
 /**
- *  @brief Binds @p sequence for a kernel, which reads it as a tape, as Metal has no device function
- *      pointers to call cheaply.
- *  @return @c sz_success_k, @c sz_device_memory_mismatch_k for a tape outside the registry, or
- *      @c sz_device_code_mismatch_k for accessors answering anything but the tape they sit on.
- *  @pre @p sequence is not empty.
+ *  @brief Binds the payload of the tape @p strings into @p data and its offsets into @p offsets,
+ *      for a kernel reading it through @c sz_strings_tape_metal_t , as Metal has no device function
+ *      pointers to call an accessor through.
+ *  @return @c sz_success_k, or @c sz_device_memory_mismatch_k for an accessor or for a block the
+ *      device's registry does not hold.
  */
-STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_sequence_t const *sequence,
-                                                   sz_metal_bound_t *bound) {
-    if (!sequence->count || sequence->count > ((sz_size_t)-1) / sizeof(sz_u64_t) - 1)
+STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_strings_view_t const *strings,
+                                                   sz_metal_bound_t *data, sz_metal_bound_t *offsets) {
+    sz_bool_t const wide = (sz_bool_t)(strings->layout == sz_strings_u64_tape_k);
+    sz_size_t const offset_bytes = wide ? sizeof(sz_u64_t) : sizeof(sz_u32_t);
+    sz_cptr_t const payload = wide ? strings->data.u64_tape.data : strings->data.u32_tape.data;
+    void const *const offsets_block = wide ? (void const *)strings->data.u64_tape.offsets
+                                           : (void const *)strings->data.u32_tape.offsets;
+    if (strings->layout == sz_strings_accessor_k || strings->count >= STRINGZILLA_SIZE_MAX / offset_bytes)
         return sz_device_memory_mismatch_k;
-    sz_u64_t const *const offsets = (sz_u64_t const *)sequence->handle;
-    sz_cptr_t const tape = (sz_cptr_t)sequence->handle;
-    sz_size_t const last = sequence->count - 1;
-    // Retain the allocation before reading its offsets.
-    if (!sz_metal_resolve_call_(call, offsets, (sequence->count + 1) * sizeof(sz_u64_t), bound) ||
-        !sz_metal_resolve_call_(call, offsets, offsets[sequence->count], bound))
+    // Retain the offsets before reading the last of them.
+    if (!sz_metal_resolve_call_(call, offsets_block, (strings->count + 1) * offset_bytes, offsets))
         return sz_device_memory_mismatch_k;
-    if (!sequence->get_start || !sequence->get_length || offsets[0] < (sequence->count + 1) * sizeof(sz_u64_t) ||
-        offsets[0] > offsets[1] || offsets[1] > offsets[sequence->count] || offsets[last] > offsets[sequence->count])
-        return sz_device_memory_mismatch_k;
-    // Accessor addresses differ between translation units in header-only builds.
-    if (sequence->get_start(tape, 0) != tape + offsets[0] || sequence->get_length(tape, 0) != offsets[1] - offsets[0] ||
-        sequence->get_start(tape, last) != tape + offsets[last] ||
-        sequence->get_length(tape, last) != offsets[last + 1] - offsets[last])
-        return sz_device_code_mismatch_k;
-    return sz_success_k;
+    sz_size_t const end = wide ? (sz_size_t)strings->data.u64_tape.offsets[strings->count]
+                               : strings->data.u32_tape.offsets[strings->count];
+    data->buffer = STRINGZILLA_NULL, data->offset = 0;
+    if (!payload) return end ? sz_device_memory_mismatch_k : sz_success_k;
+    return sz_metal_resolve_call_(call, payload, end, data) ? sz_success_k : sz_device_memory_mismatch_k;
 }
 
 #pragma endregion Context
@@ -707,11 +697,6 @@ STRINGZILLA_INLINE sz_status_t sz_metal_tape_call_(sz_metal_call_t *call, sz_seq
  *  both the host and device address. Encoded work retains buffers until completion. The allocator
  *  is stateless, so its handle is null. @return @c sz_success_k. */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
-
-/** @copydoc sz_sequence_realloc_best */
-STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      sz_stream_t stream);
 
 /**
  *  @brief Waits for every call committed to @p stream before the synchronization begins.
@@ -726,12 +711,6 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator) {
     return sz_allocator_init_unified_metal_(allocator);
-}
-
-STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      sz_stream_t stream) {
-    return sz_sequence_realloc_metal_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {

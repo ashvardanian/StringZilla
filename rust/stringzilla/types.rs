@@ -12,8 +12,8 @@
 //!   at once, which the library clamps every CPU mask to
 //!
 //! ROCm and Metal have the same three. Reach for the enabled set unless you specifically mean one
-//! of the raw axes. Every consumer, an engine, a [`Sequence`] copy or a [`UnifiedAllocator`], takes
-//! a [`Stream`] of that mask, which names the device it queues work on: [`Stream::default`] for the
+//! of the raw axes. Every consumer, an engine, a [`Tape`] or a [`UnifiedAllocator`], takes a
+//! [`Stream`] of that mask, which names the device it queues work on: [`Stream::default`] for the
 //! default one, or [`Stream::new`] on any device by its ordinal.
 //!
 //! File: rust/stringzilla/types.rs
@@ -22,7 +22,6 @@
 use core::ffi::{c_void, CStr};
 use core::fmt;
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
 use core::ops::BitOr;
 
 use super::*;
@@ -164,6 +163,9 @@ pub enum Utf8NormalForm {
     Nfkd = 2,
     /// Compatibility Decomposition followed by Canonical Composition.
     Nfkc = 3,
+    /// NFKC with full case folding and without default-ignorable codepoints, the Unicode
+    /// `toNFKC_Casefold` that caseless identifiers and search keys are matched on.
+    NfkcCasefold = 4,
 }
 
 #[repr(C)]
@@ -249,16 +251,6 @@ impl IndexSpan {
     pub const fn end(&self) -> usize {
         self.offset.saturating_add(self.length)
     }
-}
-
-pub type SortedIdx = usize;
-
-#[repr(C)]
-pub struct _SzSequence {
-    pub handle: *const c_void,
-    pub count: usize,
-    pub get_start: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> *const c_void>,
-    pub get_length: Option<unsafe extern "C" fn(handle: *const c_void, idx: usize) -> usize>,
 }
 
 impl Byteset {
@@ -620,7 +612,7 @@ impl Capabilities {
     }
 }
 
-/// A stream of one capability group's device, where engines, [`Sequence`] copies and
+/// A stream of one capability group's device, where engines, [`Tape`] conversions and
 /// [`UnifiedAllocator`] blocks queue work: a vendor's default when null, the CPU's always null.
 ///
 /// # Examples
@@ -774,167 +766,41 @@ impl Scope<'_, '_> {
 }
 
 /// A batch of strings an engine's verb reads: a slice or an array of byte strings, read where it
-/// lies through accessors over it, or a [`Sequence`] tape.
+/// lies through an accessor over it, or a [`Tape`].
 ///
-/// A GPU engine reads its batch in place, so it takes a [`Sequence`] in memory its device reaches;
+/// A GPU engine reads its batch in place, so it takes a [`Tape`] in memory its device reaches;
 /// given host strings, it refuses the round with [`Status::DeviceMemoryMismatch`].
 ///
 /// # Safety
 ///
-/// The sequence an implementation hands `call` reads `count` strings that live as long as `self`.
+/// The view an implementation hands `call` reads `count` strings that live as long as `self`.
 pub unsafe trait Strings {
-    /// Hands `call` the `sz_sequence_t` an engine of the group of `stream` reads the batch through.
-    fn with_sequence<Return>(
+    /// Hands `call` the `sz_strings_view_t` an engine of the group of `stream` reads the batch
+    /// through.
+    fn with_strings<Return>(
         &self,
         stream: &Stream,
-        call: impl FnOnce(&_SzSequence) -> Return,
+        call: impl FnOnce(&sz_strings_view_t) -> Return,
     ) -> Result<Return, Status>;
 }
 
 unsafe impl<Text: AsRef<[u8]>> Strings for [Text] {
-    fn with_sequence<Return>(
+    fn with_strings<Return>(
         &self,
         _stream: &Stream,
-        call: impl FnOnce(&_SzSequence) -> Return,
+        call: impl FnOnce(&sz_strings_view_t) -> Return,
     ) -> Result<Return, Status> {
-        Ok(with_sequence(self, call))
+        Ok(with_strings(self, call))
     }
 }
 
 unsafe impl<Text: AsRef<[u8]>, const COUNT: usize> Strings for [Text; COUNT] {
-    fn with_sequence<Return>(
+    fn with_strings<Return>(
         &self,
         _stream: &Stream,
-        call: impl FnOnce(&_SzSequence) -> Return,
+        call: impl FnOnce(&sz_strings_view_t) -> Return,
     ) -> Result<Return, Status> {
-        Ok(with_sequence(self.as_slice(), call))
-    }
-}
-
-/// A batch of strings copied into one tape, `count + 1` offsets counted from the block's own start
-/// and then the bytes, in a single block of a [`UnifiedAllocator`], which an engine reads in place.
-///
-/// It is C's `sz_sequence_realloc_best`, and the tape is freed when the sequence drops. A host
-/// engine reads a tape copied for any capabilities, and a GPU engine one its device reaches,
-/// refusing any other with [`Status::DeviceMemoryMismatch`].
-///
-/// # Examples
-///
-/// ```
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Sequence, Stream, UnifiedAllocator};
-///
-/// let stream = Stream::default(Capabilities::cpu_enabled());
-/// let unified = UnifiedAllocator::new(&stream);
-/// let candidates = Sequence::copy(&["sitting", "kitten"], &unified, &stream)?;
-/// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-/// let mut distances = [0usize; 2];
-/// stream.scope(|scope| engine.distances(scope, &candidates, &mut distances, 2))?;
-/// assert_eq!(distances, [3, 0]);
-/// # Ok::<(), stringzilla::sz::Status>(())
-/// ```
-pub struct Sequence<'stream> {
-    stream: &'stream Stream,
-    sequence: _SzSequence,
-    allocator: sz_allocator_t,
-    allocated_bytes: usize,
-}
-
-impl<'stream> Sequence<'stream> {
-    /// Copies `texts` into a host-readable tape from `allocator` and queues its device migration.
-    ///
-    /// An `allocator` bound to a different stream handle or capability group is refused with
-    /// [`Status::DeviceMemoryMismatch`].
-    pub fn copy<Text: AsRef<[u8]>>(
-        texts: &[Text],
-        allocator: &UnifiedAllocator,
-        stream: &'stream Stream,
-    ) -> Result<Self, Status> {
-        if allocator.capabilities().vendor() != stream.capabilities.vendor() || allocator.stream.handle != stream.handle
-        {
-            return Err(Status::DeviceMemoryMismatch);
-        }
-        let mut allocator = allocator.c_allocator()?;
-        let mut sequence = MaybeUninit::<_SzSequence>::uninit();
-        let mut allocated_bytes = 0;
-        with_sequence(texts, |source| unsafe {
-            sz_sequence_realloc_best(
-                sequence.as_mut_ptr(),
-                source,
-                &mut allocator,
-                &mut allocated_bytes,
-                stream.capabilities.0,
-                stream.handle,
-            )
-        })
-        .check()?;
-        Ok(Sequence {
-            stream,
-            sequence: unsafe { sequence.assume_init() },
-            allocator,
-            allocated_bytes,
-        })
-    }
-
-    /// Strings the tape holds.
-    pub fn len(&self) -> usize {
-        self.sequence.count
-    }
-
-    /// Whether the tape holds no strings.
-    pub fn is_empty(&self) -> bool {
-        self.sequence.count == 0
-    }
-}
-
-unsafe impl Strings for Sequence<'_> {
-    fn with_sequence<Return>(
-        &self,
-        stream: &Stream,
-        call: impl FnOnce(&_SzSequence) -> Return,
-    ) -> Result<Return, Status> {
-        if self.stream.handle != stream.handle || self.stream.capabilities.vendor() != stream.capabilities.vendor() {
-            self.stream.synchronize()?;
-        }
-        if stream.capabilities.vendor().is_none() {
-            return Ok(call(&self.sequence));
-        }
-        let mut allocator = UnifiedAllocator::new(stream).c_allocator()?;
-        let mut sequence = MaybeUninit::<_SzSequence>::uninit();
-        let mut allocated_bytes = 0;
-        unsafe {
-            sz_sequence_realloc_best(
-                sequence.as_mut_ptr(),
-                &self.sequence,
-                &mut allocator,
-                &mut allocated_bytes,
-                stream.capabilities.0,
-                stream.handle,
-            )
-        }
-        .check()?;
-        let prepared = Sequence {
-            stream,
-            sequence: unsafe { sequence.assume_init() },
-            allocator,
-            allocated_bytes,
-        };
-        let result = call(&prepared.sequence);
-        if allocated_bytes != 0 {
-            stream.synchronize()?;
-        }
-        Ok(result)
-    }
-}
-
-impl Drop for Sequence<'_> {
-    fn drop(&mut self) {
-        if self.allocated_bytes == 0 {
-            return;
-        }
-        if let Some(free) = self.allocator.free {
-            let tape = self.sequence.handle as *mut c_void;
-            unsafe { free(tape, self.allocated_bytes, self.allocator.handle, self.stream.handle) };
-        }
+        Ok(with_strings(self.as_slice(), call))
     }
 }
 
@@ -949,11 +815,11 @@ impl Drop for Sequence<'_> {
 /// # Examples
 ///
 /// ```no_run
-/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Sequence, Stream, UnifiedAllocator};
+/// use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Tape, UnifiedAllocator};
 ///
 /// let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
 /// let unified = UnifiedAllocator::new(&stream);
-/// let candidates = Sequence::copy(&["sitting", "kitten"], &unified, &stream)?;
+/// let candidates = Tape::copy(&["sitting", "kitten"], &unified, &stream)?;
 /// let mut distances = Vec::new_in(unified);
 /// distances.resize(2, 0usize);
 ///
@@ -964,7 +830,7 @@ impl Drop for Sequence<'_> {
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct UnifiedAllocator<'stream> {
-    stream: &'stream Stream,
+    pub(crate) stream: &'stream Stream,
 }
 
 impl<'stream> UnifiedAllocator<'stream> {
@@ -978,9 +844,10 @@ impl<'stream> UnifiedAllocator<'stream> {
         self.stream.capabilities
     }
 
-    fn c_allocator(&self) -> Result<sz_allocator_t, Status> {
+    pub(crate) fn c_allocator(&self) -> Result<sz_allocator_t, Status> {
         let mut allocator = sz_allocator_t {
             allocate: None,
+            reallocate: None,
             free: None,
             handle: core::ptr::null_mut(),
         };
@@ -1300,7 +1167,7 @@ mod tests {
         let cpu = Stream::default(Capabilities::cpu_enabled());
         let unified = UnifiedAllocator::new(&cpu);
         let words = ["sitting", "sunday", "", "kitten"];
-        let tape = Sequence::copy(&words, &unified, &cpu).unwrap();
+        let tape = sz::Tape::copy(&words, &unified, &cpu).unwrap();
         assert_eq!(tape.len(), words.len());
 
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
@@ -1341,7 +1208,7 @@ mod tests {
         let unified = UnifiedAllocator::new(&gpu);
         let queries = ["kitten", "saturday", "Straße"];
         let words = ["sitting", "sunday", "strasse", "", "kitten"];
-        let candidates = Sequence::copy(&words, &unified, &gpu).unwrap();
+        let candidates = sz::Tape::copy(&words, &unified, &gpu).unwrap();
         let mut device_distances = Vec::new_in(unified);
         device_distances.resize(queries.len() * words.len(), usize::MAX);
 

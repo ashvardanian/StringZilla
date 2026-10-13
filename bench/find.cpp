@@ -46,7 +46,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
- *  Google Benchmark. This file is the sibling of `sequence.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Google Benchmark. This file is the sibling of `sort.cpp`, `token.cpp`, and `strings.cpp`.
  */
 #include <functional> // `std::boyer_moore_searcher`
 

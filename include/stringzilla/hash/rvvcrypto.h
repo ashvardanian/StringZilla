@@ -811,8 +811,8 @@ STRINGZILLA_INLINE vbool16_t sz_sha256_multistate_lanes_above_rvvcrypto_(sz_u32_
                                        vector_length);
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                  sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_state_t *states,
+                                                                  sz_strings_view_t const *texts, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_size_t const lanes_count = texts->count;
     // One lane per 128-bit element group of an `m2` register, capped at the 16 stack-table lanes.
@@ -829,13 +829,18 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_update_rvvcrypto(sz_sha256_stat
         sz_size_t const active_lanes_count = sz_min_of_two(lanes_count - first_lane_index, lanes_per_register);
         sz_sha256_state_t *const batch = &states[first_lane_index];
         sz_u32_t buffered_lanes_count = 0, largest_blocks_count = 0;
+        sz_size_t lane_indices[16];
+        sz_string_view_t lane_views[16];
+        for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index)
+            lane_indices[lane_index] = first_lane_index + lane_index;
+        sz_strings_get_(texts, lane_indices, active_lanes_count, lane_views);
 
         // Top up any buffered partial block into the state's own buffer, which then becomes the
         // lane's first block. Every lane's whole chunk is charged to `total_length` here, once.
         for (sz_size_t lane_index = 0; lane_index != active_lanes_count; ++lane_index) {
             sz_sha256_state_t *const state = &batch[lane_index];
-            cursors[lane_index] = (sz_u8_t const *)texts->get_start(texts->handle, first_lane_index + lane_index);
-            remaining[lane_index] = texts->get_length(texts->handle, first_lane_index + lane_index);
+            cursors[lane_index] = (sz_u8_t const *)lane_views[lane_index].start;
+            remaining[lane_index] = lane_views[lane_index].length;
             buffered_flags[lane_index] = 0, blocks_per_lane[lane_index] = 0;
 
             // The block counts ride in 32-bit lanes, so a longer chunk takes the single kernel.

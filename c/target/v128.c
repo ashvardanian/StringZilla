@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/v128.h"
-#include "stringzilla/memory/v128.h"
+#include "stringzilla/strings/v128.h"
 #include "stringzilla/hash/v128.h"
 #include "stringzilla/cipher/v128.h"
 #include "stringzilla/find/v128.h"

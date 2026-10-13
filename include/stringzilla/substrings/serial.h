@@ -25,7 +25,6 @@
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_cap_cpus_k`
 
-#include "stringzilla/memory/serial.h"            // `sz_copy_serial_`
 #include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
 #include "stringzilla/utf8_uncased_fold/serial.h" // `sz_unicode_fold_codepoint_`, the folded iterators
 
@@ -44,7 +43,7 @@ extern "C" {
  */
 typedef struct sz_substrings_output_t {
 
-    /** Which needle ends here, as an index into the sequence the engine was built from. */
+    /** Which needle ends here, as an index into the strings the engine was built from. */
     sz_u32_t needle_index;
 
     /** Folded bytes this match spans; a walk traverses one edge per byte, so it fits a state id. */
@@ -59,7 +58,7 @@ typedef struct sz_substrings_output_t {
  */
 typedef struct sz_substrings_match_t {
 
-    /** Which haystack of the sequence this match was found in. */
+    /** Which haystack of the collection this match was found in. */
     sz_size_t haystack_index;
 
     /** Which needle of the vocabulary matched. */
@@ -216,9 +215,6 @@ typedef struct sz_substrings_engine_t {
 
     /** The capability that compiled the vocabulary, whose kernels every round then runs. */
     sz_capability_t capability;
-
-    /** The copy kernel host rewrites splice with, the best @ref sz_substrings_engine_init found. */
-    sz_kernel_copy_t copy;
 
     /** What built both blocks below. */
     sz_allocator_t allocator;
@@ -591,7 +587,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_substrings_folded_cursor_next(sz_substrings_f
                     cursor->rune_end_mask |= (sz_u16_t)(1u << (cursor->image_length - 1));
                     ++rune_count;
                     // More pending runes belong to this codepoint; the iterator refills only once spent.
-                    if (cursor->runes.pending_idx >= cursor->runes.pending_count) break;
+                    if (cursor->runes.pending_index >= cursor->runes.pending_count) break;
                     sz_utf8_folded_iter_next_(&cursor->runes, &rune);
                 }
                 cursor->breaks_boundary = (sz_bool_t)(rune_count != 1 || (sz_size_t)cursor->image_length !=
@@ -906,7 +902,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_grow_nodes_(sz_substrings_b
                                                              allocator->handle, stream);
     if (!grown) return sz_bad_alloc_k;
     if (builder->nodes) {
-        sz_copy_serial_((sz_ptr_t)grown, (sz_cptr_t)builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t));
+        memcpy(grown, builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t));
         allocator->free(builder->nodes, old_capacity * sizeof(sz_substrings_trie_node_t), allocator->handle, stream);
     }
     builder->nodes = grown;
@@ -987,8 +983,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_add_output_(sz_substrings_b
     if (folded_match_bytes > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
     // A folded walk snaps both ends of a match outward to whole codepoints, so a reported source span
     // reaches one rune past this ceiling. Refusing that much earlier keeps every staged length in 32 bits.
-    if (source_ceiling + (sz_size_t)sz_rune_4bytes_k > (sz_size_t)sz_substrings_no_state_k)
-        return sz_overflow_risk_k;
+    if (source_ceiling + (sz_size_t)sz_rune_4bytes_k > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
 
     builder->needle_folded_bytes[needle_index] = (sz_u32_t)folded_match_bytes;
     builder->needle_next[needle_index] = builder->nodes[state].output_head;
@@ -1178,10 +1173,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
     }
 
     if (old_capacity) {
-        sz_copy_serial_((sz_ptr_t)base, (sz_cptr_t)builder->base, old_capacity * sizeof(sz_u32_t));
-        sz_copy_serial_((sz_ptr_t)check, (sz_cptr_t)builder->check, old_capacity * sizeof(sz_u32_t));
-        sz_copy_serial_((sz_ptr_t)state_of_slot, (sz_cptr_t)builder->state_of_slot, old_capacity * sizeof(sz_u32_t));
-        sz_copy_serial_((sz_ptr_t)occupied, (sz_cptr_t)builder->occupied, old_words * sizeof(sz_u64_t));
+        memcpy(base, builder->base, old_capacity * sizeof(sz_u32_t));
+        memcpy(check, builder->check, old_capacity * sizeof(sz_u32_t));
+        memcpy(state_of_slot, builder->state_of_slot, old_capacity * sizeof(sz_u32_t));
+        memcpy(occupied, builder->occupied, old_words * sizeof(sz_u64_t));
         allocator->free(builder->base, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
         allocator->free(builder->check, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
         allocator->free(builder->state_of_slot, old_capacity * sizeof(sz_u32_t), allocator->handle, stream);
@@ -1190,8 +1185,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_reserve_slots_(sz_substring
     // The bitmap is the only record of what is claimed, so a stale set bit would hide a free slot.
     for (word = old_words; word < new_words; ++word) occupied[word] = 0;
     for (slot = old_capacity; slot < new_capacity; ++slot)
-        base[slot] = 0, check[slot] = sz_substrings_no_state_k,
-        state_of_slot[slot] = sz_substrings_no_state_k;
+        base[slot] = 0, check[slot] = sz_substrings_no_state_k, state_of_slot[slot] = sz_substrings_no_state_k;
 
     builder->base = base, builder->check = check, builder->state_of_slot = state_of_slot;
     builder->occupied = occupied, builder->slots_capacity = new_capacity;
@@ -1337,8 +1331,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_pack_cold_children_(sz_subs
                 builder->check[slot] = builder->nodes[parent].published;
                 builder->state_of_slot[slot] = placed;
                 // A tree gives every state exactly one parent edge, so no state is ever claimed twice.
-                sz_assert_(builder->nodes[placed].published == sz_substrings_no_state_k &&
-                           "One parent edge per state");
+                sz_assert_(builder->nodes[placed].published == sz_substrings_no_state_k && "One parent edge per state");
                 builder->nodes[placed].published = (sz_u32_t)slot;
             }
         }
@@ -1588,15 +1581,6 @@ STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engin
     engine->report = STRINGZILLA_NULL, engine->capability = sz_cap_serial_k;
 }
 
-/** The serial copy in the kernel's shape, which an engine splices with until its dispatch unit
- *  resolves a faster copy kernel. */
-STRINGZILLA_OUTLINED_ sz_status_t sz_substrings_copy_serial_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
-                                                             sz_stream_t stream) {
-    sz_unused_(stream);
-    sz_copy_serial_(target, source, length);
-    return sz_success_k;
-}
-
 /**
  *  @brief Compiles @p needles into @p engine 's first block, leaving the round's arena for a
  *      tier to size.
@@ -1605,7 +1589,7 @@ STRINGZILLA_OUTLINED_ sz_status_t sz_substrings_copy_serial_(sz_ptr_t target, sz
  *  this settles, so a tier sizes its own scratch afterwards rather than passing the
  *  vocabulary around twice.
  */
-STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const *needles,
+STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_strings_view_t const *needles,
                                                              sz_substrings_case_sensitivity_t case_sensitivity,
                                                              sz_substrings_overlap_policy_t overlap_policy,
                                                              sz_size_t hot_states, sz_size_t matches_budget,
@@ -1637,8 +1621,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
     builder.stream = stream;
     if (!needles->count) return sz_unexpected_dimensions_k;
 
+    sz_string_view_t views[64];
     for (needle_index = 0; needle_index != needles->count; ++needle_index) {
-        sz_size_t const length = needles->get_length(needles->handle, needle_index);
+        if (needle_index % 64 == 0) sz_strings_get_block_(needles, needle_index, views);
+        sz_size_t const length = views[needle_index % 64].length;
         if (!length) return sz_unexpected_dimensions_k;
         longest_needle = sz_max_of_two(longest_needle, length);
     }
@@ -1665,8 +1651,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
     status = sz_substrings_builder_mint_(&builder, &minted_root); // ? The root, which is always state zero
     sz_unused_(minted_root);
     for (needle_index = 0; needle_index != needles->count && status == sz_success_k; ++needle_index) {
-        sz_cptr_t const start = needles->get_start(needles->handle, needle_index);
-        sz_size_t const length = needles->get_length(needles->handle, needle_index);
+        if (needle_index % 64 == 0) sz_strings_get_block_(needles, needle_index, views);
+        sz_cptr_t const start = views[needle_index % 64].start;
+        sz_size_t const length = views[needle_index % 64].length;
         builder.needle_next[needle_index] = sz_substrings_no_state_k;
         builder.needle_folded_bytes[needle_index] = 0;
         status = case_sensitivity == sz_substrings_uncased_k
@@ -1778,7 +1765,6 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_sequence_t const
     engine->chunk_budget = 0, engine->haystacks_budget = 0;
     engine->report = STRINGZILLA_NULL;
     engine->capability = capability;
-    engine->copy = &sz_substrings_copy_serial_;
     engine->allocator = resolved;
     engine->memory = block;
     engine->memory_bytes = layout.total;
@@ -2416,16 +2402,13 @@ typedef struct sz_substrings_rewriter_t {
     sz_size_t haystack_length;
 
     /** One replacement per needle, indexed by needle. */
-    sz_sequence_t const *replacements;
+    sz_strings_view_t const *replacements;
 
     /** Where the rewrite lands, or @c STRINGZILLA_NULL for a pure size query. */
     sz_ptr_t output;
 
     /** Bytes @c output holds. */
     sz_size_t output_capacity;
-
-    /** The engine's copy kernel every stretch is spliced with. */
-    sz_kernel_copy_t copy;
 
     /** Source bytes consumed, which is where the next gap begins. */
     sz_size_t cursor;
@@ -2445,20 +2428,19 @@ typedef struct sz_substrings_rewriter_t {
 STRINGZILLA_INLINE void sz_substrings_rewriter_emit_(sz_substrings_rewriter_t *rewriter, sz_cptr_t source,
                                                      sz_size_t bytes) {
     if (bytes == 0 || rewriter->written + bytes > rewriter->output_capacity) return;
-    rewriter->copy(rewriter->output + rewriter->written, source, bytes, STRINGZILLA_NULL);
+    memcpy(rewriter->output + rewriter->written, source, bytes);
     rewriter->written += bytes;
 }
 
 STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_rewrite_report_(void *context, sz_size_t needle_index,
                                                                          sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_rewriter_t *const rewriter = (sz_substrings_rewriter_t *)context;
-    sz_sequence_t const *const replacements = rewriter->replacements;
-    sz_cptr_t const replacement = replacements->get_start(replacements->handle, needle_index);
-    sz_size_t const replacement_length = replacements->get_length(replacements->handle, needle_index);
+    sz_string_view_t replacement;
+    sz_strings_get_(rewriter->replacements, &needle_index, 1, &replacement);
     sz_substrings_rewriter_emit_(rewriter, rewriter->haystack + rewriter->cursor, byte_offset - rewriter->cursor);
-    sz_substrings_rewriter_emit_(rewriter, replacement, replacement_length);
+    sz_substrings_rewriter_emit_(rewriter, replacement.start, replacement.length);
     rewriter->cursor = byte_offset + byte_length;
-    rewriter->removed += byte_length, rewriter->added += replacement_length;
+    rewriter->removed += byte_length, rewriter->added += replacement.length;
     return sz_substrings_continue_k;
 }
 
@@ -2472,12 +2454,12 @@ STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_rewrite_report_(void *c
  */
 STRINGZILLA_INLINE sz_size_t sz_substrings_rewrite_(sz_substrings_engine_t const *engine,
                                                     sz_substrings_walks_t const *walks, sz_cptr_t haystack,
-                                                    sz_size_t length, sz_sequence_t const *replacements,
+                                                    sz_size_t length, sz_strings_view_t const *replacements,
                                                     sz_substrings_ring_t *ring, sz_substrings_overlap_policy_t policy,
                                                     sz_ptr_t output, sz_size_t output_capacity) {
     sz_substrings_rewriter_t rewriter;
     rewriter.haystack = haystack, rewriter.haystack_length = length, rewriter.replacements = replacements;
-    rewriter.output = output, rewriter.output_capacity = output_capacity, rewriter.copy = engine->copy;
+    rewriter.output = output, rewriter.output_capacity = output_capacity;
     rewriter.cursor = 0, rewriter.written = 0, rewriter.removed = 0, rewriter.added = 0;
     sz_substrings_find_leftmost_(engine, walks, haystack, length, ring, policy, &sz_substrings_rewrite_report_,
                                  &rewriter);
@@ -2572,7 +2554,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_en
  *  Split from the compilation only so a device tier can reuse it without the host arena.
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
-    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_capability_t capability, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -2592,7 +2574,7 @@ STRINGZILLA_CONSTEXPR sz_status_t sz_substrings_stride_check_(sz_size_t stride) 
 /** Per-haystack counts through @p walks, which is every CPU tier's counting verb. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t *engine,
                                                           sz_substrings_walks_t const *walks,
-                                                          sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                          sz_strings_view_t const *haystacks, sz_size_t *counts,
                                                           sz_size_t counts_stride) {
     sz_substrings_overlap_policy_t const overlap_policy = engine->overlap_policy;
     sz_substrings_report_t *const report = sz_substrings_report_(engine);
@@ -2603,9 +2585,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t
     sz_substrings_ring_bind_(engine, &ring);
     sz_substrings_report_clear_(report);
 
+    sz_string_view_t views[64];
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
-        sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
-        sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        sz_cptr_t const haystack = views[haystack_index % 64].start;
+        sz_size_t const length = views[haystack_index % 64].length;
         sz_size_t counted;
         // Only an overlapping count over a byte-exact walk can ride the transitions alone; every other shape
         // has to see the matches themselves, either to fold spans together or to decide a cover between them.
@@ -2628,8 +2612,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t
 /** Every match through @p walks, which is every CPU tier's locating verb. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *engine,
                                                         sz_substrings_walks_t const *walks,
-                                                        sz_sequence_t const *haystacks, sz_substrings_match_t *matches,
-                                                        sz_size_t matches_capacity, sz_size_t *matches_offsets) {
+                                                        sz_strings_view_t const *haystacks,
+                                                        sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                        sz_size_t *matches_offsets) {
     sz_substrings_report_t *const report = sz_substrings_report_(engine);
     sz_substrings_collector_t collector;
     sz_substrings_ring_t ring;
@@ -2639,9 +2624,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *
 
     collector.matches = matches, collector.capacity = matches_capacity;
     collector.count = 0, collector.haystack_index = 0;
+    sz_string_view_t views[64];
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
-        sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
-        sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        sz_cptr_t const haystack = views[haystack_index % 64].start;
+        sz_size_t const length = views[haystack_index % 64].length;
         matches_offsets[haystack_index] = collector.count;
         collector.haystack_index = haystack_index;
         sz_substrings_visit_(engine, walks, haystack, length, &ring, engine->overlap_policy, sz_substrings_unordered_k,
@@ -2657,8 +2644,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *
 /** The rewrite through @p walks, which is every CPU tier's rewriting verb. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_replace_with_(sz_substrings_engine_t *engine,
                                                            sz_substrings_walks_t const *walks,
-                                                           sz_sequence_t const *haystacks,
-                                                           sz_sequence_t const *replacements, sz_ptr_t target,
+                                                           sz_strings_view_t const *haystacks,
+                                                           sz_strings_view_t const *replacements, sz_ptr_t target,
                                                            sz_size_t target_capacity, sz_size_t *offsets) {
     sz_substrings_report_t *const report = sz_substrings_report_(engine);
     sz_substrings_ring_t ring;
@@ -2672,9 +2659,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_with_(sz_substrings_engine_
     // One walk per haystack, splicing into the target at the offset the walk before it settled.
     // The rewrite reports the bytes it produces whether or not they fit, so a second sizing pass would
     // walk the same automaton for an answer this one already has.
+    sz_string_view_t views[64];
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
-        sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
-        sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        sz_cptr_t const haystack = views[haystack_index % 64].start;
+        sz_size_t const length = views[haystack_index % 64].length;
         sz_size_t const room = target && running < target_capacity ? target_capacity - running : 0;
         offsets[haystack_index] = running;
         running += sz_substrings_rewrite_(engine, walks, haystack, length, replacements, &ring, engine->overlap_policy,
@@ -2816,7 +2805,7 @@ STRINGZILLA_INLINE sz_f64_t sz_substrings_bm25_total_(sz_substrings_bm25_t const
 
 /** BM25 scores through @p walks, which is every CPU tier's scoring verb. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
-    sz_substrings_engine_t *engine, sz_substrings_walks_t const *walks, sz_sequence_t const *haystacks,
+    sz_substrings_engine_t *engine, sz_substrings_walks_t const *walks, sz_strings_view_t const *haystacks,
     sz_f32_t const *document_lengths, sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights,
     sz_f32_t *scores, sz_size_t scores_stride) {
     sz_substrings_host_arena_t const arena = sz_substrings_host_arena_(
@@ -2838,9 +2827,11 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
     frequencies.counts = counters, frequencies.touched = counters + needles_count;
     frequencies.touched_count = 0, frequencies.needles_count = needles_count;
 
+    sz_string_view_t views[64];
     for (haystack_index = 0; haystack_index != haystacks->count; ++haystack_index) {
-        sz_cptr_t const haystack = haystacks->get_start(haystacks->handle, haystack_index);
-        sz_size_t const length = haystacks->get_length(haystacks->handle, haystack_index);
+        if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
+        sz_cptr_t const haystack = views[haystack_index % 64].start;
+        sz_size_t const length = views[haystack_index % 64].length;
         sz_f64_t const norm = sz_substrings_bm25_norm(
             parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
         sz_substrings_bm25_count_(engine, walks, haystack, length, &frequencies);
@@ -2853,7 +2844,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
-    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_unused_(haystacks_budget);
@@ -2861,15 +2852,16 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
                                           sz_cap_serial_k, allocator, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                        sz_size_t *counts, sz_size_t counts_stride,
-                                                        sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                        sz_size_t counts_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_counts_with_(engine, &walks, haystacks, counts, counts_stride);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine,
+                                                      sz_strings_view_t const *haystacks,
                                                       sz_substrings_match_t *matches, sz_size_t matches_capacity,
                                                       sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -2877,8 +2869,9 @@ STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *en
     return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                         sz_sequence_t const *replacements, sz_ptr_t target,
+STRINGZILLA_API sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t *engine,
+                                                         sz_strings_view_t const *haystacks,
+                                                         sz_strings_view_t const *replacements, sz_ptr_t target,
                                                          sz_size_t target_capacity, sz_size_t *offsets,
                                                          sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -2887,7 +2880,7 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_serial(sz_substrings_engine_t 
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_serial(sz_substrings_engine_t *engine,
-                                                             sz_sequence_t const *haystacks,
+                                                             sz_strings_view_t const *haystacks,
                                                              sz_f32_t const *document_lengths,
                                                              sz_substrings_bm25_t const *parameters,
                                                              sz_f32_t const *needle_weights, sz_f32_t *scores,

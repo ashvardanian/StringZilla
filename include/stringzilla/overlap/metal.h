@@ -14,15 +14,14 @@
  *  from @ref sz_allocator_init_unified_metal on that stream's device; memory outside the device's
  *  registry draws @c sz_device_memory_mismatch_k.
  *
- *  The kernels read the tape itself instead of calling a sequence's accessors, since Metal has no
- *  device function pointers to call cheaply, so a round's candidates must come from
- *  @ref sz_sequence_realloc_metal; any other sequence draws @c sz_device_code_mismatch_k.
+ *  The kernels read the tape itself, since Metal has no device function pointers to call an
+ *  accessor through, so a round's candidates must be a tape, as @ref sz_strings_to_tape_best writes
+ *  one with that allocator; an accessor draws @c sz_device_memory_mismatch_k.
  */
 #ifndef STRINGZILLA_OVERLAP_METAL_H_
 #define STRINGZILLA_OVERLAP_METAL_H_
 
 #include "stringzilla/metal.h"
-#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/overlap/serial.h"
 
 #if STRINGZILLA_TARGET_METAL
@@ -82,7 +81,7 @@ typedef struct {
     sz_u64_t nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     sz_u64_t segments, counts;
     sz_u64_t queries_count, widths_count, candidates_count, segments_count;
-    sz_u64_t scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width;
+    sz_u64_t scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout;
 } sz_overlap_arguments_metal_t;
 
 /** Encodes kernel @p name over @p groups of @p threads into @p call, with the round's @p buffers. */
@@ -98,11 +97,11 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_enqueue_metal_(sz_metal_call_t *call, 
         sz_metal_threadgroup_memory_(encoder, staged_bytes, 0);
         sz_metal_threadgroup_memory_(encoder, sz_overlap_filter_bytes_metal_k, 1);
     }
-    sz_metal_enqueue_(encoder, pipeline, buffers, 4, arguments, sizeof(*arguments), groups, threads);
+    sz_metal_enqueue_(encoder, pipeline, buffers, 5, arguments, sizeof(*arguments), groups, threads);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                          sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                          sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                          sz_stream_t stream) {
@@ -162,7 +161,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
         sz_overlap_engine_close_(engine, stream);
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     }
-    sz_fill_serial_((char *)engine->scratch, engine->scratch_bytes, 0);
+    memset(engine->scratch, 0, engine->scratch_bytes);
 
     // Building every pipeline here keeps the compiles out of the rounds and names their ceilings.
     void *const segments = sz_metal_pipeline_(call.context, sz_overlap_source_metal_,
@@ -188,7 +187,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     return sz_metal_commit_(&call, sz_success_k);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                                     sz_f32_t *scores, sz_size_t scores_query_stride,
                                                     sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_status_t status = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
@@ -196,8 +195,9 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
     if (status != sz_success_k) return status;
     if (!candidates->count || !engine->count) return sz_success_k;
 
-    // The forest, the round block, the candidates' tape and the scores, as the kernels number them.
-    sz_metal_bound_t buffers[4];
+    // The forest, the round block, the candidates' payload and offsets, and the scores, as the
+    // kernels number them.
+    sz_metal_bound_t buffers[5];
     sz_metal_call_t call;
     status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
@@ -205,17 +205,19 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
                                    (candidates->count - 1) * scores_candidate_stride + engine->widths_count;
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
         !sz_metal_resolve_call_(&call, engine->scratch, engine->scratch_bytes, &buffers[1]) ||
-        !sz_metal_resolve_call_(&call, scores, scores_count * sizeof(sz_f32_t), &buffers[3]))
+        !sz_metal_resolve_call_(&call, scores, scores_count * sizeof(sz_f32_t), &buffers[4]))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
-    status = sz_metal_tape_call_(&call, candidates, &buffers[2]);
+    status = sz_metal_tape_call_(&call, candidates, &buffers[2], &buffers[3]);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
 
     // The host sizes the scoring grid from the tape, which no kernel writes; the offsets are
     // scanned on the device, so a round still in flight never sees them change under it.
     sz_size_t segments_count = 0;
-    for (sz_size_t index = 0; index != candidates->count; ++index)
-        segments_count += sz_size_divide_round_up(candidates->get_length(candidates->handle, index),
-                                                  sz_overlap_segment_bytes_metal_k);
+    sz_string_view_t views[64];
+    for (sz_size_t index = 0; index != candidates->count; ++index) {
+        if (index % 64 == 0) sz_strings_get_block_(candidates, index, views);
+        segments_count += sz_size_divide_round_up(views[index % 64].length, sz_overlap_segment_bytes_metal_k);
+    }
     if (segments_count >> 32) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     // The counters sit behind offsets sized for the budget rather than for this round, so a smaller
@@ -237,6 +239,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
     arguments.scores_query_stride = scores_query_stride;
     arguments.scores_candidate_stride = scores_candidate_stride;
     arguments.staged_nodes_count = geometry->staged_nodes_count;
+    arguments.candidates_layout = (sz_u64_t)candidates->layout;
     arguments.widest_width = 0;
     for (sz_size_t index = 0; index != engine->widths_count; ++index)
         if (engine->widths[index] > arguments.widest_width) arguments.widest_width = engine->widths[index];

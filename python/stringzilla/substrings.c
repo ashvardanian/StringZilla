@@ -150,7 +150,7 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
         }
     }
 
-    sz_sequence_t needles;
+    sz_strings_view_t needles;
     sz_substrings_case_sensitivity_t case_sensitivity;
     sz_substrings_overlap_policy_t overlap_policy;
     sz_size_t hot_states = 0, matches_budget = 0, haystacks_budget = 0;
@@ -243,11 +243,11 @@ static PyObject *SubstringsEngine_counts(SubstringsEngine *self, PyObject *const
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
     sz_capability_t const capability = self->engine.capability;
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
     sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
-    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
+    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     sz_size_t const extents[1] = {haystacks.count};
     sz_size_t strides[1];
@@ -339,11 +339,11 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
     sz_capability_t const capability = self->engine.capability;
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
     sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
-    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
+    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     // One match is four pointer-width fields back to back, so the rows have to be packed as well as the columns.
     sz_substrings_match_t *matches = STRINGZILLA_NULL;
@@ -467,13 +467,12 @@ static PyObject *SubstringsEngine_replace(SubstringsEngine *self, PyObject *cons
     if (SubstringsEngine_ready_(self) != 0) return NULL;
 
     sz_capability_t const capability = self->engine.capability;
-    sz_sequence_t haystacks, replacements;
+    sz_strings_view_t haystacks, replacements;
     sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
-    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
-    if (sz_py_export_engine_strings(replacements_obj, "replacements", capability, stream, &replacements) != 0)
-        return NULL;
+    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
+    if (sz_py_export_strings(replacements_obj, "replacements", &replacements) != 0) return NULL;
 
     sz_ptr_t target = STRINGZILLA_NULL;
     sz_size_t target_capacity = 0;
@@ -623,11 +622,11 @@ static PyObject *SubstringsEngine_bm25_scores(SubstringsEngine *self, PyObject *
 
     sz_capability_t const capability = self->engine.capability;
     sz_size_t const needles_count = self->engine.needles_count;
-    sz_sequence_t haystacks;
+    sz_strings_view_t haystacks;
     sz_stream_t stream = NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
-    if (sz_py_export_engine_strings(haystacks_obj, "haystacks", capability, stream, &haystacks) != 0) return NULL;
+    if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     Py_buffer weights_view;
     if (sz_py_export_input_buffer(weights_obj, "needle_weights", (Py_ssize_t)sizeof(sz_f32_t), needles_count,

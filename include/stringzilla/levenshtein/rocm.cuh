@@ -59,7 +59,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_warp_words_per_lane_rocm_(sz_size
 
 /*  Warped byte rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_k1_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -67,7 +67,7 @@ static __global__ void sz_levenshtein_distances_k1_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k2_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -75,7 +75,7 @@ static __global__ void sz_levenshtein_distances_k2_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k3_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -83,7 +83,7 @@ static __global__ void sz_levenshtein_distances_k3_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k4_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -91,7 +91,7 @@ static __global__ void sz_levenshtein_distances_k4_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k5_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -99,7 +99,7 @@ static __global__ void sz_levenshtein_distances_k5_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k6_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -107,7 +107,7 @@ static __global__ void sz_levenshtein_distances_k6_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k7_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -115,7 +115,7 @@ static __global__ void sz_levenshtein_distances_k7_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k8_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_rocm_,
                                     sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_tile_queue_open_simt_,
@@ -124,7 +124,7 @@ static __global__ void sz_levenshtein_distances_k8_rocm_kernel_( //
 
 /*  Warped rune rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_utf8_k1_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -132,7 +132,7 @@ static __global__ void sz_levenshtein_distances_utf8_k1_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k2_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -140,7 +140,7 @@ static __global__ void sz_levenshtein_distances_utf8_k2_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k3_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -148,7 +148,7 @@ static __global__ void sz_levenshtein_distances_utf8_k3_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k4_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -156,7 +156,7 @@ static __global__ void sz_levenshtein_distances_utf8_k4_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k5_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -164,7 +164,7 @@ static __global__ void sz_levenshtein_distances_utf8_k5_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k6_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -172,7 +172,7 @@ static __global__ void sz_levenshtein_distances_utf8_k6_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k7_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -180,7 +180,7 @@ static __global__ void sz_levenshtein_distances_utf8_k7_rocm_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k8_rocm_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_rocm_,
                                          sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_, sz_lanes_any_rocm_,
@@ -195,7 +195,7 @@ static __global__ void sz_levenshtein_distances_utf8_k8_rocm_kernel_( //
 enum {
     sz_levenshtein_tiled_warp_stride_rocm_k = 64,
     sz_levenshtein_tiled_threads_per_block_rocm_k = sz_levenshtein_tiled_warps_per_block_simt_k *
-                                                    sz_levenshtein_tiled_warp_stride_rocm_k,
+        sz_levenshtein_tiled_warp_stride_rocm_k,
 };
 
 /** Publishes that this tile-column finished @p tile_row, releasing the frontier writes before it
@@ -214,7 +214,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_await_rocm_(sz_u32_t const *counter, sz_u
 
 static __global__
 __launch_bounds__(sz_levenshtein_tiled_threads_per_block_rocm_k) void sz_levenshtein_tiled_batch_rocm_kernel_(
-    sz_levenshtein_engine_t engine, sz_sequence_t candidates, sz_size_t *distances, sz_ptr_t workspace,
+    sz_levenshtein_engine_t engine, sz_strings_view_t candidates, sz_size_t *distances, sz_ptr_t workspace,
     sz_levenshtein_long_arguments_simt_t batch) {
     sz_levenshtein_tiled_batch_simt_(engine, candidates, distances, workspace, batch,
                                      sz_levenshtein_tiled_warp_stride_rocm_k, sz_shuffle_up_rocm_,
@@ -409,11 +409,14 @@ enum { sz_levenshtein_masks_threads_rocm_k = sz_levenshtein_byte_classes_k };
  *      byte plane there.
  *  @note Joins @p stream, which is what lets the staging be released; only an init is allowed to.
  */
-static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
+static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *engine, sz_strings_view_t const *queries,
                                                     sz_stream_t stream) {
     sz_size_t texts_bytes = 0;
-    for (sz_size_t index = 0; index != queries->count; ++index)
-        texts_bytes += queries->get_length(queries->handle, index);
+    sz_string_view_t query_views[64];
+    for (sz_size_t index = 0; index != queries->count; ++index) {
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, query_views);
+        texts_bytes += query_views[index % 64].length;
+    }
     sz_size_t const views_bytes = queries->count * sizeof(sz_string_view_t);
     sz_size_t const staged_bytes = views_bytes + texts_bytes;
     sz_ptr_t const staged = (sz_ptr_t)engine->allocator.allocate(staged_bytes, engine->allocator.handle, stream);
@@ -421,11 +424,11 @@ static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *eng
     sz_string_view_t *const views = (sz_string_view_t *)staged;
     sz_ptr_t const arena = staged + views_bytes;
     for (sz_size_t index = 0, written = 0; index != queries->count; ++index) {
-        sz_size_t const bytes = queries->get_length(queries->handle, index);
-        sz_cptr_t const text = queries->get_start(queries->handle, index);
-        for (sz_size_t byte = 0; byte != bytes; ++byte) arena[written + byte] = text[byte];
-        views[index].start = arena + written, views[index].length = bytes;
-        written += bytes;
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, query_views);
+        sz_string_view_t const query = query_views[index % 64];
+        for (sz_size_t byte = 0; byte != query.length; ++byte) arena[written + byte] = query.start[byte];
+        views[index].start = arena + written, views[index].length = query.length;
+        written += query.length;
     }
 
     sz_size_t const masks_bytes = engine->masks_offsets[engine->count] * sizeof(sz_u64_t);
@@ -455,7 +458,7 @@ static sz_status_t sz_levenshtein_build_masks_rocm_(sz_levenshtein_engine_t *eng
  *  @p entry_points the rounds will launch, which is every step of
  *  @ref sz_levenshtein_engine_init_scoped_rocm_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_engine_t *engine,
-                                                                sz_sequence_t const *queries,
+                                                                sz_strings_view_t const *queries,
                                                                 sz_levenshtein_symbol_t symbol,
                                                                 sz_levenshtein_entry_points_rocm_t const *entry_points,
                                                                 sz_allocator_t *allocator, sz_stream_t stream) {
@@ -466,9 +469,11 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_e
     if (queries->count == 0 || queries->count > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
 
     sz_size_t longest = 0, text_bytes = 0, all_text_bytes = 0;
+    sz_string_view_t views[64];
     if (queries->count > (STRINGZILLA_SIZE_MAX / sizeof(sz_string_view_t)) - 1) return sz_unexpected_dimensions_k;
     for (sz_size_t index = 0; index != queries->count; ++index) {
-        sz_size_t const bytes = queries->get_length(queries->handle, index);
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, views);
+        sz_size_t const bytes = views[index % 64].length;
         if (bytes > 0xFFFFFF00u) return sz_unexpected_dimensions_k;
         if (bytes > STRINGZILLA_SIZE_MAX - all_text_bytes) return sz_unexpected_dimensions_k;
         all_text_bytes += bytes;
@@ -494,10 +499,11 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_e
     head->query_text = (sz_ptr_t)head->query_offsets + offsets_bytes;
     for (sz_size_t index = 0, written = 0; index != queries->count; ++index) {
         head->query_offsets[index] = written;
-        sz_size_t const bytes = queries->get_length(queries->handle, index);
-        if (symbol == sz_levenshtein_bytes_k && bytes > sz_levenshtein_gpu_words_max_k * 64) {
-            sz_copy_serial_(head->query_text + written, queries->get_start(queries->handle, index), bytes);
-            written += bytes;
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, views);
+        sz_string_view_t const query = views[index % 64];
+        if (symbol == sz_levenshtein_bytes_k && query.length > sz_levenshtein_gpu_words_max_k * 64) {
+            memcpy(head->query_text + written, query.start, query.length);
+            written += query.length;
         }
         head->query_offsets[index + 1] = written;
     }
@@ -515,7 +521,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_rocm_(sz_levenshtein_e
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_rocm_(
-    sz_levenshtein_engine_t *engine, sz_sequence_t const *queries, sz_levenshtein_symbol_t symbol,
+    sz_levenshtein_engine_t *engine, sz_strings_view_t const *queries, sz_levenshtein_symbol_t symbol,
     sz_levenshtein_entry_points_rocm_t const *entry_points, sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
@@ -529,8 +535,9 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_rocm_(
  *  by prepared queries. */
 static sz_status_t sz_levenshtein_launch_rocm_(void const *entry_point, sz_size_t blocks, sz_size_t queries,
                                                sz_size_t per_block, sz_stream_t stream, sz_levenshtein_engine_t engine,
-                                               sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
-                                               sz_size_t distances_stride, sz_size_t const *candidate_order) {
+                                               sz_u32_t const *order, sz_strings_view_t candidates,
+                                               sz_size_t *distances, sz_size_t distances_stride,
+                                               sz_size_t const *candidate_order) {
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)queries, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
@@ -556,7 +563,7 @@ static sz_bool_t sz_levenshtein_narrow_rocm_(sz_levenshtein_engine_t const *engi
 
 /** Enqueues the longest-first order of @p candidates into @p storage: the cursors of every length
  *  key, then the order itself. */
-static sz_status_t sz_levenshtein_order_longest_rocm_(sz_sequence_t candidates, sz_size_t *storage,
+static sz_status_t sz_levenshtein_order_longest_rocm_(sz_strings_view_t candidates, sz_size_t *storage,
                                                       sz_stream_t stream) {
     sz_size_t *candidate_order = storage + sz_levenshtein_length_keys_simt_k;
     // One resident wave of blocks walks the batch, as wider grids would only add tallies to merge.
@@ -583,7 +590,7 @@ static sz_status_t sz_levenshtein_order_longest_rocm_(sz_sequence_t candidates, 
 }
 
 /** Enqueues candidate ordering and bucket cross-products into per-call workspace. */
-static sz_status_t sz_levenshtein_enqueue_long_rocm_(sz_levenshtein_engine_t engine, sz_sequence_t candidates,
+static sz_status_t sz_levenshtein_enqueue_long_rocm_(sz_levenshtein_engine_t engine, sz_strings_view_t candidates,
                                                      sz_levenshtein_length_bucket_t const *candidate_buckets,
                                                      sz_size_t resident, sz_bool_t cooperative, sz_size_t *distances,
                                                      sz_size_t distances_stride, sz_ptr_t workspace,
@@ -661,20 +668,25 @@ static sz_status_t sz_levenshtein_enqueue_long_rocm_(sz_levenshtein_engine_t eng
     return sz_success_k;
 }
 
-static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
+static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates,
                                              sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream) {
     sz_levenshtein_head_rocm_t const *const head = (sz_levenshtein_head_rocm_t const *)engine->memory;
     if (head->bucket_offsets[head->buckets] == engine->count) return sz_success_k;
     sz_levenshtein_length_bucket_t candidate_buckets[sz_levenshtein_length_buckets_k] = {{0, 0, 0}};
     hipPointerAttribute_t attributes;
-    sz_bool_t const host_readable = hipPointerGetAttributes(&attributes, candidates->handle) == hipSuccess &&
+    void const *const offsets = candidates->layout == sz_strings_u64_tape_k
+                                    ? (void const *)candidates->data.u64_tape.offsets
+                                    : (void const *)candidates->data.u32_tape.offsets;
+    sz_bool_t const host_readable = hipPointerGetAttributes(&attributes, offsets) == hipSuccess &&
                                             attributes.type == hipMemoryTypeManaged
                                         ? sz_true_k
                                         : sz_false_k;
     sz_size_t populated = 0;
     if (host_readable) {
+        sz_string_view_t views[64];
         for (sz_size_t index = 0; index != candidates->count; ++index) {
-            sz_size_t const length = candidates->get_length(candidates->handle, index);
+            if (index % 64 == 0) sz_strings_get_block_(candidates, index, views);
+            sz_size_t const length = views[index % 64].length;
             sz_levenshtein_length_bucket_t *const bucket = candidate_buckets + sz_levenshtein_length_bucket_(length);
             ++bucket->count;
             bucket->length_max = sz_max_of_two(bucket->length_max, length);
@@ -739,7 +751,7 @@ static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz
 /** Launches every short-query bucket's rung over @p candidates, the threaded rungs drawing them in
  *  @p candidate_order, or in the batch's own order where it is null. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_rocm_(sz_levenshtein_engine_t *engine,
-                                                           sz_sequence_t const *candidates, sz_size_t *distances,
+                                                           sz_strings_view_t const *candidates, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_size_t const *candidate_order,
                                                            sz_levenshtein_entry_points_rocm_t const *entry_points,
                                                            sz_stream_t stream) {
@@ -782,7 +794,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_rocm_(sz_levenshtein_engine
  *  the longest-first order where a threaded rung will draw through it, the short-query rungs,
  *  then the long queries. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_engine_t *engine,
-                                                              sz_sequence_t const *candidates, sz_size_t *distances,
+                                                              sz_strings_view_t const *candidates, sz_size_t *distances,
                                                               sz_size_t distances_stride,
                                                               sz_levenshtein_entry_points_rocm_t const *entry_points,
                                                               sz_stream_t stream) {
@@ -795,9 +807,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
 
     if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_rocm_(distances)) return sz_device_memory_mismatch_k;
-    if (candidates->get_start != sz_sequence_tape_start || candidates->get_length != sz_sequence_tape_length ||
-        !sz_memory_accessible_rocm_(candidates->handle))
-        return sz_device_memory_mismatch_k;
+    if (!sz_strings_accessible_rocm_(candidates)) return sz_device_memory_mismatch_k;
 
     sz_levenshtein_head_rocm_t const *const head = (sz_levenshtein_head_rocm_t const *)engine->memory;
     sz_bool_t threaded = sz_false_k;
@@ -827,8 +837,8 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_rocm_(sz_levenshtein_eng
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_rocm_(
-    sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates, sz_size_t *distances, sz_size_t distances_stride,
-    sz_levenshtein_entry_points_rocm_t const *entry_points, sz_stream_t stream) {
+    sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates, sz_size_t *distances,
+    sz_size_t distances_stride, sz_levenshtein_entry_points_rocm_t const *entry_points, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -903,7 +913,7 @@ static sz_levenshtein_entry_points_rocm_t const sz_levenshtein_entry_points_rocm
 };
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engine_t *engine,
-                                                            sz_sequence_t const *queries,
+                                                            sz_strings_view_t const *queries,
                                                             sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
                                                             sz_stream_t stream) {
     return sz_levenshtein_engine_init_scoped_rocm_(engine, queries, symbol, &sz_levenshtein_entry_points_rocm_,
@@ -911,7 +921,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_rocm(sz_levenshtein_engin
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_rocm(sz_levenshtein_engine_t *engine,
-                                                          sz_sequence_t const *candidates, sz_size_t *distances,
+                                                          sz_strings_view_t const *candidates, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream) {
     return sz_levenshtein_distances_scoped_rocm_(engine, candidates, distances, distances_stride,
                                                  &sz_levenshtein_entry_points_rocm_, stream);

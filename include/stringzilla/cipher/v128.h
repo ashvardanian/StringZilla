@@ -12,7 +12,6 @@
 #define STRINGZILLA_CIPHER_V128_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/v128.h" // `sz_fill_v128_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -879,7 +878,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_v128(sz_aes256_gcm_key_t const
 
     // A caller who drops the status must still be unable to act on forged plaintext.
     if (verdict != sz_success_k) {
-        sz_fill_v128_(target, length, 0);
+        memset(target, 0, length);
         sz_keep_alive_(target);
     }
     return verdict;

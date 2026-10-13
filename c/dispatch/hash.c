@@ -644,7 +644,7 @@ STRINGZILLA_API sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const 
     return kernel ? kernel(state, digest, stream) : sz_missing_kernel_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_best(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_sha256_multistate_update_t const kernel = (sz_kernel_sha256_multistate_update_t)sz_kernel_pick_(
         capabilities, sz_sha256_multistate_update_capabilities());

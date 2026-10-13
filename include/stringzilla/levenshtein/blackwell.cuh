@@ -157,112 +157,112 @@ STRINGZILLA_DEVICE int sz_tile_queue_next_blackwell_(sz_tile_queue_t *queue, sz_
 
 /*  Threaded byte rung: one entry point per word count. */
 static __global__ void sz_levenshtein_distances_w1_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 1,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w2_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 2,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w3_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 3,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w4_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 4,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w5_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 5,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w6_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 6,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w7_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 7,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w8_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 8,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w9_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 9,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w10_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 10,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w11_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 11,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w12_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 12,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w13_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 13,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w14_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 14,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w15_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 15,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_w16_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 16,
                                sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
@@ -270,112 +270,112 @@ static __global__ void sz_levenshtein_distances_w16_blackwell_kernel_( //
 
 /*  Threaded rune rung: one entry point per word count. */
 static __global__ void sz_levenshtein_distances_utf8_w1_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 1,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w2_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 2,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w3_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 3,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w4_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 4,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w5_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 5,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w6_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 6,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w7_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 7,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w8_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 8,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w9_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 9,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w10_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 10,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w11_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 11,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w12_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 12,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w13_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 13,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w14_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 14,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w15_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 15,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_w16_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride, sz_size_t const *candidate_order) {
     sz_levenshtein_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, candidate_order, 16,
                                     sz_tile_queue_open_blackwell_, sz_tile_queue_draw_blackwell_);
@@ -383,7 +383,7 @@ static __global__ void sz_levenshtein_distances_utf8_w16_blackwell_kernel_( //
 
 /*  Warped byte rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_k1_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -391,7 +391,7 @@ static __global__ void sz_levenshtein_distances_k1_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k2_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -399,7 +399,7 @@ static __global__ void sz_levenshtein_distances_k2_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k3_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -407,7 +407,7 @@ static __global__ void sz_levenshtein_distances_k3_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k4_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -415,7 +415,7 @@ static __global__ void sz_levenshtein_distances_k4_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k5_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -423,7 +423,7 @@ static __global__ void sz_levenshtein_distances_k5_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k6_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -431,7 +431,7 @@ static __global__ void sz_levenshtein_distances_k6_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k7_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -439,7 +439,7 @@ static __global__ void sz_levenshtein_distances_k7_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_k8_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_cuda_,
                                     sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_blackwell_,
@@ -448,7 +448,7 @@ static __global__ void sz_levenshtein_distances_k8_blackwell_kernel_( //
 
 /*  Warped rune rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_utf8_k1_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -456,7 +456,7 @@ static __global__ void sz_levenshtein_distances_utf8_k1_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k2_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -464,7 +464,7 @@ static __global__ void sz_levenshtein_distances_utf8_k2_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k3_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -472,7 +472,7 @@ static __global__ void sz_levenshtein_distances_utf8_k3_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k4_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -480,7 +480,7 @@ static __global__ void sz_levenshtein_distances_utf8_k4_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k5_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -488,7 +488,7 @@ static __global__ void sz_levenshtein_distances_utf8_k5_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k6_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -496,7 +496,7 @@ static __global__ void sz_levenshtein_distances_utf8_k6_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k7_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -504,7 +504,7 @@ static __global__ void sz_levenshtein_distances_utf8_k7_blackwell_kernel_( //
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k8_blackwell_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_sequence_t candidates, sz_size_t *distances,
+    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
     sz_size_t distances_stride) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_cuda_,
                                          sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
@@ -577,7 +577,7 @@ static sz_levenshtein_entry_points_cuda_t const sz_levenshtein_entry_points_blac
 #pragma endregion Entry Points
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_blackwell(sz_levenshtein_engine_t *engine,
-                                                                 sz_sequence_t const *queries,
+                                                                 sz_strings_view_t const *queries,
                                                                  sz_levenshtein_symbol_t symbol,
                                                                  sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_levenshtein_engine_init_scoped_cuda_(engine, queries, symbol, &sz_levenshtein_entry_points_blackwell_,
@@ -585,8 +585,9 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_blackwell(sz_levenshtein_
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_blackwell(sz_levenshtein_engine_t *engine,
-                                                               sz_sequence_t const *candidates, sz_size_t *distances,
-                                                               sz_size_t distances_stride, sz_stream_t stream) {
+                                                               sz_strings_view_t const *candidates,
+                                                               sz_size_t *distances, sz_size_t distances_stride,
+                                                               sz_stream_t stream) {
     return sz_levenshtein_distances_scoped_cuda_(engine, candidates, distances, distances_stride,
                                                  &sz_levenshtein_entry_points_blackwell_, stream);
 }

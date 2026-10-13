@@ -1,9 +1,9 @@
 
 /**
- *  @file bench/sequence.cpp
+ *  @file bench/sort.cpp
  *  @author Ash Vardanian
  *  @date June 26, 2023
- *  @brief Benchmarks sorting, partitioning, and merging operations on string sequences.
+ *  @brief Benchmarks sorting, partitioning, and merging operations on string collections.
  *
  *  Times the sorting and intersection dispatch points over the English words, against the STL and
  *  @c qsort. Every capability's kernels, and the pgram sorts only the tier headers define, are
@@ -13,13 +13,13 @@
  *  it reads the whole file by default.
  *
  *  Benchmarks include:
- *  - String sequence sorting algorithms - @b argsort.
- *  - String sequences intersections - @b intersect.
+ *  - String collection sorting algorithms - @b argsort.
+ *  - String collection intersections - @b intersect.
  *
  *  For sorting, the number of operations per second are reported as the worst-case time complexity
  *  of a comparison-based sorting algorithm, meaning O(N × log(N)) for N elements. For
  *  intersections, the number of operations is estimated as the total number of characters in the
- *  two input sequences combined.
+ *  two input collections combined.
  *
  *  Here are a few build & run commands:
  *
@@ -41,7 +41,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
- *  Google Benchmark. This file is the sibling of `find.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Google Benchmark. This file is the sibling of `find.cpp`, `token.cpp`, and `strings.cpp`.
  */
 #include <memory>        // `std::memcpy`
 #include <numeric>       // `std::iota`
@@ -81,17 +81,13 @@ int _get_qsort_order(void *arg, void const *a, void const *b) {
 #else
 int _get_qsort_order(void const *a, void const *b, void *arg) {
 #endif
-    sz_sequence_t *sequence = (sz_sequence_t *)arg;
-    sz_size_t idx_a = *(sz_size_t *)a;
-    sz_size_t idx_b = *(sz_size_t *)b;
+    strings_t const &strings = *(strings_t const *)arg;
+    sz_size_t const index_a = *(sz_size_t const *)a;
+    sz_size_t const index_b = *(sz_size_t const *)b;
+    std::string_view const string_a = strings[index_a], string_b = strings[index_b];
 
-    sz_cptr_t str_a = sequence->get_start(sequence->handle, idx_a);
-    sz_cptr_t str_b = sequence->get_start(sequence->handle, idx_b);
-    sz_size_t len_a = sequence->get_length(sequence->handle, idx_a);
-    sz_size_t len_b = sequence->get_length(sequence->handle, idx_b);
-
-    int result = strncmp(str_a, str_b, len_a < len_b ? len_a : len_b);
-    return result ? result : (int)(len_a - len_b);
+    int result = strncmp(string_a.data(), string_b.data(), std::min(string_a.size(), string_b.size()));
+    return result ? result : (int)(string_a.size() - string_b.size());
 }
 
 #endif
@@ -107,8 +103,7 @@ struct argsort_strings_via_std_t {
     argsort_strings_via_std_t(strings_t const &input, permute_t &output) : input(input), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
-        std::sort(output.begin(), output.end(),
-                  [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return input[i] < input[j]; });
+        std::sort(output.begin(), output.end(), [&](sz_size_t i, sz_size_t j) { return input[i] < input[j]; });
 
         // Prepare stats and hash the permutation to compare with the reference.
         std::size_t ops_performed = input.size() * std::log2(input.size());
@@ -127,17 +122,11 @@ struct argsort_strings_via_qsort_t {
     argsort_strings_via_qsort_t(strings_t const &input, permute_t &output) : input(input), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
-
-        // Prepare the sequence structure for the callback.
-        sz_sequence_t array;
-        array.count = input.size();
-        array.handle = &input;
-        array.get_start = strings_get_start_;
-        array.get_length = strings_get_length_;
+        void *const context = const_cast<strings_t *>(&input);
 #if STRINGZILLA_HAS_QSORT_R_
-        qsort_r(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
+        qsort_r(output.data(), input.size(), sizeof(sz_size_t), _get_qsort_order, context);
 #elif STRINGZILLA_HAS_QSORT_S_
-        qsort_s(output.data(), array.count, sizeof(sz_sorted_idx_t), _get_qsort_order, &array);
+        qsort_s(output.data(), input.size(), sizeof(sz_size_t), _get_qsort_order, context);
 #endif
 
         // Prepare stats and hash the permutation to compare with the reference.
@@ -154,21 +143,21 @@ struct argsort_strings_via_qsort_t {
  *  @brief Find the array permutation that sorts the input strings.
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
-void bench_sequencing_strings(environment_t const &env, corpus_t const &corpus) {
+void bench_sort_strings(environment_t const &env, corpus_t const &corpus) {
     permute_t permute_buffer(corpus.tokens.size());
 
-    auto base_call = argsort_strings_via_sz<cpu_best<sz_sequence_argsort_best>> {corpus.tokens, permute_buffer};
-    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_argsort_best", base_call);
+    auto base_call = argsort_strings_via_sz<cpu_best<sz_sort_order_best>> {corpus.tokens, permute_buffer};
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sort_order_best", base_call);
     print(base);
 
     // Include STL functionality
     auto std_call = argsort_strings_via_std_t {corpus.tokens, permute_buffer};
-    print(bench_nullary(env, corpus, "sequence_argsort<std::sort>", base_call, std_call), baseline_of(base));
+    print(bench_nullary(env, corpus, "sort_order<std::sort>", base_call, std_call), baseline_of(base));
 
     // Include POSIX and WinAPI functionality
 #if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
     auto qsort_call = argsort_strings_via_qsort_t {corpus.tokens, permute_buffer};
-    print(bench_nullary(env, corpus, "sequence_argsort<qsort>", base_call, qsort_call), baseline_of(base));
+    print(bench_nullary(env, corpus, "sort_order<qsort>", base_call, qsort_call), baseline_of(base));
 #endif
 }
 
@@ -181,8 +170,7 @@ struct argsort_ci_strings_via_std_t {
         : input(input), folded(folded), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
-        std::stable_sort(output.begin(), output.end(),
-                         [&](sz_sorted_idx_t i, sz_sorted_idx_t j) { return folded[i] < folded[j]; });
+        std::stable_sort(output.begin(), output.end(), [&](sz_size_t i, sz_size_t j) { return folded[i] < folded[j]; });
 
         std::size_t ops_performed = input.size() * std::log2(input.size());
         check_value_t checksum = is_uncased_sorting_permutation(folded, output);
@@ -195,26 +183,25 @@ struct argsort_ci_strings_via_std_t {
  *  @brief Find the array permutation that sorts the input strings in UTF-8 case-folded order.
  *  @warning Some algorithms use more memory than others; this benchmark does not account for it.
  */
-void bench_sequencing_strings_uncased(environment_t const &env, corpus_t const &corpus) {
+void bench_sort_strings_uncased(environment_t const &env, corpus_t const &corpus) {
     permute_t permute_buffer(corpus.tokens.size());
     std::vector<std::string> const folded = fold_tokens(corpus.tokens);
 
-    auto base_call = argsort_ci_strings_via_sz<cpu_best<sz_sequence_argsort_uncased_best>> {corpus.tokens, folded,
-                                                                                            permute_buffer};
-    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_argsort_uncased_best", base_call);
+    auto base_call = argsort_ci_strings_via_sz<cpu_best<sz_sort_uncased_order_best>> {corpus.tokens, folded,
+                                                                                      permute_buffer};
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sort_uncased_order_best", base_call);
     print(base);
 
     // Include STL functionality, as the case-folded reference
     auto std_call = argsort_ci_strings_via_std_t {corpus.tokens, folded, permute_buffer};
-    print(bench_nullary(env, corpus, "sequence_argsort_uncased<std::stable_sort>", base_call, std_call),
-          baseline_of(base));
+    print(bench_nullary(env, corpus, "sort_uncased_order<std::stable_sort>", base_call, std_call), baseline_of(base));
 }
 
 #pragma endregion
 
 #pragma region Intersections Benchmarks
 
-/** Uses the STL's @c std::unordered_map to find the intersections between two string sequences. */
+/** Uses the STL's @c std::unordered_map to intersect two string collections. */
 struct intersect_strings_via_std_t {
     strings_t const &input_a;
     strings_t const &input_b;
@@ -231,16 +218,16 @@ struct intersect_strings_via_std_t {
         auto &output_large = input_a.size() < input_b.size() ? output_b : output_a;
 
         // Construct an unordered map for the smaller input
-        std::unordered_map<std::string_view, sz_sorted_idx_t> map_small;
-        for (sz_sorted_idx_t idx_in_small = 0; idx_in_small < input_small.size(); ++idx_in_small)
-            map_small[input_small[idx_in_small]] = idx_in_small;
+        std::unordered_map<std::string_view, sz_size_t> map_small;
+        for (sz_size_t index_in_small = 0; index_in_small < input_small.size(); ++index_in_small)
+            map_small[input_small[index_in_small]] = index_in_small;
 
         // Iterate through the larger input and find the intersections
         std::size_t intersections = 0;
-        for (sz_sorted_idx_t idx_in_large = 0; idx_in_large < input_large.size(); ++idx_in_large) {
-            auto it = map_small.find(input_large[idx_in_large]);
+        for (sz_size_t index_in_large = 0; index_in_large < input_large.size(); ++index_in_large) {
+            auto it = map_small.find(input_large[index_in_large]);
             if (it == map_small.end()) continue;
-            output_large[intersections] = idx_in_large;
+            output_large[intersections] = index_in_large;
             output_small[intersections] = it->second;
             ++intersections;
         }
@@ -259,8 +246,8 @@ struct intersect_strings_via_std_t {
 void bench_intersections(environment_t const &env, corpus_t const &corpus) {
     intersect_inputs_t inputs(corpus, env.settings.seed.value);
 
-    auto base_call = intersect_strings_via_sz<cpu_best<sz_sequence_intersect_best>> {inputs};
-    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_sequence_intersect_best", base_call);
+    auto base_call = intersect_strings_via_sz<cpu_best<sz_intersect_best>> {inputs};
+    std::optional<row_t> const base = bench_nullary(env, corpus, "sz_intersect_best", base_call);
     print(base);
 
     // Include STL functionality
@@ -270,11 +257,11 @@ void bench_intersections(environment_t const &env, corpus_t const &corpus) {
 
 #pragma endregion
 
-void bench_sequence(environment_t &env) {
+void bench_sort(environment_t &env) {
     corpus_t const &corpus = env.corpora.words();
-    fmt::println("Starting sequence benchmarks...");
-    bench_sequencing_strings(env, corpus);
-    bench_sequencing_strings_uncased(env, corpus);
+    fmt::println("Starting sort benchmarks...");
+    bench_sort_strings(env, corpus);
+    bench_sort_strings_uncased(env, corpus);
     bench_intersections(env, corpus);
 }
 

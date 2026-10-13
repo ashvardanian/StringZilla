@@ -77,10 +77,10 @@ impl OverlapEngine {
         Query: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        with_sequence(queries, |sequence| unsafe {
+        with_strings(queries, |strings| unsafe {
             sz_overlap_engine_init(
                 engine.as_mut_ptr(),
-                sequence,
+                strings,
                 window_widths.as_ptr(),
                 window_widths.len(),
                 candidates_budget,
@@ -112,7 +112,7 @@ impl OverlapEngine {
     /// candidate stride being at least the width count and the query stride at least the
     /// candidates times that.
     ///
-    /// A GPU engine takes a [`Sequence`] and `scores` in memory its device reaches, such as a
+    /// A GPU engine takes a [`Tape`] and `scores` in memory its device reaches, such as a
     /// `Vec` in a [`UnifiedAllocator`]. A stream of another group than the engine's is refused
     /// with [`Status::DeviceMemoryMismatch`].
     pub fn scores<'scope, Candidates>(
@@ -129,18 +129,18 @@ impl OverlapEngine {
         let stream = scope.stream_for(self.capability)?;
         let (queries, widths_count) = (self.count, self.widths_count);
         let engine = self as *mut Self;
-        candidates.with_sequence(stream, |sequence| {
+        candidates.with_strings(stream, |strings| {
             if scores_candidate_stride < widths_count {
                 return Err(Status::UnexpectedDimensions);
             }
-            let candidates_span = sequence
+            let candidates_span = strings
                 .count
                 .checked_mul(scores_candidate_stride)
                 .ok_or(Status::OverflowRisk)?;
             if scores_query_stride < candidates_span {
                 return Err(Status::UnexpectedDimensions);
             }
-            let span = match (queries, sequence.count) {
+            let span = match (queries, strings.count) {
                 (0, _) | (_, 0) => 0,
                 (queries, candidates_count) => {
                     let planes = (queries - 1)
@@ -161,7 +161,7 @@ impl OverlapEngine {
             unsafe {
                 sz_overlap_scores(
                     engine,
-                    sequence,
+                    strings,
                     scores.as_mut_ptr(),
                     scores_query_stride,
                     scores_candidate_stride,

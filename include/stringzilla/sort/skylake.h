@@ -10,8 +10,6 @@
 #define STRINGZILLA_SORT_SKYLAKE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/skylake.h" // `sz_copy_skylake_`
-
 #include "stringzilla/sort/serial.h"
 
 #ifdef __cplusplus
@@ -48,22 +46,22 @@ extern "C" {
  *  @param[inout] initial_order Corresponding order array; updated in place after copy-back.
  *  @param[out] partitioned_pgrams Temporary output buffer for the three-way partitioned pgrams.
  *  @param[out] partitioned_order Temporary output buffer for the corresponding order entries.
- *  @param[in] start_in_sequence First index (inclusive) of the range to partition.
- *  @param[in] end_in_sequence One-past-the-last index of the range to partition.
+ *  @param[in] start_in_strings First index (inclusive) of the range to partition.
+ *  @param[in] end_in_strings One-past-the-last index of the range to partition.
  *  @param[out] first_pivot_offset Receives the index of the first element equal to the pivot.
  *  @param[out] last_pivot_offset Receives the index of the last element equal to the pivot.
  */
-STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_skylake_(                //
-    sz_pgram_t *const initial_pgrams, sz_sorted_idx_t *const initial_order,         //
-    sz_pgram_t *const partitioned_pgrams, sz_sorted_idx_t *const partitioned_order, //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,             //
+STRINGZILLA_INLINE void sz_sort_3way_partition_skylake_(                      //
+    sz_pgram_t *const initial_pgrams, sz_size_t *const initial_order,         //
+    sz_pgram_t *const partitioned_pgrams, sz_size_t *const partitioned_order, //
+    sz_size_t const start_in_strings, sz_size_t const end_in_strings,         //
     sz_size_t *const first_pivot_offset, sz_size_t *const last_pivot_offset) {
 
-    sz_size_t const count = end_in_sequence - start_in_sequence;
+    sz_size_t const count = end_in_strings - start_in_strings;
     sz_size_t const pgrams_per_register = sizeof(sz_u512_vec_t) / sizeof(sz_pgram_t);
 
     // Choose the pivot offset with Sedgewick's method.
-    sz_pgram_t const *pivot_pgram_ptr = sz_sequence_partitioning_pivot_(initial_pgrams + start_in_sequence, count);
+    sz_pgram_t const *pivot_pgram_ptr = sz_strings_partitioning_pivot_(initial_pgrams + start_in_strings, count);
     sz_pgram_t const pivot_pgram = *pivot_pgram_ptr;
     sz_u512_vec_t pivot_vec;
     pivot_vec.zmm = _mm512_set1_epi64(pivot_pgram);
@@ -75,14 +73,14 @@ STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_skylake_(            
     __mmask8 const tail_mask_m8 = sz_u8_mask_until_(tail_count);
 
     sz_u512_vec_t pgrams_vec, order_vec;
-    for (sz_size_t block_index = start_in_sequence; block_index + pgrams_per_register <= end_in_sequence;
+    for (sz_size_t block_index = start_in_strings; block_index + pgrams_per_register <= end_in_strings;
          block_index += pgrams_per_register) {
         pgrams_vec.zmm = _mm512_loadu_si512(initial_pgrams + block_index);
         count_smaller += _mm_popcnt_u32(_mm512_cmplt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
         count_greater += _mm_popcnt_u32(_mm512_cmpgt_epu64_mask(pgrams_vec.zmm, pivot_vec.zmm));
     }
     if (tail_count) {
-        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_mask_m8, initial_pgrams + end_in_sequence - tail_count);
+        pgrams_vec.zmm = _mm512_maskz_loadu_epi64(tail_mask_m8, initial_pgrams + end_in_strings - tail_count);
         count_smaller += _mm_popcnt_u32(_mm512_mask_cmplt_epu64_mask(tail_mask_m8, pgrams_vec.zmm, pivot_vec.zmm));
         count_greater += _mm_popcnt_u32(_mm512_mask_cmpgt_epu64_mask(tail_mask_m8, pgrams_vec.zmm, pivot_vec.zmm));
     }
@@ -92,13 +90,13 @@ STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_skylake_(            
     sz_size_t const count_equal = count - count_smaller - count_greater;
     sz_assert_(count_equal >= 1 && "The pivot must be present in the collection.");
     sz_assert_(count_smaller + count_equal + count_greater == count && "The partitioning must be exhaustive.");
-    sz_size_t smaller_offset = start_in_sequence;
-    sz_size_t equal_offset = start_in_sequence + count_smaller;
-    sz_size_t greater_offset = start_in_sequence + count_smaller + count_equal;
+    sz_size_t smaller_offset = start_in_strings;
+    sz_size_t equal_offset = start_in_strings + count_smaller;
+    sz_size_t greater_offset = start_in_strings + count_smaller + count_equal;
 
     // The naive algorithm - unzip the elements into 3 separate buffers.
-    for (sz_size_t block_index = start_in_sequence; block_index < end_in_sequence; block_index += pgrams_per_register) {
-        __mmask8 const load_mask_m8 = block_index + pgrams_per_register <= end_in_sequence ? 0xFF : tail_mask_m8;
+    for (sz_size_t block_index = start_in_strings; block_index < end_in_strings; block_index += pgrams_per_register) {
+        __mmask8 const load_mask_m8 = block_index + pgrams_per_register <= end_in_strings ? 0xFF : tail_mask_m8;
         pgrams_vec.zmm = _mm512_maskz_loadu_epi64(load_mask_m8, initial_pgrams + block_index);
         order_vec.zmm = _mm512_maskz_loadu_epi64(load_mask_m8, initial_order + block_index);
 
@@ -123,22 +121,17 @@ STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_skylake_(            
     }
 
     // Copy back.
-    sz_copy_skylake_((sz_ptr_t)(initial_pgrams + start_in_sequence),      //
-                     (sz_cptr_t)(partitioned_pgrams + start_in_sequence), //
-                     count * sizeof(sz_pgram_t));
-    sz_copy_skylake_((sz_ptr_t)(initial_order + start_in_sequence),      //
-                     (sz_cptr_t)(partitioned_order + start_in_sequence), //
-                     count * sizeof(sz_sorted_idx_t));
+    memcpy(initial_pgrams + start_in_strings, partitioned_pgrams + start_in_strings, count * sizeof(sz_pgram_t));
+    memcpy(initial_order + start_in_strings, partitioned_order + start_in_strings, count * sizeof(sz_size_t));
 
     // Return the offsets of the equal elements.
-    *first_pivot_offset = start_in_sequence + count_smaller;
-    *last_pivot_offset = start_in_sequence + count_smaller + count_equal - 1;
+    *first_pivot_offset = start_in_strings + count_smaller;
+    *last_pivot_offset = start_in_strings + count_smaller + count_equal - 1;
 }
 
 /**
- *  @brief Recursive Quick-Sort implementation backing both the @c sz_sequence_argsort_skylake and
- *      @c sz_pgrams_sort_skylake_, and using the @c sz_sequence_argsort_3way_partition_skylake_
- *      under the hood.
+ *  @brief Recursive Quick-Sort implementation backing both the @c sz_sort_order_skylake and
+ *      @c sz_sort_pgrams_skylake_, and using the @c sz_sort_3way_partition_skylake_ under the hood.
  *
  *  @param[inout] initial_pgrams Pgram array to sort in place.
  *  @param[inout] initial_order Corresponding order array, permuted in sync with @c initial_pgrams.
@@ -146,45 +139,45 @@ STRINGZILLA_INLINE void sz_sequence_argsort_3way_partition_skylake_(            
  *      used during partitioning.
  *  @param[out] temporary_order Scratch buffer of the same size as @c initial_order,
  *      used during partitioning.
- *  @param[in] start_in_sequence First index (inclusive) of the range to sort.
- *  @param[in] end_in_sequence One-past-the-last index of the range to sort.
+ *  @param[in] start_in_strings First index (inclusive) of the range to sort.
+ *  @param[in] end_in_strings One-past-the-last index of the range to sort.
  */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_quicksort_pgrams_skylake_( //
-    sz_pgram_t *initial_pgrams, sz_sorted_idx_t *initial_order,           //
-    sz_pgram_t *temporary_pgrams, sz_sorted_idx_t *temporary_order,       //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence, sz_size_t const top_count) {
+STRINGZILLA_OUTLINED_ void sz_sort_quicksort_pgrams_skylake_( //
+    sz_pgram_t *initial_pgrams, sz_size_t *initial_order,     //
+    sz_pgram_t *temporary_pgrams, sz_size_t *temporary_order, //
+    sz_size_t const start_in_strings, sz_size_t const end_in_strings, sz_size_t const top_count) {
 
     // On very small inputs, when we don't even have enough input for a single ZMM register,
     // use simple insertion sort without any extra memory.
-    sz_size_t const count = end_in_sequence - start_in_sequence;
+    sz_size_t const count = end_in_strings - start_in_strings;
     sz_size_t const pgrams_per_register = sizeof(sz_u512_vec_t) / sizeof(sz_pgram_t);
     if (count <= pgrams_per_register) {
-        sz_pgrams_sort_with_insertion( //
-            initial_pgrams + start_in_sequence, count, initial_order + start_in_sequence);
+        sz_sort_pgrams_insertion_( //
+            initial_pgrams + start_in_strings, count, initial_order + start_in_strings);
         return;
     }
 
     // Partition the collection around some pivot
     sz_size_t first_pivot_index, last_pivot_index;
-    sz_sequence_argsort_3way_partition_skylake_(                          //
+    sz_sort_3way_partition_skylake_(                                      //
         initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
-        start_in_sequence, end_in_sequence,                               //
+        start_in_strings, end_in_strings,                                 //
         &first_pivot_index, &last_pivot_index);
 
     // Recursively sort the left and right partitions, if there are at least 2 elements in each.
     // The right partition is skipped entirely if it lies past the `top_count` cut-off.
-    if (start_in_sequence + 1 < first_pivot_index)
-        sz_sequence_argsort_quicksort_pgrams_skylake_(                        //
+    if (start_in_strings + 1 < first_pivot_index)
+        sz_sort_quicksort_pgrams_skylake_(                                    //
             initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
-            start_in_sequence, first_pivot_index, top_count);
-    if (last_pivot_index + 2 < end_in_sequence && (top_count == 0 || last_pivot_index + 1 < top_count))
-        sz_sequence_argsort_quicksort_pgrams_skylake_(                        //
+            start_in_strings, first_pivot_index, top_count);
+    if (last_pivot_index + 2 < end_in_strings && (top_count == 0 || last_pivot_index + 1 < top_count))
+        sz_sort_quicksort_pgrams_skylake_(                                    //
             initial_pgrams, initial_order, temporary_pgrams, temporary_order, //
-            last_pivot_index + 1, end_in_sequence, top_count);
+            last_pivot_index + 1, end_in_strings, top_count);
 }
 
-STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
-                                                       sz_sorted_idx_t *order) {
+STRINGZILLA_INLINE sz_status_t sz_sort_pgrams_skylake_(sz_pgram_t *pgrams, sz_size_t count, sz_allocator_t *allocator,
+                                                       sz_size_t *order) {
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t pgram_index = 0; pgram_index != count; ++pgram_index) order[pgram_index] = pgram_index;
     if (count < 2) return sz_success_k;
@@ -198,13 +191,13 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_si
     }
 
     // Allocate memory for partitioning the elements around the pivot.
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_sorted_idx_t) * count;
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count + sizeof(sz_size_t) * count;
     sz_pgram_t *temporary_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
-    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count);
     if (!temporary_pgrams) return sz_bad_alloc_k;
 
     // Reuse the string sorting algorithm for sorting the "pgrams" - a plain full ascending sort.
-    sz_sequence_argsort_quicksort_pgrams_skylake_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
+    sz_sort_quicksort_pgrams_skylake_(pgrams, order, temporary_pgrams, temporary_order, 0, count, 0);
 
     // Deallocate the temporary memory used for partitioning.
     allocator->free(temporary_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
@@ -214,49 +207,49 @@ STRINGZILLA_INLINE sz_status_t sz_pgrams_sort_skylake_(sz_pgram_t *pgrams, sz_si
 /**
  *  @brief Recursive Quick-Sort adaptation for strings, processing them a few N-grams at a time.
  *
- *  Combines @c sz_sequence_argsort_export_byte_window_serial_ with
- *  @c sz_sequence_argsort_quicksort_pgrams_skylake_, then recurses into each group of equal pgrams.
+ *  Combines @c sz_sort_export_byte_window_serial_ with
+ *  @c sz_sort_quicksort_pgrams_skylake_, then recurses into each group of equal pgrams.
  *
- *  @param[in] sequence The collection of strings to sort.
- *  @param[inout] global_pgrams Working pgram array, length at least `sequence->count`.
+ *  @param[in] strings The collection of strings to sort.
+ *  @param[inout] global_pgrams Working pgram array, length at least `strings->count`.
  *  @param[inout] global_order Current permutation array, updated in place.
  *  @param[out] temporary_pgrams Scratch buffer of the same size as @c global_pgrams.
  *  @param[out] temporary_order Scratch buffer of the same size as @c global_order.
- *  @param[in] start_in_sequence First index (inclusive) of the range to process.
- *  @param[in] end_in_sequence One-past-the-last index of the range to process.
+ *  @param[in] start_in_strings First index (inclusive) of the range to process.
+ *  @param[in] end_in_strings One-past-the-last index of the range to process.
  *  @param[in] start_character Byte offset into each string for the current pgram window.
  *  @param[in] top_count Global top-K cut-off forwarded to the partitioner; 0 fully sorts the range.
  *  @param[in] reverse Whether to export complemented keys for descending order.
  */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_byte_windows_skylake_(      //
-    sz_sequence_t const *const sequence,                                        //
-    sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,       //
-    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, //
-    sz_size_t const start_in_sequence, sz_size_t const end_in_sequence,         //
+STRINGZILLA_OUTLINED_ void sz_sort_byte_windows_skylake_(                 //
+    sz_strings_view_t const *const strings,                               //
+    sz_pgram_t *const global_pgrams, sz_size_t *const global_order,       //
+    sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, //
+    sz_size_t const start_in_strings, sz_size_t const end_in_strings,     //
     sz_size_t const start_character, sz_size_t const top_count, sz_bool_t const reverse) {
 
     // Prepare the new range of pgrams
-    sz_sequence_argsort_export_byte_window_serial_( //
-        sequence, global_pgrams, global_order, start_in_sequence, end_in_sequence, start_character, reverse);
+    sz_sort_export_byte_window_serial_( //
+        strings, global_pgrams, global_order, start_in_strings, end_in_strings, start_character, reverse);
 
     // Sort current pgrams with a quicksort
-    sz_sequence_argsort_quicksort_pgrams_skylake_( //
-        global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_sequence, end_in_sequence, top_count);
+    sz_sort_quicksort_pgrams_skylake_( //
+        global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings, end_in_strings, top_count);
 
     // Depending on the architecture, we will export a different number of bytes.
     // On 32-bit architectures, we will export 3 bytes, and on 64-bit architectures - 7 bytes.
     sz_size_t const pgram_capacity = sizeof(sz_pgram_t) - 1;
 
     // Repeat the procedure for the identical pgrams
-    sz_size_t nested_start = start_in_sequence;
-    sz_size_t nested_end = start_in_sequence;
-    while (nested_end != end_in_sequence) {
+    sz_size_t nested_start = start_in_strings;
+    sz_size_t nested_end = start_in_strings;
+    while (nested_end != end_in_strings) {
         // Everything from `top_count` onwards needs no ordering - the wanted elements are already in front.
         if (top_count != 0 && nested_start >= top_count) break;
 
         // Find the end of the identical pgrams
         sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
         // The packed length byte lives in the low byte after the byte-reversal; under `reverse` the
         // whole key was complemented, so we complement back before reading it.
@@ -270,8 +263,8 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_byte_windows_skylake_(      
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = current_pgram_length == pgram_capacity;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_sort_byte_windows_skylake_( //
-                sequence, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
+            sz_sort_byte_windows_skylake_( //
+                strings, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
                 start_character + pgram_capacity, top_count, reverse);
         else if (has_multiple_strings)
             // Terminal run of byte-identical strings: restore stable order by original index.
@@ -282,39 +275,39 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_byte_windows_skylake_(      
     }
 }
 
-/** Uncased twin of @c sz_sequence_argsort_sort_byte_windows_skylake_: the folded code-point export
- *  stays scalar (and is shared with the serial backend), but the pgrams it produces are sorted with
- *  the AVX-512 partition - which is where Skylake beats the fully-serial uncased path. */
-STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_skylake_(
-    sz_sequence_t const *const sequence, sz_pgram_t *const global_pgrams, sz_sorted_idx_t *const global_order,
-    sz_pgram_t *const temporary_pgrams, sz_sorted_idx_t *const temporary_order, sz_size_t const start_in_sequence,
-    sz_size_t const end_in_sequence, sz_size_t const folded_skip_count, sz_size_t const top_count,
+/** Uncased twin of @c sz_sort_byte_windows_skylake_: the folded code-point export stays scalar and
+ *  shared with the serial backend, while the pgrams it produces are sorted with the AVX-512
+ *  partition, which is where Skylake beats the fully serial uncased path. */
+STRINGZILLA_OUTLINED_ void sz_sort_casefold_windows_skylake_(
+    sz_strings_view_t const *const strings, sz_pgram_t *const global_pgrams, sz_size_t *const global_order,
+    sz_pgram_t *const temporary_pgrams, sz_size_t *const temporary_order, sz_size_t const start_in_strings,
+    sz_size_t const end_in_strings, sz_size_t const folded_skip_count, sz_size_t const top_count,
     sz_bool_t const reverse) {
 
-    sz_sequence_argsort_export_casefold_window_serial_(sequence, global_pgrams, global_order, start_in_sequence,
-                                                       end_in_sequence, folded_skip_count, reverse);
-    sz_sequence_argsort_quicksort_pgrams_skylake_(global_pgrams, global_order, temporary_pgrams, temporary_order,
-                                                  start_in_sequence, end_in_sequence, top_count);
+    sz_sort_export_casefold_window_serial_(strings, global_pgrams, global_order, start_in_strings, end_in_strings,
+                                           folded_skip_count, reverse);
+    sz_sort_quicksort_pgrams_skylake_(global_pgrams, global_order, temporary_pgrams, temporary_order, start_in_strings,
+                                      end_in_strings, top_count);
 
     // A window's lowest 21-bit field is non-zero only when it was filled to capacity, so the equal group may
     // still carry more folded code-points and must recurse one window deeper (mirrors the serial folded sort).
     sz_size_t const fields_per_pgram = sz_argsort_casefold_fields_(sz_pgram_t);
     sz_pgram_t const lowest_field_mask = ((sz_pgram_t)1 << sz_argsort_casefold_field_bits_) - 1;
-    sz_size_t nested_start = start_in_sequence;
-    sz_size_t nested_end = start_in_sequence;
-    while (nested_end != end_in_sequence) {
+    sz_size_t nested_start = start_in_strings;
+    sz_size_t nested_end = start_in_strings;
+    while (nested_end != end_in_strings) {
         if (top_count != 0 && nested_start >= top_count) break;
 
         sz_pgram_t current_pgram = global_pgrams[nested_start];
-        while (nested_end != end_in_sequence && current_pgram == global_pgrams[nested_end]) ++nested_end;
+        while (nested_end != end_in_strings && current_pgram == global_pgrams[nested_end]) ++nested_end;
 
         sz_pgram_t const decoded_pgram = reverse ? ~current_pgram : current_pgram;
         int has_multiple_strings = nested_end - nested_start > 1;
         int has_more_characters_in_each = (decoded_pgram & lowest_field_mask) != 0;
         if (has_multiple_strings && has_more_characters_in_each)
-            sz_sequence_argsort_sort_casefold_windows_skylake_(
-                sequence, global_pgrams, global_order, temporary_pgrams, temporary_order, nested_start, nested_end,
-                folded_skip_count + fields_per_pgram, top_count, reverse);
+            sz_sort_casefold_windows_skylake_(strings, global_pgrams, global_order, temporary_pgrams, temporary_order,
+                                              nested_start, nested_end, folded_skip_count + fields_per_pgram, top_count,
+                                              reverse);
         else if (has_multiple_strings)
             sz_order_indices_ascending_(global_order + nested_start, nested_end - nested_start);
         nested_start = nested_end;
@@ -323,21 +316,20 @@ STRINGZILLA_OUTLINED_ void sz_sequence_argsort_sort_casefold_windows_skylake_(
 
 #if STRINGZILLA_TARGET_SKYLAKE
 
-STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                        sz_bool_t reverse, sz_allocator_t *allocator,
-                                                        sz_sorted_idx_t *order, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_sort_order_skylake(sz_strings_view_t const *strings, sz_size_t top_count,
+                                                  sz_bool_t reverse, sz_allocator_t *allocator, sz_size_t *order,
+                                                  sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // First, initialize the `order` with `std::iota`-like behavior.
-    sz_size_t count = sequence->count;
-    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
-        order[sequence_index] = sequence_index;
+    sz_size_t count = strings->count;
+    for (sz_size_t strings_index = 0; strings_index != count; ++strings_index) order[strings_index] = strings_index;
     if (count < 2) return sz_success_k;
 
     // On very small ascending collections, just use the quadratic-complexity @b stable insertion
     // sort without any smart optimizations or memory allocations; descending ones fall through.
     if (count <= 32 && !reverse) {
-        sz_sequence_argsort_with_insertion(sequence, order);
+        sz_sort_insertion_(strings, order);
         return sz_success_k;
     }
 
@@ -350,29 +342,28 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_skylake(sz_sequence_t const *seq
     }
 
     // Allocate memory for partitioning the elements around the pivot.
-    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_size_t memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
-    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count);
     if (!global_pgrams) return sz_bad_alloc_k;
 
-    // Recursively sort the whole sequence.
-    sz_sequence_argsort_sort_byte_windows_skylake_(sequence, global_pgrams, order, temporary_pgrams, temporary_order, //
-                                                   0, count, 0, top_count, reverse);
+    // Recursively sort the whole collection.
+    sz_sort_byte_windows_skylake_(strings, global_pgrams, order, temporary_pgrams, temporary_order, //
+                                  0, count, 0, top_count, reverse);
 
     // Free temporary storage.
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
-    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_allocator_t *allocator, sz_sorted_idx_t *order, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_sort_uncased_order_skylake(                    //
+    sz_strings_view_t const *strings, sz_size_t top_count, sz_bool_t reverse, //
+    sz_allocator_t *allocator, sz_size_t *order, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
-    sz_size_t const count = sequence->count;
-    for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
-        order[sequence_index] = sequence_index;
+    sz_size_t const count = strings->count;
+    for (sz_size_t strings_index = 0; strings_index != count; ++strings_index) order[strings_index] = strings_index;
     if (count < 2) return sz_success_k;
 
     sz_allocator_t global_alloc;
@@ -385,14 +376,14 @@ STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_skylake(           //
     // Same layout as the byte arg-sort - working pgrams (count) + the partition's two scratch regions. The
     // AVX-512 compress-store is exact, so no slack is needed. The folded export is stateless (re-folds the
     // prefix on demand), so unlike the earlier design there is no per-string cursor array.
-    sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_sorted_idx_t) * count;
+    sz_size_t const memory_usage = sizeof(sz_pgram_t) * count * 2 + sizeof(sz_size_t) * count;
     sz_pgram_t *global_pgrams = (sz_pgram_t *)allocator->allocate(memory_usage, allocator->handle, STRINGZILLA_NULL);
     if (!global_pgrams) return sz_bad_alloc_k;
     sz_pgram_t *temporary_pgrams = global_pgrams + count;
-    sz_sorted_idx_t *temporary_order = (sz_sorted_idx_t *)(temporary_pgrams + count);
+    sz_size_t *temporary_order = (sz_size_t *)(temporary_pgrams + count);
 
-    sz_sequence_argsort_sort_casefold_windows_skylake_(sequence, global_pgrams, order, temporary_pgrams,
-                                                       temporary_order, 0, count, 0, top_count, reverse);
+    sz_sort_casefold_windows_skylake_(strings, global_pgrams, order, temporary_pgrams, temporary_order, 0, count, 0,
+                                      top_count, reverse);
 
     allocator->free(global_pgrams, memory_usage, allocator->handle, STRINGZILLA_NULL);
     return sz_success_k;

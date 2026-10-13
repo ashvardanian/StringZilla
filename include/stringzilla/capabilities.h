@@ -194,17 +194,23 @@ typedef enum sz_kernel_kind_t {
     /** Lexicographic three-way comparison. */
     sz_kernel_order_k,
 
-    /** Copy between non-overlapping ranges. */
-    sz_kernel_copy_k,
+    /** Gather strings into a tape. */
+    sz_kernel_strings_to_tape_k,
 
-    /** Copy between possibly overlapping ranges. */
-    sz_kernel_move_k,
+    /** Write strings into NUL-padded rows. */
+    sz_kernel_strings_to_rows_k,
 
-    /** Fill a range with one byte. */
-    sz_kernel_fill_k,
+    /** Escape strings for a text format. */
+    sz_kernel_strings_escape_k,
 
-    /** Map every byte through a 256-entry table. */
-    sz_kernel_lookup_k,
+    /** Unescape strings from a text format. */
+    sz_kernel_strings_unescape_k,
+
+    /** Map every byte of every string through a 256-entry table. */
+    sz_kernel_strings_lookup_k,
+
+    /** Bring strings into a Unicode normalization form. */
+    sz_kernel_strings_normalize_k,
 
     /** First occurrence of a substring. */
     sz_kernel_find_k,
@@ -299,14 +305,14 @@ typedef enum sz_kernel_kind_t {
     /** Streaming AES-256-GCM decryptor tag verification. */
     sz_kernel_aes256_gcm_decryptor_verify_k,
 
-    /** Stable argsort of a sequence of strings. */
-    sz_kernel_sequence_argsort_k,
+    /** Stable argsort of a collection of strings. */
+    sz_kernel_sort_order_k,
 
-    /** Stable case-insensitive argsort of a sequence of strings. */
-    sz_kernel_sequence_argsort_uncased_k,
+    /** Stable case-insensitive argsort of a collection of strings. */
+    sz_kernel_sort_uncased_order_k,
 
-    /** Intersection of two sequences of strings. */
-    sz_kernel_sequence_intersect_k,
+    /** Intersection of two collections of strings. */
+    sz_kernel_intersect_k,
 
     /** Count of UTF-8 runes. */
     sz_kernel_utf8_count_k,
@@ -394,10 +400,12 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_unknown_k: return "unknown";
     case sz_kernel_equal_k: return "equal";
     case sz_kernel_order_k: return "order";
-    case sz_kernel_copy_k: return "copy";
-    case sz_kernel_move_k: return "move";
-    case sz_kernel_fill_k: return "fill";
-    case sz_kernel_lookup_k: return "lookup";
+    case sz_kernel_strings_to_tape_k: return "strings_to_tape";
+    case sz_kernel_strings_to_rows_k: return "strings_to_rows";
+    case sz_kernel_strings_escape_k: return "strings_escape";
+    case sz_kernel_strings_unescape_k: return "strings_unescape";
+    case sz_kernel_strings_lookup_k: return "strings_lookup";
+    case sz_kernel_strings_normalize_k: return "strings_normalize";
     case sz_kernel_find_k: return "find";
     case sz_kernel_rfind_k: return "rfind";
     case sz_kernel_find_byte_k: return "find_byte";
@@ -429,9 +437,9 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
     case sz_kernel_aes256_gcm_decryptor_associate_k: return "aes256_gcm_decryptor_associate";
     case sz_kernel_aes256_gcm_decryptor_update_unverified_k: return "aes256_gcm_decryptor_update_unverified";
     case sz_kernel_aes256_gcm_decryptor_verify_k: return "aes256_gcm_decryptor_verify";
-    case sz_kernel_sequence_argsort_k: return "sequence_argsort";
-    case sz_kernel_sequence_argsort_uncased_k: return "sequence_argsort_uncased";
-    case sz_kernel_sequence_intersect_k: return "sequence_intersect";
+    case sz_kernel_sort_order_k: return "sort_order";
+    case sz_kernel_sort_uncased_order_k: return "sort_uncased_order";
+    case sz_kernel_intersect_k: return "intersect";
     case sz_kernel_utf8_count_k: return "utf8_count";
     case sz_kernel_utf8_seek_k: return "utf8_seek";
     case sz_kernel_utf8_decode_k: return "utf8_decode";
@@ -467,10 +475,12 @@ STRINGZILLA_CONSTEXPR char const *sz_kernel_name(sz_kernel_kind_t kind) {
 STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size_t length) {
     if (sz_same_literal_(name, length, "equal")) return sz_kernel_equal_k;
     if (sz_same_literal_(name, length, "order")) return sz_kernel_order_k;
-    if (sz_same_literal_(name, length, "copy")) return sz_kernel_copy_k;
-    if (sz_same_literal_(name, length, "move")) return sz_kernel_move_k;
-    if (sz_same_literal_(name, length, "fill")) return sz_kernel_fill_k;
-    if (sz_same_literal_(name, length, "lookup")) return sz_kernel_lookup_k;
+    if (sz_same_literal_(name, length, "strings_to_tape")) return sz_kernel_strings_to_tape_k;
+    if (sz_same_literal_(name, length, "strings_to_rows")) return sz_kernel_strings_to_rows_k;
+    if (sz_same_literal_(name, length, "strings_escape")) return sz_kernel_strings_escape_k;
+    if (sz_same_literal_(name, length, "strings_unescape")) return sz_kernel_strings_unescape_k;
+    if (sz_same_literal_(name, length, "strings_lookup")) return sz_kernel_strings_lookup_k;
+    if (sz_same_literal_(name, length, "strings_normalize")) return sz_kernel_strings_normalize_k;
     if (sz_same_literal_(name, length, "find")) return sz_kernel_find_k;
     if (sz_same_literal_(name, length, "rfind")) return sz_kernel_rfind_k;
     if (sz_same_literal_(name, length, "find_byte")) return sz_kernel_find_byte_k;
@@ -505,9 +515,9 @@ STRINGZILLA_CONSTEXPR sz_kernel_kind_t sz_kernel_named(char const *name, sz_size
     if (sz_same_literal_(name, length, "aes256_gcm_decryptor_update_unverified"))
         return sz_kernel_aes256_gcm_decryptor_update_unverified_k;
     if (sz_same_literal_(name, length, "aes256_gcm_decryptor_verify")) return sz_kernel_aes256_gcm_decryptor_verify_k;
-    if (sz_same_literal_(name, length, "sequence_argsort")) return sz_kernel_sequence_argsort_k;
-    if (sz_same_literal_(name, length, "sequence_argsort_uncased")) return sz_kernel_sequence_argsort_uncased_k;
-    if (sz_same_literal_(name, length, "sequence_intersect")) return sz_kernel_sequence_intersect_k;
+    if (sz_same_literal_(name, length, "sort_order")) return sz_kernel_sort_order_k;
+    if (sz_same_literal_(name, length, "sort_uncased_order")) return sz_kernel_sort_uncased_order_k;
+    if (sz_same_literal_(name, length, "intersect")) return sz_kernel_intersect_k;
     if (sz_same_literal_(name, length, "utf8_count")) return sz_kernel_utf8_count_k;
     if (sz_same_literal_(name, length, "utf8_seek")) return sz_kernel_utf8_seek_k;
     if (sz_same_literal_(name, length, "utf8_decode")) return sz_kernel_utf8_decode_k;
@@ -618,7 +628,7 @@ typedef sz_status_t (*sz_kernel_sha256_state_update_t)(struct sz_sha256_state_t 
 typedef sz_status_t (*sz_kernel_sha256_state_digest_t)(struct sz_sha256_state_t const *, sz_u8_t *, sz_stream_t);
 
 /** Signature of the @c sz_sha256_multistate_update_best kernels. */
-typedef sz_status_t (*sz_kernel_sha256_multistate_update_t)(struct sz_sha256_state_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_sha256_multistate_update_t)(struct sz_sha256_state_t *, sz_strings_view_t const *,
                                                             sz_stream_t);
 
 /** Signature of the @c sz_sha256_multistate_digest_best kernels. */
@@ -685,17 +695,22 @@ typedef sz_status_t (*sz_kernel_equal_t)(sz_cptr_t, sz_cptr_t, sz_size_t, sz_boo
 /** Signature of the @c sz_order_best kernels. */
 typedef sz_status_t (*sz_kernel_order_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size_t, sz_ordering_t *, sz_stream_t);
 
-/** Signature of the @c sz_lookup_best kernels. */
-typedef sz_status_t (*sz_kernel_lookup_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_cptr_t, sz_stream_t);
+/** Signature of the @c sz_strings_to_tape_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_to_tape_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                   sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
 
-/** Signature of the @c sz_copy_best kernels. */
-typedef sz_status_t (*sz_kernel_copy_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_stream_t);
+/** Signature of the @c sz_strings_to_rows_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_to_rows_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                   sz_strings_rows_t const *, sz_size_t *, sz_stream_t);
 
-/** Signature of the @c sz_move_best kernels. */
-typedef sz_status_t (*sz_kernel_move_t)(sz_ptr_t, sz_cptr_t, sz_size_t, sz_stream_t);
+/** Signature of the @c sz_strings_lookup_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_lookup_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t, sz_cptr_t,
+                                                  sz_allocator_t *, sz_strings_span_t *, sz_stream_t);
 
-/** Signature of the @c sz_fill_best kernels. */
-typedef sz_status_t (*sz_kernel_fill_t)(sz_ptr_t, sz_size_t, sz_u8_t, sz_stream_t);
+/** Signature of the @c sz_strings_normalize_best kernels. */
+typedef sz_status_t (*sz_kernel_strings_normalize_t)(sz_strings_view_t const *, sz_size_t const *, sz_size_t,
+                                                     sz_normal_form_t, sz_allocator_t *, sz_strings_span_t *,
+                                                     sz_stream_t);
 
 /** Signature of the @c sz_find_byte_best and @c sz_rfind_byte_best kernels. */
 typedef sz_status_t (*sz_kernel_find_byte_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_cptr_t *, sz_stream_t);
@@ -706,57 +721,55 @@ typedef sz_status_t (*sz_kernel_find_t)(sz_cptr_t, sz_size_t, sz_cptr_t, sz_size
 /** Signature of the @c sz_find_byteset_best and @c sz_rfind_byteset_best kernels. */
 typedef sz_status_t (*sz_kernel_find_byteset_t)(sz_cptr_t, sz_size_t, sz_byteset_t const *, sz_cptr_t *, sz_stream_t);
 
-/** Signature of the @c sz_sequence_argsort_best and @c sz_sequence_argsort_uncased_best kernels. */
-typedef sz_status_t (*sz_kernel_sequence_argsort_t)(struct sz_sequence_t const *, sz_size_t, sz_bool_t,
-                                                    sz_allocator_t *, sz_sorted_idx_t *, sz_stream_t);
+/** Signature of the @c sz_sort_order_best and @c sz_sort_uncased_order_best kernels. */
+typedef sz_status_t (*sz_kernel_sort_order_t)(sz_strings_view_t const *, sz_size_t, sz_bool_t, sz_allocator_t *,
+                                              sz_size_t *, sz_stream_t);
 
-/** Signature of the benchmark-only @c sz_pgrams_sort_serial_ integer sort helper and its tiers. */
-typedef sz_status_t (*sz_pgrams_sort_t_)(sz_pgram_t *, sz_size_t, sz_allocator_t *, sz_sorted_idx_t *);
+/** Signature of the benchmark-only @c sz_sort_pgrams_serial_ integer sort helper and its tiers. */
+typedef sz_status_t (*sz_sort_pgrams_t_)(sz_pgram_t *, sz_size_t, sz_allocator_t *, sz_size_t *);
 
-/** Signature of the @c sz_sequence_intersect_best kernels. */
-typedef sz_status_t (*sz_kernel_sequence_intersect_t)(struct sz_sequence_t const *, struct sz_sequence_t const *,
-                                                      sz_allocator_t *, sz_u64_t, sz_size_t *, sz_sorted_idx_t *,
-                                                      sz_sorted_idx_t *, sz_stream_t);
+/** Signature of the @c sz_intersect_best kernels. */
+typedef sz_status_t (*sz_kernel_intersect_t)(sz_strings_view_t const *, sz_strings_view_t const *, sz_allocator_t *,
+                                             sz_u64_t, sz_size_t *, sz_size_t *, sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_levenshtein_engine_init kernel. */
-typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein_engine_t *,
-                                                           struct sz_sequence_t const *, sz_levenshtein_symbol_t,
-                                                           sz_allocator_t *, sz_stream_t);
+typedef sz_status_t (*sz_kernel_levenshtein_engine_init_t)(struct sz_levenshtein_engine_t *, sz_strings_view_t const *,
+                                                           sz_levenshtein_symbol_t, sz_allocator_t *, sz_stream_t);
 
 /** Signature of every @c sz_levenshtein_distances kernel, at either alphabet. */
-typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_levenshtein_distances_t)(struct sz_levenshtein_engine_t *, sz_strings_view_t const *,
                                                          sz_size_t *, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_overlap_engine_init kernel. */
-typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *,
                                                        sz_size_t const *, sz_size_t, sz_size_t, sz_allocator_t *,
                                                        sz_stream_t);
 
 /** Signature of every @c sz_overlap_scores kernel. */
-typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, struct sz_sequence_t const *,
-                                                  sz_f32_t *, sz_size_t, sz_size_t, sz_stream_t);
+typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *, sz_f32_t *,
+                                                  sz_size_t, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_engine_init kernel. */
-typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
                                                           sz_substrings_case_sensitivity_t,
                                                           sz_substrings_overlap_policy_t, sz_size_t, sz_size_t,
                                                           sz_size_t, sz_allocator_t *, sz_stream_t);
 
 /** Signature of every @c sz_substrings_counts kernel. */
-typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_substrings_counts_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
                                                      sz_size_t *, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_find kernel. */
-typedef sz_status_t (*sz_kernel_substrings_find_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_substrings_find_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
                                                    struct sz_substrings_match_t *, sz_size_t, sz_size_t *, sz_stream_t);
 
 /** Signature of every @c sz_substrings_replace kernel. */
-typedef sz_status_t (*sz_kernel_substrings_replace_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
-                                                      struct sz_sequence_t const *, sz_ptr_t, sz_size_t, sz_size_t *,
+typedef sz_status_t (*sz_kernel_substrings_replace_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
+                                                      sz_strings_view_t const *, sz_ptr_t, sz_size_t, sz_size_t *,
                                                       sz_stream_t);
 
 /** Signature of every @c sz_substrings_bm25_scores kernel. */
-typedef sz_status_t (*sz_kernel_substrings_bm25_scores_t)(struct sz_substrings_engine_t *, struct sz_sequence_t const *,
+typedef sz_status_t (*sz_kernel_substrings_bm25_scores_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,
                                                           sz_f32_t const *, struct sz_substrings_bm25_t const *,
                                                           sz_f32_t const *, sz_f32_t *, sz_size_t, sz_stream_t);
 

@@ -81,7 +81,8 @@ The `sz` module exposes a handful of public value types used throughout the API.
 - `SemVer`, `Status` — version and error types.
 - `Capability`, `Capabilities` — one CPU or GPU capability, and a set of them printed as their names, with the producers that report a device's set by its ordinal.
 - `Stream`, `Scope` — a stream of one device, which every engine, tape and allocator takes, and the span its engine verbs queue in before one join.
-- `Sequence`, `UnifiedAllocator` — a batch copied into one tape, and the memory the host and a GPU both address.
+- `Tape`, `UnifiedAllocator` — a batch gathered into one tape, and the memory the host and a GPU both address.
+- `EscapeKind`, `UnescapeError` — the formats a `Tape` escapes for, and the first malformed string unescaping stopped at.
 - `ArgsortOptions` — knobs for sorting.
 
 `Status` is the error of every fallible call: one variant per failure code of C's `sz_status_t`, plus `Unrecognized` for a code this crate's header does not list.
@@ -315,17 +316,7 @@ sz::lookup_inplace(&mut text, to_lower);
 assert_eq!(&text, b"hello world!");
 ```
 
-### Buffer Fill, Copy, and Move
-
-`fill` sets every byte of a buffer to one value, `copy` writes a source into a target, and `move_` does the same for overlapping regions.
-
-```rust
-pub fn fill<T: AsMut<[u8]>>(target: &mut T, value: u8);
-pub fn copy<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S) -> Result<(), Status>;
-pub fn move_<T: AsMut<[u8]>, S: AsRef<[u8]>>(target: &mut T, source: &S) -> Result<(), Status>;
-```
-
-`copy`, `move_` and `lookup` return `Status::UnexpectedDimensions`, writing nothing, when the target is shorter than the source; `move_` tolerates overlapping regions.
+`lookup` returns `Status::UnexpectedDimensions`, writing nothing, when the target is shorter than the source.
 
 ### In Place Replacement
 
@@ -363,7 +354,7 @@ pub fn utf8_find_denormalized<T: AsRef<[u8]>>(source: T, form: Utf8NormalForm) -
 ```
 
 `utf8_uncased_fold` applies Unicode case folding, for example `ß` → `ss`, returning the number of bytes written.
-`utf8_norm` normalizes to one of the four `Utf8NormalForm` variants: `Nfd`, `Nfc`, `Nfkd`, and `Nfkc`.
+`utf8_norm` normalizes to one of the five `Utf8NormalForm` variants: `Nfd`, `Nfc`, `Nfkd`, `Nfkc`, and `NfkcCasefold`, the Unicode `toNFKC_Casefold` that caseless search keys match on.
 `utf8_find_denormalized` is a fast check returning the byte offset of the first non-conforming byte, or `None` if already normalized:
 
 ```rust
@@ -384,6 +375,49 @@ assert_eq!(&out[..n], "caf\u{00E9}".as_bytes());
 
 The C kernels write without a capacity, so target buffers must hold the worst-case expansion whatever the input: `source.len() * 3` for folding and `source.len() * 18` for normalization.
 A shorter one is refused with `Status::UnexpectedDimensions` before anything is written.
+
+### Escaping, Mapping and Normalizing Collections
+
+A `Tape` gathers a batch into two blocks, the bytes of every string back to back and their offsets, in the layout Apache Arrow reads.
+Each conversion reads one tape and writes a new one from the same allocator, on the device of its stream:
+
+```rust
+impl<'stream> Tape<'stream> {
+    pub fn copy<T: AsRef<[u8]>>(texts: &[T], allocator: &UnifiedAllocator, stream: &'stream Stream) -> Result<Self, Status>;
+    pub fn escape(&self, kind: EscapeKind) -> Result<Self, Status>;
+    pub fn unescape(&self, kind: EscapeKind) -> Result<Self, UnescapeError>;
+    pub fn lookup(&self, table: [u8; 256]) -> Result<Self, Status>;
+    pub fn normalize(&self, form: Utf8NormalForm) -> Result<Self, Status>;
+    pub fn to_rows(&self, rows: &mut [u8], width: usize) -> Result<usize, Status>;
+    pub fn get(&self, index: usize) -> Option<&[u8]>;
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &[u8]>;
+}
+```
+
+`EscapeKind` names the format: `Json`, `JsonAscii`, `Csv`, `Html`, `Url`, `Hex` or `Console`, the last one keeping logs safe from control bytes and bidirectional overrides.
+`unescape` stops at the first malformed string, like a CSV field with an unbalanced quote, and reports its position as `UnescapeError::Malformed`.
+`to_rows` writes NUL-padded fixed-width rows, truncating longer strings, and returns the longest length to retry with wider rows:
+
+```rust
+use stringzilla::sz::{Capabilities, EscapeKind, Stream, Tape, UnescapeError, UnifiedAllocator, Utf8NormalForm};
+
+let cpu = Stream::default(Capabilities::cpu_enabled());
+let unified = UnifiedAllocator::new(&cpu);
+let names = Tape::copy(&["Ada", "Grace \"Amazing\" Hopper", "Stra\u{df}e"], &unified, &cpu)?;
+
+let fields = names.escape(EscapeKind::Csv)?;
+assert_eq!(fields.get(1), Some(&br#""Grace ""Amazing"" Hopper""#[..]));
+assert!(fields.unescape(EscapeKind::Csv).unwrap().iter().eq(names.iter()));
+
+let keys = names.normalize(Utf8NormalForm::NfkcCasefold)?;
+assert_eq!(keys.get(2), Some(&b"strasse"[..]));
+
+let mut rows = [0u8; 3 * 8];
+assert_eq!(names.to_rows(&mut rows, 8)?, 22); // "Grace \"Amazing\" Hopper" is 22 bytes long
+
+let broken = Tape::copy(&["fine", "\"unbalanced"], &unified, &cpu)?;
+assert_eq!(broken.unescape(EscapeKind::Csv).err(), Some(UnescapeError::Malformed(1)));
+```
 
 ### Uncased UTF-8 Search
 
@@ -537,15 +571,14 @@ assert_eq!(digests[0], sz::Sha256::hash(b"alpha"));
 `argsort` writes the sorted permutation of a slice into a caller-provided `order` slice, while `argsort_by` sorts by a byte-slice key extracted from each element.
 
 ```rust
-pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>;
-pub fn argsort_by<T, K>(data: &[T], key: K, order: &mut [SortedIdx], options: ArgsortOptions) -> Result<(), Status>
+pub fn argsort<T: AsRef<[u8]>>(data: &[T], order: &mut [usize], options: ArgsortOptions) -> Result<(), Status>;
+pub fn argsort_by<T, K>(data: &[T], key: K, order: &mut [usize], options: ArgsortOptions) -> Result<(), Status>
 where K: Fn(&T) -> &[u8];
 ```
 
 Both write the sorting permutation of `data` into a caller-supplied `order` buffer of length at least `data.len()`, or return `Status::UnexpectedDimensions`.
 `argsort_by` sorts by a byte-slice key of each element, ideal for sorting structs by a field.
 The binding indexes `data` itself, so the key only projects an element onto its bytes; it runs inside the C call, where a panic cannot unwind and aborts the process.
-`SortedIdx` is an alias for `usize`.
 
 `ArgsortOptions` is a builder; the default is a full, ascending, byte-lexicographic, __stable__ sort:
 
@@ -580,9 +613,9 @@ assert_eq!(&order, &[1, 2, 0]); // Alice, Bob, Charlie
 
 ```rust
 pub fn intersection<T: AsRef<[u8]>>(data1: &[T], data2: &[T], seed: u64,
-    positions1: &mut [SortedIdx], positions2: &mut [SortedIdx]) -> Result<usize, Status>;
+    positions1: &mut [usize], positions2: &mut [usize]) -> Result<usize, Status>;
 pub fn intersection_by<T, U, K, L>(data1: &[T], key1: K, data2: &[U], key2: L, seed: u64,
-    positions1: &mut [SortedIdx], positions2: &mut [SortedIdx]) -> Result<usize, Status>
+    positions1: &mut [usize], positions2: &mut [usize]) -> Result<usize, Status>
 where K: Fn(&T) -> &[u8], L: Fn(&U) -> &[u8];
 ```
 
@@ -950,14 +983,15 @@ A stream of another group than the engine's is refused with `Status::DeviceMemor
 
 A device engine reads its rounds where they lie, so its candidates and its outputs have to sit in memory the device reaches.
 `UnifiedAllocator::new(&stream)` is that memory on the stream's device, behind the standard `Allocator` trait, so `Vec::new_in` and any other allocator-aware collection lays an output out there.
-`Sequence::copy` copies a batch on the host into one tape of offsets and bytes in it, queuing only its migration to the device, and every engine reads that tape in place, while a batch of host strings is refused with `Status::DeviceMemoryMismatch`.
+`Tape::copy` gathers a batch on the host into one tape of bytes and offsets in it, and every engine reads that tape in place, while a batch of host strings is refused with `Status::DeviceMemoryMismatch`.
+The conversions of a tape on a GPU stream, like `escape` or `normalize`, run on that GPU.
 
 ```rust
-use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Sequence, Stream, UnifiedAllocator};
+use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, Tape, UnifiedAllocator};
 
 let stream = Stream::new(Capabilities::cuda_enabled(0)?, 0)?;
 let unified = UnifiedAllocator::new(&stream);
-let candidates = Sequence::copy(&["sitting", "kitten"], &unified, &stream)?;
+let candidates = Tape::copy(&["sitting", "kitten"], &unified, &stream)?;
 let mut distances = Vec::new_in(unified);
 distances.resize(2, 0usize);
 
@@ -967,4 +1001,4 @@ assert_eq!(distances[..], [3, 0]);
 ```
 
 `stream.synchronize()` joins a stream outside any scope.
-A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and a `Sequence` copied for any capabilities reads there too.
+A host engine imposes no such requirement: plain `Vec` and stack buffers are exactly what its verbs expect, and a `Tape` copied for any capabilities reads there too.

@@ -295,7 +295,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x8_sweep_skylake_(sz_levenshtein_query
 /** Streams every candidate through a prepared @p query, eight at a time, with @p transpose emitting
  *  their classes at @p width; @p verticals holds enough for a runtime word count. */
 STRINGZILLA_INLINE void sz_levenshtein_u64x8_distances_skylake_(
-    sz_levenshtein_query_t const *query, sz_sequence_t const *candidates, sz_levenshtein_transpose_t_ transpose,
+    sz_levenshtein_query_t const *query, sz_strings_view_t const *candidates, sz_levenshtein_transpose_t_ transpose,
     sz_levenshtein_classes_width_t width, sz_levenshtein_u64x8_vertical_skylake_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 8 };
     sz_size_t const words = sz_levenshtein_query_words(query->length);
@@ -305,9 +305,14 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x8_distances_skylake_(
                                                     candidates->count - sweep_first);
         sz_cptr_t texts[candidates_per_position_k] = {0};
         sz_u64_t byte_counts[candidates_per_position_k] = {0}, symbol_counts[candidates_per_position_k] = {0};
+        sz_size_t indices[candidates_per_position_k];
+        sz_string_view_t views[candidates_per_position_k];
+        for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
+            indices[candidate] = sweep_first + candidate;
+        sz_strings_get_(candidates, indices, sweep_count, views);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {
-            texts[candidate] = candidates->get_start(candidates->handle, sweep_first + candidate);
-            byte_counts[candidate] = candidates->get_length(candidates->handle, sweep_first + candidate);
+            texts[candidate] = views[candidate].start;
+            byte_counts[candidate] = views[candidate].length;
             symbol_counts[candidate] = byte_counts[candidate];
         }
         if (words == 1)
@@ -323,8 +328,8 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x8_distances_skylake_(
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_engine_t *engine,
-                                                                 sz_sequence_t const *candidates, sz_size_t *distances,
-                                                                 sz_size_t distances_stride) {
+                                                                 sz_strings_view_t const *candidates,
+                                                                 sz_size_t *distances, sz_size_t distances_stride) {
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_u64x8_registers_per_position_skylake_k };
@@ -356,14 +361,14 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_skylake_(sz_levenshtein_
 #if STRINGZILLA_TARGET_SKYLAKE
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_skylake(sz_levenshtein_engine_t *engine,
-                                                               sz_sequence_t const *queries,
+                                                               sz_strings_view_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
                                                                sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_skylake_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_skylake(sz_levenshtein_engine_t *engine,
-                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_strings_view_t const *candidates, sz_size_t *distances,
                                                              sz_size_t distances_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_levenshtein_distances_skylake_(engine, candidates, distances, distances_stride);

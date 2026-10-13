@@ -1,7 +1,7 @@
 # StringZilla for Python
 
 StringZilla for Python wraps SIMD- and SWAR-accelerated native kernels behind `str`- and `bytes`-shaped types that avoid copies wherever possible.
-The `stringzilla` module covers single-string search, slicing, splitting, trimming, translation, hashing, checksums, sorting, sampling, random generation, UTF-8 segmentation, Unicode case-folding, and Unicode normalization.
+The `stringzilla` module covers single-string search, slicing, splitting, trimming, translation, hashing, checksums, sorting, sampling, random generation, UTF-8 segmentation, Unicode case-folding, Unicode normalization, escaping, and dumping JSON and CSV.
 The same module also carries the batch engines, each preparing one set of queries once and scoring it against many collections of candidates, on the host or on a CUDA or ROCm device.
 
 Every call runs the best kernel of the capabilities it is given, by default every CPU capability, which the library clamps to `sz.cpu_capabilities_enabled()`, and the batch engines release the GIL around native work.
@@ -284,6 +284,8 @@ table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
 assert sz.Str("cabbage").translate(table) == b"CABBAge"
 ```
 
+`Strs.translate(table)` takes the same tables and maps every string of a collection in one call, returning a new `Strs`, as [Escaping and Normalizing Collections](#escaping-and-normalizing-collections) describes.
+
 ### Decoding
 
 `decode(encoding='utf-8', errors='strict')` decodes the bytes to a Python `str`, mirroring `bytes.decode`.
@@ -455,6 +457,76 @@ buf = bytearray(16)
 sz.fill_random(buf)                           # mutates buf in place
 assert len(buf) == 16
 ```
+
+## Escaping and Normalizing Collections
+
+Every verb below is one native call over the whole collection, in whatever layout it holds, and returns a new `Strs` owning one tape.
+
+- `translate(table)`: maps every byte through a 256-byte table or a `dict`, as `bytes.translate` does for each string.
+- `escape(kind='json')`: escapes every string for a text format.
+- `unescape(kind='json')`: reverses `escape`, raising `ValueError` that names the index of the first string holding a malformed escape.
+- `normalize(form='NFC')`: brings every string into a Unicode form, as `unicodedata.normalize` does, taking the forms `utf8_norm` takes.
+
+The escape kinds follow the standard library's own writers and readers:
+
+- `json`: a string body as `json.dumps(text, ensure_ascii=False)[1:-1]` writes it, decoded as `json.loads` decodes it.
+- `json_ascii`: the same with every non-ASCII codepoint as `\uXXXX`, as `json.dumps(text)` writes it.
+- `hex`: two lowercase digits per byte, as `bytes.hex` writes them and `bytes.fromhex` reads them.
+- `html`: `&`, `<`, `>`, `"` and `'` as entities, as `html.escape` writes them but with `&#39;` for `'`, decoding the five XML entities and numeric references as `html.unescape` does.
+- `url`: every byte outside `A-Z a-z 0-9 - . _ ~` percent-encoded, as `urllib.parse.quote(text, safe="")` writes it and `urllib.parse.unquote_to_bytes` reads it.
+- `console`: controls, DEL, ill-formed UTF-8 and the bidirectional overrides as `\n`, `\xHH` or `\uXXXX`, so a logged string can neither hide nor reorder what a terminal shows.
+- `csv`: a field quoted only around a comma, a quote, CR or LF, with every quote doubled, as `csv.writer` writes it and `csv.reader` reads it.
+
+```python
+import stringzilla as sz
+
+names = sz.Strs(["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds"])
+assert [str(x) for x in names.escape("csv")] == ["Ada", '"Grace ""Amazing"" Hopper"', '"Linus\nTorvalds"']
+assert [str(x) for x in names.escape("url").unescape("url")] == [str(x) for x in names]
+assert [str(x) for x in names.translate({"a": "A"})][0] == "AdA"
+assert [str(x) for x in sz.Strs(["Straße", "ﬁle"]).normalize("NFKC_Casefold")] == ["strasse", "file"]
+```
+
+## Dumping JSON and CSV
+
+Writing a column of strings out as JSON or CSV usually costs a Python object per cell: `json.dumps` walks a `list` of `str`, `csv.writer` formats one row at a time, and pandas first builds a `DataFrame` of objects.
+`sz.to_json` and `sz.to_csv` instead escape each column once, in one native pass over the whole column, then interleave the rows straight into a single `bytes` object of exactly the right size.
+
+- `Strs.to_json(ensure_ascii=True)`: one compact JSON array, byte for byte what `json.dumps(strings, ensure_ascii=ensure_ascii, separators=(",", ":"))` writes.
+- `sz.to_json(columns, ensure_ascii=True)`: an array of records, one object per row, byte for byte what `json.dumps` writes for those records, and what `pandas.DataFrame(columns).to_json(orient="records")` writes apart from pandas spelling `/` as `\/`.
+- `sz.to_csv(columns, lineterminator="\n")`: a header line of the names, then a line per row, byte for byte what `csv.writer` and `pandas.DataFrame(columns).to_csv(index=False)` write.
+
+`columns` maps every name to a `Strs` or to any sequence of `str`, all of the same length, and the names are escaped the same way as the cells.
+
+```python
+import csv, io, json
+import pandas as pd
+import stringzilla as sz
+
+names = ["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds"]
+cities = ["London", "New York, NY", "Helsinki"]
+columns = {"name": sz.Strs(names), "city": cities}
+frame = pd.DataFrame({"name": names, "city": cities})
+
+records = [{"name": name, "city": city} for name, city in zip(names, cities)]
+assert sz.to_json(columns) == json.dumps(records, separators=(",", ":")).encode()
+assert sz.to_json(columns) == frame.to_json(orient="records").encode()
+
+buffer = io.StringIO()
+writer = csv.writer(buffer, lineterminator="\n")
+writer.writerow(columns)
+writer.writerows(zip(names, cities))
+assert sz.to_csv(columns) == buffer.getvalue().encode()
+assert sz.to_csv(columns) == frame.to_csv(index=False, lineterminator="\n").encode()
+```
+
+On an Apple M5 Pro with CPython 3.12 and pandas 3.0, the input is 200,000 English sentences from Leipzig 1M plus a second column holding the first word of each, 27.1 MB of UTF-8 in all.
+Times are the best of 5 runs, each producing the whole `bytes` object:
+
+- A JSON array of the sentences with `ensure_ascii=True`: 39.4 ms for `json.dumps` and 12.0 ms for `Strs.to_json`, 3.3x faster.
+- The same array with `ensure_ascii=False`: 75.8 ms and 10.9 ms, 7.0x faster.
+- CSV of both columns: 174.5 ms for `csv.writer` and 188.5 ms for `DataFrame.to_csv`, against 20.8 ms for `sz.to_csv` over `list`s and 17.1 ms over `Strs`, 8.4x and 10.2x faster than `csv.writer`.
+- JSON records of both columns: 94.1 ms for `json.dumps` with the `dict`s built inline and 68.2 ms for `DataFrame.to_json`, against 15.5 ms for `sz.to_json` over `Strs`, 6.1x and 4.4x faster.
 
 ## Batch Engines
 
@@ -676,7 +748,8 @@ assert [str(m) for m in sz.utf8_uncased_matches("Hello HELLO hello", "hello")] =
 
 These mirror `unicodedata.normalize` but operate on raw UTF-8 bytes.
 
-- `utf8_norm(text, form, validate=False)` — normalize to one of `'NFC'`, `'NFD'`, `'NFKC'`, `'NFKD'`; returns `bytes`.
+- `utf8_norm(text, form, validate=False)` — normalize to one of `'NFC'`, `'NFD'`, `'NFKC'`, `'NFKD'`, `'NFKC_Casefold'`; returns `bytes`.
+  `'NFKC_Casefold'` is the Unicode toNFKC_Casefold, the keys search engines match on: NFKC with full case folding and without default-ignorable codepoints.
 - `utf8_find_denormalized(text, form)` — return the byte offset of the first codepoint that breaks the given normalization form, or `None` if the string is already fully normalized.
 
 ```python
@@ -685,6 +758,7 @@ import stringzilla as sz
 assert sz.utf8_norm("café", "NFD") == b"cafe\xcc\x81"   # decomposed
 assert sz.utf8_norm("ﬁ", "NFKD") == b"fi"   # ligature expanded
 assert sz.utf8_find_denormalized("café", "NFC") is None   # already NFC
+assert sz.utf8_norm("Straße­", "NFKC_Casefold") == b"strasse"   # folded, soft hyphen dropped
 ```
 
 ## Runtime Dispatch and Capabilities

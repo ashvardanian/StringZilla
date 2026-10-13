@@ -15,7 +15,7 @@
  *
  *  This module exports C functions via a @c PyCapsule of @c PyAPI, for another extension to import:
  *  - @c sz_py_export_string_like.
- *  - @c sz_py_export_strings_as_sequence.
+ *  - @c sz_py_export_strings_as_view.
  *  - @c sz_py_export_strings_as_u32tape.
  *  - @c sz_py_export_strings_as_u64tape.
  *  - @c sz_py_replace_strings_allocator.
@@ -28,7 +28,7 @@
  *  and @c PyInit_stringzilla - plus the argument plumbing the three engine files share. The
  *  @c File, @c Str, and @c Strs struct layouts and the @c PyTypeObject forward declarations every
  *  domain file needs live in `stringzilla.h`; the domains themselves are split across `shared.c`,
- *  `file.c`, `str.c`, `strs.c`, `memory.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`,
+ *  `file.c`, `str.c`, `strs.c`, `strings.c`, `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`,
  *  `intersect.c`, `levenshtein.c`, `overlap.c`, `substrings.c`, and the `utf8_*.c` files.
  *
  *  @see PyArrow arrays: https://arrow.apache.org/docs/python/generated/pyarrow.array.html
@@ -40,11 +40,14 @@
  *
  *  An importer carries its own copy of this layout and casts the capsule pointer to it, so the two
  *  must stay identical: a field added, removed, or reordered on one side alone makes the other
- *  misread memory with no diagnostic, since the capsule carries no version tag.
+ *  misread memory with no diagnostic, since the capsule carries no version tag. The same holds for
+ *  the @c sz_allocator_t that @c sz_py_replace_strings_allocator fills, four pointers with
+ *  @c reallocate between @c allocate and @c free, and for the 32-byte @c sz_strings_view_t, so an
+ *  importer builds against the same headers.
  */
 typedef struct PyAPI {
     sz_bool_t (*sz_py_export_string_like)(PyObject *, sz_cptr_t *, sz_size_t *);
-    sz_bool_t (*sz_py_export_strings_as_sequence)(PyObject *, sz_sequence_t *);
+    sz_bool_t (*sz_py_export_strings_as_view)(PyObject *, sz_strings_view_t *);
     sz_bool_t (*sz_py_export_strings_as_u32tape)(PyObject *, sz_cptr_t *, sz_u32_t const **, sz_size_t *);
     sz_bool_t (*sz_py_export_strings_as_u64tape)(PyObject *, sz_cptr_t *, sz_u64_t const **, sz_size_t *);
     sz_bool_t (*sz_py_replace_strings_allocator)(PyObject *, sz_allocator_t *);
@@ -489,8 +492,8 @@ void sz_py_raise_status(sz_status_t status, char const *context) {
     }
 }
 
-int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence) {
-    if (sz_py_export_strings_as_sequence(object, sequence)) return 0;
+int sz_py_export_strings(PyObject *object, char const *name, sz_strings_view_t *strings) {
+    if (sz_py_export_strings_as_view(object, strings)) return 0;
     PyErr_Format(PyExc_TypeError, "%s must be a stringzilla.Strs, got %s", name, Py_TYPE(object)->tp_name);
     return -1;
 }
@@ -630,6 +633,10 @@ static PyMethodDef stringzilla_methods[] = {
 
     // In-place transforms
     {"translate", (PyCFunction)Str_like_translate, STRINGZILLA_METHOD_FLAGS, doc_translate},
+
+    // Dumping columns of strings
+    {"to_json", (PyCFunction)module_to_json, STRINGZILLA_METHOD_FLAGS, doc_to_json},
+    {"to_csv", (PyCFunction)module_to_csv, STRINGZILLA_METHOD_FLAGS, doc_to_csv},
 
     // Global unary extensions
     {"hash", (PyCFunction)Str_like_hash, STRINGZILLA_METHOD_FLAGS, doc_like_hash},
@@ -789,7 +796,7 @@ PyMODINIT_FUNC PyInit_stringzilla(void) {
     // Export C API functions as a single capsule structure for StringZillas
     static PyAPI sz_py_api = {
         .sz_py_export_string_like = sz_py_export_string_like,
-        .sz_py_export_strings_as_sequence = sz_py_export_strings_as_sequence,
+        .sz_py_export_strings_as_view = sz_py_export_strings_as_view,
         .sz_py_export_strings_as_u32tape = sz_py_export_strings_as_u32tape,
         .sz_py_export_strings_as_u64tape = sz_py_export_strings_as_u64tape,
         .sz_py_replace_strings_allocator = sz_py_replace_strings_allocator,

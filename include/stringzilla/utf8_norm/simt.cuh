@@ -63,14 +63,12 @@ static __device__ sz_rune_t sz_utf8_norm_compose_value_simt_[sizeof(sz_utf8_norm
 
 /** The properties of @p codepoint, @c sz_utf8_norm_lookup_ over the device's copies. */
 STRINGZILLA_DEVICE sz_utf8_norm_props_t sz_utf8_norm_lookup_simt_(sz_rune_t codepoint) {
-    sz_size_t index = 0;
-    if (codepoint < sz_utf8_norm_table_max_k) {
-        sz_size_t const leaf = codepoint >> sz_utf8_norm_low_bits_k;
-        sz_size_t const middle = sz_utf8_norm_stage1_simt_[leaf >> sz_utf8_norm_mid_bits_k];
-        sz_size_t const block =
-            sz_utf8_norm_stage2_simt_[middle * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
-        index = sz_utf8_norm_stage3_simt_[block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
-    }
+    if (codepoint >= sz_utf8_norm_table_max_k) codepoint = (codepoint >> 12) == 0xE0 ? 0xAD : 0;
+    sz_size_t const leaf = codepoint >> sz_utf8_norm_low_bits_k;
+    sz_size_t const middle = sz_utf8_norm_stage1_simt_[leaf >> sz_utf8_norm_mid_bits_k];
+    sz_size_t const block = sz_utf8_norm_stage2_simt_[middle * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
+    sz_size_t const index =
+        sz_utf8_norm_stage3_simt_[block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
     return sz_utf8_norm_props_simt_[index];
 }
 
@@ -88,27 +86,31 @@ STRINGZILLA_DEVICE sz_bool_t sz_utf8_norm_boundary_simt_(sz_rune_t codepoint, sz
     switch (form) {
     case sz_normal_form_nfc_k: return (sz_bool_t)((properties.quick_check & 3) == 0);
     case sz_normal_form_nfkc_k: return (sz_bool_t)((properties.quick_check & 12) == 0);
+    case sz_normal_form_nfkc_casefold_k: return (sz_bool_t)((properties.quick_check & 16) == 0);
     case sz_normal_form_nfd_k: return (sz_bool_t)(!properties.nfd && !sz_utf8_norm_hangul_simt_(codepoint));
     default: return (sz_bool_t)(!properties.nfkd && !sz_utf8_norm_hangul_simt_(codepoint));
     }
 }
 
 /** Whether @p codepoint, of @p properties, may change under @p form, as
- *  @c sz_utf8_norm_classify_serial_ flags it. */
+ *  @c sz_utf8_norm_classify_serial_ flags it, or as the case folding of NFKC_Casefold's clean runs
+ *  would change it, which the device leaves to the normalizing runs instead. */
 STRINGZILLA_DEVICE sz_bool_t sz_utf8_norm_dirty_simt_(sz_rune_t codepoint, sz_utf8_norm_props_t properties,
                                                       sz_normal_form_t form) {
     if (properties.canonical_combining_class != 0) return sz_true_k;
     switch (form) {
     case sz_normal_form_nfc_k: return (sz_bool_t)((properties.quick_check & 3) != 0);
     case sz_normal_form_nfkc_k: return (sz_bool_t)((properties.quick_check & 12) != 0);
+    case sz_normal_form_nfkc_casefold_k:
+        return (sz_bool_t)((properties.quick_check & 16) != 0 || properties.nfkc_casefold != properties.nfd);
     case sz_normal_form_nfd_k: return (sz_bool_t)(properties.nfd || sz_utf8_norm_hangul_simt_(codepoint));
     default: return (sz_bool_t)(properties.nfkd || sz_utf8_norm_hangul_simt_(codepoint));
     }
 }
 
 /** @c sz_utf8_norm_decompose_rune_ over the device's copies. */
-STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_decompose_rune_simt_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
-                                                               sz_u8_t *out_canonical_combining_class) {
+STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_decompose_rune_simt_(sz_rune_t codepoint, sz_normal_form_t form,
+                                                               sz_rune_t *out, sz_u8_t *out_canonical_combining_class) {
     if (sz_utf8_norm_hangul_simt_(codepoint)) {
         sz_u32_t const syllable = codepoint - sz_utf8_norm_hangul_s_base_k;
         sz_u32_t const trailing = syllable % sz_utf8_norm_hangul_t_count_k;
@@ -121,7 +123,9 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_decompose_rune_simt_(sz_rune_t codepoi
         return 3;
     }
     sz_utf8_norm_props_t const properties = sz_utf8_norm_lookup_simt_(codepoint);
-    sz_u16_t const index = compat ? properties.nfkd : properties.nfd;
+    sz_u16_t index = properties.nfd;
+    if (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) index = properties.nfkd;
+    else if (form == sz_normal_form_nfkc_casefold_k) index = properties.nfkc_casefold;
     if (index == 0) {
         out[0] = codepoint, out_canonical_combining_class[0] = properties.canonical_combining_class;
         return 1;
@@ -214,13 +218,13 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_flush_simt_(sz_rune_t *runes, sz_u8_t 
  *  @p written bytes into @p target, or only measures them, returning the bytes they took. */
 STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_run_simt_(sz_u8_t const *source, sz_size_t length, sz_normal_form_t form,
                                                     sz_u8_t *target, sz_size_t written) {
-    sz_bool_t const compat = (sz_bool_t)(form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k);
-    sz_bool_t const compose = (sz_bool_t)(form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k);
+    sz_bool_t const compose = (sz_bool_t)(form != sz_normal_form_nfd_k && form != sz_normal_form_nfkd_k);
     sz_u8_t const *position = source, *const end = source + length;
     sz_rune_t segment[sz_utf8_norm_seg_cap_k], decomposed[sz_utf8_norm_decomp_max_k];
     sz_u8_t segment_classes[sz_utf8_norm_seg_cap_k], decomposed_classes[sz_utf8_norm_decomp_max_k];
     sz_size_t segment_length = 0, parts, part;
     sz_size_t const before = written;
+    sz_bool_t follows_malformed = sz_false_k;
     while (position < end) {
         sz_rune_t rune;
         sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
@@ -229,11 +233,14 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_norm_run_simt_(sz_u8_t const *source, sz_si
             written += sz_utf8_norm_flush_simt_(segment, segment_classes, segment_length, compose, target, written);
             segment_length = 0;
             if (target) target[written] = *position;
-            ++written, ++position;
+            ++written, ++position, follows_malformed = sz_true_k;
             continue;
         }
         position += rune_length;
-        parts = sz_utf8_norm_decompose_rune_simt_(rune, compat, decomposed, decomposed_classes);
+        parts = sz_utf8_norm_decompose_rune_simt_(rune, form, decomposed, decomposed_classes);
+        if (parts == 0 && follows_malformed)
+            parts = sz_utf8_norm_decompose_rune_simt_(rune, sz_normal_form_nfd_k, decomposed, decomposed_classes);
+        follows_malformed = sz_false_k;
         for (part = 0; part != parts; ++part) {
             if (decomposed_classes[part] == 0) {
                 if (compose && segment_length == 1 && segment_classes[0] == 0) {

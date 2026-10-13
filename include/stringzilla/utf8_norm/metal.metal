@@ -4,7 +4,13 @@
  *  @date October 4, 2026
  *  @brief Metal Unicode normalization with shared decomposition and composition tables.
  */
-enum { sz_normal_form_nfd_k = 0, sz_normal_form_nfc_k = 1, sz_normal_form_nfkd_k = 2, sz_normal_form_nfkc_k = 3 };
+enum {
+    sz_normal_form_nfd_k = 0,
+    sz_normal_form_nfc_k = 1,
+    sz_normal_form_nfkd_k = 2,
+    sz_normal_form_nfkc_k = 3,
+    sz_normal_form_nfkc_casefold_k = 4,
+};
 enum {
     sz_utf8_norm_table_max_k = 0x30000,
     sz_utf8_norm_low_bits_k = 3,
@@ -75,13 +81,11 @@ inline ulong sz_utf8_norm_encode_metal_(uint rune, device uchar *target) {
 }
 
 inline sz_utf8_norm_props_t sz_utf8_norm_lookup_metal_(uint codepoint) {
-    ulong index = 0;
-    if (codepoint < sz_utf8_norm_table_max_k) {
-        ulong const leaf = codepoint >> sz_utf8_norm_low_bits_k;
-        ulong const middle = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
-        ulong const block = sz_utf8_norm_stage2_[middle * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
-        index = sz_utf8_norm_stage3_[block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
-    }
+    if (codepoint >= sz_utf8_norm_table_max_k) codepoint = (codepoint >> 12) == 0xE0 ? 0xAD : 0;
+    ulong const leaf = codepoint >> sz_utf8_norm_low_bits_k;
+    ulong const middle = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
+    ulong const block = sz_utf8_norm_stage2_[middle * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
+    ulong const index = sz_utf8_norm_stage3_[block * sz_utf8_norm_low_k + (codepoint & sz_utf8_norm_low_mask_k)];
     return sz_utf8_norm_props_[index];
 }
 
@@ -95,6 +99,8 @@ inline bool sz_utf8_norm_dirty_metal_(uint codepoint, sz_utf8_norm_props_t prope
     switch (form) {
     case sz_normal_form_nfc_k: return ((properties.quick_check & 3) != 0);
     case sz_normal_form_nfkc_k: return ((properties.quick_check & 12) != 0);
+    case sz_normal_form_nfkc_casefold_k:
+        return ((properties.quick_check & 16) != 0 || properties.nfkc_casefold != properties.nfd);
     case sz_normal_form_nfd_k: return (properties.nfd || sz_utf8_norm_hangul_metal_(codepoint));
     default: return (properties.nfkd || sz_utf8_norm_hangul_metal_(codepoint));
     }
@@ -102,7 +108,6 @@ inline bool sz_utf8_norm_dirty_metal_(uint codepoint, sz_utf8_norm_props_t prope
 
 inline ulong sz_utf8_norm_decompose_rune_metal_(uint codepoint, uint form, thread uint *out,
                                                 thread uchar *out_canonical_combining_class) {
-    bool const compat = form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k;
     if (sz_utf8_norm_hangul_metal_(codepoint)) {
         uint const syllable = codepoint - sz_utf8_norm_hangul_s_base_k;
         uint const trailing = syllable % sz_utf8_norm_hangul_t_count_k;
@@ -115,7 +120,9 @@ inline ulong sz_utf8_norm_decompose_rune_metal_(uint codepoint, uint form, threa
         return 3;
     }
     sz_utf8_norm_props_t const properties = sz_utf8_norm_lookup_metal_(codepoint);
-    ushort const index = compat ? properties.nfkd : properties.nfd;
+    ushort index = properties.nfd;
+    if (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) index = properties.nfkd;
+    else if (form == sz_normal_form_nfkc_casefold_k) index = properties.nfkc_casefold;
     if (index == 0) {
         out[0] = codepoint, out_canonical_combining_class[0] = properties.canonical_combining_class;
         return 1;
@@ -163,7 +170,7 @@ inline ulong sz_utf8_norm_emit_metal_(device uchar *target, ulong written, uint 
 
 inline ulong sz_utf8_norm_flush_metal_(thread uint *runes, thread uchar *canonical_combining_classes, ulong count,
                                        uint form, device uchar *target, ulong written) {
-    bool const compose = form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k;
+    bool const compose = form != sz_normal_form_nfd_k && form != sz_normal_form_nfkd_k;
     ulong const before = written;
     if (count == 0) return 0;
     sz_utf8_norm_canonical_order_metal_(runes, canonical_combining_classes, count);
@@ -194,12 +201,13 @@ inline ulong sz_utf8_norm_flush_metal_(thread uint *runes, thread uchar *canonic
 
 inline ulong sz_utf8_norm_run_metal_(device uchar const *source, ulong length, uint form, device uchar *target,
                                      ulong written) {
-    bool const compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k);
+    bool const compose = form != sz_normal_form_nfd_k && form != sz_normal_form_nfkd_k;
     device uchar const *position = source, *const end = source + length;
     uint segment[sz_utf8_norm_seg_cap_k], decomposed[sz_utf8_norm_decomp_max_k];
     uchar segment_classes[sz_utf8_norm_seg_cap_k], decomposed_classes[sz_utf8_norm_decomp_max_k];
     ulong segment_length = 0, parts, part;
     ulong const before = written;
+    bool follows_malformed = false;
     while (position < end) {
         uint rune;
         uint const rune_length = sz_utf8_decode_rune_metal_(position, (ulong)(end - position), 0, rune);
@@ -208,11 +216,14 @@ inline ulong sz_utf8_norm_run_metal_(device uchar const *source, ulong length, u
             written += sz_utf8_norm_flush_metal_(segment, segment_classes, segment_length, form, target, written);
             segment_length = 0;
             if (target) target[written] = *position;
-            ++written, ++position;
+            ++written, ++position, follows_malformed = true;
             continue;
         }
         position += rune_length;
         parts = sz_utf8_norm_decompose_rune_metal_(rune, form, decomposed, decomposed_classes);
+        if (parts == 0 && follows_malformed)
+            parts = sz_utf8_norm_decompose_rune_metal_(rune, sz_normal_form_nfd_k, decomposed, decomposed_classes);
+        follows_malformed = false;
         for (part = 0; part != parts; ++part) {
             if (decomposed_classes[part] == 0) {
                 if (compose && segment_length == 1 && segment_classes[0] == 0) {

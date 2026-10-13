@@ -72,7 +72,7 @@ struct sz_substrings_arguments_metal_t {
     ulong report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
     ulong emitted, reported, keep_offsets, gap_offsets, overflow_rows;
     ulong slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
-    ulong haystacks_count, counts_stride, matches_capacity, target_ceiling;
+    ulong haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
     ulong document_lengths, scores_stride, tally_hashed;
     float saturation, normalization, average_length, unused;
     ulong pass, scan_count, scan_elements_per_tile, scan_tiles, clear_words;
@@ -332,7 +332,7 @@ inline long sz_substrings_bm25_fixed_metal_(float weight, uint frequency, float 
 /** Zeroes @c clear_words words of the cleared slot, which is how a round clears what it reads
  *  first. */
 kernel void sz_substrings_clear_metal_kernel_(device ulong *words [[buffer(5)]],
-                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                               uint position [[thread_position_in_grid]],
                                               uint threads [[threads_per_grid]]) {
     for (ulong index = position; index < arguments.clear_words; index += threads) words[index] = 0;
@@ -341,7 +341,7 @@ kernel void sz_substrings_clear_metal_kernel_(device ulong *words [[buffer(5)]],
 /** Reduces one threadgroup's own contiguous tile of the scanned slot into @c tile_sums. */
 kernel void sz_substrings_scan_reduce_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                     device ulong const *values [[buffer(4)]],
-                                                    constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                    constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                     uint group [[threadgroup_position_in_grid]],
                                                     uint lane [[thread_index_in_threadgroup]],
                                                     uint width [[threads_per_threadgroup]]) {
@@ -360,7 +360,7 @@ kernel void sz_substrings_scan_reduce_metal_kernel_(device uchar *scratch [[buff
 
 /** Scans @c tile_sums in place on one threadgroup, carrying a running offset across its tiles. */
 kernel void sz_substrings_scan_carry_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                   constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                   constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                    uint lane [[thread_index_in_threadgroup]],
                                                    uint width [[threads_per_threadgroup]]) {
     threadgroup ulong shared[sz_substrings_threads_metal_k];
@@ -379,7 +379,7 @@ kernel void sz_substrings_scan_carry_metal_kernel_(device uchar *scratch [[buffe
  *  set. */
 kernel void sz_substrings_scan_apply_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                    device ulong *values [[buffer(4)]],
-                                                   constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                   constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                    uint group [[threadgroup_position_in_grid]],
                                                    uint lane [[thread_index_in_threadgroup]],
                                                    uint width [[threads_per_threadgroup]]) {
@@ -406,15 +406,16 @@ kernel void sz_substrings_scan_apply_metal_kernel_(device uchar *scratch [[buffe
  *  haystack's own remainder at most one more.
  */
 kernel void sz_substrings_chunk_bytes_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                    device ulong const *haystacks [[buffer(2)]],
-                                                    constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                    device uchar const *haystacks [[buffer(2)]],
+                                                    device uchar const *haystacks_offsets [[buffer(14)]],
+                                                    constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                     uint lane [[thread_index_in_threadgroup]],
                                                     uint width [[threads_per_threadgroup]]) {
     threadgroup ulong shared[sz_substrings_threads_metal_k];
-    sz_sequence_tape_metal_t const tape = {haystacks};
+    sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     ulong mine = 0, total;
     for (ulong index = lane; index < arguments.haystacks_count; index += width)
-        mine += sz_sequence_tape_length_metal_(tape, index);
+        mine += sz_strings_length_metal_(tape, index);
     sz_substrings_block_scan_metal_(mine, shared, lane, width, total);
     if (lane) return;
     ulong const budget = max(arguments.chunk_budget, 1ul);
@@ -425,15 +426,16 @@ kernel void sz_substrings_chunk_bytes_metal_kernel_(device uchar *scratch [[buff
 /** Writes how many chunks each haystack is cut into - at least one, so an empty haystack still gets
  *  a thread and lands its own boundary - which the scan then turns into its chunk range. */
 kernel void sz_substrings_chunk_counts_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                     device ulong const *haystacks [[buffer(2)]],
-                                                     constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                     device uchar const *haystacks [[buffer(2)]],
+                                                     device uchar const *haystacks_offsets [[buffer(14)]],
+                                                     constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                      uint position [[thread_position_in_grid]],
                                                      uint threads [[threads_per_grid]]) {
-    sz_sequence_tape_metal_t const tape = {haystacks};
+    sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     device ulong *chunk_offsets = sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.chunk_offsets);
     ulong const chunk_bytes = *sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.chunk_bytes);
     for (ulong index = position; index < arguments.haystacks_count; index += threads) {
-        ulong const length = sz_sequence_tape_length_metal_(tape, index);
+        ulong const length = sz_strings_length_metal_(tape, index);
         chunk_offsets[index] = length == 0 ? 1 : sz_size_divide_round_up_metal_<ulong>(length, chunk_bytes);
     }
 }
@@ -446,8 +448,9 @@ kernel void sz_substrings_chunk_counts_metal_kernel_(device uchar *scratch [[buf
  *  range and a write needs no atomic.
  */
 kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
-                                             device ulong const *haystacks [[buffer(2)]],
-                                             constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                             device uchar const *haystacks [[buffer(2)]],
+                                             device uchar const *haystacks_offsets [[buffer(14)]],
+                                             constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                              uint position [[thread_position_in_grid]],
                                              uint threads [[threads_per_grid]]) {
     ulong const scratch_host = arguments.scratch_host;
@@ -457,7 +460,7 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
     // it retires whole.
     if (arguments.pass == sz_substrings_gpu_writing_metal_k && report->shortfall) return;
     sz_substrings_automaton_metal_t const automaton = sz_substrings_automaton_metal_(engine, arguments);
-    sz_sequence_tape_metal_t const tape = {haystacks};
+    sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     device ulong const *chunk_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_offsets);
     device ulong *chunk_slots = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_slots);
     device sz_substrings_match_metal_t *emitted = sz_reach_metal_<sz_substrings_match_metal_t>(scratch, scratch_host,
@@ -468,13 +471,13 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
     for (ulong chunk_index = position; chunk_index < chunk_count; chunk_index += threads) {
         ulong const haystack_index = sz_substrings_last_not_above_metal_(chunk_offsets, arguments.haystacks_count,
                                                                          chunk_index);
-        ulong const length = sz_sequence_tape_length_metal_(tape, haystack_index);
+        ulong const length = sz_strings_length_metal_(tape, haystack_index);
         ulong const chunk_begin = (chunk_index - chunk_offsets[haystack_index]) * chunk_bytes;
         ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
         device sz_substrings_match_metal_t *matches_at_chunk = arguments.pass == sz_substrings_gpu_writing_metal_k
                                                                    ? emitted + chunk_slots[chunk_index]
                                                                    : nullptr;
-        device uchar const *haystack = sz_sequence_tape_start_metal_(tape, haystack_index);
+        device uchar const *haystack = sz_strings_start_metal_(tape, haystack_index);
         ulong const found = chunk_begin >= chunk_end ? 0
                             : automaton.uncased
                                 ? sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin,
@@ -490,7 +493,7 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
 /** Publishes what the sizing walk found, the one place a round learns whether it fit. The scanned
  *  chunk slots end in the emitted total, which every trailing zero carried. */
 kernel void sz_substrings_sized_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]]) {
+                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]]) {
     device sz_substrings_report_metal_t *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, arguments.scratch_host, arguments.report);
     device ulong const *chunk_slots = sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.chunk_slots);
@@ -518,7 +521,7 @@ inline bool sz_substrings_boundary_before_metal_(device sz_substrings_match_meta
  *  tier's cover does, falling back to emitted order past
  *  @ref sz_substrings_cover_segment_limit_metal_k candidates. */
 kernel void sz_substrings_cover_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                               uint position [[thread_position_in_grid]],
                                               uint threads [[threads_per_grid]]) {
     device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
@@ -577,7 +580,7 @@ kernel void sz_substrings_cover_metal_kernel_(device uchar *scratch [[buffer(1)]
 /** Gathers the surviving matches into their scanned slots, order preserved: a match was kept
  *  exactly when the scan steps across it. */
 kernel void sz_substrings_compact_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                                constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                 uint position [[thread_position_in_grid]],
                                                 uint threads [[threads_per_grid]]) {
     ulong const scratch_host = arguments.scratch_host;
@@ -595,7 +598,7 @@ kernel void sz_substrings_compact_metal_kernel_(device uchar *scratch [[buffer(1
 
 /** Publishes how many matches the cover kept, which every later boundary is read against. */
 kernel void sz_substrings_covered_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]]) {
+                                                constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]]) {
     device sz_substrings_report_metal_t *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, arguments.scratch_host, arguments.report);
     device ulong const *keep_offsets = sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.keep_offsets);
@@ -607,7 +610,7 @@ kernel void sz_substrings_covered_metal_kernel_(device uchar *scratch [[buffer(1
 kernel void sz_substrings_haystack_offsets_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                          device ulong *haystack_offsets [[buffer(3)]],
                                                          constant sz_substrings_arguments_metal_t &arguments
-                                                         [[buffer(14)]],
+                                                         [[buffer(16)]],
                                                          uint position [[thread_position_in_grid]],
                                                          uint threads [[threads_per_grid]]) {
     ulong const scratch_host = arguments.scratch_host;
@@ -624,7 +627,7 @@ kernel void sz_substrings_haystack_offsets_metal_kernel_(device uchar *scratch [
 /** Writes how many matches each haystack owns, as the gap between its two boundaries. */
 kernel void sz_substrings_counts_metal_kernel_(device ulong const *haystack_offsets [[buffer(3)]],
                                                device ulong *counts [[buffer(6)]],
-                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
+                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                uint position [[thread_position_in_grid]],
                                                uint threads [[threads_per_grid]]) {
     for (ulong index = position; index < arguments.haystacks_count; index += threads)
@@ -635,7 +638,7 @@ kernel void sz_substrings_counts_metal_kernel_(device ulong const *haystack_offs
 kernel void sz_substrings_store_matches_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                       device sz_substrings_match_metal_t *matches [[buffer(7)]],
                                                       constant sz_substrings_arguments_metal_t &arguments
-                                                      [[buffer(14)]],
+                                                      [[buffer(16)]],
                                                       uint position [[thread_position_in_grid]],
                                                       uint threads [[threads_per_grid]]) {
     ulong const scratch_host = arguments.scratch_host;
@@ -649,7 +652,7 @@ kernel void sz_substrings_store_matches_metal_kernel_(device uchar *scratch [[bu
 
 /** Publishes what the store kept, once every thread of it has read the report it changes. */
 kernel void sz_substrings_stored_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]]) {
+                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]]) {
     device sz_substrings_report_metal_t *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, arguments.scratch_host, arguments.report);
     ulong const kept = report->shortfall ? 0 : report->matches_stored;
@@ -667,15 +670,19 @@ kernel void sz_substrings_stored_metal_kernel_(device uchar *scratch [[buffer(1)
  *  scan across haystacks that this feeds.
  */
 kernel void sz_substrings_rewrite_offsets_metal_kernel_(
-    device uchar *scratch [[buffer(1)]], device ulong const *haystacks [[buffer(2)]],
-    device ulong const *haystack_offsets [[buffer(3)]], device ulong const *replacements [[buffer(8)]],
-    device ulong *output_sizes [[buffer(10)]], constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]],
-    uint group [[threadgroup_position_in_grid]], uint groups [[threadgroups_per_grid]],
-    uint lane [[thread_index_in_threadgroup]], uint width [[threads_per_threadgroup]]) {
+    device uchar *scratch [[buffer(1)]], device uchar const *haystacks [[buffer(2)]],
+    device ulong const *haystack_offsets [[buffer(3)]], device uchar const *replacements [[buffer(8)]],
+    device ulong *output_sizes [[buffer(10)]], device uchar const *haystacks_offsets [[buffer(14)]],
+    device uchar const *replacements_offsets [[buffer(15)]],
+    constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]], uint group [[threadgroup_position_in_grid]],
+    uint groups [[threadgroups_per_grid]], uint lane [[thread_index_in_threadgroup]],
+    uint width [[threads_per_threadgroup]]) {
     threadgroup ulong shared[sz_substrings_threads_metal_k];
     ulong const scratch_host = arguments.scratch_host;
     if (sz_reach_metal_<sz_substrings_report_metal_t>(scratch, scratch_host, arguments.report)->shortfall) return;
-    sz_sequence_tape_metal_t const haystacks_tape = {haystacks}, replacements_tape = {replacements};
+    sz_strings_tape_metal_t const haystacks_tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
+    sz_strings_tape_metal_t const replacements_tape = {replacements, replacements_offsets,
+                                                       arguments.replacements_layout};
     device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
         scratch, scratch_host, arguments.reported);
     device ulong *gap_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.gap_offsets);
@@ -690,7 +697,7 @@ kernel void sz_substrings_rewrite_offsets_metal_kernel_(
             if (owns) {
                 // Shrinking matches make this wrap, which is right: only the prefix sums
                 // are ever read.
-                drift_here = sz_sequence_tape_length_metal_(replacements_tape, matches[match_index].needle_index) -
+                drift_here = sz_strings_length_metal_(replacements_tape, matches[match_index].needle_index) -
                              matches[match_index].byte_length;
                 if (match_index != first)
                     previous_end = matches[match_index - 1].byte_offset + matches[match_index - 1].byte_length;
@@ -700,7 +707,7 @@ kernel void sz_substrings_rewrite_offsets_metal_kernel_(
             drift_carry += drift_in_tile;
         }
         if (lane == 0)
-            output_sizes[haystack_index] = sz_sequence_tape_length_metal_(haystacks_tape, haystack_index) + drift_carry;
+            output_sizes[haystack_index] = sz_strings_length_metal_(haystacks_tape, haystack_index) + drift_carry;
     }
 }
 
@@ -715,7 +722,7 @@ inline void sz_substrings_copy_clipped_metal_(device uchar *output, ulong tile_b
 /** Publishes the bytes the rewrite needs, and whether the target could hold them. */
 kernel void sz_substrings_target_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                device ulong const *output_offsets [[buffer(10)]],
-                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]]) {
+                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]]) {
     device sz_substrings_report_metal_t *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, arguments.scratch_host, arguments.report);
     ulong const rewritten = output_offsets[arguments.haystacks_count];
@@ -727,17 +734,20 @@ kernel void sz_substrings_target_metal_kernel_(device uchar *scratch [[buffer(1)
 /** Copies the rewritten target, one fixed-width output tile per threadgroup, one simdgroup per gap
  *  or replacement, so no threadgroup's work scales with one stretch's width. */
 kernel void sz_substrings_rewrite_copy_metal_kernel_(
-    device uchar *scratch [[buffer(1)]], device ulong const *haystacks [[buffer(2)]],
-    device ulong const *haystack_offsets [[buffer(3)]], device ulong const *replacements [[buffer(8)]],
+    device uchar *scratch [[buffer(1)]], device uchar const *haystacks [[buffer(2)]],
+    device ulong const *haystack_offsets [[buffer(3)]], device uchar const *replacements [[buffer(8)]],
     device uchar *output [[buffer(9)]], device ulong const *output_offsets [[buffer(10)]],
-    constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]], uint group [[threadgroup_position_in_grid]],
+    device uchar const *haystacks_offsets [[buffer(14)]], device uchar const *replacements_offsets [[buffer(15)]],
+    constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]], uint group [[threadgroup_position_in_grid]],
     uint groups [[threadgroups_per_grid]], uint simdgroup [[simdgroup_index_in_threadgroup]],
     uint simdgroups [[simdgroups_per_threadgroup]], uint lane [[thread_index_in_simdgroup]]) {
     ulong const scratch_host = arguments.scratch_host;
     // A target that cannot hold the whole rewrite is left untouched rather than holding a valid
     // prefix of one.
     if (sz_reach_metal_<sz_substrings_report_metal_t>(scratch, scratch_host, arguments.report)->shortfall) return;
-    sz_sequence_tape_metal_t const haystacks_tape = {haystacks}, replacements_tape = {replacements};
+    sz_strings_tape_metal_t const haystacks_tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
+    sz_strings_tape_metal_t const replacements_tape = {replacements, replacements_offsets,
+                                                       arguments.replacements_layout};
     device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
         scratch, scratch_host, arguments.reported);
     device ulong const *gap_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.gap_offsets);
@@ -749,8 +759,8 @@ kernel void sz_substrings_rewrite_copy_metal_kernel_(
         ulong const tile_end = min(tile_begin + sz_substrings_gpu_rewrite_tile_bytes_metal_k, total);
         for (ulong haystack_index = sz_substrings_last_not_above_metal_(output_offsets, count + 1, tile_begin);
              haystack_index < count && output_offsets[haystack_index] < tile_end; ++haystack_index) {
-            device uchar const *haystack = sz_sequence_tape_start_metal_(haystacks_tape, haystack_index);
-            ulong const haystack_length = sz_sequence_tape_length_metal_(haystacks_tape, haystack_index);
+            device uchar const *haystack = sz_strings_start_metal_(haystacks_tape, haystack_index);
+            ulong const haystack_length = sz_strings_length_metal_(haystacks_tape, haystack_index);
             ulong const base = output_offsets[haystack_index];
             ulong const first = haystack_offsets[haystack_index], last = haystack_offsets[haystack_index + 1];
             ulong const wanted = tile_begin > base ? tile_begin - base : 0;
@@ -774,10 +784,10 @@ kernel void sz_substrings_rewrite_copy_metal_kernel_(
                                                   gap_source_end - previous_end, lane);
                 if (closes) continue;
                 ulong const needle_index = matches[match_index].needle_index;
-                sz_substrings_copy_clipped_metal_(
-                    output, tile_begin, tile_end, gap_begin + (gap_source_end - previous_end),
-                    sz_sequence_tape_start_metal_(replacements_tape, needle_index),
-                    sz_sequence_tape_length_metal_(replacements_tape, needle_index), lane);
+                sz_substrings_copy_clipped_metal_(output, tile_begin, tile_end,
+                                                  gap_begin + (gap_source_end - previous_end),
+                                                  sz_strings_start_metal_(replacements_tape, needle_index),
+                                                  sz_strings_length_metal_(replacements_tape, needle_index), lane);
             }
         }
     }
@@ -851,9 +861,10 @@ inline void sz_substrings_bm25_score_metal_(thread sz_substrings_tally_metal_t c
  */
 kernel void sz_substrings_bm25_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
-    device ulong const *haystacks [[buffer(2)]], device float const *lengths [[buffer(11)]],
+    device uchar const *haystacks [[buffer(2)]], device float const *lengths [[buffer(11)]],
     device float const *weights [[buffer(12)]], device float *scores [[buffer(13)]],
-    constant sz_substrings_arguments_metal_t &arguments [[buffer(14)]], uint group [[threadgroup_position_in_grid]],
+    device uchar const *haystacks_offsets [[buffer(14)]],
+    constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]], uint group [[threadgroup_position_in_grid]],
     uint groups [[threadgroups_per_grid]], uint lane [[thread_index_in_threadgroup]],
     uint width [[threads_per_threadgroup]]) {
     threadgroup atomic_uint counts[sz_substrings_tally_slots_metal_k], keys[sz_substrings_tally_slots_metal_k];
@@ -862,7 +873,7 @@ kernel void sz_substrings_bm25_metal_kernel_(
     ulong const needles_count = arguments.needles_count;
     ulong const table_slots = min(needles_count, (ulong)sz_substrings_tally_slots_metal_k);
     sz_substrings_automaton_metal_t const automaton = sz_substrings_automaton_metal_(engine, arguments);
-    sz_sequence_tape_metal_t const tape = {haystacks};
+    sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     sz_substrings_tally_metal_t tally;
     tally.keys = keys, tally.counts = counts, tally.overflowed = &overflowed;
     tally.overflow = sz_reach_metal_<atomic_uint>(scratch, arguments.scratch_host, arguments.overflow_rows) +
@@ -878,13 +889,13 @@ kernel void sz_substrings_bm25_metal_kernel_(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     for (ulong haystack_index = group; haystack_index < arguments.haystacks_count; haystack_index += groups) {
-        ulong const length = sz_sequence_tape_length_metal_(tape, haystack_index);
+        ulong const length = sz_strings_length_metal_(tape, haystack_index);
         float const document_length = arguments.document_lengths ? lengths[haystack_index] : (float)length;
         float const norm = normalization > 0
                                ? 1 - normalization + normalization * document_length / arguments.average_length
                                : 1.0f;
-        sz_substrings_bm25_walk_metal_(automaton, sz_sequence_tape_start_metal_(tape, haystack_index), length,
-                                       haystack_index, lane, width, &tally);
+        sz_substrings_bm25_walk_metal_(automaton, sz_strings_start_metal_(tape, haystack_index), length, haystack_index,
+                                       lane, width, &tally);
         threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
         sz_substrings_bm25_score_metal_(&tally, table_slots, needles_count, saturation, norm, weights, partials, lane,
                                         width, scores + haystack_index * arguments.scores_stride);

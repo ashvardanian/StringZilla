@@ -9,7 +9,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/v128relaxed.h"
-#include "stringzilla/memory/v128relaxed.h"
+#include "stringzilla/strings/v128relaxed.h"
 #include "stringzilla/hash/v128relaxed.h"
 #include "stringzilla/cipher/v128relaxed.h"
 #include "stringzilla/find/v128relaxed.h"

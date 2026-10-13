@@ -278,6 +278,8 @@ public class StringZillaTests {
         var dst = new byte[src.Length];
         Sz.Lookup(dst, src, lut);
         Assert.Equal(new byte[] { 2, 3, 4, 255 }, dst);
+        Sz.Lookup(dst, dst, lut); // in place
+        Assert.Equal(new byte[] { 3, 4, 5, 0 }, dst);
     }
 
     #endregion
@@ -306,6 +308,11 @@ public class StringZillaTests {
     public void Normalize_Nfkc_ExpandsCompatibilityLigature() {
         byte[] ligature = { 0xEF, 0xAC, 0x81 }; // U+FB01 LATIN SMALL LIGATURE FI
         Assert.Equal(new byte[] { (byte)'f', (byte)'i' }, Sz.Normalize(ligature, Sz.NormalForm.Nfkc));
+    }
+
+    [Fact]
+    public void Normalize_NfkcCasefold_FoldsCase() {
+        Assert.Equal(B("strasse"), Sz.Normalize(B("Straße"), Sz.NormalForm.NfkcCasefold));
     }
 
     [Fact]
@@ -343,6 +350,23 @@ public class StringZillaTests {
     public void ArgSort_TopK() {
         var items = new[] { B("d"), B("a"), B("c"), B("b") };
         Assert.Equal(new long[] { 1, 3 }, Sz.ArgSort(items, top: 2));
+    }
+
+    [Fact]
+    public void ArgSort_Segments_MatchesSortedCopies() {
+        // More segments than the 64 the native side reads per accessor call.
+        var words = new List<byte[]>();
+        for (int i = 0; i < 100; i++) words.Add(B(((i * 37) % 100).ToString()));
+        var text = new List<byte>();
+        long[] starts = new long[words.Count], lengths = new long[words.Count];
+        for (int i = 0; i < words.Count; i++) {
+            starts[i] = text.Count;
+            lengths[i] = words[i].Length;
+            text.AddRange(words[i]);
+        }
+        long[] order = new long[words.Count];
+        Assert.Equal(words.Count, Sz.ArgSort(text.ToArray(), starts, lengths, order));
+        Assert.Equal(Sz.ArgSort(words), order);
     }
 
     [Fact]

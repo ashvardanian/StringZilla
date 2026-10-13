@@ -6,8 +6,10 @@ Mirrors the C++ test/string.cpp translation unit.
 Covers: Str/Strs construction from native str, bytes, and bytearray, indexing, slicing, and rich
 comparisons, the read-only buffer protocol, split, rsplit, strip, and splitlines in both eager and
 lazy iterator form, translate, fill_random, and UTF-8 decoding, degenerate and out-of-ssize_t corner
-cases, and the pyarrow/numpy interop surface for Str and Strs.
-Compares against: CPython str and bytes methods, and cross-backend agreement via capability_sweep().
+cases, the pyarrow/numpy interop surface for Str and Strs, and the collection verbs Strs.translate,
+Strs.escape, Strs.unescape and Strs.to_json, with the sz.to_json and sz.to_csv column dumpers.
+Compares against: CPython str and bytes methods, the json, csv, html and urllib.parse modules,
+pandas when installed, and cross-backend agreement via capability_sweep().
 
 Run:
     uv pip install numpy pyarrow pytest pytest-repeat
@@ -20,10 +22,15 @@ Author: Ash Vardanian
 Date: September 16, 2023
 """
 
+import csv
+import html
+import io
+import json
 import math
 import os
 import sys
 import tempfile
+import urllib.parse
 from random import Random
 from string import ascii_lowercase
 from typing import Sequence
@@ -1427,6 +1434,192 @@ def test_strs_from_arrow_with_nulls():
 # endregion Interop
 
 
+# region Escaping and dumping
+
+ESCAPE_KINDS = ["json", "json_ascii", "hex", "html", "url", "console", "csv"]
+
+ESCAPE_CORPUS = [
+    "",
+    "plain ascii",
+    'quote " and backslash \\',
+    "controls \x00\x01\x08\x0c\x1f",
+    "line breaks \n\r\t",
+    "comma, separated",
+    "slash / and tilde ~",
+    "markup <b>&amp;</b> 'single'",
+    "accents café ∑ 日本",
+    "beyond the plane \U0001f600",
+    "bidirectional \u202e override \u2066 isolate",
+    "c1 control \u0085",
+    "percent %41",
+]
+"""Strings holding the special bytes of every escape kind, multi-byte UTF-8, and a codepoint past U+FFFF."""
+
+
+def csv_field(text: str) -> str:
+    """One field as `csv.writer` quotes it, written beside another so an empty one stays unquoted."""
+    buffer = io.StringIO()
+    csv.writer(buffer, lineterminator="").writerow([text, ""])
+    return buffer.getvalue()[:-1]
+
+
+def csv_unescaped(field: str) -> str:
+    """One field as `csv.reader` reads it, where an empty line holds no fields at all."""
+    row = next(csv.reader([field]))
+    return row[0] if row else ""
+
+
+STDLIB_ESCAPERS = {
+    "json": lambda text: json.dumps(text, ensure_ascii=False)[1:-1],
+    "json_ascii": lambda text: json.dumps(text)[1:-1],
+    "hex": lambda text: text.encode().hex(),
+    "html": lambda text: html.escape(text).replace("&#x27;", "&#39;"),
+    "url": lambda text: urllib.parse.quote(text, safe=""),
+    "csv": csv_field,
+}
+"""The standard library's writer for every kind that has one; `html.escape` alone spells `'` in hex."""
+
+STDLIB_UNESCAPERS = {
+    "json": lambda escaped: json.loads(f'"{escaped}"'),
+    "json_ascii": lambda escaped: json.loads(f'"{escaped}"'),
+    "hex": lambda escaped: bytes.fromhex(escaped).decode(),
+    "html": html.unescape,
+    "url": lambda escaped: urllib.parse.unquote_to_bytes(escaped).decode(),
+    "csv": csv_unescaped,
+}
+
+DUMP_COLUMNS = {
+    "name": ["Ada", 'Grace "Amazing" Hopper', "Linus\nTorvalds", "", "café \U0001f600"],
+    "city, country": ["London, UK", "New York", "Helsinki\r\n", "日本", "<&>"],
+}
+"""Two columns, one named with a comma, whose cells need every JSON and CSV escape between them."""
+
+
+@pytest.mark.parametrize("kind", sorted(STDLIB_ESCAPERS))
+def test_strs_escape_matches_stdlib(kind: str):
+    """`Strs.escape` writes the bytes the standard library's own writer does, for every kind that has one."""
+    escaped = Strs(ESCAPE_CORPUS).escape(kind)
+    assert [str(text) for text in escaped] == [STDLIB_ESCAPERS[kind](text) for text in ESCAPE_CORPUS]
+
+
+@pytest.mark.parametrize("kind", ESCAPE_KINDS)
+def test_strs_unescape_round_trips(kind: str):
+    """`Strs.unescape` inverts `Strs.escape` for every kind, as the standard library's own readers do, and every
+    kind but `json_ascii`, which writes an ill-formed byte as U+FFFD, carries ill-formed UTF-8 through too."""
+    corpus = ESCAPE_CORPUS + ["delete \x7f"]
+    escaped = Strs(corpus).escape(kind=kind)
+    assert [str(text) for text in escaped.unescape(kind)] == corpus
+    if kind in STDLIB_UNESCAPERS:
+        assert [STDLIB_UNESCAPERS[kind](str(text)) for text in escaped] == corpus
+    if kind != "json_ascii":
+        ill_formed = b"ill-formed \xc3\x28 \xff"
+        assert bytes(Strs([ill_formed]).escape(kind).unescape(kind)[0]) == ill_formed
+
+
+@pytest.mark.parametrize(
+    "kind, malformed",
+    [
+        ("json", "lone \\ud800 surrogate"),
+        ("json_ascii", "unknown \\q escape"),
+        ("hex", "abc"),
+        ("url", "truncated %4"),
+        ("console", "truncated \\x4"),
+        ("csv", '"unbalanced'),
+    ],
+)
+def test_strs_unescape_names_the_malformed_index(kind: str, malformed: str):
+    """`Strs.unescape` raises a `ValueError` naming the index of the first malformed string."""
+    well_formed = str(Strs(['ok, "fine"']).escape(kind)[0])
+    with pytest.raises(ValueError, match="index 2 "):
+        Strs([well_formed, well_formed, malformed, well_formed, malformed]).unescape(kind)
+
+
+@pytest.mark.parametrize("ensure_ascii", [True, False])
+def test_strs_to_json_matches_json_dumps(ensure_ascii: bool):
+    """`Strs.to_json` writes the bytes of a compact `json.dumps`, reading every layout: a tape, a slice of one,
+    and a reordered fragmented collection."""
+
+    def expected(texts):
+        return json.dumps(texts, ensure_ascii=ensure_ascii, separators=(",", ":")).encode()
+
+    tape = Strs(ESCAPE_CORPUS)
+    assert tape.to_json(ensure_ascii=ensure_ascii) == expected(ESCAPE_CORPUS)
+    assert tape[3:].to_json(ensure_ascii) == expected(ESCAPE_CORPUS[3:])
+    assert Strs(ESCAPE_CORPUS, view=True)[::-1].to_json(ensure_ascii) == expected(ESCAPE_CORPUS[::-1])
+    assert Strs([]).to_json() == b"[]"
+
+
+def test_strs_to_json_ascii_escapes_delete():
+    """`json.dumps` writes DEL as `\\u007f` once it keeps to ASCII, so `ensure_ascii` must as well."""
+    assert Strs(["delete \x7f"]).to_json() == json.dumps(["delete \x7f"], separators=(",", ":")).encode()
+
+
+@pytest.mark.parametrize("ensure_ascii", [True, False])
+def test_to_json_matches_json_dumps(ensure_ascii: bool):
+    """`sz.to_json` writes the bytes of a compact `json.dumps` of the records, from `Strs` and lists alike."""
+    records = [dict(zip(DUMP_COLUMNS, row)) for row in zip(*DUMP_COLUMNS.values())]
+    columns = {"name": Strs(DUMP_COLUMNS["name"]), "city, country": DUMP_COLUMNS["city, country"]}
+    expected = json.dumps(records, ensure_ascii=ensure_ascii, separators=(",", ":")).encode()
+    assert sz.to_json(columns, ensure_ascii=ensure_ascii) == expected
+    assert sz.to_json({}) == sz.to_json({"empty": []}) == b"[]"
+
+
+@pytest.mark.parametrize("ensure_ascii", [True, False])
+def test_to_json_matches_pandas(ensure_ascii: bool):
+    """`sz.to_json` writes the bytes of `pandas.DataFrame.to_json(orient="records")` for string columns
+    holding no `/`, which pandas alone writes as `\\/`."""
+    pandas = pytest.importorskip("pandas")
+    expected = pandas.DataFrame(DUMP_COLUMNS).to_json(orient="records", force_ascii=ensure_ascii).encode()
+    assert sz.to_json(DUMP_COLUMNS, ensure_ascii=ensure_ascii) == expected
+
+
+@pytest.mark.parametrize("lineterminator", ["\n", "\r\n"])
+def test_to_csv_matches_csv_writer(lineterminator: str):
+    """`sz.to_csv` writes the bytes of `csv.writer`: a header of the names, then a line per row, a lone empty
+    field quoted as `""` so its line is not mistaken for one of no fields."""
+    for columns in (DUMP_COLUMNS, {"": ["", "x", ""]}, {"empty": []}, {}):
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator=lineterminator)
+        writer.writerow(columns)
+        writer.writerows(zip(*columns.values()))
+        assert sz.to_csv(columns, lineterminator) == buffer.getvalue().encode()
+
+
+def test_to_csv_matches_pandas():
+    """`sz.to_csv` writes the bytes of `pandas.DataFrame.to_csv(index=False)` for string columns."""
+    pandas = pytest.importorskip("pandas")
+    for columns in (DUMP_COLUMNS, {"": ["", "x", ""]}):
+        expected = pandas.DataFrame(columns).to_csv(index=False, lineterminator="\n").encode()
+        assert sz.to_csv({name: Strs(column) for name, column in columns.items()}) == expected
+
+
+def test_dumps_refuse_malformed_columns():
+    """Columns of different lengths, a non-string cell, and a terminator other than LF or CRLF are refused."""
+    ragged = {"a": ["x", "y"], "b": Strs(["z"])}
+    with pytest.raises(ValueError, match="'b'"):
+        sz.to_json(ragged)
+    with pytest.raises(ValueError, match="'b'"):
+        sz.to_csv(ragged)
+    with pytest.raises(TypeError):
+        sz.to_json({"a": ["x", None]})
+    with pytest.raises(ValueError):
+        sz.to_csv({"a": ["x"]}, lineterminator=";")
+
+
+def test_strs_translate_matches_bytes_translate():
+    """`Strs.translate` maps every string as `bytes.translate` does, over a tape, a slice of one, and a fragmented
+    collection, and takes the same dict tables as `Str.translate`."""
+    table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
+    texts = ["cabbage", "", "abc" * 50, "été"]
+    expected = [text.encode().translate(table) for text in texts]
+    for strings in (Strs(texts), Strs(["skipped"] + texts)[1:], Strs(texts, view=True)):
+        assert [bytes(text) for text in strings.translate(table)] == expected
+    assert [str(text) for text in Strs(texts).translate({"a": "A"})] == [text.replace("a", "A") for text in texts]
+
+
+# endregion Escaping and dumping
+
+
 # region Backend differential
 
 
@@ -1634,6 +1827,27 @@ def test_unit_backend_differential_translate_unaligned(backend_results, offset):
             ),
             oracle=oracle,
         )
+
+
+@pytest.mark.parametrize("kind", ESCAPE_KINDS)
+def test_unit_backend_differential_escape(backend_results, kind: str):
+    """`Strs.escape` and `Strs.unescape` must agree across every backend, whose byte-set searches skip the bytes
+    needing no escape, with a special byte at either end and in the middle of every SIMD-relevant length."""
+    texts = []
+    for length in VECTOR_WIDTH_LENGTHS:
+        body = "a" * length
+        for special in '"\\,\n<%\x01\x7f\u202e':
+            texts += [special + body, body + special, body[: length // 2] + special + body[length // 2 :]]
+    strings = Strs(texts)
+
+    def escape_and_back(capabilities):
+        escaped = strings.escape(kind, capabilities=capabilities)
+        unescaped = escaped.unescape(kind, capabilities=capabilities)
+        return [bytes(text) for text in escaped], [str(text) for text in unescaped]
+
+    results = backend_results(escape_and_back)
+    assert_backends_agree(results)
+    assert next(iter(results.values()))[1] == texts
 
 
 @pytest.mark.parametrize("length", VECTOR_WIDTH_LENGTHS)

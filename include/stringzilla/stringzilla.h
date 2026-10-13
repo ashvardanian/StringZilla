@@ -78,13 +78,13 @@
 #include "stringzilla/types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`, `STRINGZILLA_H_VERSION_MAJOR`
 #include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_capabilities_enabled_cpu`, `sz_capabilities_name`
 #include "stringzilla/compare.h"      // `sz_equal_best`, `sz_order_best`
-#include "stringzilla/memory.h"       // `sz_copy_best`, `sz_move_best`, `sz_fill_best`
+#include "stringzilla/strings.h"      // `sz_strings_to_tape_best`, `sz_strings_escape_best`
 #include "stringzilla/hash.h"         // `sz_bytesum_best`, `sz_hash_best`, `sz_hash_state_init_best`
 #include "stringzilla/cipher.h"       // `sz_aes256_key_init_best`, `sz_aes256_ctr_xor_best`
 #include "stringzilla/find.h"         // `sz_find_best`, `sz_find_byteset_best`, `sz_rfind_best`
 
-#include "stringzilla/sort.h"        // `sz_sequence_argsort_best`, `sz_sequence_argsort_uncased_best`
-#include "stringzilla/intersect.h"   // `sz_sequence_intersect_best`
+#include "stringzilla/sort.h"        // `sz_sort_order_best`, `sz_sort_uncased_order_best`
+#include "stringzilla/intersect.h"   // `sz_intersect_best`
 #include "stringzilla/levenshtein.h" // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
 #include "stringzilla/overlap.h"     // `sz_overlap_engine_init`, `sz_overlap_scores`
 #include "stringzilla/substrings.h"  // `sz_substrings_engine_init`, `sz_substrings_find`

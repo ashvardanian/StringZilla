@@ -11,7 +11,7 @@
 //! - `std`: standard-library integration, such as `BuildSzHasher` for `HashMap`; without it the
 //!   crate is `no_std`.
 //! - `cuda`, `rocm`, `metal`: build the library through CMake with that GPU backend, so that
-//!   vendor's devices count and make a `Stream`, on which engines, `Sequence` tapes and
+//!   vendor's devices count and make a `Stream`, on which engines, `Tape` conversions and
 //!   `UnifiedAllocator` memory are built; without the feature those report `Status::MissingGpu`.
 //!
 //! Every call dispatches on

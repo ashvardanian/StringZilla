@@ -22,7 +22,7 @@
  *
  *  - @c sz_string_view_t - a C-style structure like @c std::string_view.
  *  - @c sz_allocator_t - a wrapper for memory-management functions.
- *  - @c sz_sequence_t - a wrapper to access strings forming a sequential container.
+ *  - @c sz_strings_view_t - an ordered collection of strings, as a tape or behind an accessor.
  *  - @c sz_byteset_t - a bitset for 256 possible byte values.
  */
 #if !defined(STRINGZILLA_TYPES_H_)
@@ -364,6 +364,7 @@
 #if STRINGZILLA_WITH_LIBC
 #include <stddef.h> // `size_t`
 #include <stdint.h> // `uint8_t`
+#include <string.h> // `memcpy`, `memmove`, `memset`
 #endif
 
 /*  The headers needed for the @c sz_assert_failure_ function. */
@@ -804,7 +805,49 @@ typedef sz_i64_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__I
 typedef sz_u32_t sz_size_t;  // ? Preferred over the `__SIZE_TYPE__` and `__UINTMAX_TYPE__` macros
 typedef sz_i32_t sz_ssize_t; // ? Preferred over the `__PTRDIFF_TYPE__` and `__INTMAX_TYPE__` macros
 #endif // STRINGZILLA_ARCH_64BIT_
+
+/*  Freestanding GCC and Clang still emit calls to these three, so every environment provides them.
+ *  Their length is the compiler's own @c size_t, which may differ from @c sz_size_t in spelling. */
+#if defined(__SIZE_TYPE__)
+void *memcpy(void *target, void const *source, __SIZE_TYPE__ length);
+void *memmove(void *target, void const *source, __SIZE_TYPE__ length);
+void *memset(void *target, int value, __SIZE_TYPE__ length);
+#else
+void *memcpy(void *target, void const *source, sz_size_t length);
+void *memmove(void *target, void const *source, sz_size_t length);
+void *memset(void *target, int value, sz_size_t length);
+#endif
 #endif // STRINGZILLA_WITH_LIBC
+
+/** Defines @c STRINGZILLA_NULL, analogous to @c NULL. The default often comes from locale.h,
+ *  stddef.h, stdio.h, stdlib.h, string.h, time.h, or wchar.h. */
+#if defined(__cplusplus)
+#define STRINGZILLA_NULL nullptr
+#define STRINGZILLA_NULL_CHAR nullptr
+#else
+#define STRINGZILLA_NULL ((void *)0)
+#define STRINGZILLA_NULL_CHAR ((char *)0)
+#endif
+
+#define STRINGZILLA_SIZE_MAX ((sz_size_t)(-1))
+#define STRINGZILLA_SSIZE_MAX ((sz_ssize_t)(STRINGZILLA_SIZE_MAX >> 1))
+#define STRINGZILLA_SSIZE_MIN ((sz_ssize_t)(-STRINGZILLA_SSIZE_MAX - 1))
+
+/** Default alignment policy for padding and allocation-size heuristics. */
+#if !defined(STRINGZILLA_DEFAULT_ALIGNMENT)
+#if defined(__s390x__)
+#define STRINGZILLA_DEFAULT_ALIGNMENT 256
+#elif STRINGZILLA_ARCH_WASM_
+#define STRINGZILLA_DEFAULT_ALIGNMENT 64
+#else
+#define STRINGZILLA_DEFAULT_ALIGNMENT 128
+#endif
+#endif
+#if STRINGZILLA_DEFAULT_ALIGNMENT < 64 || (STRINGZILLA_DEFAULT_ALIGNMENT & (STRINGZILLA_DEFAULT_ALIGNMENT - 1))
+#error "STRINGZILLA_DEFAULT_ALIGNMENT must be a power of two and at least 64 bytes"
+#endif
+
+enum { sz_default_alignment_k = STRINGZILLA_DEFAULT_ALIGNMENT };
 
 /** Compile-time assert akin to C++ @c static_assert. Uses the native assertion where available
  *  (C++11 @c static_assert, C11 @c _Static_assert); the older-C typedef fallback must sit at file
@@ -828,21 +871,19 @@ typedef char const *sz_cptr_t;              // A type alias for `char const *`
 typedef sz_i8_t sz_error_cost_t;            // Character mismatch cost for fuzzy matching functions
 typedef sz_u16_t sz_error_cost_magnitude_t; // The smallest type that can hold unsigned `abs(sz_error_cost_t {})`
 
-struct sz_hash_state_t;            // Forward declaration of a hash state structure
-struct sz_sha256_state_t;          // Forward declaration of a SHA256 hash state structure
-struct sz_aes256_key_t;            // Forward declaration of an AES-256 round-key schedule
-struct sz_aes256_gcm_key_t;        // Forward declaration of an AES-256-GCM key, schedule plus hash powers
-struct sz_aes256_gcm_state_t;      // Forward declaration of the payload both streaming directions share
-struct sz_aes256_gcm_encryptor_t;  // Forward declaration of an AES-256-GCM sealing state
-struct sz_aes256_gcm_decryptor_t;  // Forward declaration of an AES-256-GCM opening state
-struct sz_sequence_t;              // Forward declaration of an ordered collection of strings
-struct sz_substrings_match_t;      // Forward declaration of one located multi-pattern match
-struct sz_substrings_bm25_t;       // Forward declaration of BM25's continuous parameters
-struct sz_levenshtein_engine_t;    // Forward declaration of a batch of prepared Levenshtein queries
-struct sz_overlap_engine_t;        // Forward declaration of a forest of prepared overlap query trees
-struct sz_substrings_engine_t;     // Forward declaration of a compiled multi-pattern vocabulary
-typedef sz_size_t sz_sorted_idx_t; // Index of a sorted string in a list of strings
-typedef sz_size_t sz_pgram_t;      // "Pointer-sized N-gram" of a string
+struct sz_hash_state_t;           // Forward declaration of a hash state structure
+struct sz_sha256_state_t;         // Forward declaration of a SHA256 hash state structure
+struct sz_aes256_key_t;           // Forward declaration of an AES-256 round-key schedule
+struct sz_aes256_gcm_key_t;       // Forward declaration of an AES-256-GCM key, schedule plus hash powers
+struct sz_aes256_gcm_state_t;     // Forward declaration of the payload both streaming directions share
+struct sz_aes256_gcm_encryptor_t; // Forward declaration of an AES-256-GCM sealing state
+struct sz_aes256_gcm_decryptor_t; // Forward declaration of an AES-256-GCM opening state
+struct sz_substrings_match_t;     // Forward declaration of one located multi-pattern match
+struct sz_substrings_bm25_t;      // Forward declaration of BM25's continuous parameters
+struct sz_levenshtein_engine_t;   // Forward declaration of a batch of prepared Levenshtein queries
+struct sz_overlap_engine_t;       // Forward declaration of a forest of prepared overlap query trees
+struct sz_substrings_engine_t;    // Forward declaration of a compiled multi-pattern vocabulary
+typedef sz_size_t sz_pgram_t;     // "Pointer-sized N-gram" of a string
 
 /**
  *  @brief Simple boolean type, until @c _Bool in C 99 and @c true and @c false in C 23.
@@ -918,6 +959,10 @@ typedef enum sz_normal_form_t {
 
     /** Compatibility decomposition followed by canonical composition. */
     sz_normal_form_nfkc_k = 3,
+
+    /** NFKC with full case folding and without default-ignorable codepoints, recomposed to NFC:
+     *  the Unicode toNFKC_Casefold that caseless identifier and search matching rely on. */
+    sz_normal_form_nfkc_casefold_k = 4,
 } sz_normal_form_t;
 
 /** Which symbols a batch counts, as the alphabet picks the transpose and the mask layout alike. */
@@ -1165,19 +1210,24 @@ STRINGZILLA_CONSTEXPR void sz_byteset_invert(sz_byteset_t *s) {
 typedef void *sz_stream_t;
 
 typedef void *(*sz_allocate_t)(sz_size_t bytes, void *handle, sz_stream_t stream);
+typedef void *(*sz_reallocate_t)(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                 sz_stream_t stream);
 typedef void (*sz_free_t)(void *pointer, sz_size_t bytes, void *handle, sz_stream_t stream);
 
 /**
  *  @brief Some complex pattern matching algorithms may require memory allocations. This structure
  *      passes the memory allocator to those functions.
  *
- *  Both functions take the caller's stream, which on a GPU names the device a block is made on and
- *  the work a release waits behind; host allocators ignore it, and on the CPU it is null.
+ *  Every function takes the caller's stream, which on a GPU names the device a block is made on and
+ *  the work a release waits behind; host allocators ignore it, and on the CPU it is null. The
+ *  @c reallocate function keeps the first `min(old_bytes, new_bytes)` bytes, resizing the block
+ *  where it lies when it can and moving it otherwise; a null pointer makes it allocate.
  *
  *  @sa sz_allocator_init_arena, sz_allocator_init_unified_best
  */
 typedef struct sz_allocator_t {
     sz_allocate_t allocate;
+    sz_reallocate_t reallocate;
     sz_free_t free;
     void *handle;
 } sz_allocator_t;
@@ -1411,46 +1461,250 @@ sz_align_(64) static sz_u8_t const sz_popcount4_lut_[16] = {0, 1, 1, 2, 1, 2, 2,
 
 #pragma endregion
 
-#pragma region String Sequences API
+#pragma region String Collections API
 
-/** Signature of @c sz_sequence_t::get_start, returning the start of the string at an index. */
-typedef sz_cptr_t (*sz_sequence_member_start_t)(void const *, sz_sorted_idx_t);
+/** Signature of the @c sz_strings_view_t accessor, writing the view of every string `indices[i]`.
+ *  Kernels call it once per block of up to 64 indices, and it must accept any @c count. */
+typedef void (*sz_strings_get_t)(void const *handle, sz_size_t const *indices, sz_size_t count,
+                                 sz_string_view_t *views);
 
-/** Signature of @c sz_sequence_t::get_length, returning the length of the string at an index. */
-typedef sz_size_t (*sz_sequence_member_length_t)(void const *, sz_sorted_idx_t);
+/** How a collection holds its strings, naming the member of its @c data union to read. */
+typedef enum sz_strings_layout_t {
+
+    /** Apache Arrow @c String, where string i spans `[offsets[i], offsets[i + 1])` of the bytes. */
+    sz_strings_u32_tape_k = 0,
+
+    /** Apache Arrow @c LargeString, the same with 64-bit offsets. */
+    sz_strings_u64_tape_k = 1,
+
+    /** Strings found through a @c sz_strings_get_t accessor, which only the host can call. */
+    sz_strings_accessor_k = 2,
+} sz_strings_layout_t;
 
 /**
- *  @brief Structure to represent an ordered collection of strings, in whatever layout.
+ *  @brief A read-only, ordered collection of borrowed strings, in one of three layouts.
  *
- *  It can be easily combined with Apache Arrow and its tape-like concatenated strings.
+ *  Tapes are what Apache Arrow, the Python @c Strs class and GPU kernels read directly. The
+ *  accessor covers every other shape, from arrays of views to the nodes of a parsed tree, at one
+ *  indirect call per block of strings. A slice of a tape keeps its parent's offsets, so its first
+ *  offset may be above zero.
  *
- *  @sa sz_sequence_from_null_terminated_strings
+ *  @sa sz_strings_from_string_views, sz_strings_from_records, sz_strings_from_span
  */
-typedef struct sz_sequence_t {
-    void const *handle;
+typedef struct sz_strings_view_t {
+
+    /** Which member of @c data describes the strings. */
+    sz_strings_layout_t layout;
+
+    /** Number of strings. */
     sz_size_t count;
-    sz_sequence_member_start_t get_start;
-    sz_sequence_member_length_t get_length;
-} sz_sequence_t;
+
+    /** The description of the strings, read through the member that @c layout names. */
+    union {
+
+        /** The accessor of a @c sz_strings_accessor_k collection. */
+        struct {
+
+            /** Writes the views of the requested strings. */
+            sz_strings_get_t get;
+
+            /** The state @c get reads, like an array of views. */
+            void const *handle;
+        } accessor;
+
+        /** The tape of a @c sz_strings_u32_tape_k collection. */
+        struct {
+
+            /** The bytes of every string, back to back. */
+            sz_cptr_t data;
+
+            /** Offsets into @c data, one per string and one past the end of the last string. */
+            sz_u32_t const *offsets;
+        } u32_tape;
+
+        /** The tape of a @c sz_strings_u64_tape_k collection. */
+        struct {
+
+            /** The bytes of every string, back to back. */
+            sz_cptr_t data;
+
+            /** Offsets into @c data, one per string and one past the end of the last string. */
+            sz_u64_t const *offsets;
+        } u64_tape;
+    } data;
+} sz_strings_view_t;
 
 /**
- *  @brief Initiates the sequence structure from a typical C-style strings array, like `char *[]`.
- *  @param[in] start Pointer to the array of strings.
+ *  @brief A writable tape, the output of every collection conversion, in place or not.
+ *
+ *  Its payload and offsets are two blocks of exactly the sizes they need, so both sizes follow from
+ *  the offsets, which the host can always read. A zeroed span is an empty tape holding no blocks.
+ */
+typedef struct sz_strings_span_t {
+
+    /** Either @c sz_strings_u32_tape_k or @c sz_strings_u64_tape_k, never the accessor. */
+    sz_strings_layout_t layout;
+
+    /** Number of strings. */
+    sz_size_t count;
+
+    /** The tape, read through the member that @c layout names. */
+    union {
+
+        /** The tape of a @c sz_strings_u32_tape_k span. */
+        struct {
+
+            /** The bytes of every string, back to back. */
+            sz_ptr_t data;
+
+            /** Offsets into @c data, one per string and one past the end of the last string. */
+            sz_u32_t *offsets;
+        } u32_tape;
+
+        /** The tape of a @c sz_strings_u64_tape_k span. */
+        struct {
+
+            /** The bytes of every string, back to back. */
+            sz_ptr_t data;
+
+            /** Offsets into @c data, one per string and one past the end of the last string. */
+            sz_u64_t *offsets;
+        } u64_tape;
+    } data;
+} sz_strings_span_t;
+
+/** Where every record of an array keeps its string, the handle of @c sz_strings_from_records and
+ *  @c sz_strings_from_record_pointers. */
+typedef struct sz_strings_crecords_t {
+
+    /** The first record, or the first pointer to a record. */
+    void const *records;
+
+    /** Bytes between consecutive records, or between consecutive record pointers. */
+    sz_size_t stride;
+
+    /** Byte offset of the @c sz_cptr_t member pointing at the string inside a record. */
+    sz_size_t start_member;
+
+    /** Byte offset of the @c sz_size_t member holding the string length inside a record. */
+    sz_size_t length_member;
+} sz_strings_crecords_t;
+
+/** Read-only NUL-padded rows, like NumPy @c S arrays or @c char fields of structs, each string
+ *  ending before its row's trailing NUL bytes. */
+typedef struct sz_strings_crows_t {
+
+    /** The first row. */
+    sz_cptr_t data;
+
+    /** Bytes between the starts of consecutive rows, at least @c width. */
+    sz_size_t stride;
+
+    /** Bytes in every row. */
+    sz_size_t width;
+} sz_strings_crows_t;
+
+/** Writable NUL-padded rows, laid out like @c sz_strings_crows_t. */
+typedef struct sz_strings_rows_t {
+
+    /** The first row. */
+    sz_ptr_t data;
+
+    /** Bytes between the starts of consecutive rows, at least @c width. */
+    sz_size_t stride;
+
+    /** Bytes in every row. */
+    sz_size_t width;
+} sz_strings_rows_t;
+
+/**
+ *  @brief Describes an array of NUL-terminated strings, like `char const *argv[]`.
+ *  @param[in] start The array of strings, which must outlive @p strings.
  *  @param[in] count Number of strings in the array.
- *  @param[out] sequence Sequence structure to initialize.
+ *  @param[out] strings The accessor-backed collection to initialize.
  */
-STRINGZILLA_INLINE void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
-                                                                 sz_sequence_t *sequence);
+STRINGZILLA_INLINE void sz_strings_from_null_terminated_strings(sz_cptr_t const *start, sz_size_t count,
+                                                                sz_strings_view_t *strings);
 
 /**
- *  @brief Initiates the sequence structure from an array of pointer-length pairs, like
- *      `sz_string_view_t[]`.
- *  @param[in] views Pointer to the array of views, which must outlive @p sequence.
+ *  @brief Describes an array of pointer-length pairs, like Python's fragmented @c Strs.
+ *  @param[in] views The array of views, which must outlive @p strings.
  *  @param[in] count Number of views in the array.
- *  @param[out] sequence Sequence structure to initialize.
+ *  @param[out] strings The accessor-backed collection to initialize.
  */
-STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
-                                                      sz_sequence_t *sequence);
+STRINGZILLA_INLINE void sz_strings_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                     sz_strings_view_t *strings);
+
+/**
+ *  @brief Describes the string members of fixed-stride records, like an array of structs that each
+ *      hold a pointer and a length.
+ *  @param[in] records Where the members sit, which must outlive @p strings.
+ *  @param[in] count Number of records.
+ *  @param[out] strings The accessor-backed collection to initialize.
+ */
+STRINGZILLA_INLINE void sz_strings_from_records(sz_strings_crecords_t const *records, sz_size_t count,
+                                                sz_strings_view_t *strings);
+
+/**
+ *  @brief Describes the string members of records reached through an array of pointers, like the
+ *      nodes a query over a parsed tree returns.
+ *  @param[in] records Where the pointers and members sit, which must outlive @p strings.
+ *  @param[in] count Number of record pointers.
+ *  @param[out] strings The accessor-backed collection to initialize.
+ */
+STRINGZILLA_INLINE void sz_strings_from_record_pointers(sz_strings_crecords_t const *records, sz_size_t count,
+                                                        sz_strings_view_t *strings);
+
+/**
+ *  @brief Describes NUL-padded rows, trimming the trailing NUL bytes of every row.
+ *  @param[in] rows Where the rows sit, which must outlive @p strings.
+ *  @param[in] count Number of rows.
+ *  @param[out] strings The accessor-backed collection to initialize.
+ */
+STRINGZILLA_INLINE void sz_strings_from_rows(sz_strings_crows_t const *rows, sz_size_t count,
+                                             sz_strings_view_t *strings);
+
+/**
+ *  @brief Selects the @p count strings at `start + i * step`, copying no string bytes.
+ *
+ *  A step of one over a tape yields a tape over the same bytes and offsets, leaving @p views
+ *  untouched. Every other selection fills @p views and points the accessor of @p slice at them.
+ *
+ *  @param[in] strings The collection to slice, which must outlive @p slice.
+ *  @param[in] start Index of the first selected string.
+ *  @param[in] step Distance between selected indices, negative to walk backward.
+ *  @param[in] count Number of strings to select.
+ *  @param[out] views Room for @p count views, or null for a step of one over a tape.
+ *  @param[out] slice The selected strings.
+ */
+STRINGZILLA_INLINE void sz_strings_slice(sz_strings_view_t const *strings, sz_size_t start, sz_ssize_t step,
+                                         sz_size_t count, sz_string_view_t *views, sz_strings_view_t *slice);
+
+/**
+ *  @brief Reorders @p strings by the order @c sz_sort_order_best emits, copying no bytes.
+ *  @param[in] strings The collection to reorder, which must outlive @p permuted.
+ *  @param[in] order Indices into @p strings, possibly fewer than all of them.
+ *  @param[in] count Number of indices in @p order.
+ *  @param[out] views Receives the view of `strings[order[i]]` for each index.
+ *  @param[out] permuted Points its accessor at @p views.
+ */
+STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                           sz_string_view_t *views, sz_strings_view_t *permuted);
+
+/**
+ *  @brief Views the tape of @p span, so the output of one conversion can feed the next.
+ *  @param[in] span The writable tape to read, which must outlive @p strings.
+ *  @param[out] strings The read-only collection to initialize.
+ */
+STRINGZILLA_INLINE void sz_strings_from_span(sz_strings_span_t const *span, sz_strings_view_t *strings);
+
+/**
+ *  @brief Returns both blocks of @p span to the @p allocator they came from, leaving it zeroed.
+ *  @param[inout] span The tape to release, whose offsets the host reads to size both blocks.
+ *  @param[in] allocator The allocator both blocks came from.
+ *  @param[in] stream Null on the CPU, or the GPU stream the release waits behind.
+ */
+STRINGZILLA_INLINE void sz_strings_span_free(sz_strings_span_t *span, sz_allocator_t *allocator, sz_stream_t stream);
 
 #pragma endregion
 
@@ -1476,36 +1730,6 @@ STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *vi
 #else
 #define sz_bitcast_(type, value) (*((type *)&(value)))
 #endif
-
-/** Defines @c STRINGZILLA_NULL, analogous to @c NULL. The default often comes from locale.h,
- *  stddef.h, stdio.h, stdlib.h, string.h, time.h, or wchar.h. */
-#if defined(__cplusplus)
-#define STRINGZILLA_NULL nullptr
-#define STRINGZILLA_NULL_CHAR nullptr
-#else
-#define STRINGZILLA_NULL ((void *)0)
-#define STRINGZILLA_NULL_CHAR ((char *)0)
-#endif
-
-/** Default alignment policy for padding and allocation-size heuristics. */
-#if !defined(STRINGZILLA_DEFAULT_ALIGNMENT)
-#if defined(__s390x__)
-#define STRINGZILLA_DEFAULT_ALIGNMENT 256
-#elif STRINGZILLA_ARCH_WASM_
-#define STRINGZILLA_DEFAULT_ALIGNMENT 64
-#else
-#define STRINGZILLA_DEFAULT_ALIGNMENT 128
-#endif
-#endif
-#if STRINGZILLA_DEFAULT_ALIGNMENT < 64 || (STRINGZILLA_DEFAULT_ALIGNMENT & (STRINGZILLA_DEFAULT_ALIGNMENT - 1))
-#error "STRINGZILLA_DEFAULT_ALIGNMENT must be a power of two and at least 64 bytes"
-#endif
-
-enum { sz_default_alignment_k = STRINGZILLA_DEFAULT_ALIGNMENT };
-
-#define STRINGZILLA_SIZE_MAX ((sz_size_t)(-1))
-#define STRINGZILLA_SSIZE_MAX ((sz_ssize_t)(STRINGZILLA_SIZE_MAX >> 1))
-#define STRINGZILLA_SSIZE_MIN ((sz_ssize_t)(-STRINGZILLA_SSIZE_MAX - 1))
 
 STRINGZILLA_CONSTEXPR sz_size_t sz_size_max_(void) { return STRINGZILLA_SIZE_MAX; }
 STRINGZILLA_CONSTEXPR sz_ssize_t sz_ssize_max_(void) { return STRINGZILLA_SSIZE_MAX; }
@@ -2091,6 +2315,25 @@ STRINGZILLA_CONSTEXPR void sz_free_arena_(void *start, sz_size_t length, void *h
     sz_unused_(start && length && handle && stream);
 }
 
+/** Resizes the arena's last block where it lies, and moves any other block into a new one. */
+STRINGZILLA_CONSTEXPR void *sz_reallocate_arena_(void *start, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                                 sz_stream_t stream) {
+    sz_arena_t_ *metadata = (sz_arena_t_ *)handle;
+    if (!start) return sz_allocate_arena_(new_bytes, handle, stream);
+    sz_size_t const start_offset = (sz_size_t)((sz_ptr_t)start - (sz_ptr_t)handle);
+    if (start_offset + old_bytes == metadata->consumed) {
+        if (new_bytes > metadata->capacity - start_offset) return STRINGZILLA_NULL;
+        metadata->consumed = start_offset + new_bytes;
+        return start;
+    }
+    sz_ptr_t const moved = (sz_ptr_t)sz_allocate_arena_(new_bytes, handle, stream);
+    if (!moved) return STRINGZILLA_NULL;
+    sz_cptr_t const kept = (sz_cptr_t)start;
+    for (sz_size_t byte_index = 0; byte_index != sz_min_of_two(old_bytes, new_bytes); ++byte_index)
+        moved[byte_index] = kept[byte_index];
+    return moved;
+}
+
 #if defined(__GNUC__)
 #pragma GCC visibility pop
 #endif
@@ -2111,12 +2354,22 @@ STRINGZILLA_INLINE void sz_free_heap_(void *start, sz_size_t length, void *handl
     sz_unused_(handle && length && stream);
     free(start);
 }
+STRINGZILLA_INLINE void *sz_reallocate_heap_(void *start, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                             sz_stream_t stream) {
+    sz_unused_(handle && old_bytes && stream);
+    if (new_bytes == 0) {
+        free(start);
+        return STRINGZILLA_NULL;
+    }
+    return realloc(start, new_bytes);
+}
 
 #endif
 
 STRINGZILLA_INLINE sz_status_t sz_allocator_init_heap(sz_allocator_t *allocator) {
 #if STRINGZILLA_WITH_LIBC
     allocator->allocate = sz_allocate_heap_;
+    allocator->reallocate = sz_reallocate_heap_;
     allocator->free = sz_free_heap_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
@@ -2138,6 +2391,7 @@ STRINGZILLA_INLINE sz_status_t sz_allocator_init_arena(sz_allocator_t *allocator
     metadata->consumed = sizeof(sz_arena_t_);
     metadata->alignment = alignment;
     allocator->allocate = sz_allocate_arena_;
+    allocator->reallocate = sz_reallocate_arena_;
     allocator->free = sz_free_arena_;
     allocator->handle = metadata;
     return sz_success_k;
@@ -2147,65 +2401,185 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_allocator_equal(sz_allocator_t const *a, sz_a
     if (!a || !b) return sz_false_k;
 
     // Two allocators are considered equal if they have the same function pointers and handle
-    return (a->allocate == b->allocate) && (a->free == b->free) && (a->handle == b->handle) ? sz_true_k : sz_false_k;
+    return (a->allocate == b->allocate) && (a->reallocate == b->reallocate) && (a->free == b->free) &&
+                   (a->handle == b->handle)
+               ? sz_true_k
+               : sz_false_k;
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_sequence_from_null_terminated_strings_get_start_(void const *handle, sz_size_t i) {
-    sz_cptr_t const *start = (sz_cptr_t const *)handle;
-    return start[i];
+/** Writes the views of the strings @p indices of @p strings, in any of its three layouts. */
+STRINGZILLA_INLINE void sz_strings_get_(sz_strings_view_t const *strings, sz_size_t const *indices, sz_size_t count,
+                                        sz_string_view_t *views) {
+    switch (strings->layout) {
+    case sz_strings_accessor_k: strings->data.accessor.get(strings->data.accessor.handle, indices, count, views); break;
+    case sz_strings_u32_tape_k:
+        for (sz_size_t position = 0; position != count; ++position) {
+            sz_u32_t const *offsets = strings->data.u32_tape.offsets + indices[position];
+            views[position].start = strings->data.u32_tape.data + offsets[0];
+            views[position].length = offsets[1] - offsets[0];
+        }
+        break;
+    case sz_strings_u64_tape_k:
+        for (sz_size_t position = 0; position != count; ++position) {
+            sz_u64_t const *offsets = strings->data.u64_tape.offsets + indices[position];
+            views[position].start = strings->data.u64_tape.data + offsets[0];
+            views[position].length = (sz_size_t)(offsets[1] - offsets[0]);
+        }
+        break;
+    }
 }
 
-STRINGZILLA_INLINE sz_size_t sz_sequence_from_null_terminated_strings_get_length_(void const *handle, sz_size_t i) {
-    sz_cptr_t const *start = (sz_cptr_t const *)handle;
-    sz_size_t length = 0;
-    for (sz_cptr_t ptr = start[i]; *ptr; ptr++) length++;
-    return length;
+/** Writes the views of up to 64 strings of @p strings from @p start on, returning how many. */
+STRINGZILLA_INLINE sz_size_t sz_strings_get_block_(sz_strings_view_t const *strings, sz_size_t start,
+                                                   sz_string_view_t *views) {
+    sz_size_t const count = sz_min_of_two(strings->count - start, (sz_size_t)64);
+    sz_size_t indices[64];
+    for (sz_size_t position = 0; position != count; ++position) indices[position] = start + position;
+    sz_strings_get_(strings, indices, count, views);
+    return count;
 }
 
-STRINGZILLA_INLINE void sz_sequence_from_null_terminated_strings(sz_cptr_t *start, sz_size_t count,
-                                                                 sz_sequence_t *sequence) {
-    sequence->handle = start;
-    sequence->count = count;
-    sequence->get_start = sz_sequence_from_null_terminated_strings_get_start_;
-    sequence->get_length = sz_sequence_from_null_terminated_strings_get_length_;
+STRINGZILLA_INLINE void sz_strings_from_null_terminated_strings_get_(void const *handle, sz_size_t const *indices,
+                                                                     sz_size_t count, sz_string_view_t *views) {
+    sz_cptr_t const *starts = (sz_cptr_t const *)handle;
+    for (sz_size_t position = 0; position != count; ++position) {
+        sz_cptr_t const start = starts[indices[position]];
+        sz_size_t length = 0;
+        while (start[length]) ++length;
+        views[position].start = start;
+        views[position].length = length;
+    }
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_sequence_from_string_views_get_start_(void const *handle, sz_size_t i) {
-    sz_string_view_t const *views = (sz_string_view_t const *)handle;
-    return views[i].start;
+STRINGZILLA_INLINE void sz_strings_from_string_views_get_(void const *handle, sz_size_t const *indices, sz_size_t count,
+                                                          sz_string_view_t *views) {
+    sz_string_view_t const *source_views = (sz_string_view_t const *)handle;
+    for (sz_size_t position = 0; position != count; ++position) views[position] = source_views[indices[position]];
 }
 
-STRINGZILLA_INLINE sz_size_t sz_sequence_from_string_views_get_length_(void const *handle, sz_size_t i) {
-    sz_string_view_t const *views = (sz_string_view_t const *)handle;
-    return views[i].length;
+STRINGZILLA_INLINE void sz_strings_from_records_get_(void const *handle, sz_size_t const *indices, sz_size_t count,
+                                                     sz_string_view_t *views) {
+    sz_strings_crecords_t const *records = (sz_strings_crecords_t const *)handle;
+    for (sz_size_t position = 0; position != count; ++position) {
+        sz_cptr_t const record = (sz_cptr_t)records->records + indices[position] * records->stride;
+        views[position].start = *(sz_cptr_t const *)(record + records->start_member);
+        views[position].length = *(sz_size_t const *)(record + records->length_member);
+    }
 }
 
-STRINGZILLA_INLINE void sz_sequence_from_string_views(sz_string_view_t const *views, sz_size_t count,
-                                                      sz_sequence_t *sequence) {
-    sequence->handle = views;
-    sequence->count = count;
-    sequence->get_start = sz_sequence_from_string_views_get_start_;
-    sequence->get_length = sz_sequence_from_string_views_get_length_;
+STRINGZILLA_INLINE void sz_strings_from_record_pointers_get_(void const *handle, sz_size_t const *indices,
+                                                             sz_size_t count, sz_string_view_t *views) {
+    sz_strings_crecords_t const *records = (sz_strings_crecords_t const *)handle;
+    for (sz_size_t position = 0; position != count; ++position) {
+        sz_cptr_t const record = *(sz_cptr_t const *)((sz_cptr_t)records->records +
+                                                      indices[position] * records->stride);
+        views[position].start = *(sz_cptr_t const *)(record + records->start_member);
+        views[position].length = *(sz_size_t const *)(record + records->length_member);
+    }
 }
 
-/** Reads one string out of a tape: one block of count + 1 @c sz_u64_t offsets from the block's own
- *  start, then the bytes, string @p i spanning `[offsets[i], offsets[i + 1])`. Exported once, so
- *  every unit of the library knows a tape by this one address. */
-STRINGZILLA_API sz_cptr_t sz_sequence_tape_start(void const *handle, sz_size_t i);
-
-/** Reads one length out of a tape, laid out as @ref sz_sequence_tape_start reads it. */
-STRINGZILLA_API sz_size_t sz_sequence_tape_length(void const *handle, sz_size_t i);
-
-#if STRINGZILLA_HEADER_ONLY
-STRINGZILLA_API sz_cptr_t sz_sequence_tape_start(void const *handle, sz_size_t i) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_cptr_t)handle + offsets[i];
+STRINGZILLA_INLINE void sz_strings_from_rows_get_(void const *handle, sz_size_t const *indices, sz_size_t count,
+                                                  sz_string_view_t *views) {
+    sz_strings_crows_t const *rows = (sz_strings_crows_t const *)handle;
+    for (sz_size_t position = 0; position != count; ++position) {
+        sz_cptr_t const row = rows->data + indices[position] * rows->stride;
+        sz_size_t length = rows->width;
+        while (length && !row[length - 1]) --length;
+        views[position].start = row;
+        views[position].length = length;
+    }
 }
-STRINGZILLA_API sz_size_t sz_sequence_tape_length(void const *handle, sz_size_t i) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_size_t)(offsets[i + 1] - offsets[i]);
+
+STRINGZILLA_INLINE void sz_strings_from_null_terminated_strings(sz_cptr_t const *start, sz_size_t count,
+                                                                sz_strings_view_t *strings) {
+    strings->layout = sz_strings_accessor_k;
+    strings->count = count;
+    strings->data.accessor.get = sz_strings_from_null_terminated_strings_get_;
+    strings->data.accessor.handle = start;
 }
-#endif
+
+STRINGZILLA_INLINE void sz_strings_from_string_views(sz_string_view_t const *views, sz_size_t count,
+                                                     sz_strings_view_t *strings) {
+    strings->layout = sz_strings_accessor_k;
+    strings->count = count;
+    strings->data.accessor.get = sz_strings_from_string_views_get_;
+    strings->data.accessor.handle = views;
+}
+
+STRINGZILLA_INLINE void sz_strings_from_records(sz_strings_crecords_t const *records, sz_size_t count,
+                                                sz_strings_view_t *strings) {
+    strings->layout = sz_strings_accessor_k;
+    strings->count = count;
+    strings->data.accessor.get = sz_strings_from_records_get_;
+    strings->data.accessor.handle = records;
+}
+
+STRINGZILLA_INLINE void sz_strings_from_record_pointers(sz_strings_crecords_t const *records, sz_size_t count,
+                                                        sz_strings_view_t *strings) {
+    strings->layout = sz_strings_accessor_k;
+    strings->count = count;
+    strings->data.accessor.get = sz_strings_from_record_pointers_get_;
+    strings->data.accessor.handle = records;
+}
+
+STRINGZILLA_INLINE void sz_strings_from_rows(sz_strings_crows_t const *rows, sz_size_t count,
+                                             sz_strings_view_t *strings) {
+    strings->layout = sz_strings_accessor_k;
+    strings->count = count;
+    strings->data.accessor.get = sz_strings_from_rows_get_;
+    strings->data.accessor.handle = rows;
+}
+
+STRINGZILLA_INLINE void sz_strings_slice(sz_strings_view_t const *strings, sz_size_t start, sz_ssize_t step,
+                                         sz_size_t count, sz_string_view_t *views, sz_strings_view_t *slice) {
+    if (step == 1 && strings->layout != sz_strings_accessor_k) {
+        *slice = *strings;
+        slice->count = count;
+        if (strings->layout == sz_strings_u32_tape_k) slice->data.u32_tape.offsets += start;
+        else slice->data.u64_tape.offsets += start;
+        return;
+    }
+    sz_size_t indices[64];
+    for (sz_size_t block_start = 0; block_start < count; block_start += 64) {
+        sz_size_t const block_count = sz_min_of_two(count - block_start, (sz_size_t)64);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            indices[position] = (sz_size_t)((sz_ssize_t)start + (sz_ssize_t)(block_start + position) * step);
+        sz_strings_get_(strings, indices, block_count, views + block_start);
+    }
+    sz_strings_from_string_views(views, count, slice);
+}
+
+STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                           sz_string_view_t *views, sz_strings_view_t *permuted) {
+    sz_strings_get_(strings, order, count, views);
+    sz_strings_from_string_views(views, count, permuted);
+}
+
+STRINGZILLA_INLINE void sz_strings_from_span(sz_strings_span_t const *span, sz_strings_view_t *strings) {
+    strings->layout = span->layout;
+    strings->count = span->count;
+    if (span->layout == sz_strings_u64_tape_k)
+        strings->data.u64_tape.data = span->data.u64_tape.data,
+        strings->data.u64_tape.offsets = span->data.u64_tape.offsets;
+    else
+        strings->data.u32_tape.data = span->data.u32_tape.data,
+        strings->data.u32_tape.offsets = span->data.u32_tape.offsets;
+}
+
+STRINGZILLA_INLINE void sz_strings_span_free(sz_strings_span_t *span, sz_allocator_t *allocator, sz_stream_t stream) {
+    if (span->layout == sz_strings_u32_tape_k && span->data.u32_tape.offsets) {
+        sz_u32_t *const offsets = span->data.u32_tape.offsets;
+        allocator->free(span->data.u32_tape.data, offsets[span->count], allocator->handle, stream);
+        allocator->free(offsets, (span->count + 1) * sizeof(sz_u32_t), allocator->handle, stream);
+    }
+    else if (span->layout == sz_strings_u64_tape_k && span->data.u64_tape.offsets) {
+        sz_u64_t *const offsets = span->data.u64_tape.offsets;
+        allocator->free(span->data.u64_tape.data, (sz_size_t)offsets[span->count], allocator->handle, stream);
+        allocator->free(offsets, (span->count + 1) * sizeof(sz_u64_t), allocator->handle, stream);
+    }
+    span->layout = sz_strings_u32_tape_k, span->count = 0;
+    span->data.u32_tape.data = STRINGZILLA_NULL, span->data.u32_tape.offsets = STRINGZILLA_NULL;
+}
 
 #pragma endregion
 

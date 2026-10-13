@@ -1095,13 +1095,16 @@ STRINGZILLA_API sz_status_t sz_sha256_multistate_digest_serial(sz_sha256_state_t
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                               sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_serial(sz_sha256_state_t *states,
+                                                               sz_strings_view_t const *texts, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_size_t const lanes_count = texts->count;
-    for (sz_size_t lane_index = 0; lane_index != lanes_count; ++lane_index)
-        sz_sha256_state_update_serial_(&states[lane_index], texts->get_start(texts->handle, lane_index),
-                                       texts->get_length(texts->handle, lane_index));
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < texts->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(texts, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            sz_sha256_state_update_serial_(&states[block_start + position], views[position].start,
+                                           views[position].length);
+    }
     return sz_success_k;
 }
 

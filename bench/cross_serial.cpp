@@ -39,11 +39,9 @@ void bench_cross_serial(environment_t &env) {
                                                                                                             "serial");
     bench_equal_kernels<sz_equal_serial>(env, "serial");
     bench_order_kernels<sz_order_serial>(env, "serial");
-    bench_copy_kernels<sz_copy_serial>(env, "serial");
-    bench_move_kernels<sz_move_serial>(env, "serial");
-    bench_fill_kernels<sz_fill_serial>(env, "serial");
     bench_fill_random_kernels<sz_fill_random_serial>(env, "serial");
-    bench_lookup_kernels<sz_lookup_serial>(env, "serial");
+    bench_strings_kernels<sz_strings_to_tape_serial, sz_strings_escape_serial, sz_strings_unescape_serial,
+                          sz_strings_lookup_serial, sz_strings_normalize_serial>(env, "serial");
     bench_aes256_ctr_kernels<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial>(env, "serial");
     bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial>(env, "serial");
     bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,
@@ -51,8 +49,8 @@ void bench_cross_serial(environment_t &env) {
         env, "serial");
     bench_map_kernels<sz_order_serial>(env, "serial");
     bench_unordered_map_kernels<sz_hash_serial, sz_equal_serial>(env, "serial", "serial");
-    bench_sequence_argsort_kernels<sz_sequence_argsort_serial, sz_sequence_argsort_uncased_serial>(env, "serial");
-    bench_sequence_intersect_kernels<sz_sequence_intersect_serial>(env, "serial");
+    bench_sort_order_kernels<sz_sort_order_serial, sz_sort_uncased_order_serial>(env, "serial");
+    bench_intersect_kernels<sz_intersect_serial>(env, "serial");
     bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>(
         env, "serial", sz_levenshtein_bytes_k);
     bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_serial, sz_levenshtein_distances_serial>(

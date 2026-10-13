@@ -294,6 +294,8 @@ class StringZillaTest {
         byte[] dst = new byte[src.length];
         StringZilla.lookup(dst, src, lut);
         assertArrayEquals(new byte[] {2, 3, 4, (byte) 255}, dst);
+        StringZilla.lookup(dst, dst, lut); // in place
+        assertArrayEquals(new byte[] {3, 4, 5, 0}, dst);
     }
 
     // endregion
@@ -326,6 +328,11 @@ class StringZillaTest {
     void normalize_nfkc_expandsCompatibilityLigature() {
         byte[] ligature = {(byte) 0xEF, (byte) 0xAC, (byte) 0x81}; // U+FB01 LATIN SMALL LIGATURE FI
         assertArrayEquals(new byte[] {'f', 'i'}, StringZilla.normalize(ligature, StringZilla.NormalForm.NFKC));
+    }
+
+    @Test
+    void normalize_nfkcCasefold_foldsCase() {
+        assertArrayEquals(b("strasse"), StringZilla.normalize(b("Straße"), StringZilla.NormalForm.NFKC_CASEFOLD));
     }
 
     @Test
@@ -391,6 +398,23 @@ class StringZillaTest {
         int count = StringZilla.argSort(text, starts, lengths, order, false, 0, false);
         assertEquals(3, count);
         assertArrayEquals(new long[] {1, 0, 2}, order); // apple, banana, cherry
+    }
+
+    @Test
+    void argSort_bufferSegmentsMatchSortedCopies() {
+        // More segments than the 64 the native side reads per accessor upcall.
+        var words = new java.util.ArrayList<byte[]>();
+        for (int i = 0; i < 100; i++) words.add(b(Integer.toString((i * 37) % 100)));
+        var text = new java.io.ByteArrayOutputStream();
+        long[] starts = new long[words.size()], lengths = new long[words.size()];
+        for (int i = 0; i < words.size(); i++) {
+            starts[i] = text.size();
+            lengths[i] = words.get(i).length;
+            text.writeBytes(words.get(i));
+        }
+        long[] order = new long[words.size()];
+        assertEquals(words.size(), StringZilla.argSort(text.toByteArray(), starts, lengths, order, false, 0, false));
+        assertArrayEquals(StringZilla.argSort(words), order);
     }
 
     @Test

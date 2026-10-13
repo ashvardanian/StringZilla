@@ -25,7 +25,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_westmere, sz_aes256_gcm_encryptor_init_westmere,
                                         sz_aes256_gcm_encryptor_update_westmere,
                                         sz_aes256_gcm_encryptor_digest_westmere>(env, "westmere");
-        bench_sequence_intersect_kernels<sz_sequence_intersect_westmere>(env, "westmere");
+        bench_intersect_kernels<sz_intersect_westmere>(env, "westmere");
     }
 #endif // STRINGZILLA_TARGET_WESTMERE
 #if STRINGZILLA_TARGET_GOLDMONT
@@ -61,18 +61,15 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
             env, "haswell");
         bench_equal_kernels<sz_equal_haswell>(env, "haswell");
         bench_order_kernels<sz_order_haswell>(env, "haswell");
-        bench_copy_kernels<sz_copy_haswell>(env, "haswell");
-        bench_move_kernels<sz_move_haswell>(env, "haswell");
-        bench_fill_kernels<sz_fill_haswell>(env, "haswell");
-        bench_lookup_kernels<sz_lookup_haswell>(env, "haswell");
+        bench_strings_kernels<sz_strings_to_tape_haswell, sz_strings_escape_haswell, sz_strings_unescape_haswell,
+                              sz_strings_lookup_haswell, sz_strings_normalize_haswell>(env, "haswell");
         bench_map_kernels<sz_order_haswell>(env, "haswell");
 #if STRINGZILLA_TARGET_WESTMERE
         // Haswell equality pairs with Westmere hashing, which also requires AES-NI.
         if (env.machine.detected & sz_cap_westmere_k)
             bench_unordered_map_kernels<sz_hash_westmere, sz_equal_haswell>(env, "westmere", "haswell");
 #endif
-        bench_sequence_argsort_kernels<sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell>(env,
-                                                                                                         "haswell");
+        bench_sort_order_kernels<sz_sort_order_haswell, sz_sort_uncased_order_haswell>(env, "haswell");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_haswell, sz_levenshtein_distances_haswell>(
             env, "haswell", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_haswell, sz_levenshtein_distances_haswell>(
@@ -97,14 +94,10 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
             env, "skylake");
         bench_equal_kernels<sz_equal_skylake>(env, "skylake");
         bench_order_kernels<sz_order_skylake>(env, "skylake");
-        bench_copy_kernels<sz_copy_skylake>(env, "skylake");
-        bench_move_kernels<sz_move_skylake>(env, "skylake");
-        bench_fill_kernels<sz_fill_skylake>(env, "skylake");
         bench_fill_random_kernels<sz_fill_random_skylake>(env, "skylake");
         bench_map_kernels<sz_order_skylake>(env, "skylake");
         bench_unordered_map_kernels<sz_hash_skylake, sz_equal_skylake>(env, "skylake", "skylake");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake>(env,
-                                                                                                         "skylake");
+        bench_sort_order_kernels<sz_sort_order_skylake, sz_sort_uncased_order_skylake>(env, "skylake");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_skylake, sz_levenshtein_distances_skylake>(
             env, "skylake", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_skylake, sz_levenshtein_distances_skylake>(
@@ -136,13 +129,14 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_hash_stream_kernels<sz_hash_state_init_icelake, sz_hash_state_update_icelake,
                                   sz_hash_state_digest_icelake>(env, "icelake");
         bench_fill_random_kernels<sz_fill_random_icelake>(env, "icelake");
-        bench_lookup_kernels<sz_lookup_icelake>(env, "icelake");
+        bench_strings_kernels<sz_strings_to_tape_icelake, sz_strings_escape_icelake, sz_strings_unescape_icelake,
+                              sz_strings_lookup_icelake, sz_strings_normalize_icelake>(env, "icelake");
         bench_aes256_ctr_kernels<sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake>(env, "icelake");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake>(env, "icelake");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encryptor_init_icelake,
                                         sz_aes256_gcm_encryptor_update_icelake, sz_aes256_gcm_encryptor_digest_icelake>(
             env, "icelake");
-        bench_sequence_intersect_kernels<sz_sequence_intersect_icelake>(env, "icelake");
+        bench_intersect_kernels<sz_intersect_icelake>(env, "icelake");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_icelake, sz_levenshtein_distances_icelake>(
             env, "icelake", sz_levenshtein_bytes_k);
         bench_substrings_kernels<sz_substrings_engine_init_icelake, sz_substrings_counts_icelake,

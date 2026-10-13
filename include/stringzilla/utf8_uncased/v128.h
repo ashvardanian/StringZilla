@@ -11,7 +11,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/find/v128.h"              // `sz_find_v128_`
-#include "stringzilla/utf8_uncased_fold/v128.h" //
+#include "stringzilla/utf8_uncased_fold/v128.h" // `sz_ascii_fold_v128_`, `sz_utf8_in_range_v128_`
 #include "stringzilla/utf8_uncased/serial.h"
 
 #ifdef __cplusplus

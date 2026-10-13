@@ -13,9 +13,9 @@ mod find;
 mod hash;
 mod intersect;
 mod levenshtein;
-mod memory;
 mod overlap;
 mod sort;
+mod strings;
 mod substrings;
 mod types;
 mod utf8_graphemes;
@@ -36,9 +36,9 @@ pub use find::*;
 pub use hash::*;
 pub use intersect::*;
 pub use levenshtein::*;
-pub use memory::*;
 pub use overlap::*;
 pub use sort::*;
+pub use strings::*;
 pub use substrings::*;
 pub use types::*;
 pub use utf8_graphemes::*;
@@ -92,37 +92,8 @@ extern "C" {
         allocator: *mut sz_allocator_t,
         capabilities: sz_capability_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_sequence_realloc_best(
-        target: *mut _SzSequence,
-        source: *const _SzSequence,
-        allocator: *mut sz_allocator_t,
-        allocated_bytes: *mut sz_size_t,
-        capabilities: sz_capability_t,
-        stream: sz_stream_t,
-    ) -> sz_status_t;
     pub(crate) fn sz_stream_synchronize_best(capabilities: sz_capability_t, stream: sz_stream_t) -> sz_status_t;
 
-    pub(crate) fn sz_copy_best(
-        target: *mut c_void,
-        source: *const c_void,
-        length: sz_size_t,
-        capabilities: sz_capability_t,
-        stream: sz_stream_t,
-    ) -> sz_status_t;
-    pub(crate) fn sz_fill_best(
-        target: *mut c_void,
-        length: sz_size_t,
-        value: u8,
-        capabilities: sz_capability_t,
-        stream: sz_stream_t,
-    ) -> sz_status_t;
-    pub(crate) fn sz_move_best(
-        target: *mut c_void,
-        source: *const c_void,
-        length: sz_size_t,
-        capabilities: sz_capability_t,
-        stream: sz_stream_t,
-    ) -> sz_status_t;
     pub(crate) fn sz_fill_random_best(
         text: *mut c_void,
         length: sz_size_t,
@@ -130,11 +101,63 @@ extern "C" {
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_lookup_best(
-        target: *mut c_void,
-        source: *const c_void,
-        length: sz_size_t,
+
+    pub(crate) fn sz_strings_to_tape_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_to_rows_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        rows: *const sz_strings_rows_t,
+        longest: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_escape_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        kind: EscapeKind,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_unescape_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        kind: EscapeKind,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        malformed_index: *mut sz_size_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_lookup_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
         lut: *const u8,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
+        capabilities: sz_capability_t,
+        stream: sz_stream_t,
+    ) -> sz_status_t;
+    pub(crate) fn sz_strings_normalize_best(
+        strings: *const sz_strings_view_t,
+        order: *const sz_size_t,
+        count: sz_size_t,
+        form: Utf8NormalForm,
+        allocator: *mut sz_allocator_t,
+        tape: *mut sz_strings_span_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -401,7 +424,7 @@ extern "C" {
     ) -> sz_status_t;
     pub(crate) fn sz_sha256_multistate_update_best(
         states: *mut c_void,
-        texts: *const _SzSequence,
+        texts: *const sz_strings_view_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -516,33 +539,33 @@ extern "C" {
         stream: sz_stream_t,
     ) -> sz_status_t;
 
-    pub(crate) fn sz_sequence_argsort_best(
-        sequence: *const _SzSequence,
+    pub(crate) fn sz_sort_order_best(
+        strings: *const sz_strings_view_t,
         top_count: sz_size_t,
         reverse: sz_bool_t,
         allocator: *const c_void,
-        order: *mut SortedIdx,
+        order: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
-    pub(crate) fn sz_sequence_argsort_uncased_best(
-        sequence: *const _SzSequence,
+    pub(crate) fn sz_sort_uncased_order_best(
+        strings: *const sz_strings_view_t,
         top_count: sz_size_t,
         reverse: sz_bool_t,
         allocator: *const c_void,
-        order: *mut SortedIdx,
+        order: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
 
-    pub(crate) fn sz_sequence_intersect_best(
-        first_sequence: *const _SzSequence,
-        second_sequence: *const _SzSequence,
+    pub(crate) fn sz_intersect_best(
+        first_strings: *const sz_strings_view_t,
+        second_strings: *const sz_strings_view_t,
         allocator: *const c_void,
         seed: u64,
         intersection_count: *mut sz_size_t,
-        first_positions: *mut SortedIdx,
-        second_positions: *mut SortedIdx,
+        first_positions: *mut sz_size_t,
+        second_positions: *mut sz_size_t,
         capabilities: sz_capability_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
@@ -551,7 +574,7 @@ extern "C" {
     // device; a null allocator resolves to the unified one of those capabilities.
     pub(crate) fn sz_levenshtein_engine_init(
         engine: *mut LevenshteinEngine,
-        queries: *const _SzSequence,
+        queries: *const sz_strings_view_t,
         symbol: LevenshteinSymbol,
         capabilities: sz_capability_t,
         allocator: *const c_void,
@@ -560,7 +583,7 @@ extern "C" {
     pub(crate) fn sz_levenshtein_engine_free(engine: *mut LevenshteinEngine, stream: sz_stream_t);
     pub(crate) fn sz_levenshtein_distances(
         engine: *mut LevenshteinEngine,
-        candidates: *const _SzSequence,
+        candidates: *const sz_strings_view_t,
         distances: *mut sz_size_t,
         distances_stride: sz_size_t,
         stream: sz_stream_t,
@@ -568,7 +591,7 @@ extern "C" {
 
     pub(crate) fn sz_overlap_engine_init(
         engine: *mut OverlapEngine,
-        queries: *const _SzSequence,
+        queries: *const sz_strings_view_t,
         window_widths: *const sz_size_t,
         window_widths_count: sz_size_t,
         candidates_budget: sz_size_t,
@@ -579,7 +602,7 @@ extern "C" {
     pub(crate) fn sz_overlap_engine_free(engine: *mut OverlapEngine, stream: sz_stream_t);
     pub(crate) fn sz_overlap_scores(
         engine: *mut OverlapEngine,
-        candidates: *const _SzSequence,
+        candidates: *const sz_strings_view_t,
         scores: *mut f32,
         scores_query_stride: sz_size_t,
         scores_candidate_stride: sz_size_t,
@@ -588,7 +611,7 @@ extern "C" {
 
     pub(crate) fn sz_substrings_engine_init(
         engine: *mut SubstringsEngine,
-        needles: *const _SzSequence,
+        needles: *const sz_strings_view_t,
         case_sensitivity: CaseSensitivity,
         overlap_policy: SubstringsOverlapPolicy,
         hot_states: sz_size_t,
@@ -601,14 +624,14 @@ extern "C" {
     pub(crate) fn sz_substrings_engine_free(engine: *mut SubstringsEngine, stream: sz_stream_t);
     pub(crate) fn sz_substrings_counts(
         engine: *mut SubstringsEngine,
-        haystacks: *const _SzSequence,
+        haystacks: *const sz_strings_view_t,
         counts: *mut sz_size_t,
         counts_stride: sz_size_t,
         stream: sz_stream_t,
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_find(
         engine: *mut SubstringsEngine,
-        haystacks: *const _SzSequence,
+        haystacks: *const sz_strings_view_t,
         matches: *mut SubstringsMatch,
         matches_capacity: sz_size_t,
         matches_offsets: *mut sz_size_t,
@@ -616,8 +639,8 @@ extern "C" {
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_replace(
         engine: *mut SubstringsEngine,
-        haystacks: *const _SzSequence,
-        replacements: *const _SzSequence,
+        haystacks: *const sz_strings_view_t,
+        replacements: *const sz_strings_view_t,
         target: *mut u8,
         target_capacity: sz_size_t,
         offsets: *mut sz_size_t,
@@ -625,7 +648,7 @@ extern "C" {
     ) -> sz_status_t;
     pub(crate) fn sz_substrings_bm25_scores(
         engine: *mut SubstringsEngine,
-        haystacks: *const _SzSequence,
+        haystacks: *const sz_strings_view_t,
         document_lengths: *const f32,
         parameters: *const Bm25Params,
         needle_weights: *const f32,
@@ -640,6 +663,14 @@ extern "C" {
 pub(crate) type sz_allocate_t =
     unsafe extern "C" fn(bytes: sz_size_t, handle: *mut c_void, stream: sz_stream_t) -> *mut c_void;
 #[allow(non_camel_case_types)]
+pub(crate) type sz_reallocate_t = unsafe extern "C" fn(
+    pointer: *mut c_void,
+    old_bytes: sz_size_t,
+    new_bytes: sz_size_t,
+    handle: *mut c_void,
+    stream: sz_stream_t,
+) -> *mut c_void;
+#[allow(non_camel_case_types)]
 pub(crate) type sz_free_t =
     unsafe extern "C" fn(pointer: *mut c_void, bytes: sz_size_t, handle: *mut c_void, stream: sz_stream_t);
 
@@ -649,56 +680,164 @@ pub(crate) type sz_free_t =
 #[derive(Clone, Copy)]
 pub(crate) struct sz_allocator_t {
     pub(crate) allocate: Option<sz_allocate_t>,
+    pub(crate) reallocate: Option<sz_reallocate_t>,
     pub(crate) free: Option<sz_free_t>,
     pub(crate) handle: *mut c_void,
 }
 
-/// Binds `items` into a `sz_sequence_t` that lives for the span of `call`, allocating nothing.
+/// Mirror of `sz_string_view_t`, one of which an accessor writes per index it is asked for.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct sz_string_view_t {
+    pub(crate) start: *const u8,
+    pub(crate) length: sz_size_t,
+}
+
+/// Mirror of `sz_strings_get_t`, which the C side calls once per block of up to 64 indices.
+#[allow(non_camel_case_types)]
+pub(crate) type sz_strings_get_t = unsafe extern "C" fn(
+    handle: *const c_void,
+    indices: *const sz_size_t,
+    count: sz_size_t,
+    views: *mut sz_string_view_t,
+);
+
+/// Mirror of `sz_strings_layout_t`, naming the member of the `data` union to read a collection by.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum sz_strings_layout_t {
+    U32Tape = 0,
+    U64Tape = 1,
+    Accessor = 2,
+}
+
+/// Mirror of the `accessor` member of the `sz_strings_view_t` union.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct sz_strings_accessor_t {
+    pub(crate) get: sz_strings_get_t,
+    pub(crate) handle: *const c_void,
+}
+
+/// Mirror of the `u32_tape` and `u64_tape` members of the `sz_strings_view_t` and
+/// `sz_strings_span_t` unions, whose offsets are 32-bit or 64-bit as the `layout` beside them says.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct sz_strings_tape_t {
+    pub(crate) data: *mut u8,
+    pub(crate) offsets: *mut c_void,
+}
+
+/// Mirror of the `data` union of `sz_strings_view_t`.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) union sz_strings_data_t {
+    pub(crate) accessor: sz_strings_accessor_t,
+    pub(crate) tape: sz_strings_tape_t,
+}
+
+/// Mirror of C's `sz_strings_view_t`, a borrowed collection the C side only reads, which
+/// [`Strings`] implementations hand to it and which is opaque outside this crate.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct sz_strings_view_t {
+    pub(crate) layout: sz_strings_layout_t,
+    pub(crate) count: sz_size_t,
+    pub(crate) data: sz_strings_data_t,
+}
+
+/// Mirror of `sz_strings_span_t`, the tape every conversion writes, which is never an accessor.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct sz_strings_span_t {
+    pub(crate) layout: sz_strings_layout_t,
+    pub(crate) count: sz_size_t,
+    pub(crate) tape: sz_strings_tape_t,
+}
+
+/// Mirror of `sz_strings_rows_t`, NUL-padded rows of `width` bytes, `stride` bytes apart.
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub(crate) struct sz_strings_rows_t {
+    pub(crate) data: *mut u8,
+    pub(crate) stride: sz_size_t,
+    pub(crate) width: sz_size_t,
+}
+
+// The C layouts: a 4-byte enum, then the count and two pointers, 32 bytes on 64-bit targets.
+const _: () = {
+    use core::mem::{offset_of, size_of};
+
+    let word = size_of::<usize>();
+    assert!(size_of::<sz_strings_layout_t>() == 4);
+    assert!(offset_of!(sz_strings_view_t, count) == word && offset_of!(sz_strings_view_t, data) == 2 * word);
+    assert!(size_of::<sz_strings_view_t>() == 4 * word && size_of::<sz_strings_span_t>() == 4 * word);
+    assert!(offset_of!(sz_strings_span_t, tape) == 2 * word);
+    assert!(size_of::<sz_allocator_t>() == 4 * word && size_of::<sz_strings_rows_t>() == 3 * word);
+};
+
+/// Binds `items` into a `sz_strings_view_t` that lives for the span of `call`, allocating nothing.
 ///
-/// The accessors read the caller's slices in place, so a sequence borrows rather than copies and
+/// The accessor reads the caller's slices in place, so the view borrows rather than copies and
 /// must never outlive the call the C side makes through it.
-pub(crate) fn with_sequence<Element, Return>(items: &[Element], call: impl FnOnce(&_SzSequence) -> Return) -> Return
+pub(crate) fn with_strings<Element, Return>(
+    items: &[Element],
+    call: impl FnOnce(&sz_strings_view_t) -> Return,
+) -> Return
 where
     Element: AsRef<[u8]>,
 {
-    with_sequence_by(items, |item| item.as_ref(), call)
+    with_strings_by(items, |item| item.as_ref(), call)
 }
 
-/// Binds `items` as [`with_sequence`] does, reading each one's bytes through `key`.
+/// Binds `items` as [`with_strings`] does, reading each one's bytes through `key`.
 ///
 /// The C side calls `key` from inside `call`, where a panic cannot unwind and aborts the process.
-pub(crate) fn with_sequence_by<Element, Key, Return>(
+pub(crate) fn with_strings_by<Element, Key, Return>(
     items: &[Element],
     key: Key,
-    call: impl FnOnce(&_SzSequence) -> Return,
+    call: impl FnOnce(&sz_strings_view_t) -> Return,
 ) -> Return
 where
     Key: Fn(&Element) -> &[u8],
 {
-    let view = (items, key);
-    let sequence = _SzSequence {
-        handle: &view as *const (&[Element], Key) as *const c_void,
+    let accessed = (items, key);
+    let strings = sz_strings_view_t {
+        layout: sz_strings_layout_t::Accessor,
         count: items.len(),
-        get_start: Some(sequence_start::<Element, Key>),
-        get_length: Some(sequence_length::<Element, Key>),
+        data: sz_strings_data_t {
+            accessor: sz_strings_accessor_t {
+                get: strings_get::<Element, Key>,
+                handle: &accessed as *const (&[Element], Key) as *const c_void,
+            },
+        },
     };
-    call(&sequence)
+    call(&strings)
 }
 
-unsafe extern "C" fn sequence_start<Element, Key>(handle: *const c_void, index: usize) -> *const c_void
-where
+unsafe extern "C" fn strings_get<Element, Key>(
+    handle: *const c_void,
+    indices: *const sz_size_t,
+    count: sz_size_t,
+    views: *mut sz_string_view_t,
+) where
     Key: Fn(&Element) -> &[u8],
 {
     let (items, key) = &*(handle as *const (&[Element], Key));
-    key(&items[index]).as_ptr() as *const c_void
-}
-
-unsafe extern "C" fn sequence_length<Element, Key>(handle: *const c_void, index: usize) -> usize
-where
-    Key: Fn(&Element) -> &[u8],
-{
-    let (items, key) = &*(handle as *const (&[Element], Key));
-    key(&items[index]).len()
+    for position in 0..count {
+        let bytes = key(&items[*indices.add(position)]);
+        views.add(position).write(sz_string_view_t {
+            start: bytes.as_ptr(),
+            length: bytes.len(),
+        });
+    }
 }
 
 /// Trait for unary string operations that only operate on `self` without needle parameters.

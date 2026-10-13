@@ -34,12 +34,10 @@ void bench_cross_riscv64([[maybe_unused]] environment_t &env) {
                                                                                                                "rvv");
         bench_equal_kernels<sz_equal_rvv>(env, "rvv");
         bench_order_kernels<sz_order_rvv>(env, "rvv");
-        bench_copy_kernels<sz_copy_rvv>(env, "rvv");
-        bench_move_kernels<sz_move_rvv>(env, "rvv");
-        bench_fill_kernels<sz_fill_rvv>(env, "rvv");
         bench_fill_random_kernels<sz_fill_random_rvv>(env, "rvv");
-        bench_lookup_kernels<sz_lookup_rvv>(env, "rvv");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv>(env, "rvv");
+        bench_strings_kernels<sz_strings_to_tape_rvv, sz_strings_escape_rvv, sz_strings_unescape_rvv,
+                              sz_strings_lookup_rvv, sz_strings_normalize_rvv>(env, "rvv");
+        bench_sort_order_kernels<sz_sort_order_rvv, sz_sort_uncased_order_rvv>(env, "rvv");
     }
 #endif // STRINGZILLA_TARGET_RVV
 #if STRINGZILLA_TARGET_RVVCRYPTO

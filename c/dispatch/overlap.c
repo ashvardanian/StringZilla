@@ -102,7 +102,7 @@ static sz_capability_kernels_t const *sz_overlap_scores_capabilities(void) {
     return lists;
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                    sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                    sz_size_t candidates_budget, sz_capability_t capabilities,
                                                    sz_allocator_t *allocator, sz_stream_t stream) {
@@ -116,7 +116,7 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
     sz_overlap_engine_close_(engine, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                               sz_f32_t *scores, sz_size_t scores_query_stride,
                                               sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_kernel_overlap_scores_t const kernel = (sz_kernel_overlap_scores_t)sz_kernel_pick_(

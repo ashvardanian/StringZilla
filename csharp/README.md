@@ -123,6 +123,7 @@ int written = Sz.Normalize(text, Sz.NormalForm.Nfc, destination); // allocation-
 
 Sz.Normalize("é"u8, Sz.NormalForm.Nfc);  // "e" + U+0301 -> precomposed "é"
 Sz.Normalize("ﬁ"u8, Sz.NormalForm.Nfkc);       // ligature "ﬁ" -> "fi"
+Sz.Normalize("Straße"u8, Sz.NormalForm.NfkcCasefold); // NFKC with case folding -> "strasse", for caseless keys
 ```
 
 ## Sorting and Set Operations

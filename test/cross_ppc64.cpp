@@ -17,17 +17,17 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_compare_unit_powervsx",
           [] { check_compare_unit_({"powervsx", sz_equal_powervsx, sz_order_powervsx}); });
 
-    constexpr memory_backend_t memory_powervsx {"powervsx", sz_copy_powervsx, sz_move_powervsx, sz_fill_powervsx};
-    check("test_memory_unit_powervsx", [&] { check_memory_unit_(memory_powervsx); });
-    check("test_memory_equivalence_powervsx",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_powervsx); });
-    check("test_memory_safety_powervsx", [&] { check_memory_safety_(memory_powervsx); });
-
-    constexpr lookup_backend_t lookup_powervsx {"powervsx", sz_lookup_powervsx};
-    check("test_lookup_unit_powervsx", [&] { check_lookup_unit_(lookup_powervsx); });
-    check("test_lookup_equivalence_powervsx",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_powervsx); });
-    check("test_lookup_safety_powervsx", [&] { check_lookup_safety_(lookup_powervsx); });
+    constexpr strings_backend_t strings_powervsx {"powervsx",
+                                                  sz_strings_to_tape_powervsx,
+                                                  sz_strings_to_rows_powervsx,
+                                                  sz_strings_escape_powervsx,
+                                                  sz_strings_unescape_powervsx,
+                                                  sz_strings_lookup_powervsx,
+                                                  sz_strings_normalize_powervsx};
+    check("test_strings_unit_powervsx", [&] { check_strings_unit_(strings_powervsx); });
+    check("test_strings_equivalence_powervsx",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_powervsx); });
+    check("test_strings_safety_powervsx", [&] { check_strings_safety_(strings_powervsx); });
 
     constexpr find_backend_t find_powervsx {
         .name = "powervsx",

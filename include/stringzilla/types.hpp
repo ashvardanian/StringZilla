@@ -26,7 +26,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h" // `sz_capabilities_enabled_cpu`, `sz_capabilities_enabled_cuda`
-#include "stringzilla/memory.h"
+#include "stringzilla/strings.h"
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
  *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
@@ -135,7 +135,6 @@ using error_cost_magnitude_t = sz_error_cost_magnitude_t;
 using bool_t = sz_bool_t;
 using ordering_t = sz_ordering_t;
 using rune_length_t = sz_rune_length_t;
-using sorted_idx_t = sz_sorted_idx_t;
 
 using u16_vec_t = sz_u16_vec_t;
 using u32_vec_t = sz_u32_vec_t;
@@ -777,23 +776,33 @@ struct tape {
                (termination_ == tape_termination_t::nul_terminated_k ? offsets_.size() * sizeof(offset_t) : 0);
     }
 
-    sz_sequence_t sequence() const noexcept
+    sz_strings_view_t strings() const noexcept
         requires(termination_ == tape_termination_t::packed_k)
     {
-        return {buffer_.data(), count_, sz_sequence_tape_start, sz_sequence_tape_length};
+        sz_strings_view_t view;
+        view.layout = sz_strings_u64_tape_k, view.count = count_;
+        view.data.u64_tape.data = buffer_.data(), view.data.u64_tape.offsets = offsets_.data();
+        return view;
     }
 
-    status_t assign(sz_sequence_t const &source) noexcept
+    status_t assign(sz_strings_view_t const &source) noexcept
         requires(termination_ == tape_termination_t::packed_k)
     {
         if (source.count >= (std::numeric_limits<std::size_t>::max)() / sizeof(offset_t)) return status_t::bad_alloc_k;
+        // Both passes of the iterator overload walk in order, so one fetched block serves 64 reads.
         struct input_t {
             using value_type = std::span<char_t const>;
-            sz_sequence_t const &source;
+            sz_strings_view_t const &strings;
+            mutable sz_string_view_t views[64];
+            mutable std::size_t block_start;
+            explicit input_t(sz_strings_view_t const &strings) noexcept
+                : strings(strings), views(), block_start((std::numeric_limits<std::size_t>::max)()) {}
             value_type operator[](std::size_t index) const noexcept {
-                return {source.get_start(source.handle, index), source.get_length(source.handle, index)};
+                std::size_t const start = index - index % 64;
+                if (start != block_start) block_start = start, sz_strings_get_block_(&strings, start, views);
+                return {views[index - start].start, views[index - start].length};
             }
-        } input {source};
+        } input(source);
         using input_iterator_t = indexed_container_iterator<input_t>;
         return assign(input_iterator_t(input, 0), input_iterator_t(input, source.count));
     }
@@ -801,8 +810,8 @@ struct tape {
     status_t assign(std::span<sz_string_view_t const> views) noexcept
         requires(termination_ == tape_termination_t::packed_k)
     {
-        sz_sequence_t source {};
-        sz_sequence_from_string_views(views.data(), views.size(), &source);
+        sz_strings_view_t source;
+        sz_strings_from_string_views(views.data(), views.size(), &source);
         return assign(source);
     }
 
@@ -1424,8 +1433,8 @@ struct unified_alloc {
     }
     template <typename other_type_, sz_capability_t other_capabilities_>
     bool operator==(unified_alloc<other_type_, other_capabilities_> const &other) const noexcept {
-        return unified.allocate == other.unified.allocate && unified.free == other.unified.free &&
-               unified.handle == other.unified.handle && stream == other.stream;
+        return unified.allocate == other.unified.allocate && unified.reallocate == other.unified.reallocate &&
+               unified.free == other.unified.free && unified.handle == other.unified.handle && stream == other.stream;
     }
     template <typename other_type_, sz_capability_t other_capabilities_>
     bool operator!=(unified_alloc<other_type_, other_capabilities_> const &other) const noexcept {

@@ -52,6 +52,14 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
     };
     check.section("Cross ROCm", sz_cap_rocm_k);
     check_device_kernels_(check, rocm);
+    strings_backend_t const strings_rocm {"rocm",
+                                          sz_strings_to_tape_rocm,
+                                          sz_strings_to_rows_rocm,
+                                          sz_strings_escape_rocm,
+                                          sz_strings_unescape_rocm,
+                                          sz_strings_lookup_rocm,
+                                          sz_strings_normalize_rocm};
+    check_device_strings_(check, runtime, strings_rocm);
 #endif
     auto const failures = capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
     return failures;

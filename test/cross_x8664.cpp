@@ -62,7 +62,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_cipher_equivalence_westmere",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_westmere, gcm_westmere); });
 
-    check("test_intersect_unit_westmere", [] { check_intersect_unit_(sz_sequence_intersect_westmere); });
+    check("test_intersect_unit_westmere", [] { check_intersect_unit_(sz_intersect_westmere); });
 #endif // STRINGZILLA_TARGET_WESTMERE
 
 #if STRINGZILLA_TARGET_GOLDMONT
@@ -89,17 +89,17 @@ std::size_t test_cross_x8664(environment_t const &env) {
 
     check("test_compare_unit_haswell", [] { check_compare_unit_({"haswell", sz_equal_haswell, sz_order_haswell}); });
 
-    constexpr memory_backend_t memory_haswell {"haswell", sz_copy_haswell, sz_move_haswell, sz_fill_haswell};
-    check("test_memory_unit_haswell", [&] { check_memory_unit_(memory_haswell); });
-    check("test_memory_equivalence_haswell",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_haswell); });
-    check("test_memory_safety_haswell", [&] { check_memory_safety_(memory_haswell); });
-
-    constexpr lookup_backend_t lookup_haswell {"haswell", sz_lookup_haswell};
-    check("test_lookup_unit_haswell", [&] { check_lookup_unit_(lookup_haswell); });
-    check("test_lookup_equivalence_haswell",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_haswell); });
-    check("test_lookup_safety_haswell", [&] { check_lookup_safety_(lookup_haswell); });
+    constexpr strings_backend_t strings_haswell {"haswell",
+                                                 sz_strings_to_tape_haswell,
+                                                 sz_strings_to_rows_haswell,
+                                                 sz_strings_escape_haswell,
+                                                 sz_strings_unescape_haswell,
+                                                 sz_strings_lookup_haswell,
+                                                 sz_strings_normalize_haswell};
+    check("test_strings_unit_haswell", [&] { check_strings_unit_(strings_haswell); });
+    check("test_strings_equivalence_haswell",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_haswell); });
+    check("test_strings_safety_haswell", [&] { check_strings_safety_(strings_haswell); });
 
     constexpr find_backend_t find_haswell {
         .name = "haswell",
@@ -124,7 +124,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         check_sha256_multistate_equivalence_(context, sha256_multistate_haswell);
     });
 
-    constexpr sort_backend_t sort_haswell {"haswell", sz_sequence_argsort_haswell, sz_sequence_argsort_uncased_haswell};
+    constexpr sort_backend_t sort_haswell {"haswell", sz_sort_order_haswell, sz_sort_uncased_order_haswell};
     check("test_sort_unit_haswell", [&] { check_sort_unit_(sort_haswell); });
     check("test_sort_equivalence_haswell",
           [&](test_context_t &context) { check_sort_equivalence_(context, sort_haswell); });
@@ -229,12 +229,6 @@ std::size_t test_cross_x8664(environment_t const &env) {
 
     check("test_compare_unit_skylake", [] { check_compare_unit_({"skylake", sz_equal_skylake, sz_order_skylake}); });
 
-    constexpr memory_backend_t memory_skylake {"skylake", sz_copy_skylake, sz_move_skylake, sz_fill_skylake};
-    check("test_memory_unit_skylake", [&] { check_memory_unit_(memory_skylake); });
-    check("test_memory_equivalence_skylake",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_skylake); });
-    check("test_memory_safety_skylake", [&] { check_memory_safety_(memory_skylake); });
-
     constexpr find_backend_t find_skylake {
         .name = "skylake",
         .find = sz_find_skylake,
@@ -264,7 +258,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         check_sha256_multistate_equivalence_(context, sha256_multistate_skylake);
     });
 
-    constexpr sort_backend_t sort_skylake {"skylake", sz_sequence_argsort_skylake, sz_sequence_argsort_uncased_skylake};
+    constexpr sort_backend_t sort_skylake {"skylake", sz_sort_order_skylake, sz_sort_uncased_order_skylake};
     check("test_sort_unit_skylake", [&] { check_sort_unit_(sort_skylake); });
     check("test_sort_equivalence_skylake",
           [&](test_context_t &context) { check_sort_equivalence_(context, sort_skylake); });
@@ -293,11 +287,17 @@ std::size_t test_cross_x8664(environment_t const &env) {
 #if STRINGZILLA_TARGET_ICELAKE
     check.section("Cross Ice Lake", sz_cap_icelake_k);
 
-    constexpr lookup_backend_t lookup_icelake {"icelake", sz_lookup_icelake};
-    check("test_lookup_unit_icelake", [&] { check_lookup_unit_(lookup_icelake); });
-    check("test_lookup_equivalence_icelake",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_icelake); });
-    check("test_lookup_safety_icelake", [&] { check_lookup_safety_(lookup_icelake); });
+    constexpr strings_backend_t strings_icelake {"icelake",
+                                                 sz_strings_to_tape_icelake,
+                                                 sz_strings_to_rows_icelake,
+                                                 sz_strings_escape_icelake,
+                                                 sz_strings_unescape_icelake,
+                                                 sz_strings_lookup_icelake,
+                                                 sz_strings_normalize_icelake};
+    check("test_strings_unit_icelake", [&] { check_strings_unit_(strings_icelake); });
+    check("test_strings_equivalence_icelake",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_icelake); });
+    check("test_strings_safety_icelake", [&] { check_strings_safety_(strings_icelake); });
 
     constexpr find_backend_t find_icelake {
         .name = "icelake",
@@ -344,7 +344,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_cipher_equivalence_icelake",
           [&](test_context_t &context) { check_cipher_equivalence_(context, ctr_icelake, gcm_icelake); });
 
-    check("test_intersect_unit_icelake", [] { check_intersect_unit_(sz_sequence_intersect_icelake); });
+    check("test_intersect_unit_icelake", [] { check_intersect_unit_(sz_intersect_icelake); });
 
     constexpr levenshtein_backend_t levenshtein_icelake {"icelake", sz_levenshtein_engine_init_icelake,
                                                          sz_levenshtein_distances_icelake};

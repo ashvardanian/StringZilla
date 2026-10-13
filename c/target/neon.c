@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/neon.h"
-#include "stringzilla/memory/neon.h"
+#include "stringzilla/strings/neon.h"
 #include "stringzilla/hash/neon.h"
 #include "stringzilla/find/neon.h"
 #include "stringzilla/sort/neon.h"

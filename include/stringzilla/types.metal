@@ -39,20 +39,37 @@ constexpr scalar_type_ sz_size_divide_round_up_metal_(scalar_type_ number, scala
     return (number + divisor - 1) / divisor;
 }
 
-/** A sequence tape from @c sz_sequence_realloc_best: @b [count+1] byte offsets
- *  from the block's own start, then the bytes they address. */
-struct sz_sequence_tape_metal_t {
-    device ulong const *offsets;
+/** The layout of a tape with 64-bit offsets, as @c sz_strings_u64_tape_k numbers it. */
+constant ulong sz_strings_u64_tape_metal_k = 1;
+
+/** A tape of @c sz_strings_view_t a kernel reads, bound as two buffers. */
+struct sz_strings_tape_metal_t {
+
+    /** The bytes of every string, back to back. */
+    device uchar const *data;
+
+    /** One offset per string and one past the last, 32 or 64 bits wide as @c layout says. */
+    device uchar const *offsets;
+
+    /** The layout as @c sz_strings_layout_t numbers it, never the accessor. */
+    ulong layout;
 };
 
-/** The first byte of text @p index of @p tape. */
-inline device uchar const *sz_sequence_tape_start_metal_(sz_sequence_tape_metal_t tape, ulong index) {
-    return (device uchar const *)tape.offsets + tape.offsets[index];
+/** Offset @p index of @p tape. */
+inline ulong sz_strings_offset_metal_(sz_strings_tape_metal_t tape, ulong index) {
+    device uint const *const offsets_u32 = (device uint const *)tape.offsets;
+    device ulong const *const offsets_u64 = (device ulong const *)tape.offsets;
+    return tape.layout == sz_strings_u64_tape_metal_k ? offsets_u64[index] : ulong(offsets_u32[index]);
 }
 
-/** The bytes text @p index of @p tape spans. */
-inline ulong sz_sequence_tape_length_metal_(sz_sequence_tape_metal_t tape, ulong index) {
-    return tape.offsets[index + 1] - tape.offsets[index];
+/** The first byte of string @p index of @p tape. */
+inline device uchar const *sz_strings_start_metal_(sz_strings_tape_metal_t tape, ulong index) {
+    return tape.data + sz_strings_offset_metal_(tape, index);
+}
+
+/** The bytes string @p index of @p tape spans. */
+inline ulong sz_strings_length_metal_(sz_strings_tape_metal_t tape, ulong index) {
+    return sz_strings_offset_metal_(tape, index + 1) - sz_strings_offset_metal_(tape, index);
 }
 
 /** The kernel's own address of @p host, a host address inside the block bound at @p block, which

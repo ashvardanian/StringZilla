@@ -102,14 +102,15 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_stream_synchronize_best),
         call_stub_(sz_equal_best),
         call_stub_(sz_order_best),
-        call_stub_(sz_copy_best),
-        call_stub_(sz_move_best),
-        call_stub_(sz_fill_best),
-        call_stub_(sz_lookup_best),
+        call_stub_(sz_strings_to_tape_best),
+        call_stub_(sz_strings_to_rows_best),
+        call_stub_(sz_strings_escape_best),
+        call_stub_(sz_strings_unescape_best),
+        call_stub_(sz_strings_lookup_best),
+        call_stub_(sz_strings_normalize_best),
         call_stub_(sz_allocator_init_unified_best),
         call_stub_(sz_allocator_init_device_best),
         call_stub_(sz_allocator_init_pinned_best),
-        call_stub_(sz_sequence_realloc_best),
         call_stub_(sz_find_byte_best),
         call_stub_(sz_rfind_byte_best),
         call_stub_(sz_find_best),
@@ -141,9 +142,9 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_aes256_gcm_decryptor_associate_best),
         call_stub_(sz_aes256_gcm_decryptor_update_unverified_best),
         call_stub_(sz_aes256_gcm_decryptor_verify_best),
-        call_stub_(sz_sequence_argsort_best),
-        call_stub_(sz_sequence_argsort_uncased_best),
-        call_stub_(sz_sequence_intersect_best),
+        call_stub_(sz_sort_order_best),
+        call_stub_(sz_sort_uncased_order_best),
+        call_stub_(sz_intersect_best),
         call_stub_(sz_utf8_count_best),
         call_stub_(sz_utf8_seek_best),
         call_stub_(sz_utf8_decode_best),
@@ -172,7 +173,7 @@ void test_dispatch_stubs_unit() {
 void test_find_kernel_unit() {
     sz_status_t (*const find_kernels[])(sz_kernel_kind_t, sz_capability_t, sz_kernel_punned_t *, sz_capability_t *) = {
         sz_compare_find_kernel,
-        sz_memory_find_kernel,
+        sz_strings_find_kernel,
         sz_find_find_kernel,
         sz_hash_find_kernel,
         sz_cipher_find_kernel,
@@ -260,7 +261,7 @@ int main(int, char const **argv) {
 #else
     failures += run_test(env.settings, "test_device_unit", test_device_unit);
     failures += run_test(env.settings, "test_arithmetic_unit", test_arithmetic_unit);
-    failures += run_test(env.settings, "test_sequence_unit", test_sequence_unit);
+    failures += run_test(env.settings, "test_strings_view_unit", test_strings_view_unit);
     failures += run_test(env.settings, "test_tape_assign_unit", test_tape_assign_unit);
     failures += run_test(env.settings, "test_tape_overflow_unit", test_tape_overflow_unit);
     failures += run_test(env.settings, "test_allocator_unit", test_allocator_unit);
@@ -294,9 +295,9 @@ int main(int, char const **argv) {
 
     failures += run_test(env.settings, "test_ascii_unit<sz::string_t>", test_ascii_unit<sz::string_t>);
     failures += run_test(env.settings, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_memory_unit", test_memory_unit);
-    failures += run_test(env.settings, "test_memory_all", test_memory_all);
-    failures += run_test(env.settings, "test_memory_safety", test_memory_safety);
+    failures += run_test(env.settings, "test_strings_unit", test_strings_unit);
+    failures += run_test(env.settings, "test_strings_all", test_strings_all);
+    failures += run_test(env.settings, "test_strings_safety", test_strings_safety);
     failures += run_test(env.settings, "test_stl_reads_unit<std::string_view>", test_stl_reads_unit<std::string_view>);
     failures += run_test(env.settings, "test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
     failures += run_test(env.settings, "test_stl_reads_unit<sz::string_view_t>",

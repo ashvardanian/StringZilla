@@ -13,7 +13,6 @@
 #define STRINGZILLA_CIPHER_POWERVSX_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/powervsx.h" // `sz_fill_powervsx_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -1104,7 +1103,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_powervsx(sz_aes256_gcm_key_t c
 
     //  A caller who drops the status must still be unable to act on forged plaintext.
     if (verdict != sz_success_k) {
-        sz_fill_powervsx_(target, length, 0);
+        memset(target, 0, length);
         sz_keep_alive_(target);
     }
     return verdict;

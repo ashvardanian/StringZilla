@@ -72,7 +72,7 @@ impl ArgsortOptions {
 /// ```
 pub fn argsort<Element: AsRef<[u8]>>(
     data: &[Element],
-    order: &mut [SortedIdx],
+    order: &mut [usize],
     options: ArgsortOptions,
 ) -> Result<(), Status> {
     argsort_by(data, |item| item.as_ref(), order, options)
@@ -101,7 +101,7 @@ pub fn argsort<Element: AsRef<[u8]>>(
 pub fn argsort_by<Element, Key>(
     data: &[Element],
     key: Key,
-    order: &mut [SortedIdx],
+    order: &mut [usize],
     options: ArgsortOptions,
 ) -> Result<(), Status>
 where
@@ -111,13 +111,13 @@ where
     let top_count = options.top.unwrap_or(0);
     let reverse = options.reverse as i32;
     let argsort = if options.uncased {
-        sz_sequence_argsort_uncased_best
+        sz_sort_uncased_order_best
     } else {
-        sz_sequence_argsort_best
+        sz_sort_order_best
     };
-    with_sequence_by(data, key, |sequence| unsafe {
+    with_strings_by(data, key, |strings| unsafe {
         argsort(
-            sequence,
+            strings,
             top_count,
             reverse,
             core::ptr::null(),

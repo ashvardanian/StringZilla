@@ -338,12 +338,7 @@ PyObject *Str_write_to(PyObject *self, PyObject *const *args, Py_ssize_t positio
         PyErr_SetString(PyExc_MemoryError, "Unable to allocate memory for the path");
         return NULL;
     }
-    status = sz_copy_best(path_buffer, path.start, path.length, sz_cap_cpus_k, NULL);
-    if (status != sz_success_k) {
-        free(path_buffer);
-        sz_py_raise_status(status, "write_to()");
-        return NULL;
-    }
+    memcpy(path_buffer, path.start, path.length);
     path_buffer[path.length] = '\0';
 
     // Unlock the Global Interpreter Lock (GIL) to allow other threads to run
@@ -450,15 +445,8 @@ static PyObject *Str_concat(PyObject *self, PyObject *other) {
 
     // Perform the string concatenation
     sz_ptr_t const target = (sz_ptr_t)result_str->memory.start;
-    sz_status_t status = sz_copy_best(target, self_str.start, self_str.length, sz_cap_cpus_k, NULL);
-    if (status == sz_success_k)
-        status = sz_copy_best(target + self_str.length, other_str.start, other_str.length, sz_cap_cpus_k, NULL);
-    if (status != sz_success_k) {
-        Py_DECREF(result_str);
-        sz_py_raise_status(status, "Str concatenation");
-        return NULL;
-    }
-
+    memcpy(target, self_str.start, self_str.length);
+    memcpy(target + self_str.length, other_str.start, other_str.length);
     return (PyObject *)result_str;
 }
 

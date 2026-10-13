@@ -34,11 +34,10 @@ void bench_cross_loongarch64([[maybe_unused]] environment_t &env) {
                              sz_sha256_state_digest_loongsonasx>(env, "loongsonasx");
         bench_equal_kernels<sz_equal_loongsonasx>(env, "loongsonasx");
         bench_order_kernels<sz_order_loongsonasx>(env, "loongsonasx");
-        bench_copy_kernels<sz_copy_loongsonasx>(env, "loongsonasx");
-        bench_move_kernels<sz_move_loongsonasx>(env, "loongsonasx");
-        bench_fill_kernels<sz_fill_loongsonasx>(env, "loongsonasx");
         bench_fill_random_kernels<sz_fill_random_loongsonasx>(env, "loongsonasx");
-        bench_lookup_kernels<sz_lookup_loongsonasx>(env, "loongsonasx");
+        bench_strings_kernels<sz_strings_to_tape_loongsonasx, sz_strings_escape_loongsonasx,
+                              sz_strings_unescape_loongsonasx, sz_strings_lookup_loongsonasx,
+                              sz_strings_normalize_loongsonasx>(env, "loongsonasx");
     }
 #endif // STRINGZILLA_TARGET_LOONGSONASX
 }

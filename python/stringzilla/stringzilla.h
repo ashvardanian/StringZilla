@@ -4,7 +4,7 @@
  *  @date September 2, 2023
  *  @brief The shared types and forward declarations for the per-domain files.
  *
- *  The @c stringzilla extension is split into one translation unit per domain - `memory.c`,
+ *  The @c stringzilla extension is split into one translation unit per domain - `strings.c`,
  *  `hash.c`, `cipher.c`, `find.c`, `compare.c`, `sort.c`, `intersect.c`, `levenshtein.c`,
  *  `overlap.c`, `substrings.c`, and the `utf8_*.c` files - alongside the CPython object-model files
  *  `file.c`, `str.c`, `strs.c` and the `shared.c` plumbing. This header carries everything more
@@ -63,24 +63,18 @@ typedef SSIZE_T ssize_t;
 
 /* `strs.c` */
 
-/** Reads the start pointer of the @p i -th element of a @c Strs handed as a raw `void const *`. */
-extern sz_cptr_t Strs_get_start_(void const *handle, sz_size_t i);
+/** Views a @c Strs in place: its tapes as tapes, a fragmented one through its array of views. */
+extern sz_bool_t sz_py_export_strings_as_view(PyObject *object, sz_strings_view_t *strings);
 
-/** Reads the byte length of the @p i -th element of a @c Strs handed as a raw `void const *`. */
-extern sz_size_t Strs_get_length_(void const *handle, sz_size_t i);
-
-/** Helper function to export a @c Strs or similar sequence objects into a @c sz_sequence_t. */
-extern sz_bool_t sz_py_export_strings_as_sequence(PyObject *object, sz_sequence_t *sequence);
-
-/** Helper function to export a @c Strs object into @c sz_sequence_u32tape_t components. */
+/** Exports the bytes, the 32-bit offsets and the count of a @c Strs tape with 32-bit offsets. */
 extern sz_bool_t sz_py_export_strings_as_u32tape(PyObject *object, sz_cptr_t *data, sz_u32_t const **offsets,
                                                  sz_size_t *count);
 
-/** Helper function to export a @c Strs object into @c sz_sequence_u64tape_t components. */
+/** Exports the bytes, the 64-bit offsets and the count of a @c Strs tape with 64-bit offsets. */
 extern sz_bool_t sz_py_export_strings_as_u64tape(PyObject *object, sz_cptr_t *data, sz_u64_t const **offsets,
                                                  sz_size_t *count);
 
-/** Helper function to replace the allocator in a @c Strs object. */
+/** Gathers a @c Strs into a tape of blocks from @p allocator, unless it already owns one. */
 extern sz_bool_t sz_py_replace_strings_allocator(PyObject *object, sz_allocator_t *allocator);
 
 /* `shared.c` */
@@ -365,15 +359,38 @@ extern Strs **Strs_freelist_next_(Strs *node);
 /** Number of live elements in a @c Strs collection, regardless of layout. */
 extern Py_ssize_t Strs_len(Strs *self);
 
+/** Wraps a tape that @p allocator made into a new @c Strs owning both its blocks, or frees the tape
+ *  and returns @c NULL with a Python exception set. */
+extern PyObject *Strs_from_tape_(sz_strings_span_t *tape, sz_allocator_t *allocator);
+
 /*  Cross-domain function and docstring declarations: every `Str_like_*` and `Strs_*` method and its
  *  `doc_*` docstring constant named by the `Str_methods[]`, `Strs_methods[]`, and
  *  `stringzilla_methods[]` @c PyMethodDef tables in `str.c`, `strs.c`, and `stringzilla.c`. Each
  *  symbol is visible here so those tables can reach the domain file that owns it. */
 
-/* `memory.c` */
-extern char const doc_translate[];
+/* `strings.c` */
+extern char const doc_translate[], doc_Strs_translate[], doc_Strs_escape[], doc_Strs_unescape[], doc_Strs_normalize[],
+    doc_Strs_to_json[], doc_to_json[], doc_to_csv[];
+
+/** Maps @p length bytes of @p source through @p lut into @p target, which may be @p source. */
+extern sz_status_t sz_py_lookup(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const *lut,
+                                sz_capability_t capabilities);
 extern PyObject *Str_like_translate(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
+extern PyObject *Strs_translate(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple);
+extern PyObject *Strs_escape(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                             PyObject *args_names_tuple);
+extern PyObject *Strs_unescape(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple);
+extern PyObject *Strs_normalize(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple);
+extern PyObject *Strs_to_json(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                              PyObject *args_names_tuple);
+extern PyObject *module_to_json(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                PyObject *args_names_tuple);
+extern PyObject *module_to_csv(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                               PyObject *args_names_tuple);
 
 /* `hash.c` */
 extern char const doc_like_hash[], doc_hash_multiseed[], doc_fill_random[], doc_random[], doc_like_bytesum[],
@@ -470,7 +487,7 @@ extern PyObject *Str_like_splitlines(PyObject *self, PyObject *const *args, Py_s
 
 /* `sort.c` */
 extern char const doc_argsort[];
-extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order,
+extern sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order,
                                      sz_size_t top, sz_bool_t reverse, sz_capability_t capabilities);
 extern PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_args_count,
                               PyObject *args_names_tuple);
@@ -556,6 +573,9 @@ extern PyObject *Str_like_utf8_uncased_matches(PyObject *self, PyObject *const *
 
 /* `utf8_norm.c` */
 extern char const doc_utf8_norm[], doc_utf8_find_denormalized[];
+
+/** Reads a form name `sz.utf8_norm` accepts, or raises an exception naming @p context. */
+extern int sz_py_export_normal_form(PyObject *form_object, char const *context, sz_normal_form_t *form);
 extern PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                     PyObject *args_names_tuple);
 extern PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
@@ -574,17 +594,9 @@ extern int sz_py_export_capabilities(PyObject *capabilities_object, sz_capabilit
 /** Raises the Python exception @p status names, blaming @p context; never called on success. */
 extern void sz_py_raise_status(sz_status_t status, char const *context);
 
-/** Exports @p object as a sequence of strings, or raises a @c TypeError naming @p name. */
-extern int sz_py_export_strings(PyObject *object, char const *name, sz_sequence_t *sequence);
-
-/**
- *  @brief Exports @p object as the sequence an engine of @p capability reads on @p stream.
- *  @return 0 with the accessors of a GPU engine's group for a whole tape from @c Strs.copy its device
- *      reaches, and host accessors otherwise; or -1 with a Python exception set, a @c BufferError for
- *      a tape that device would have to copy.
- */
-extern int sz_py_export_engine_strings(PyObject *object, char const *name, sz_capability_t capability,
-                                       sz_stream_t stream, sz_sequence_t *sequence);
+/** Views the @c Strs @p object in place, or raises a @c TypeError naming @p name. A device engine
+ *  reads only tapes in memory its device reaches, as from @c Strs.copy, and refuses the rest. */
+extern int sz_py_export_strings(PyObject *object, char const *name, sz_strings_view_t *strings);
 
 /** Reads a device stream handle carried as an integer, or @c NULL for the default stream. */
 extern int sz_py_export_stream(PyObject *stream_object, sz_stream_t *stream);

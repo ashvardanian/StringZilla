@@ -26,10 +26,12 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     switch (kind) {
     case sz_kernel_equal_k:
     case sz_kernel_order_k: return sz_compare_find_kernel(kind, capabilities, kernel, capability);
-    case sz_kernel_copy_k:
-    case sz_kernel_move_k:
-    case sz_kernel_fill_k:
-    case sz_kernel_lookup_k: return sz_memory_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_strings_to_tape_k:
+    case sz_kernel_strings_to_rows_k:
+    case sz_kernel_strings_escape_k:
+    case sz_kernel_strings_unescape_k:
+    case sz_kernel_strings_lookup_k:
+    case sz_kernel_strings_normalize_k: return sz_strings_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_find_k:
     case sz_kernel_rfind_k:
     case sz_kernel_find_byte_k:
@@ -61,9 +63,9 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_aes256_gcm_decryptor_associate_k:
     case sz_kernel_aes256_gcm_decryptor_update_unverified_k:
     case sz_kernel_aes256_gcm_decryptor_verify_k: return sz_cipher_find_kernel(kind, capabilities, kernel, capability);
-    case sz_kernel_sequence_argsort_k:
-    case sz_kernel_sequence_argsort_uncased_k: return sz_sort_find_kernel(kind, capabilities, kernel, capability);
-    case sz_kernel_sequence_intersect_k: return sz_intersect_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_sort_order_k:
+    case sz_kernel_sort_uncased_order_k: return sz_sort_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_intersect_k: return sz_intersect_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_utf8_count_k:
     case sz_kernel_utf8_seek_k:
     case sz_kernel_utf8_decode_k: return sz_utf8_runes_find_kernel(kind, capabilities, kernel, capability);
@@ -82,8 +84,7 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_utf8_uncased_order_k:
     case sz_kernel_utf8_find_cased_k: return sz_utf8_uncased_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_levenshtein_engine_init_k:
-    case sz_kernel_levenshtein_distances_k:
-        return sz_levenshtein_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_levenshtein_distances_k: return sz_levenshtein_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_overlap_engine_init_k:
     case sz_kernel_overlap_scores_k: return sz_overlap_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_substrings_engine_init_k:
@@ -99,16 +100,6 @@ STRINGZILLA_API int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR;
 STRINGZILLA_API int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
 STRINGZILLA_API int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
 STRINGZILLA_API char const *sz_status_name(sz_status_t status) { return sz_status_name_(status); }
-
-STRINGZILLA_API sz_cptr_t sz_sequence_tape_start(void const *handle, sz_size_t i) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_cptr_t)handle + offsets[i];
-}
-
-STRINGZILLA_API sz_size_t sz_sequence_tape_length(void const *handle, sz_size_t i) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_size_t)(offsets[i + 1] - offsets[i]);
-}
 
 /*  The CPU's capabilities, probed on the first query: a query can be a system call, and the
  *  bindings ask on every call. Racing threads probe the same CPU and store the same word, never

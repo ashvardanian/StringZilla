@@ -5,11 +5,11 @@
  *  @brief Benchmarks AES-256 counter and Galois/counter mode through the dispatch points.
  *
  *  Bulk shaped rather than token shaped, so this sits alongside the random fill of
- *  `bench/memory.cpp` rather than in `bench/token.cpp`. The corpus decides how long each message is
- *  drawn from, but the content is a deterministic fill: a cipher's cost depends on message length
- *  alone, never on the bytes themselves. Sizes sweep a short record up to a page-sized buffer,
- *  because that range is where the fixed cost of a key schedule and a tag stops dominating and bulk
- *  kernels take over. Every capability's kernels are timed against the serial ones by the
+ *  `bench/strings.cpp` rather than in `bench/token.cpp`. The corpus decides how long each message
+ *  is drawn from, but the content is a deterministic fill: a cipher's cost depends on message
+ *  length alone, never on the bytes themselves. Sizes sweep a short record up to a page-sized
+ *  buffer, because that range is where the fixed cost of a key schedule and a tag stops dominating
+ *  and bulk kernels take over. Every capability's kernels are timed against the serial ones by the
  *  `cross_<arch>.cpp` files, through the adapters in `cross.hpp`.
  *
  *  @code{.sh}

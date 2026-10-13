@@ -266,7 +266,7 @@ where
     if states.is_empty() {
         return Ok(());
     }
-    with_sequence_by(chunks, key, |texts| unsafe {
+    with_strings_by(chunks, key, |texts| unsafe {
         sz_sha256_multistate_update_best(
             states.as_mut_ptr() as *mut c_void,
             texts,

@@ -58,15 +58,15 @@ using namespace std::literals; // for ""sv
 #pragma region Helpers
 
 /** The dispatched byte and uncased arg-sorts, in the shape of their capability kernels. */
-static sort_backend_t const sort_dispatched {"dispatched", cpu_best<sz_sequence_argsort_best>,
-                                             cpu_best<sz_sequence_argsort_uncased_best>};
+static sort_backend_t const sort_dispatched {"dispatched", cpu_best<sz_sort_order_best>,
+                                             cpu_best<sz_sort_uncased_order_best>};
 
 #pragma endregion Helpers
 
 #pragma region Unit
 
 /**
- *  @brief Known-answer and coverage tests for the sequence sort and intersect family.
+ *  @brief Known-answer and coverage tests for the strings sort and intersect family.
  *
  *  Exercises each function through the dispatched C API with automatic kernel resolution and
  *  through the C++ @c sz::argsort and @c sz::intersect wrappers, so a regression that the
@@ -76,7 +76,7 @@ static sort_backend_t const sort_dispatched {"dispatched", cpu_best<sz_sequence_
  */
 void test_sort_unit() {
     using strs_t = std::vector<std::string>;
-    using order_t = std::vector<sz::sorted_idx_t>;
+    using order_t = std::vector<sz_size_t>;
 
     // Byte arg-sort: {"banana","apple","cherry"} sorts lexicographically to {1, 0, 2}, and uncased
     // {"Banana","apple"} case-folds to {"banana","apple"}, ordering them {1, 0}.
@@ -166,15 +166,15 @@ void test_sort_unit() {
 
 /** Known-answer intersection pairs through the dispatched API and the C++ wrapper. */
 void test_intersect_unit() {
-    check_intersect_unit_(cpu_best<sz_sequence_intersect_best>);
+    check_intersect_unit_(cpu_best<sz_intersect_best>);
 
     using strs_t = std::vector<std::string>;
     using result_t = sz::intersect_result_t;
 
     // The mapping aren't guaranteed to be in any specific order, so we will sort them for comparisons.
-    using idx_pairs_t = std::set<intersect_match_t>;
-    auto to_pairs = [](result_t const &result) -> idx_pairs_t {
-        idx_pairs_t pairs;
+    using index_pairs_t = std::set<intersect_match_t>;
+    auto to_pairs = [](result_t const &result) -> index_pairs_t {
+        index_pairs_t pairs;
         for (std::size_t i = 0; i < result.first_offsets.size(); ++i)
             pairs.insert({result.first_offsets[i], result.second_offsets[i]});
         return pairs;
@@ -198,19 +198,19 @@ void test_intersect_unit() {
         {
             result = sz::intersect(abcd, abcd).value;
             verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
+            verify(to_pairs(result) == index_pairs_t({{0u, 0u}, {1u, 1u}, {2u, 2u}, {3u, 3u}}));
         }
         // Identical size, different order
         {
             result = sz::intersect(abcd, dcba).value;
             verify(result.first_offsets.size() == 4 && result.second_offsets.size() == 4);
-            verify(to_pairs(result) == idx_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
+            verify(to_pairs(result) == index_pairs_t({{0u, 3u}, {1u, 2u}, {2u, 1u}, {3u, 0u}}));
         }
         // Different sets
         {
             result = sz::intersect(abcd, abs).value;
             verify(result.first_offsets.size() == 2 && result.second_offsets.size() == 2);
-            verify(to_pairs(result) == idx_pairs_t({{0u, 0u}, {1u, 1u}}));
+            verify(to_pairs(result) == index_pairs_t({{0u, 0u}, {1u, 1u}}));
         }
     }
 }
@@ -264,7 +264,7 @@ void test_intersect_equivalence(test_context_t &context) {
  */
 void test_sort_reference_equivalence(test_context_t &context) {
     using strs_t = std::vector<std::string>;
-    using order_t = std::vector<sz::sorted_idx_t>;
+    using order_t = std::vector<sz_size_t>;
 
     // Sizes scale with the multiplier, as this tier's contract requires. The largest crosses 100k strings
     // to exercise the large-input partitioning path.
@@ -280,7 +280,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
             for (std::size_t i = 0; i < dataset_size; ++i)
                 dataset.push_back(sz::test::random_string(generator, string_length, "ab"));
 
-            for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
+            for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
                 std::shuffle(dataset.begin(), dataset.end(), generator);
                 auto order = sz::argsort(dataset).value;
                 for (std::size_t i = 1; i < dataset.size(); ++i)
@@ -296,7 +296,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
         for (std::size_t i = 0; i < dataset_size; ++i)
             dataset.push_back(sz::test::random_string(generator, i % 6, "ab"));
 
-        for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
+        for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
@@ -313,7 +313,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
         for (std::size_t i = 0; i < dataset_size; ++i)
             dataset.push_back(sz::test::random_string(generator, min_length + i % 32, "ab"));
 
-        for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
+        for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
@@ -329,7 +329,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
         for (std::size_t i = 0; i < dataset_size; ++i)
             dataset.push_back(sz::test::random_string(generator, i % 32, std::string_view("ab\0", 3)));
 
-        for (std::size_t experiment_idx = 0; experiment_idx < experiment_count; ++experiment_idx) {
+        for (std::size_t experiment_index = 0; experiment_index < experiment_count; ++experiment_index) {
             std::shuffle(dataset.begin(), dataset.end(), generator);
             auto order = sz::argsort(dataset).value;
             for (std::size_t i = 1; i < dataset_size; ++i) {
@@ -377,7 +377,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
     auto reference_order = [&](std::vector<std::string> const &keys, sort_direction_t direction) {
         order_t reference(mixed_count);
         std::iota(reference.begin(), reference.end(), 0u);
-        std::stable_sort(reference.begin(), reference.end(), [&](sz::sorted_idx_t a, sz::sorted_idx_t b) {
+        std::stable_sort(reference.begin(), reference.end(), [&](sz_size_t a, sz_size_t b) {
             int const ordering = compare_bytes(keys[a], keys[b]);
             if (ordering != 0) return direction == sort_direction_t::descending_k ? ordering > 0 : ordering < 0;
             return a < b; // Equal keys stay ascending by original index in both directions.
@@ -416,7 +416,7 @@ void test_sort_reference_equivalence(test_context_t &context) {
 
 #pragma region Safety
 
-/** Degenerate sequences through the dispatched arg-sorts, whose output must stay a permutation. */
+/** Degenerate inputs through the dispatched arg-sorts, whose output must stay a permutation. */
 void test_sort_safety() { check_sort_safety_(sort_dispatched); }
 
 #pragma endregion Safety

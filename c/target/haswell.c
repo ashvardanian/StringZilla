@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/haswell.h"
-#include "stringzilla/memory/haswell.h"
+#include "stringzilla/strings/haswell.h"
 #include "stringzilla/hash/haswell.h"
 #include "stringzilla/find/haswell.h"
 #include "stringzilla/sort/haswell.h"

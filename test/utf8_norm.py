@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""UTF-8 normalization: sz.utf8_norm and sz.utf8_find_denormalized across the NFC, NFD, NFKC, and NFKD forms.
+"""UTF-8 normalization: sz.utf8_norm, sz.utf8_find_denormalized and Strs.normalize across the NFC, NFD,
+NFKC, NFKD and NFKC_Casefold forms.
 
 Mirrors the C++ test/utf8_norm.cpp translation unit.
 
-Covers: NFC/NFD/NFKC/NFKD normalization and denormalization-violation offsets on Str and bytes
-input, ligature and combining-mark expansions, idempotence, and cross-backend agreement over
+Covers: NFC/NFD/NFKC/NFKD/NFKC_Casefold normalization and denormalization-violation offsets on Str and
+bytes input, ligature and combining-mark expansions, case folding and dropped default ignorables,
+idempotence, whole collections normalized in one call, and cross-backend agreement over
 precomposed/decomposed text, malformed UTF-8, and random ASCII corpora.
 Compares against: CPython's unicodedata.normalize, including an exhaustive sweep of the algorithmic
-Hangul syllable block, ICU's Normalizer2 for an exhaustive
+Hangul syllable block and a rebuild of toNFKC_Casefold, ICU's Normalizer2 for an exhaustive
 all-codepoints sweep and random multi-codepoint sequences, the official UCD NormalizationTest.txt
 vectors, a canonical-combining-class ordering invariant checked directly against the CCC table, and
 cross-backend self-consistency.
@@ -145,6 +147,66 @@ def test_unit_utf8_find_denormalized():
         sz.utf8_find_denormalized("hello", "XYZ")
 
 
+DEFAULT_IGNORABLE_RANGES = [
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+]
+"""Default_Ignorable_Code_Point of DerivedCoreProperties.txt, the same from Unicode 15 through 17."""
+
+
+def nfkc_casefold_reference(text: str) -> str:
+    """toNFKC_Casefold rebuilt from `unicodedata`: NFKC and full case folding repeated to a fixed point, with
+    every default-ignorable codepoint dropped first, so the codepoints it separated compose."""
+
+    def without_ignorables(text: str) -> str:
+        return "".join(c for c in text if not any(first <= ord(c) <= last for first, last in DEFAULT_IGNORABLE_RANGES))
+
+    previous, text = None, without_ignorables(text)
+    while text != previous:
+        previous = text
+        text = without_ignorables(unicodedata.normalize("NFKC", unicodedata.normalize("NFKC", text).casefold()))
+    return text
+
+
+NFKC_CASEFOLD_TEXTS = [
+    "",
+    "Hello, World",
+    "Straße ẞ",  # sharp s and its capital fold to "ss"
+    "ﬁle Ⅳ ① ㎡",  # ligature, Roman numeral, circled digit, square metre
+    "İstanbul",  # capital I with dot folds to i and a combining dot
+    "J\u00ad\u030c",  # the soft hyphen goes, so J and the caron compose into U+01F0
+    "zero\u200bwidth\ufeff joiners \u2060",  # default ignorables vanish
+    "ΣΑΣ Ａｂｃ",  # Greek capitals and fullwidth Latin
+    "café 日本 \U0001f600",
+]
+"""Well-formed text through every step of NFKC_Casefold, all assigned before Unicode 15."""
+
+
+def test_utf8_norm_nfkc_casefold():
+    """NFKC_Casefold folds case, expands compatibility characters and drops default ignorables, as a
+    `unicodedata` rebuild of toNFKC_Casefold does, through `sz.utf8_norm`, `Strs.normalize` and the quick check."""
+    expected = [nfkc_casefold_reference(text) for text in NFKC_CASEFOLD_TEXTS]
+    assert [sz.utf8_norm(text, "NFKC_Casefold").decode() for text in NFKC_CASEFOLD_TEXTS] == expected
+    assert [str(text) for text in sz.Strs(NFKC_CASEFOLD_TEXTS).normalize("NFKC_Casefold")] == expected
+    assert sz.utf8_find_denormalized("strasse", "NFKC_Casefold") is None
+    assert sz.utf8_find_denormalized("Strasse", "NFKC_Casefold") == 0
+
+
 # endregion Unit
 
 
@@ -199,7 +261,7 @@ def test_utf8_norm_canonical_ordering(rng: Random, combining_classes):
 # region Oracles
 
 
-@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
+@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD", "NFKC_Casefold"])
 def test_utf8_norm_all_codepoints_icu(form: str):
     """Exhaustive single-codepoint normalization vs ICU's Normalizer2, for every codepoint assigned in the
     locally-installed ICU's Unicode version.
@@ -254,7 +316,7 @@ def test_utf8_norm_hangul_syllables(form: str):
     )
 
 
-@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD"])
+@pytest.mark.parametrize("form", ["NFC", "NFD", "NFKC", "NFKD", "NFKC_Casefold"])
 def test_utf8_norm_random_sequences_icu(form: str, rng: Random):
     """Multi-codepoint normalization vs ICU: random base-letter + combining-mark sequences exercise composition
     and canonical ordering across codepoint boundaries, which the exhaustive single-codepoint sweep cannot reach."""
@@ -343,6 +405,22 @@ def test_utf8_norm_backend_differential_random(backend_results, rng: Random, for
     text = get_random_string(rng)
     results = backend_results(lambda capabilities: sz.utf8_norm(text, form, capabilities=capabilities))
     assert_backends_agree(results, format_inputs=lambda: f"{text!r} form={form}")
+
+
+@pytest.mark.parametrize("form", NORMALIZATION_FORMS + ("NFKC_Casefold",))
+def test_strs_normalize_backend_differential(backend_results, form: str):
+    """`Strs.normalize` brings a whole collection into `form` in one call, agreeing across every backend with
+    `unicodedata.normalize`, or the rebuild of toNFKC_Casefold, over a tape and a fragmented reordering of it."""
+    texts = UTF8_NORM_BACKEND_DIFFERENTIAL_TEXTS + NFKC_CASEFOLD_TEXTS
+    reference = nfkc_casefold_reference if form == "NFKC_Casefold" else lambda text: unicodedata.normalize(form, text)
+    expected = [reference(text) for text in texts]
+
+    def normalize(capabilities):
+        forward = [str(text) for text in sz.Strs(texts).normalize(form, capabilities=capabilities)]
+        backward = [str(text) for text in sz.Strs(texts, view=True)[::-1].normalize(form, capabilities=capabilities)]
+        return forward, backward[::-1]
+
+    assert_backends_agree(backend_results(normalize), oracle=(expected, expected))
 
 
 # endregion Backend differential

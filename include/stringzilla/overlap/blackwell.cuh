@@ -24,7 +24,7 @@
 extern "C" {
 #endif
 
-static __global__ void sz_overlap_scores_blackwell_kernel_(sz_overlap_engine_t engine, sz_sequence_t candidates,
+static __global__ void sz_overlap_scores_blackwell_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
                                                            sz_f32_t *scores, sz_size_t scores_query_stride,
                                                            sz_size_t scores_candidate_stride,
                                                            sz_size_t staged_nodes_count) {
@@ -33,7 +33,8 @@ static __global__ void sz_overlap_scores_blackwell_kernel_(sz_overlap_engine_t e
                             sz_tile_queue_next_blackwell_);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t *engine,
+                                                             sz_strings_view_t const *queries,
                                                              sz_size_t const *window_widths,
                                                              sz_size_t window_widths_count, sz_size_t candidates_budget,
                                                              sz_allocator_t *allocator, sz_stream_t stream) {
@@ -42,8 +43,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t
                                                allocator, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
-                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
+STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *engine,
+                                                        sz_strings_view_t const *candidates, sz_f32_t *scores,
+                                                        sz_size_t scores_query_stride,
                                                         sz_size_t scores_candidate_stride, sz_stream_t stream) {
     return sz_overlap_scores_scoped_cuda_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
                                           (void const *)sz_overlap_scores_blackwell_kernel_, stream);

@@ -63,9 +63,9 @@ struct levenshtein_pair_from_sz {
         std::string_view const candidate = corpus.tokens[(token_index + 1) % corpus.tokens.size()];
         sz_string_view_t const query_view {query.data(), query.size()};
         sz_string_view_t const candidate_view {candidate.data(), candidate.size()};
-        sz_sequence_t queries, candidates;
-        sz_sequence_from_string_views(&query_view, 1, &queries);
-        sz_sequence_from_string_views(&candidate_view, 1, &candidates);
+        sz_strings_view_t queries, candidates;
+        sz_strings_from_string_views(&query_view, 1, &queries);
+        sz_strings_from_string_views(&candidate_view, 1, &candidates);
 
         sz_levenshtein_engine_t engine {};
         if (sz_levenshtein_engine_init(&engine, &queries, symbol, sz::default_capabilities(), nullptr, nullptr) !=

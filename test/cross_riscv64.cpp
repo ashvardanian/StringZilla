@@ -16,17 +16,17 @@ std::size_t test_cross_riscv64(environment_t const &env) {
 
     check("test_compare_unit_rvv", [] { check_compare_unit_({"rvv", sz_equal_rvv, sz_order_rvv}); });
 
-    constexpr memory_backend_t memory_rvv {"rvv", sz_copy_rvv, sz_move_rvv, sz_fill_rvv};
-    check("test_memory_unit_rvv", [&] { check_memory_unit_(memory_rvv); });
-    check("test_memory_equivalence_rvv",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_rvv); });
-    check("test_memory_safety_rvv", [&] { check_memory_safety_(memory_rvv); });
-
-    constexpr lookup_backend_t lookup_rvv {"rvv", sz_lookup_rvv};
-    check("test_lookup_unit_rvv", [&] { check_lookup_unit_(lookup_rvv); });
-    check("test_lookup_equivalence_rvv",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_rvv); });
-    check("test_lookup_safety_rvv", [&] { check_lookup_safety_(lookup_rvv); });
+    constexpr strings_backend_t strings_rvv {"rvv",
+                                             sz_strings_to_tape_rvv,
+                                             sz_strings_to_rows_rvv,
+                                             sz_strings_escape_rvv,
+                                             sz_strings_unescape_rvv,
+                                             sz_strings_lookup_rvv,
+                                             sz_strings_normalize_rvv};
+    check("test_strings_unit_rvv", [&] { check_strings_unit_(strings_rvv); });
+    check("test_strings_equivalence_rvv",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_rvv); });
+    check("test_strings_safety_rvv", [&] { check_strings_safety_(strings_rvv); });
 
     constexpr find_backend_t find_rvv {
         .name = "rvv",
@@ -59,7 +59,7 @@ std::size_t test_cross_riscv64(environment_t const &env) {
         check_sha256_equivalence_(context, sha256_rvv);
     });
 
-    constexpr sort_backend_t sort_rvv {"rvv", sz_sequence_argsort_rvv, sz_sequence_argsort_uncased_rvv};
+    constexpr sort_backend_t sort_rvv {"rvv", sz_sort_order_rvv, sz_sort_uncased_order_rvv};
     check("test_sort_unit_rvv", [&] { check_sort_unit_(sort_rvv); });
     check("test_sort_equivalence_rvv", [&](test_context_t &context) { check_sort_equivalence_(context, sort_rvv); });
     check("test_sort_safety_rvv", [&] { check_sort_safety_(sort_rvv); });

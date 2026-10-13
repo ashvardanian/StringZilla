@@ -9,7 +9,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/sve.h"
-#include "stringzilla/memory/sve.h"
+#include "stringzilla/strings/sve.h"
 #include "stringzilla/hash/sve.h"
 #include "stringzilla/find/sve.h"
 #include "stringzilla/sort/sve.h"

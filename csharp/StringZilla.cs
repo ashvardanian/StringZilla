@@ -382,18 +382,26 @@ public static unsafe class Sz {
     public static void Lookup(Span<byte> destination, ReadOnlySpan<byte> source, ReadOnlySpan<byte> lut) {
         if (lut.Length != 256) throw new ArgumentException("LUT must be 256 bytes", nameof(lut));
         if (destination.Length < source.Length) throw new ArgumentException("destination too small", nameof(destination));
+        if (source.IsEmpty) return;
+        // One-string tapes over both buffers, whose matching sizes leave nothing to allocate; in place they share offsets.
+        uint* offsets = stackalloc uint[4] { 0, (uint)source.Length, 0, (uint)source.Length };
         fixed (byte* d = destination)
         fixed (byte* s = source)
-        fixed (byte* l = lut)
-            Check("sz_lookup_best", Native.sz_lookup_best(
-                (nint)d, (nint)s, (nuint)source.Length, (nint)l, Cpus, nint.Zero));
+        fixed (byte* l = lut) {
+            SzStringsView strings = SzStringsView.U32Tape(s, offsets, 1);
+            SzStringsView tape = SzStringsView.U32Tape(d, d == s ? offsets : offsets + 2, 1);
+            Check("sz_strings_lookup_best", Native.sz_strings_lookup_best(
+                &strings, null, 1, l, nint.Zero, &tape, Cpus, nint.Zero));
+        }
     }
 
     #endregion
 
     #region UTF-8 Normalization
 
-    public enum NormalForm { Nfd = 0, Nfc = 1, Nfkd = 2, Nfkc = 3 }
+    /// <summary>Unicode normalization forms, <see cref="NfkcCasefold"/> being NFKC with full case folding and
+    /// without default-ignorable codepoints, the Unicode toNFKC_Casefold that caseless keys match on.</summary>
+    public enum NormalForm { Nfd = 0, Nfc = 1, Nfkd = 2, Nfkc = 3, NfkcCasefold = 4 }
 
     /// <summary>Normalizes into the caller's <paramref name="destination"/> (must hold ≥ text.Length*18
     /// bytes) and returns the bytes written. Allocation-free.</summary>
@@ -452,25 +460,17 @@ public static unsafe class Sz {
         int n = items.Count;
         if (n == 0) return 0;
         if (order.Length < n) throw new ArgumentException($"order must hold at least {n} entries", nameof(order));
-        long total = 0;
-        foreach (var it in items) total += it.Length;
-        byte* data = (byte*)NativeMemory.Alloc((nuint)Math.Max(total, 1));
-        nuint* starts = (nuint*)NativeMemory.Alloc((nuint)n, (nuint)sizeof(nuint));
-        nuint* lengths = (nuint*)NativeMemory.Alloc((nuint)n, (nuint)sizeof(nuint));
+        ulong* offsets = (ulong*)NativeMemory.Alloc((nuint)n + 1, sizeof(ulong));
+        byte* data = null;
         try {
-            FillTable(items, data, starts, lengths);
-            SeqContext ctx; ctx.Data = data; ctx.Starts = starts; ctx.Lengths = lengths;
-            SzSequence seq;
-            seq.Handle = &ctx;
-            seq.Count = (nuint)n;
-            seq.GetStart = &SeqCallbacks.GetStart;
-            seq.GetLength = &SeqCallbacks.GetLength;
+            data = FillTape(items, offsets);
+            SzStringsView strings = SzStringsView.U64Tape(data, offsets, (nuint)n);
             fixed (long* ord = order)
-                ArgSortSequence(&seq, ord, top, reverse, uncased);
+                ArgSortStrings(&strings, ord, top, reverse, uncased);
             return top > 0 ? (int)Math.Min(top, n) : n;
         }
         finally {
-            NativeMemory.Free(data); NativeMemory.Free(starts); NativeMemory.Free(lengths);
+            NativeMemory.Free(data); NativeMemory.Free(offsets);
         }
     }
 
@@ -507,27 +507,23 @@ public static unsafe class Sz {
         fixed (long* segmentStarts = starts)
         fixed (long* segmentLengths = lengths)
         fixed (long* ord = order) {
-            SeqRangeContext ctx;
-            ctx.Base = basePtr;
-            ctx.Starts = segmentStarts;
-            ctx.Lengths = segmentLengths;
-            SzSequence seq;
-            seq.Handle = &ctx;
-            seq.Count = (nuint)n;
-            seq.GetStart = &SeqCallbacks.GetRangeStart;
-            seq.GetLength = &SeqCallbacks.GetRangeLength;
-            ArgSortSequence(&seq, ord, top, reverse, uncased);
+            SegmentRanges ranges;
+            ranges.Base = basePtr;
+            ranges.Starts = segmentStarts;
+            ranges.Lengths = segmentLengths;
+            SzStringsView strings = SzStringsView.Accessor(&SegmentRanges.Get, &ranges, (nuint)n);
+            ArgSortStrings(&strings, ord, top, reverse, uncased);
         }
         return top > 0 ? (int)Math.Min(top, n) : n;
     }
 
-    private static void ArgSortSequence(SzSequence* seq, long* order, long top, bool reverse, bool uncased) {
+    private static void ArgSortStrings(SzStringsView* strings, long* order, long top, bool reverse, bool uncased) {
         if (uncased)
-            Check("sz_sequence_argsort_uncased_best", Native.sz_sequence_argsort_uncased_best(
-                (nint)seq, (nuint)top, reverse ? 1 : 0, nint.Zero, (nint)order, Cpus, nint.Zero));
+            Check("sz_sort_uncased_order_best", Native.sz_sort_uncased_order_best(
+                strings, (nuint)top, reverse ? 1 : 0, nint.Zero, order, Cpus, nint.Zero));
         else
-            Check("sz_sequence_argsort_best", Native.sz_sequence_argsort_best(
-                (nint)seq, (nuint)top, reverse ? 1 : 0, nint.Zero, (nint)order, Cpus, nint.Zero));
+            Check("sz_sort_order_best", Native.sz_sort_order_best(
+                strings, (nuint)top, reverse ? 1 : 0, nint.Zero, order, Cpus, nint.Zero));
     }
 
     /// <summary>Inner-joins two de-duplicated sequences, writing matching index pairs into
@@ -539,47 +535,36 @@ public static unsafe class Sz {
         int minN = Math.Min(na, nb);
         if (firstPositions.Length < minN || secondPositions.Length < minN)
             throw new ArgumentException($"position spans must hold at least {minN} entries");
-        long ta = 0; foreach (var it in a) ta += it.Length;
-        long tb = 0; foreach (var it in b) tb += it.Length;
-        byte* dataA = (byte*)NativeMemory.Alloc((nuint)Math.Max(ta, 1));
-        nuint* startsA = (nuint*)NativeMemory.Alloc((nuint)na, (nuint)sizeof(nuint));
-        nuint* lengthsA = (nuint*)NativeMemory.Alloc((nuint)na, (nuint)sizeof(nuint));
-        byte* dataB = (byte*)NativeMemory.Alloc((nuint)Math.Max(tb, 1));
-        nuint* startsB = (nuint*)NativeMemory.Alloc((nuint)nb, (nuint)sizeof(nuint));
-        nuint* lengthsB = (nuint*)NativeMemory.Alloc((nuint)nb, (nuint)sizeof(nuint));
+        ulong* offsetsA = (ulong*)NativeMemory.Alloc((nuint)na + 1, sizeof(ulong));
+        ulong* offsetsB = (ulong*)NativeMemory.Alloc((nuint)nb + 1, sizeof(ulong));
+        byte* dataA = null, dataB = null;
         try {
-            FillTable(a, dataA, startsA, lengthsA);
-            FillTable(b, dataB, startsB, lengthsB);
-            SeqContext ctxA; ctxA.Data = dataA; ctxA.Starts = startsA; ctxA.Lengths = lengthsA;
-            SeqContext ctxB; ctxB.Data = dataB; ctxB.Starts = startsB; ctxB.Lengths = lengthsB;
-            SzSequence seqA;
-            seqA.Handle = &ctxA; seqA.Count = (nuint)na; seqA.GetStart = &SeqCallbacks.GetStart; seqA.GetLength = &SeqCallbacks.GetLength;
-            SzSequence seqB;
-            seqB.Handle = &ctxB; seqB.Count = (nuint)nb; seqB.GetStart = &SeqCallbacks.GetStart; seqB.GetLength = &SeqCallbacks.GetLength;
+            dataA = FillTape(a, offsetsA);
+            dataB = FillTape(b, offsetsB);
+            SzStringsView stringsA = SzStringsView.U64Tape(dataA, offsetsA, (nuint)na);
+            SzStringsView stringsB = SzStringsView.U64Tape(dataB, offsetsB, (nuint)nb);
             nuint size;
             fixed (long* fp = firstPositions)
             fixed (long* sp = secondPositions)
-                Check("sz_sequence_intersect_best", Native.sz_sequence_intersect_best(
-                    (nint)(&seqA), (nint)(&seqB), nint.Zero, seed, (nint)(&size), (nint)fp, (nint)sp,
-                    Cpus, nint.Zero));
+                Check("sz_intersect_best", Native.sz_intersect_best(
+                    &stringsA, &stringsB, nint.Zero, seed, &size, fp, sp, Cpus, nint.Zero));
             return (int)size;
         }
         finally {
-            NativeMemory.Free(dataA); NativeMemory.Free(startsA); NativeMemory.Free(lengthsA);
-            NativeMemory.Free(dataB); NativeMemory.Free(startsB); NativeMemory.Free(lengthsB);
+            NativeMemory.Free(dataA); NativeMemory.Free(offsetsA);
+            NativeMemory.Free(dataB); NativeMemory.Free(offsetsB);
         }
     }
 
-    private static void FillTable(IReadOnlyList<byte[]> items, byte* data, nuint* starts, nuint* lengths) {
-        long off = 0;
-        for (int i = 0; i < items.Count; i++) {
-            byte[] it = items[i];
-            starts[i] = (nuint)off;
-            lengths[i] = (nuint)it.Length;
-            if (it.Length > 0)
-                fixed (byte* src = it) Buffer.MemoryCopy(src, data + off, it.Length, it.Length);
-            off += it.Length;
-        }
+    /// <summary>Gathers <paramref name="items"/> into a tape: returns their bytes back to back, which the caller
+    /// frees, and fills <paramref name="offsets"/>, one per item and one past the last.</summary>
+    private static byte* FillTape(IReadOnlyList<byte[]> items, ulong* offsets) {
+        ulong total = 0;
+        offsets[0] = 0;
+        for (int i = 0; i < items.Count; i++) offsets[i + 1] = total += (ulong)items[i].Length;
+        byte* data = (byte*)NativeMemory.Alloc((nuint)Math.Max(total, 1));
+        for (int i = 0; i < items.Count; i++) items[i].CopyTo(new Span<byte>(data + offsets[i], items[i].Length));
+        return data;
     }
 
     #endregion
@@ -1513,7 +1498,7 @@ internal static unsafe partial class Native {
     [LibraryImport(Lib)] internal static partial int sz_sha256_state_update_best(nint state, nint data, nuint len, ulong caps, nint stream);
     [LibraryImport(Lib)] internal static partial int sz_sha256_state_digest_best(nint state, nint digest, ulong caps, nint stream);
     [LibraryImport(Lib)] internal static partial int sz_fill_random_best(nint text, nuint len, ulong nonce, ulong caps, nint stream);
-    [LibraryImport(Lib)] internal static partial int sz_lookup_best(nint target, nint source, nuint len, nint lut, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_strings_lookup_best(SzStringsView* strings, nuint* order, nuint count, byte* lut, nint allocator, SzStringsView* tape, ulong caps, nint stream);
 
     #endregion
 
@@ -1523,62 +1508,57 @@ internal static unsafe partial class Native {
 
     #endregion
 
-    #region Collections (Sequence Callbacks)
-    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort_best(nint sequence, nuint top, int reverse, nint allocator, nint order, ulong caps, nint stream);
-    [LibraryImport(Lib)] internal static partial int sz_sequence_argsort_uncased_best(nint sequence, nuint top, int reverse, nint allocator, nint order, ulong caps, nint stream);
-    [LibraryImport(Lib)] internal static partial int sz_sequence_intersect_best(nint first, nint second, nint allocator, ulong seed, nint size, nint firstPos, nint secondPos, ulong caps, nint stream);
+    #region Collections
+    [LibraryImport(Lib)] internal static partial int sz_sort_order_best(SzStringsView* strings, nuint top, int reverse, nint allocator, long* order, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_sort_uncased_order_best(SzStringsView* strings, nuint top, int reverse, nint allocator, long* order, ulong caps, nint stream);
+    [LibraryImport(Lib)] internal static partial int sz_intersect_best(SzStringsView* first, SzStringsView* second, nint allocator, ulong seed, nuint* size, long* firstPositions, long* secondPositions, ulong caps, nint stream);
 
     #endregion
 }
 
-/// <summary>Off-heap string table backing a <c>sz_sequence_t</c>: concatenated bytes + per-item
-/// (start, length). The callbacks index into this with trivial pointer arithmetic.</summary>
-internal unsafe struct SeqContext {
-    public byte* Data;
-    public nuint* Starts;
-    public nuint* Lengths;
-}
-
-/// <summary>Mirrors C <c>sz_sequence_t</c> { handle, count, get_start, get_length }.</summary>
+/// <summary>Mirrors C <c>sz_string_view_t</c>, which a <see cref="SzStringsView"/> accessor writes per index.</summary>
 [StructLayout(LayoutKind.Sequential)]
-internal unsafe struct SzSequence {
-    public void* Handle;
+internal unsafe struct SzStringView {
+    public byte* Start;
+    public nuint Length;
+}
+
+/// <summary>Mirrors C <c>sz_strings_view_t</c> and the <c>sz_strings_span_t</c> sharing its layout: a 4-byte
+/// layout, the count, then a tape's bytes and offsets, or an accessor's <c>get</c> and <c>handle</c>, 32 bytes
+/// on 64-bit targets.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct SzStringsView {
+    public int Layout;
     public nuint Count;
-    public delegate* unmanaged<void*, nuint, nint> GetStart;
-    public delegate* unmanaged<void*, nuint, nuint> GetLength;
+    public void* First;
+    public void* Second;
+
+    public static SzStringsView U32Tape(byte* data, uint* offsets, nuint count) =>
+        new() { Layout = 0, Count = count, First = data, Second = offsets };
+
+    public static SzStringsView U64Tape(byte* data, ulong* offsets, nuint count) =>
+        new() { Layout = 1, Count = count, First = data, Second = offsets };
+
+    public static SzStringsView Accessor(
+        delegate* unmanaged<void*, nuint*, nuint, SzStringView*, void> get, void* handle, nuint count) =>
+        new() { Layout = 2, Count = count, First = get, Second = handle };
 }
 
-/// <summary>Unmanaged (AOT-safe) callbacks the native sort/intersect invokes per element.</summary>
-internal static unsafe class SeqCallbacks {
-    [UnmanagedCallersOnly]
-    public static nint GetStart(void* handle, nuint index) {
-        var c = (SeqContext*)handle;
-        return (nint)(c->Data + c->Starts[index]);
-    }
-
-    [UnmanagedCallersOnly]
-    public static nuint GetLength(void* handle, nuint index) {
-        var c = (SeqContext*)handle;
-        return c->Lengths[index];
-    }
-
-    [UnmanagedCallersOnly]
-    public static nint GetRangeStart(void* handle, nuint index) {
-        var c = (SeqRangeContext*)handle;
-        return (nint)(c->Base + c->Starts[index]);
-    }
-
-    [UnmanagedCallersOnly]
-    public static nuint GetRangeLength(void* handle, nuint index) {
-        var c = (SeqRangeContext*)handle;
-        return (nuint)c->Lengths[index];
-    }
-}
-
-/// <summary>Backs a <c>sz_sequence_t</c> over (start, length) ranges into one caller-pinned buffer; the
-/// callbacks index it without copying any segment bytes.</summary>
-internal unsafe struct SeqRangeContext {
+/// <summary>Backs a <see cref="SzStringsView"/> accessor over (start, length) ranges into one caller-pinned
+/// buffer, viewing every segment where it lies.</summary>
+internal unsafe struct SegmentRanges {
     public byte* Base;
     public long* Starts;
     public long* Lengths;
+
+    /// <summary>Writes the views of a block of up to 64 segments, as <c>sz_strings_get_t</c> does.</summary>
+    [UnmanagedCallersOnly]
+    public static void Get(void* handle, nuint* indices, nuint count, SzStringView* views) {
+        var ranges = (SegmentRanges*)handle;
+        for (nuint position = 0; position < count; position++) {
+            nuint index = indices[position];
+            views[position].Start = ranges->Base + ranges->Starts[index];
+            views[position].Length = (nuint)ranges->Lengths[index];
+        }
+    }
 }

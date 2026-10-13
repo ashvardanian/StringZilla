@@ -60,6 +60,14 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
                device.handle == runtime.unified.handle);
     });
     check_device_kernels_(check, metal);
+    strings_backend_t const strings_metal {"metal",
+                                           sz_strings_to_tape_metal,
+                                           sz_strings_to_rows_metal,
+                                           sz_strings_escape_metal,
+                                           sz_strings_unescape_metal,
+                                           sz_strings_lookup_metal,
+                                           sz_strings_normalize_metal};
+    check_device_strings_(check, runtime, strings_metal);
     return capability_failures + check.failures + test_cross_dispatch_device(env, runtime);
 #else
     sz_unused_(env);

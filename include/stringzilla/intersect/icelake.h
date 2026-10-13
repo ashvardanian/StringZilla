@@ -11,8 +11,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/compare/serial.h"   // `sz_equal_serial_`
-#include "stringzilla/memory/serial.h"    // `sz_fill_serial_`
-#include "stringzilla/intersect/serial.h" // `STRINGZILLA_SEQUENCE_INTERSECT_BUDGET`
+#include "stringzilla/intersect/serial.h" // `STRINGZILLA_INTERSECT_BUDGET`
 #include "stringzilla/hash/icelake.h"     // `sz_hash_icelake_`, `sz_hash_state_short_x4_*_icelake_`
 
 #ifdef __cplusplus
@@ -66,28 +65,28 @@ STRINGZILLA_INLINE int sz_u64x4_contains_collisions_haswell_(__m256i values_u64x
     return matches_mask;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                       //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,   //
-    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr, //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_intersect_icelake(                                    //
+    sz_strings_view_t const *first_strings, sz_strings_view_t const *second_strings, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count_ptr,     //
+    sz_size_t *first_positions, sz_size_t *second_positions, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
 
     // To join to unordered sets of strings, the simplest approach would be to hash them into a dynamically
     // allocated hash table and then iterate over the second set, checking for the presence of each element in the
     // hash table. This would require O(N) memory and O(N) time complexity, where N is the smaller set.
-    sz_sequence_t const *small_sequence, *large_sequence;
-    sz_sorted_idx_t *small_positions, *large_positions;
-    if (first_sequence->count <= second_sequence->count) {
-        small_sequence = first_sequence, large_sequence = second_sequence;
+    sz_strings_view_t const *small_strings, *large_strings;
+    sz_size_t *small_positions, *large_positions;
+    if (first_strings->count <= second_strings->count) {
+        small_strings = first_strings, large_strings = second_strings;
         small_positions = first_positions, large_positions = second_positions;
     }
     else {
-        small_sequence = second_sequence, large_sequence = first_sequence;
+        small_strings = second_strings, large_strings = first_strings;
         small_positions = second_positions, large_positions = first_positions;
     }
 
     // We may very well have nothing to join
-    if (small_sequence->count == 0) {
+    if (small_strings->count == 0) {
         *intersection_count_ptr = 0;
         return sz_success_k;
     }
@@ -103,24 +102,23 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
     // Allocate memory for the hash table and initialize it with 0xFF.
     // The higher is the `hash_table_slots` multiple - the more memory we will use,
     // but the less likely the collisions will be.
-    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_sequence->count) *
-                                       (1u << STRINGZILLA_SEQUENCE_INTERSECT_BUDGET);
-    sz_assert_(hash_table_slots > small_sequence->count && "A full table leaves a missing key probing forever");
+    sz_size_t const hash_table_slots = sz_size_bit_ceil(small_strings->count) * (1u << STRINGZILLA_INTERSECT_BUDGET);
+    sz_assert_(hash_table_slots > small_strings->count && "A full table leaves a missing key probing forever");
     sz_size_t const bytes_per_entry = sizeof(sz_size_t) + sizeof(sz_u64_t);
     sz_size_t *table_positions = (sz_size_t *)allocator->allocate(hash_table_slots * bytes_per_entry, allocator->handle,
                                                                   STRINGZILLA_NULL);
     if (!table_positions) return sz_bad_alloc_k;
     sz_u64_t *table_hashes = (sz_u64_t *)(table_positions + hash_table_slots);
-    sz_fill_serial_((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
+    memset(table_positions, 0xFF, hash_table_slots * bytes_per_entry);
 
     // Empty-slot sentinel for the 64-bit `table_hashes`: the `0xFF` fill makes every slot all-ones.
     // It must be a 64-bit constant, not `STRINGZILLA_SIZE_MAX` - on 32-bit targets `sz_size_t` is
     // 32-bit, so `STRINGZILLA_SIZE_MAX` (0xFFFFFFFF) never equals the 64-bit fill and the probe
     // loop spins forever.
     sz_u64_t const empty_slot = ~(sz_u64_t)0;
-    // Top bit of a stored position marks a slot whose (distinct) value already produced a pair, so a
-    // duplicate key on either sequence doesn't re-emit, so the result stays a set of size <= min(counts)
-    // and never overflows the caller's `positions` arrays. Positions are indices; the high bit is free.
+    // The top bit of a stored position marks a slot whose distinct value already produced a pair,
+    // so a duplicate key on either side never emits again: the result stays a set of `min(counts)`
+    // at most, never overflows the caller's `positions` arrays, and indices never reach that bit.
     sz_size_t const consumed_flag = (sz_size_t)1 << (sizeof(sz_size_t) * 8 - 1);
 
     // Conceptually the Ice Lake variant is similar to the serial one, except it takes advantage of:
@@ -136,19 +134,19 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
     sz_hash_state_aligned_for_short_x4_t batch_hashes_states_initial;
     sz_hash_state_short_x4_init_icelake_(&batch_hashes_states_initial, seed);
     sz_size_t count_longer = 0;
-    for (sz_size_t small_position = 0; small_position < small_sequence->count;) {
+    sz_string_view_t views[64];
+    for (sz_size_t small_position = 0; small_position < small_strings->count;) {
         sz_string_view_t batch[4];
         sz_u256_vec_t batch_positions_vec;
         sz_size_t batch_size;
-        for (batch_size = 0; batch_size < 4 && small_position < small_sequence->count; ++small_position) {
-            sz_size_t length = small_sequence->get_length(small_sequence->handle, small_position);
-            if (length > 16) {
+        for (batch_size = 0; batch_size < 4 && small_position < small_strings->count; ++small_position) {
+            sz_size_t const position_in_block = small_position % 64;
+            if (!position_in_block) sz_strings_get_block_(small_strings, small_position, views);
+            if (views[position_in_block].length > 16) {
                 count_longer++;
                 continue;
             }
-            sz_cptr_t str = small_sequence->get_start(small_sequence->handle, small_position);
-            batch[batch_size].start = str;
-            batch[batch_size].length = length;
+            batch[batch_size] = views[position_in_block];
             batch_positions_vec.u64s[batch_size] = small_position;
             ++batch_size;
         }
@@ -227,19 +225,18 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
 
     // Now, let's cross-reference all shorter values from the larger collection.
     sz_size_t intersection_count = 0;
-    for (sz_size_t large_position = 0; large_position < large_sequence->count;) {
+    for (sz_size_t large_position = 0; large_position < large_strings->count;) {
         sz_string_view_t batch[4];
         sz_u256_vec_t batch_positions_vec;
         sz_size_t batch_size;
-        for (batch_size = 0; batch_size < 4 && large_position < large_sequence->count; ++large_position) {
-            sz_size_t length = large_sequence->get_length(large_sequence->handle, large_position);
-            if (length > 16) {
+        for (batch_size = 0; batch_size < 4 && large_position < large_strings->count; ++large_position) {
+            sz_size_t const position_in_block = large_position % 64;
+            if (!position_in_block) sz_strings_get_block_(large_strings, large_position, views);
+            if (views[position_in_block].length > 16) {
                 count_longer++;
                 continue;
             }
-            sz_cptr_t str = large_sequence->get_start(large_sequence->handle, large_position);
-            batch[batch_size].start = str;
-            batch[batch_size].length = length;
+            batch[batch_size] = views[position_in_block];
             batch_positions_vec.u64s[batch_size] = large_position;
             ++batch_size;
         }
@@ -259,12 +256,12 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
                     // The hash matches, compare the strings.
                     sz_size_t const stored = table_positions[hash_slot];
                     sz_size_t const small_position = stored & ~consumed_flag;
-                    sz_size_t const small_length = small_sequence->get_length(small_sequence->handle, small_position);
-                    if (length != small_length) continue;
+                    sz_string_view_t small_view;
+                    sz_strings_get_(small_strings, &small_position, 1, &small_view);
+                    if (length != small_view.length) continue;
 
                     // Same hash may still imply different strings, so we need to compare them.
-                    sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                    sz_bool_t const same = sz_equal_serial_(str, small_str, length);
+                    sz_bool_t const same = sz_equal_serial_(str, small_view.start, length);
                     if (same != sz_true_k) continue;
 
                     // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
@@ -343,11 +340,11 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
                     // The hash matches, compare the strings.
                     sz_size_t const stored = table_positions[hash_slot];
                     sz_size_t const small_position = stored & ~consumed_flag;
-                    sz_size_t const small_length = small_sequence->get_length(small_sequence->handle, small_position);
-                    if (length == small_length) {
+                    sz_string_view_t small_view;
+                    sz_strings_get_(small_strings, &small_position, 1, &small_view);
+                    if (length == small_view.length) {
                         // Same hash may still imply different strings, so we need to compare them.
-                        sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                        sz_bool_t const same = sz_equal_serial_(str, small_str, length);
+                        sz_bool_t const same = sz_equal_serial_(str, small_view.start, length);
                         if (same == sz_true_k) {
                             // This distinct value already produced a pair, so skip the duplicate key.
                             if (stored & consumed_flag) continue;
@@ -372,12 +369,12 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
                     // The hash matches, compare the strings.
                     sz_size_t const stored = table_positions[hash_slot];
                     sz_size_t const small_position = stored & ~consumed_flag;
-                    sz_size_t const small_length = small_sequence->get_length(small_sequence->handle, small_position);
-                    if (length != small_length) continue;
+                    sz_string_view_t small_view;
+                    sz_strings_get_(small_strings, &small_position, 1, &small_view);
+                    if (length != small_view.length) continue;
 
                     // Same hash may still imply different strings, so we need to compare them.
-                    sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                    sz_bool_t const same = sz_equal_serial_(str, small_str, length);
+                    sz_bool_t const same = sz_equal_serial_(str, small_view.start, length);
                     if (same != sz_true_k) continue;
 
                     // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.
@@ -398,14 +395,15 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
     if (count_longer) {
         // At this point only large values are remaining, let's process them with the code identical to our
         // serial solution, but dispatching the right Ice Lake kernel under the hood.
-        sz_fill_serial_((sz_ptr_t)table_positions, hash_table_slots * bytes_per_entry, 0xFF);
+        memset(table_positions, 0xFF, hash_table_slots * bytes_per_entry);
 
         // Hash the smaller set into the hash table using the default available backend.
-        for (sz_size_t small_position = 0; small_position < small_sequence->count; ++small_position) {
-            sz_size_t const length = small_sequence->get_length(small_sequence->handle, small_position);
+        for (sz_size_t small_position = 0; small_position < small_strings->count; ++small_position) {
+            sz_size_t const position_in_block = small_position % 64;
+            if (!position_in_block) sz_strings_get_block_(small_strings, small_position, views);
+            sz_size_t const length = views[position_in_block].length;
             if (length <= 16) continue; //! This is the only difference from the serial solution
-            sz_cptr_t const str = small_sequence->get_start(small_sequence->handle, small_position);
-            sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
+            sz_u64_t const hash = sz_hash_icelake_(views[position_in_block].start, length, seed);
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
             // Implement linear probing to find the first free slot.
             // If we somehow face 2 different strings with same hash, we will export that hash 2 times!
@@ -415,10 +413,12 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
         }
 
         // Iterate over the larger set and check for the presence of each element in the hash table.
-        for (sz_size_t large_position = 0; large_position < large_sequence->count; ++large_position) {
-            sz_size_t const length = large_sequence->get_length(large_sequence->handle, large_position);
+        for (sz_size_t large_position = 0; large_position < large_strings->count; ++large_position) {
+            sz_size_t const position_in_block = large_position % 64;
+            if (!position_in_block) sz_strings_get_block_(large_strings, large_position, views);
+            sz_size_t const length = views[position_in_block].length;
             if (length <= 16) continue; //! This is the only difference from the serial solution
-            sz_cptr_t const str = large_sequence->get_start(large_sequence->handle, large_position);
+            sz_cptr_t const str = views[position_in_block].start;
             sz_u64_t const hash = sz_hash_icelake_(str, length, seed);
             sz_size_t hash_slot = hash & (hash_table_slots - 1);
 
@@ -430,12 +430,12 @@ STRINGZILLA_API sz_status_t sz_sequence_intersect_icelake(                      
                 // The hash matches, compare the strings.
                 sz_size_t const stored = table_positions[hash_slot];
                 sz_size_t const small_position = stored & ~consumed_flag;
-                sz_size_t const small_length = small_sequence->get_length(small_sequence->handle, small_position);
-                if (length != small_length) continue;
+                sz_string_view_t small_view;
+                sz_strings_get_(small_strings, &small_position, 1, &small_view);
+                if (length != small_view.length) continue;
 
                 // Same hash may still imply different strings, so we need to compare them.
-                sz_cptr_t const small_str = small_sequence->get_start(small_sequence->handle, small_position);
-                sz_bool_t const same = sz_equal_serial_(str, small_str, length);
+                sz_bool_t const same = sz_equal_serial_(str, small_view.start, length);
                 if (same != sz_true_k) continue;
 
                 // This distinct value already contributed a pair, a duplicate key on either side, so don't re-emit.

@@ -395,7 +395,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_clear_cuda_(sz_substrings_eng
  *  @param[out] haystack_offsets Where the per-haystack boundaries land, or @c STRINGZILLA_NULL to
  *      leave them in the arena, as every verb but @ref sz_substrings_find_scoped_cuda_ does.
  */
-STRINGZILLA_INLINE sz_status_t sz_substrings_walk_cuda_(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+STRINGZILLA_INLINE sz_status_t sz_substrings_walk_cuda_(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
                                                         sz_substrings_matches_cuda_t wanted,
                                                         sz_size_t *haystack_offsets, sz_substrings_round_cuda_t *round,
                                                         sz_stream_t stream) {
@@ -410,7 +411,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_cuda_(sz_substrings_engine_t *
     sz_size_t longest = engine->max_source_match_bytes;
     sz_substrings_overlap_policy_t overlap_policy = engine->overlap_policy;
     sz_substrings_report_t *report;
-    sz_sequence_t launched_haystacks = *haystacks;
+    sz_strings_view_t launched_haystacks = *haystacks;
     sz_substrings_engine_t launched_engine;
     sz_substrings_gpu_pass_t walk_pass = sz_substrings_gpu_sizing_k;
     sz_size_t *emitted_at;
@@ -486,14 +487,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_cuda_(sz_substrings_engine_t *
 
 /** Whether every argument the device verbs read or write is one a kernel can address. */
 STRINGZILLA_INLINE sz_bool_t sz_substrings_resident_cuda_(sz_substrings_engine_t const *engine,
-                                                          sz_sequence_t const *haystacks) {
+                                                          sz_strings_view_t const *haystacks) {
     // An array the kernel dereferences, rather than the owning handle it never touches, so a caller
     // holding a borrowed view of a resident engine is not refused for a null owner.
-    if (!sz_memory_accessible_cuda_(engine->base)) return sz_false_k;
-    return haystacks->get_start == sz_sequence_tape_start && haystacks->get_length == sz_sequence_tape_length &&
-                   sz_memory_accessible_cuda_(haystacks->handle)
-               ? sz_true_k
-               : sz_false_k;
+    return (sz_bool_t)(sz_memory_accessible_cuda_(engine->base) && sz_strings_accessible_cuda_(haystacks));
 }
 
 #pragma endregion Host Plumbing
@@ -504,7 +501,7 @@ STRINGZILLA_INLINE sz_bool_t sz_substrings_resident_cuda_(sz_substrings_engine_t
  *  @p capability names, which is every step of @ref sz_substrings_engine_init_scoped_cuda_ but the
  *  device scope; the host compiles the vocabulary in place, so nothing here is scheduled. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
-    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_capability_t capability, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_allocator_t unified;
@@ -535,7 +532,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cuda_(
 }
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_scoped_cuda_(
-    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_capability_t capability, sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
@@ -552,7 +549,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_scoped_cuda_(
 #pragma region Backends
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_counts_cuda_(sz_substrings_engine_t *engine,
-                                                          sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                          sz_strings_view_t const *haystacks, sz_size_t *counts,
                                                           sz_size_t counts_stride, sz_stream_t stream) {
     sz_substrings_round_cuda_t round;
     sz_size_t haystacks_count = haystacks->count;
@@ -573,7 +570,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_cuda_(sz_substrings_engine_t
                                       sz_substrings_grid_cuda_(haystacks_count), arguments, 0, stream);
 }
 
-STRINGZILLA_INLINE sz_status_t sz_substrings_find_cuda_(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+STRINGZILLA_INLINE sz_status_t sz_substrings_find_cuda_(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
                                                         sz_substrings_match_t *matches, sz_size_t matches_capacity,
                                                         sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_substrings_round_cuda_t round;
@@ -606,13 +604,13 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_cuda_(sz_substrings_engine_t *
 }
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_replace_cuda_(sz_substrings_engine_t *engine,
-                                                           sz_sequence_t const *haystacks,
-                                                           sz_sequence_t const *replacements, sz_ptr_t target,
+                                                           sz_strings_view_t const *haystacks,
+                                                           sz_strings_view_t const *replacements, sz_ptr_t target,
                                                            sz_size_t target_capacity, sz_size_t *offsets,
                                                            sz_stream_t stream) {
     sz_substrings_round_cuda_t round;
     sz_substrings_report_t *report;
-    sz_sequence_t launched_haystacks, launched_replacements;
+    sz_strings_view_t launched_haystacks, launched_replacements;
     sz_size_t boundaries = haystacks->count + 1;
     sz_size_t target_ceiling = target_capacity;
     sz_size_t *rewritten_at;
@@ -623,9 +621,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_cuda_(sz_substrings_engine_
     if (replacements->count != engine->needles_count) return sz_unexpected_dimensions_k;
     if (!haystacks->count) return sz_success_k;
     if (!sz_substrings_resident_cuda_(engine, haystacks)) return sz_device_memory_mismatch_k;
-    if (replacements->get_start != sz_sequence_tape_start || replacements->get_length != sz_sequence_tape_length ||
-        !sz_memory_accessible_cuda_(replacements->handle))
-        return sz_device_memory_mismatch_k;
+    if (!sz_strings_accessible_cuda_(replacements)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_cuda_(offsets)) return sz_device_memory_mismatch_k;
     if (target_capacity && !sz_memory_accessible_cuda_(target)) return sz_device_memory_mismatch_k;
 
@@ -672,7 +668,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_cuda_(sz_substrings_engine_
  *      or @c STRINGZILLA_NULL.
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
-    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks, sz_f32_t const *document_lengths,
     sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride,
     void const *clustered, sz_stream_t stream) {
     void const *kernel = (void const *)sz_substrings_bm25_simt_kernel_;
@@ -686,7 +682,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
                                   sizeof(sz_u32_t);
     sz_size_t const accepts_bytes = sz_substrings_accepts_words_cuda_(engine) * sizeof(sz_u32_t);
     sz_substrings_engine_t engine_copy;
-    sz_sequence_t haystacks_copy = *haystacks;
+    sz_strings_view_t haystacks_copy = *haystacks;
     sz_substrings_bm25_t parameters_copy;
     sz_u32_t *overflow_rows = STRINGZILLA_NULL;
     sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks, resident, clusters, cluster_blocks = 1;
@@ -751,7 +747,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
 /*  Each launcher makes the engine's device current around its helper, and restores the caller's. */
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_counts_scoped_cuda_(sz_substrings_engine_t *engine,
-                                                                 sz_sequence_t const *haystacks, sz_size_t *counts,
+                                                                 sz_strings_view_t const *haystacks, sz_size_t *counts,
                                                                  sz_size_t counts_stride, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
@@ -762,7 +758,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_scoped_cuda_(sz_substrings_e
 }
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_find_scoped_cuda_(sz_substrings_engine_t *engine,
-                                                               sz_sequence_t const *haystacks,
+                                                               sz_strings_view_t const *haystacks,
                                                                sz_substrings_match_t *matches,
                                                                sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                                sz_stream_t stream) {
@@ -775,10 +771,10 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_find_scoped_cuda_(sz_substrings_eng
 }
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_replace_scoped_cuda_(sz_substrings_engine_t *engine,
-                                                                  sz_sequence_t const *haystacks,
-                                                                  sz_sequence_t const *replacements, sz_ptr_t target,
-                                                                  sz_size_t target_capacity, sz_size_t *offsets,
-                                                                  sz_stream_t stream) {
+                                                                  sz_strings_view_t const *haystacks,
+                                                                  sz_strings_view_t const *replacements,
+                                                                  sz_ptr_t target, sz_size_t target_capacity,
+                                                                  sz_size_t *offsets, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
@@ -788,7 +784,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_scoped_cuda_(sz_substrings_
 }
 
 STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_scoped_cuda_(
-    sz_substrings_engine_t *engine, sz_sequence_t const *haystacks, sz_f32_t const *document_lengths,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks, sz_f32_t const *document_lengths,
     sz_substrings_bm25_t const *parameters, sz_f32_t const *needle_weights, sz_f32_t *scores, sz_size_t scores_stride,
     void const *clustered, sz_stream_t stream) {
     int caller = 0;
@@ -804,29 +800,29 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_scoped_cuda_(
 
 #if STRINGZILLA_TARGET_CUDA
 
-STRINGZILLA_API sz_status_t sz_substrings_engine_init_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
-                                                           sz_substrings_case_sensitivity_t case_sensitivity,
-                                                           sz_substrings_overlap_policy_t overlap_policy,
-                                                           sz_size_t hot_states, sz_size_t matches_budget,
-                                                           sz_size_t haystacks_budget, sz_allocator_t *allocator,
-                                                           sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_substrings_engine_init_cuda(
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
+    sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_substrings_engine_init_scoped_cuda_(engine, needles, case_sensitivity, overlap_policy, hot_states,
                                                   matches_budget, haystacks_budget, sz_cap_cuda_k, allocator, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                      sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_substrings_counts_cuda(sz_substrings_engine_t *engine,
+                                                      sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                      sz_size_t counts_stride, sz_stream_t stream) {
     return sz_substrings_counts_scoped_cuda_(engine, haystacks, counts, counts_stride, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+STRINGZILLA_API sz_status_t sz_substrings_find_cuda(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                     sz_substrings_match_t *matches, sz_size_t matches_capacity,
                                                     sz_size_t *matches_offsets, sz_stream_t stream) {
     return sz_substrings_find_scoped_cuda_(engine, haystacks, matches, matches_capacity, matches_offsets, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                       sz_sequence_t const *replacements, sz_ptr_t target,
+STRINGZILLA_API sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *engine,
+                                                       sz_strings_view_t const *haystacks,
+                                                       sz_strings_view_t const *replacements, sz_ptr_t target,
                                                        sz_size_t target_capacity, sz_size_t *offsets,
                                                        sz_stream_t stream) {
     return sz_substrings_replace_scoped_cuda_(engine, haystacks, replacements, target, target_capacity, offsets,
@@ -834,7 +830,7 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_cuda(sz_substrings_engine_t *e
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_cuda(sz_substrings_engine_t *engine,
-                                                           sz_sequence_t const *haystacks,
+                                                           sz_strings_view_t const *haystacks,
                                                            sz_f32_t const *document_lengths,
                                                            sz_substrings_bm25_t const *parameters,
                                                            sz_f32_t const *needle_weights, sz_f32_t *scores,

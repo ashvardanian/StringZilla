@@ -288,16 +288,19 @@ STRINGZILLA_INLINE void sz_levenshtein_u8x64_sweep_icelake_(sz_levenshtein_query
 /** Streams every candidate through a prepared byte @p query of at most eight symbols, sixty-four
  *  at a time. */
 STRINGZILLA_INLINE void sz_levenshtein_u8x64_distances_icelake_(sz_levenshtein_query_t const *query,
-                                                                sz_sequence_t const *candidates, sz_size_t *distances) {
+                                                                sz_strings_view_t const *candidates,
+                                                                sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k };
     for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
         sz_size_t const sweep_count = sz_min_of_two((sz_size_t)candidates_per_position_k,
                                                     candidates->count - sweep_first);
         sz_cptr_t texts[candidates_per_position_k] = {0};
         sz_u64_t byte_counts[candidates_per_position_k] = {0};
+        sz_string_view_t views[candidates_per_position_k];
+        sz_strings_get_block_(candidates, sweep_first, views);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {
-            texts[candidate] = candidates->get_start(candidates->handle, sweep_first + candidate);
-            byte_counts[candidate] = candidates->get_length(candidates->handle, sweep_first + candidate);
+            texts[candidate] = views[candidate].start;
+            byte_counts[candidate] = views[candidate].length;
         }
         sz_levenshtein_u8x64_sweep_icelake_(query, texts, byte_counts, sweep_count, distances + sweep_first);
     }
@@ -323,14 +326,14 @@ STRINGZILLA_CONSTEXPR sz_levenshtein_lanes_icelake_t sz_levenshtein_lanes_icelak
 #pragma endregion Narrow Lanes
 
 STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_icelake(sz_levenshtein_engine_t *engine,
-                                                               sz_sequence_t const *queries,
+                                                               sz_strings_view_t const *queries,
                                                                sz_levenshtein_symbol_t symbol,
                                                                sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_icelake_k, allocator, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
-                                                             sz_sequence_t const *candidates, sz_size_t *distances,
+                                                             sz_strings_view_t const *candidates, sz_size_t *distances,
                                                              sz_size_t distances_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&

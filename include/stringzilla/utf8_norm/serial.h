@@ -2,13 +2,16 @@
  *  @file include/stringzilla/utf8_norm/serial.h
  *  @author Ash Vardanian
  *  @date June 14, 2026
- *  @brief Serial backend for the single-pass Unicode normalizer (NFD / NFC / NFKD / NFKC).
+ *  @brief Serial backend for the single-pass Unicode normalizer, from NFD to NFKC_Casefold.
  *
  *  Implements the three UAX #15 primitives over UTF-8:
  *
  *  - canonical / compatibility @b decomposition (table-driven, plus algorithmic Hangul),
  *  - canonical @b ordering (stable insertion sort of each non-starter run by combining class),
  *  - canonical @b composition (Hangul algorithm + the partner-indexed primary-composite table).
+ *
+ *  NFKC_Casefold composes like NFKC over decompositions of its own, some of them empty, and
+ *  folds the clean runs between dirty regions with the tier's @c utf8_uncased_fold kernel.
  *
  *  Work is streamed one combining segment at a time - a starter followed by its trailing
  *  non-starters - so no whole-string buffer is needed. Real-world non-starter runs are 1-2 long,
@@ -28,7 +31,8 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_norm/tables.h"
-#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_rune_encode`
+#include "stringzilla/utf8_runes/serial.h"        // `sz_rune_decode`, `sz_rune_encode`
+#include "stringzilla/utf8_uncased_fold/serial.h" // `sz_utf8_uncased_fold_serial_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,7 +70,10 @@ enum {
     sz_utf8_norm_seg_cap_k = 256,
 
     /** Longest single-codepoint decomposition in the UCD. */
-    sz_utf8_norm_decomp_max_k = 18
+    sz_utf8_norm_decomp_max_k = 18,
+
+    /** Bytes of a clean run folded at once when checking it against NFKC_Casefold. */
+    sz_utf8_norm_fold_chunk_k = 256
 };
 
 /** Hangul is algorithmic and absent from the tables, so the syllable block is described by
@@ -91,12 +98,17 @@ enum sz_utf8_norm_quick_check_t {
     sz_utf8_norm_quick_check_nfkc_k = 1 << 1,
     sz_utf8_norm_quick_check_nfd_k = 1 << 2,
     sz_utf8_norm_quick_check_nfkd_k = 1 << 3,
+    sz_utf8_norm_quick_check_nfkc_casefold_k = 1 << 4,
 };
 
 /** 3-stage trie index for @p codepoint, 0 for out-of-range or default codepoints. Shared by the
  *  props and scan lookups. */
 STRINGZILLA_CONSTEXPR sz_u16_t sz_utf8_norm_index_(sz_rune_t codepoint) {
-    if (codepoint >= sz_utf8_norm_table_max_k) return 0;
+    if (codepoint >= sz_utf8_norm_table_max_k) {
+        // Past the tables only plane 14's tags and variation selectors have properties: U+00AD's.
+        if ((codepoint >> 12) != 0xE0) return 0;
+        codepoint = 0xAD;
+    }
     sz_size_t leaf = codepoint >> sz_utf8_norm_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_stage1_[leaf >> sz_utf8_norm_mid_bits_k];
     sz_u16_t block = sz_utf8_norm_stage2_[(sz_size_t)mid * sz_utf8_norm_mid_k + (leaf & sz_utf8_norm_mid_mask_k)];
@@ -120,7 +132,10 @@ STRINGZILLA_INLINE sz_utf8_norm_props_t sz_utf8_norm_lookup_(sz_rune_t codepoint
  *  test is needed here.
  */
 STRINGZILLA_CONSTEXPR sz_u16_t sz_utf8_norm_value_(sz_rune_t codepoint) {
-    if (codepoint >= sz_utf8_norm_table_max_k) return 0;
+    if (codepoint >= sz_utf8_norm_table_max_k) {
+        if ((codepoint >> 12) != 0xE0) return 0;
+        codepoint = 0xAD;
+    }
     sz_size_t leaf = codepoint >> sz_utf8_norm_scan_low_bits_k;
     sz_u16_t mid = sz_utf8_norm_scan_stage1_[leaf >> sz_utf8_norm_scan_mid_bits_k];
     sz_u16_t block =
@@ -136,14 +151,15 @@ STRINGZILLA_INLINE sz_u8_t sz_utf8_norm_ccc_(sz_rune_t codepoint) {
 }
 
 /**
- *  @brief Decompose one codepoint into 1-18 runes and their combining classes in a single lookup.
+ *  @brief Decompose one codepoint for @p form into 0-18 runes and their combining classes at once.
  *
  *  Fusing decomposition with the combining-class read avoids a second trie probe per codepoint on
  *  the common non-decomposing path, which is every base letter and every Hangul jamo.
  *
- *  @return Number of runes written to @p out and @p out_canonical_combining_class, at least 1.
+ *  @return Number of runes written to @p out and @p out_canonical_combining_class, 0 only for a
+ *      codepoint NFKC_Casefold erases.
  */
-STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_bool_t compat, sz_rune_t *out,
+STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint, sz_normal_form_t form, sz_rune_t *out,
                                                              sz_u8_t *out_canonical_combining_class) {
     // Hangul syllables decompose algorithmically - they are absent from the tables; jamo are starters.
     if (codepoint >= sz_utf8_norm_hangul_s_base_k &&
@@ -162,7 +178,9 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_utf8_norm_decompose_rune_(sz_rune_t codepoint
         return 2;
     }
     sz_utf8_norm_props_t properties = sz_utf8_norm_lookup_(codepoint);
-    sz_u16_t index = compat ? properties.nfkd : properties.nfd;
+    sz_u16_t index = properties.nfd;
+    if (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) index = properties.nfkd;
+    else if (form == sz_normal_form_nfkc_casefold_k) index = properties.nfkc_casefold;
     if (index == 0) { // no decomposition: emit self with its own combining class (no second lookup)
         out[0] = codepoint, out_canonical_combining_class[0] = properties.canonical_combining_class;
         return 1;
@@ -320,8 +338,7 @@ STRINGZILLA_CONSTEXPR void sz_utf8_norm_flush_(sz_rune_t *runes, sz_u8_t *canoni
 /** Core normalization engine, shared by the write and compare entry points. */
 STRINGZILLA_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                           sz_utf8_norm_out_t *out) {
-    sz_bool_t compat = (form == sz_normal_form_nfkd_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
-    sz_bool_t compose = (form == sz_normal_form_nfc_k || form == sz_normal_form_nfkc_k) ? sz_true_k : sz_false_k;
+    sz_bool_t compose = (form == sz_normal_form_nfd_k || form == sz_normal_form_nfkd_k) ? sz_false_k : sz_true_k;
 
     sz_u8_t const *source_ptr = (sz_u8_t const *)source;
     sz_u8_t const *source_end = source_ptr + source_length;
@@ -332,6 +349,7 @@ STRINGZILLA_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_len
 
     sz_rune_t decomposed[sz_utf8_norm_decomp_max_k];
     sz_u8_t decomposed_canonical_combining_classes[sz_utf8_norm_decomp_max_k];
+    sz_bool_t follows_malformed = sz_false_k;
     while (source_ptr < source_end) {
         sz_rune_t rune;
         sz_rune_length_t rune_length = sz_rune_decode((sz_cptr_t)source_ptr, (sz_cptr_t)source_end, &rune);
@@ -341,13 +359,17 @@ STRINGZILLA_INLINE void sz_utf8_norm_run_(sz_cptr_t source, sz_size_t source_len
             sz_utf8_norm_flush_(segment, segment_canonical_combining_classes, segment_length, compose, out);
             segment_length = 0;
             sz_utf8_norm_emit_byte_(out, *source_ptr);
-            ++source_ptr;
+            ++source_ptr, follows_malformed = sz_true_k;
             continue;
         }
         source_ptr += rune_length;
 
-        sz_size_t parts = sz_utf8_norm_decompose_rune_(rune, compat, decomposed,
-                                                       decomposed_canonical_combining_classes);
+        sz_size_t parts = sz_utf8_norm_decompose_rune_(rune, form, decomposed, decomposed_canonical_combining_classes);
+        // Erasing the codepoint after a malformed byte could fuse that byte with the next ones.
+        if (parts == 0 && follows_malformed)
+            parts = sz_utf8_norm_decompose_rune_(rune, sz_normal_form_nfd_k, decomposed,
+                                                 decomposed_canonical_combining_classes);
+        follows_malformed = sz_false_k;
         for (sz_size_t p = 0; p != parts; ++p) {
             sz_rune_t rune_part = decomposed[p];
             sz_u8_t canonical_combining_class = decomposed_canonical_combining_classes[p];
@@ -394,8 +416,9 @@ STRINGZILLA_INLINE sz_bool_t sz_utf8_norm_is_safe_boundary_(sz_rune_t codepoint,
     switch (form) {
     case sz_normal_form_nfc_k: return (properties.quick_check & 3) ? sz_false_k : sz_true_k;   // NFC_QC == Yes
     case sz_normal_form_nfkc_k: return (properties.quick_check & 12) ? sz_false_k : sz_true_k; // NFKC_QC == Yes
-    case sz_normal_form_nfd_k: return (properties.nfd || hangul) ? sz_false_k : sz_true_k;     // no canonical decomp
-    default: return (properties.nfkd || hangul) ? sz_false_k : sz_true_k;                      // no compat decomp
+    case sz_normal_form_nfkc_casefold_k: return (properties.quick_check & 16) ? sz_false_k : sz_true_k; // inert
+    case sz_normal_form_nfd_k: return (properties.nfd || hangul) ? sz_false_k : sz_true_k; // no canonical decomp
+    default: return (properties.nfkd || hangul) ? sz_false_k : sz_true_k;                  // no compat decomp
     }
 }
 
@@ -432,6 +455,9 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_norm_classify_serial_(sz_cptr_t text, sz
         case sz_normal_form_nfkc_k:
             if ((properties.quick_check & 12) || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
+        case sz_normal_form_nfkc_casefold_k:
+            if ((properties.quick_check & 16) || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
+            break;
         case sz_normal_form_nfd_k:
             if (properties.nfd || hangul || properties.canonical_combining_class != 0) return (sz_cptr_t)ptr;
             break;
@@ -449,6 +475,7 @@ STRINGZILLA_CONSTEXPR sz_u8_t sz_utf8_norm_form_flag_(sz_normal_form_t form) {
     switch (form) {
     case sz_normal_form_nfc_k: return sz_utf8_norm_quick_check_nfc_k;
     case sz_normal_form_nfkc_k: return sz_utf8_norm_quick_check_nfkc_k;
+    case sz_normal_form_nfkc_casefold_k: return sz_utf8_norm_quick_check_nfkc_casefold_k;
     case sz_normal_form_nfd_k: return sz_utf8_norm_quick_check_nfd_k;
     default: return sz_utf8_norm_quick_check_nfkd_k;
     }
@@ -527,6 +554,51 @@ STRINGZILLA_CONSTEXPR sz_cptr_t sz_utf8_norm_verify_block_(sz_u8_t const **posit
  */
 typedef sz_cptr_t (*sz_utf8_norm_scan_t_)(sz_cptr_t, sz_size_t, sz_normal_form_t);
 
+/** A clean-run kernel: writes what an inert run normalizes to and returns its length, with the
+ *  signature of the @c utf8_uncased_fold kernels NFKC_Casefold passes. */
+typedef sz_size_t (*sz_utf8_norm_clean_t_)(sz_cptr_t, sz_size_t, sz_ptr_t);
+
+/** The clean-run kernel of the four UAX #15 forms, whose inert runs are already normalized. */
+STRINGZILLA_INLINE sz_size_t sz_utf8_norm_copy_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+    memcpy(target, source, source_length);
+    return source_length;
+}
+
+/**
+ *  @brief First codepoint from @p position to @p end that @p fold rewrites, or
+ *      @b STRINGZILLA_NULL_CHAR if the run folds to itself, as an NFKC_Casefold clean run must.
+ *
+ *  Folds a chunk at a time into a stack buffer. The first byte that differs lies in the culprit,
+ *  since every byte before it folded to itself.
+ */
+STRINGZILLA_INLINE sz_cptr_t sz_utf8_norm_find_unfolded_(sz_u8_t const *position, sz_u8_t const *end,
+                                                         sz_utf8_norm_clean_t_ fold) {
+    sz_u8_t folded[(sz_size_t)sz_utf8_norm_fold_chunk_k * sz_utf8_fold_max_expansion_k];
+    while (position < end) {
+        sz_u8_t const *chunk_end = (sz_size_t)(end - position) > sz_utf8_norm_fold_chunk_k
+                                       ? position + sz_utf8_norm_fold_chunk_k
+                                       : end;
+        // Never split a well-formed codepoint, which has at most three continuation bytes.
+        for (sz_size_t step = 0; step != 3 && chunk_end != end && (*chunk_end & 0xC0u) == 0x80u; ++step) --chunk_end;
+        sz_size_t const length = (sz_size_t)(chunk_end - position);
+        sz_size_t const folded_length = fold((sz_cptr_t)position, length, (sz_ptr_t)folded);
+        sz_size_t common = 0;
+        while (common != length && common != folded_length && folded[common] == position[common]) ++common;
+        if (common != length || folded_length != length) {
+            sz_u8_t const *const changed = position + (common != length ? common : length - 1);
+            for (;;) {
+                sz_rune_t rune;
+                sz_rune_length_t const rune_length = sz_rune_decode((sz_cptr_t)position, (sz_cptr_t)end, &rune);
+                sz_u8_t const *const next = position + (rune_length == sz_rune_invalid_k ? 1 : rune_length);
+                if (next > changed) return (sz_cptr_t)position;
+                position = next;
+            }
+        }
+        position = chunk_end;
+    }
+    return STRINGZILLA_NULL_CHAR;
+}
+
 /**
  *  @brief Does the codepoint or malformed byte at @p position open a safe split boundary
  *      for @p form?
@@ -559,20 +631,23 @@ STRINGZILLA_INLINE sz_u8_t const *sz_utf8_norm_step_back_(sz_u8_t const *positio
     return position - 1;
 }
 
-/** Normalize via skip-and-fix: copy the already-normalized runs verbatim, located by the @p scan
- *  primitive, and run the decompose, reorder and compose engine only on the short dirty regions,
- *  each delimited by safe boundaries so composition never crosses a split. Shared across ISAs. */
+/** Normalize via skip-and-fix: copy the already-normalized runs verbatim, or @p fold them for
+ *  NFKC_Casefold, located by the @p scan primitive, and run the decompose, reorder and compose
+ *  engine only on the short dirty regions, each delimited by safe boundaries so composition never
+ *  crosses a split. Shared across ISAs. */
 STRINGZILLA_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
-                                                  sz_ptr_t destination, sz_utf8_norm_scan_t_ scan) {
+                                                  sz_ptr_t destination, sz_utf8_norm_scan_t_ scan,
+                                                  sz_utf8_norm_clean_t_ fold) {
     sz_u8_t const *const begin = (sz_u8_t const *)source;
     sz_u8_t const *const end = begin + source_length;
     sz_u8_t *out = (sz_u8_t *)destination;
     sz_u8_t const *ptr = begin;
+    sz_utf8_norm_clean_t_ const clean = form == sz_normal_form_nfkc_casefold_k ? fold : &sz_utf8_norm_copy_;
 
     while (ptr < end) {
         sz_cptr_t dirty = scan((sz_cptr_t)ptr, (sz_size_t)(end - ptr), form);
-        if (dirty == STRINGZILLA_NULL_CHAR) { // rest is provably normalized - copy verbatim
-            while (ptr < end) *out++ = *ptr++;
+        if (dirty == STRINGZILLA_NULL_CHAR) { // rest is provably inert
+            out += clean((sz_cptr_t)ptr, (sz_size_t)(end - ptr), (sz_ptr_t)out);
             break;
         }
         sz_u8_t const *dirty_ptr = (sz_u8_t const *)dirty;
@@ -599,8 +674,8 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t so
             tail += rune_length == sz_rune_invalid_k ? 1 : rune_length;
         }
 
-        // Emit the clean prefix verbatim, then normalize the bounded dirty region.
-        while (ptr < segment) *out++ = *ptr++;
+        // Emit the clean prefix through its kernel, then normalize the bounded dirty region.
+        out += clean((sz_cptr_t)ptr, (sz_size_t)(segment - ptr), (sz_ptr_t)out);
         sz_utf8_norm_out_t sink;
         sink.dst = out;
         sink.cmp = STRINGZILLA_NULL, sink.cmp_end = STRINGZILLA_NULL;
@@ -625,7 +700,9 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t so
  *  combining mark is valid NFD. We therefore verify exactly: a combining segment, delimited by safe
  *  boundaries so the check is compositional, is in @p form @b iff normalizing it reproduces it
  *  byte-for-byte. If it changes, the segment is the violation; otherwise we skip it and keep
- *  scanning. This single rule is exact for all four forms, subsuming the No, Maybe and order cases.
+ *  scanning. This single rule is exact for all five forms, subsuming the No, Maybe and order cases.
+ *  NFKC_Casefold leaves case-only changes to its clean runs, so each of them must also @p fold to
+ *  itself, and the first codepoint that does not, always a safe boundary, is the violation.
  *
  *  We return the @b safe-boundary start of the first non-conforming segment, not the @p scan stop.
  *  This is backend-independent, as a conservative serial scan and an exact NEON scan walk past the
@@ -633,13 +710,19 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_norm_engine_(sz_cptr_t source, sz_size_t so
  *  every byte before the returned pointer is provably in @p form.
  */
 STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source, sz_size_t source_length,
-                                                               sz_normal_form_t form, sz_utf8_norm_scan_t_ scan) {
+                                                               sz_normal_form_t form, sz_utf8_norm_scan_t_ scan,
+                                                               sz_utf8_norm_clean_t_ fold) {
     sz_u8_t const *const end = (sz_u8_t const *)source + source_length;
     sz_u8_t const *cur = (sz_u8_t const *)source;
 
     while (cur < end) {
         // Fast path: the scanner spans the already-normalized run (NEON: 26-94 GB/s).
         sz_cptr_t stop = scan((sz_cptr_t)cur, (sz_size_t)(end - cur), form);
+        if (form == sz_normal_form_nfkc_casefold_k) {
+            sz_cptr_t const unfolded = sz_utf8_norm_find_unfolded_(
+                cur, stop == STRINGZILLA_NULL_CHAR ? end : (sz_u8_t const *)stop, fold);
+            if (unfolded != STRINGZILLA_NULL_CHAR) return unfolded;
+        }
         if (stop == STRINGZILLA_NULL_CHAR) return STRINGZILLA_NULL_CHAR;
 
         // Resolve the flagged byte exactly by normalizing its combining segment and comparing.
@@ -678,7 +761,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_find_denormalized_engine_(sz_cptr_t source,
 STRINGZILLA_API sz_status_t sz_utf8_norm_serial(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                 sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_serial_);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_serial_,
+                                          &sz_utf8_uncased_fold_serial_);
     return sz_success_k;
 }
 
@@ -686,7 +770,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_serial(sz_cptr_t source, s
                                                              sz_normal_form_t form, sz_cptr_t *match,
                                                              sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_serial_,
+                                               &sz_utf8_uncased_fold_serial_);
     return sz_success_k;
 }
 

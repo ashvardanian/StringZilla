@@ -16,11 +16,100 @@
 extern "C" {
 #endif
 
+/*  Branch-light partial load/store of 0..16 bytes — the shared building block for WASM tails, so
+ *  the kernels never fall back to a scalar byte loop and never over-read/over-write past the
+ *  buffer. WASM lane load/store need compile-time-constant lane indices, so the 0..7 byte assembly
+ *  is a small constant-lane switch; the 8..15 case loads the low 8 with @c load64_zero and folds
+ *  the remaining bytes in with one constant `i8x16.shuffle`. They live in this lowest @c v128
+ *  header, which includes no other family, so every @c v128 backend reaches them without cycles. */
 #if STRINGZILLA_ARCH_WASM_
 #if STRINGZILLA_ARCH_WASM_V128_
 #if defined(__clang__)
 #pragma clang attribute push(__attribute__((target("simd128"))), apply_to = function)
 #endif
+
+STRINGZILLA_INLINE v128_t sz_load_partial_lo8_v128_(sz_u8_t const *source_pointer, sz_size_t remainder) {
+    v128_t result_u8x16 = wasm_u64x2_splat(0);
+    switch (remainder) {
+    case 1: result_u8x16 = wasm_v128_load8_lane(source_pointer, result_u8x16, 0); break;
+    case 2: result_u8x16 = wasm_v128_load16_lane(source_pointer, result_u8x16, 0); break;
+    case 3:
+        result_u8x16 = wasm_v128_load16_lane(source_pointer, result_u8x16, 0);
+        result_u8x16 = wasm_v128_load8_lane(source_pointer + 2, result_u8x16, 2);
+        break;
+    case 4: result_u8x16 = wasm_v128_load32_lane(source_pointer, result_u8x16, 0); break;
+    case 5:
+        result_u8x16 = wasm_v128_load32_lane(source_pointer, result_u8x16, 0);
+        result_u8x16 = wasm_v128_load8_lane(source_pointer + 4, result_u8x16, 4);
+        break;
+    case 6:
+        result_u8x16 = wasm_v128_load32_lane(source_pointer, result_u8x16, 0);
+        result_u8x16 = wasm_v128_load16_lane(source_pointer + 4, result_u8x16, 2);
+        break;
+    case 7:
+        result_u8x16 = wasm_v128_load32_lane(source_pointer, result_u8x16, 0);
+        result_u8x16 = wasm_v128_load16_lane(source_pointer + 4, result_u8x16, 2);
+        result_u8x16 = wasm_v128_load8_lane(source_pointer + 6, result_u8x16, 6);
+        break;
+    default: break;
+    }
+    return result_u8x16;
+}
+
+/** Load exactly @p length (0..16) bytes into a v128; remaining lanes zero; no over-read. */
+STRINGZILLA_INLINE v128_t sz_load_partial_v128_(sz_cptr_t source, sz_size_t length) {
+    sz_u8_t const *source_pointer = (sz_u8_t const *)source;
+    if (length >= 16) return wasm_v128_load(source_pointer);
+    if (length & 8) {
+        v128_t low_half_u8x16 = wasm_v128_load64_zero(source_pointer);
+        v128_t high_half_u8x16 = sz_load_partial_lo8_v128_(source_pointer + 8, length & 7);
+        return wasm_i8x16_shuffle(low_half_u8x16, high_half_u8x16, 0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22,
+                                  23);
+    }
+    return sz_load_partial_lo8_v128_(source_pointer, length);
+}
+
+STRINGZILLA_INLINE void sz_store_partial_lo8_v128_(sz_u8_t *target_pointer, v128_t data_u8x16, sz_size_t remainder) {
+    switch (remainder) {
+    case 1: wasm_v128_store8_lane(target_pointer, data_u8x16, 0); break;
+    case 2: wasm_v128_store16_lane(target_pointer, data_u8x16, 0); break;
+    case 3:
+        wasm_v128_store16_lane(target_pointer, data_u8x16, 0);
+        wasm_v128_store8_lane(target_pointer + 2, data_u8x16, 2);
+        break;
+    case 4: wasm_v128_store32_lane(target_pointer, data_u8x16, 0); break;
+    case 5:
+        wasm_v128_store32_lane(target_pointer, data_u8x16, 0);
+        wasm_v128_store8_lane(target_pointer + 4, data_u8x16, 4);
+        break;
+    case 6:
+        wasm_v128_store32_lane(target_pointer, data_u8x16, 0);
+        wasm_v128_store16_lane(target_pointer + 4, data_u8x16, 2);
+        break;
+    case 7:
+        wasm_v128_store32_lane(target_pointer, data_u8x16, 0);
+        wasm_v128_store16_lane(target_pointer + 4, data_u8x16, 2);
+        wasm_v128_store8_lane(target_pointer + 6, data_u8x16, 6);
+        break;
+    default: break;
+    }
+}
+
+/** Store exactly @p length (0..16) bytes from a v128; no over-write past the buffer. */
+STRINGZILLA_INLINE void sz_store_partial_v128_(sz_ptr_t target, v128_t data_u8x16, sz_size_t length) {
+    sz_u8_t *target_pointer = (sz_u8_t *)target;
+    if (length >= 16) {
+        wasm_v128_store(target_pointer, data_u8x16);
+        return;
+    }
+    if (length & 8) {
+        wasm_v128_store64_lane(target_pointer, data_u8x16, 0);
+        v128_t high_half_u8x16 = wasm_i8x16_shuffle(data_u8x16, data_u8x16, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4,
+                                                    5, 6, 7);
+        sz_store_partial_lo8_v128_(target_pointer + 8, high_half_u8x16, length & 7);
+    }
+    else { sz_store_partial_lo8_v128_(target_pointer, data_u8x16, length); }
+}
 
 STRINGZILLA_INLINE sz_ordering_t sz_order_v128_(sz_cptr_t a, sz_size_t a_length, sz_cptr_t b, sz_size_t b_length) {
     //! Lexicographic ordering needs the byte-reversed comparison of the first differing word,

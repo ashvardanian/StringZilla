@@ -21,16 +21,13 @@ extern "C" {
 
 #if STRINGZILLA_TARGET_CUDA
 
-STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_update_cuda_(sz_sha256_state_t *states, sz_sequence_t const *texts,
-                                                                 sz_stream_t stream) {
-    sz_size_t count = texts->count;
-    void const *tape = texts->handle;
-    if (!count) return sz_success_k;
-    if (texts->get_start != sz_sequence_tape_start || texts->get_length != sz_sequence_tape_length ||
-        !sz_memory_accessible_cuda_(tape) || !sz_memory_accessible_cuda_(states))
-        return sz_device_memory_mismatch_k;
-    void *arguments[] = {&states, &tape, &count};
-    dim3 const grid((unsigned)sz_size_divide_round_up(count, sz_sha256_threads_per_block_simt_k));
+STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_update_cuda_(sz_sha256_state_t *states,
+                                                                 sz_strings_view_t const *texts, sz_stream_t stream) {
+    sz_strings_view_t launched_texts = *texts;
+    if (!texts->count) return sz_success_k;
+    if (!sz_strings_accessible_cuda_(texts) || !sz_memory_accessible_cuda_(states)) return sz_device_memory_mismatch_k;
+    void *arguments[] = {&states, &launched_texts};
+    dim3 const grid((unsigned)sz_size_divide_round_up(texts->count, sz_sha256_threads_per_block_simt_k));
     return sz_launch_cuda_((void const *)&sz_sha256_multistate_update_simt_kernel_, grid,
                            dim3(sz_sha256_threads_per_block_simt_k), arguments, 0, stream);
 }
@@ -46,7 +43,7 @@ STRINGZILLA_INLINE sz_status_t sz_sha256_multistate_digest_cuda_(sz_sha256_state
                            dim3(sz_sha256_threads_per_block_simt_k), arguments, 0, stream);
 }
 
-STRINGZILLA_API sz_status_t sz_sha256_multistate_update_cuda(sz_sha256_state_t *states, sz_sequence_t const *texts,
+STRINGZILLA_API sz_status_t sz_sha256_multistate_update_cuda(sz_sha256_state_t *states, sz_strings_view_t const *texts,
                                                              sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);

@@ -566,7 +566,7 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/file.c
         python/stringzilla/str.c
         python/stringzilla/strs.c
-        python/stringzilla/memory.c
+        python/stringzilla/strings.c
         python/stringzilla/hash.c
         python/stringzilla/cipher.c
         python/stringzilla/compare.c
@@ -713,8 +713,8 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/main.cpp
         bench/find.cpp
         bench/token.cpp
-        bench/sequence.cpp
-        bench/memory.cpp
+        bench/sort.cpp
+        bench/strings.cpp
         bench/cipher.cpp
         bench/container.cpp
         bench/levenshtein.cpp

@@ -30,7 +30,7 @@
  *  @endcode
  *
  *  Unlike the full-blown StringWars, it doesn't use any external frameworks like Criterion or
- *  Google Benchmark. Its siblings are `sequence.cpp`, `find.cpp`, `token.cpp`, and `memory.cpp`.
+ *  Google Benchmark. Its siblings are `sort.cpp`, `find.cpp`, `token.cpp`, and `strings.cpp`.
  */
 #include <map>           // `std::map`
 #include <unordered_map> // `std::unordered_map`

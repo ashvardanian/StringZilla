@@ -16,17 +16,17 @@ std::size_t test_cross_wasm(environment_t const &env) {
 
     check("test_compare_unit_v128", [] { check_compare_unit_({"v128", sz_equal_v128, sz_order_v128}); });
 
-    constexpr memory_backend_t memory_v128 {"v128", sz_copy_v128, sz_move_v128, sz_fill_v128};
-    check("test_memory_unit_v128", [&] { check_memory_unit_(memory_v128); });
-    check("test_memory_equivalence_v128",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_v128); });
-    check("test_memory_safety_v128", [&] { check_memory_safety_(memory_v128); });
-
-    constexpr lookup_backend_t lookup_v128 {"v128", sz_lookup_v128};
-    check("test_lookup_unit_v128", [&] { check_lookup_unit_(lookup_v128); });
-    check("test_lookup_equivalence_v128",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_v128); });
-    check("test_lookup_safety_v128", [&] { check_lookup_safety_(lookup_v128); });
+    constexpr strings_backend_t strings_v128 {"v128",
+                                              sz_strings_to_tape_v128,
+                                              sz_strings_to_rows_v128,
+                                              sz_strings_escape_v128,
+                                              sz_strings_unescape_v128,
+                                              sz_strings_lookup_v128,
+                                              sz_strings_normalize_v128};
+    check("test_strings_unit_v128", [&] { check_strings_unit_(strings_v128); });
+    check("test_strings_equivalence_v128",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_v128); });
+    check("test_strings_safety_v128", [&] { check_strings_safety_(strings_v128); });
 
     constexpr find_backend_t find_v128 {
         .name = "v128",
@@ -144,18 +144,17 @@ std::size_t test_cross_wasm(environment_t const &env) {
     check("test_compare_unit_v128relaxed",
           [] { check_compare_unit_({"v128relaxed", sz_equal_v128relaxed, sz_order_v128relaxed}); });
 
-    constexpr memory_backend_t memory_v128relaxed {"v128relaxed", sz_copy_v128relaxed, sz_move_v128relaxed,
-                                                   sz_fill_v128relaxed};
-    check("test_memory_unit_v128relaxed", [&] { check_memory_unit_(memory_v128relaxed); });
-    check("test_memory_equivalence_v128relaxed",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_v128relaxed); });
-    check("test_memory_safety_v128relaxed", [&] { check_memory_safety_(memory_v128relaxed); });
-
-    constexpr lookup_backend_t lookup_v128relaxed {"v128relaxed", sz_lookup_v128relaxed};
-    check("test_lookup_unit_v128relaxed", [&] { check_lookup_unit_(lookup_v128relaxed); });
-    check("test_lookup_equivalence_v128relaxed",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_v128relaxed); });
-    check("test_lookup_safety_v128relaxed", [&] { check_lookup_safety_(lookup_v128relaxed); });
+    constexpr strings_backend_t strings_v128relaxed {"v128relaxed",
+                                                     sz_strings_to_tape_v128relaxed,
+                                                     sz_strings_to_rows_v128relaxed,
+                                                     sz_strings_escape_v128relaxed,
+                                                     sz_strings_unescape_v128relaxed,
+                                                     sz_strings_lookup_v128relaxed,
+                                                     sz_strings_normalize_v128relaxed};
+    check("test_strings_unit_v128relaxed", [&] { check_strings_unit_(strings_v128relaxed); });
+    check("test_strings_equivalence_v128relaxed",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_v128relaxed); });
+    check("test_strings_safety_v128relaxed", [&] { check_strings_safety_(strings_v128relaxed); });
 
     constexpr find_backend_t find_v128relaxed {
         .name = "v128relaxed",

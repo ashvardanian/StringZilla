@@ -137,7 +137,7 @@ def test_unit_strs_argsort_out():
     strs = Str("banana\napple\ncherry\nApple\nBANANA").splitlines()
     n = len(strs)
 
-    # `out` must match `sz_sorted_idx_t` exactly: one pointer-width unsigned integer per index.
+    # `out` must match `sz_size_t` exactly: one pointer-width unsigned integer per index.
     index_code = next(code for code in "LQ" if array.array(code).itemsize == struct.calcsize("P"))
     buf = array.array(index_code, [0] * n)
     assert strs.argsort(uncased=True, out=buf) is buf

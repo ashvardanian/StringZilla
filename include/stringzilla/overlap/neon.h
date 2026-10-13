@@ -148,7 +148,7 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_u32x4_btree_probe_neon(sz_overlap_btree_
 }
 #if STRINGZILLA_TARGET_NEON
 
-STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                         sz_stream_t stream) {
@@ -175,8 +175,10 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *eng
     sz_u32_t *const nodes = (sz_u32_t *)engine->nodes;
     sz_u32_t *const keys_counts = (sz_u32_t *)engine->keys_counts;
     sz_f64_t *const chain = (sz_f64_t *)engine->scratch;
+    sz_string_view_t views[64];
     for (sz_size_t index = 0; index != engine->count; ++index) {
-        sz_cptr_t const text = queries->get_start(queries->handle, index);
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, views);
+        sz_cptr_t const text = views[index % 64].start;
         sz_size_t const length = engine->lengths[index];
         sz_u32_t *const arena = nodes + engine->nodes_offsets[index];
         chain[0] = 0.0;
@@ -212,7 +214,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *eng
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                                    sz_f32_t *scores, sz_size_t scores_query_stride,
                                                    sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -223,11 +225,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, 
     sz_size_t const step = sz_overlap_f64x2_positions_per_step_neon_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
 
-    sz_size_t longest_candidate = 0;
-    for (sz_size_t index = 0; index != candidates->count; ++index) {
-        sz_size_t const length = candidates->get_length(candidates->handle, index);
-        if (length > longest_candidate) longest_candidate = length;
-    }
+    sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
     sz_status_t const grown = sz_overlap_engine_grow_(engine, sz_overlap_engine_round_bytes_(longest_candidate, chains),
                                                       stream);
     if (grown != sz_success_k) return grown;
@@ -241,9 +239,13 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, 
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
         sz_size_t shortest = STRINGZILLA_SIZE_MAX;
+        sz_size_t indices[sz_overlap_interleaved_chains_k];
+        sz_string_view_t views[sz_overlap_interleaved_chains_k];
+        for (sz_size_t chain = 0; chain != interleaved; ++chain) indices[chain] = first + chain;
+        sz_strings_get_(candidates, indices, interleaved, views);
         for (sz_size_t chain = 0; chain != interleaved; ++chain) {
-            texts[chain] = candidates->get_start(candidates->handle, first + chain);
-            lengths[chain] = candidates->get_length(candidates->handle, first + chain);
+            texts[chain] = views[chain].start;
+            lengths[chain] = views[chain].length;
             priors[chain] = prefix_hashes[chain * chain_stride] = 0.0;
             if (lengths[chain] < shortest) shortest = lengths[chain];
         }

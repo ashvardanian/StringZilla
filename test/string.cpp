@@ -4,8 +4,8 @@
  *  @date December 21, 2023
  *  @brief Tests for the string class and the utilities beneath it.
  *
- *  Covers arithmetic and struct plumbing, ASCII utilities, memory, STL compatibility, conversions
- *  and the extensions beyond the STL.
+ *  Covers arithmetic and struct plumbing, ASCII utilities, string collections, STL compatibility,
+ *  conversions and the extensions beyond the STL.
  */
 #undef NDEBUG // ! Enable all assertions for testing
 
@@ -52,7 +52,7 @@
 
 #include <fmt/format.h>
 
-#include "cross.hpp"   // `check_memory_unit_`, `memory_backend_t`, `lookup_backend_t`
+#include "cross.hpp"   // `check_strings_unit_`, `strings_backend_t`
 #include "harness.hpp" // `randomize_string`, `test_context_t`
 
 namespace ashvardanian::stringzilla::test {
@@ -123,12 +123,14 @@ void assert_balanced_memory(std::size_t const &live_bytes, callback_type_ callba
     verify(live_bytes == before && "Callback leaked or double-freed tracked allocator bytes");
 }
 
-/** The copy, move and fill dispatch points, in the shape of their kernels. */
-static memory_backend_t const memory_dispatched {"dispatched", cpu_best<sz_copy_best>, cpu_best<sz_move_best>,
-                                                 cpu_best<sz_fill_best>};
-
-/** The lookup dispatch point, in the shape of its kernels. */
-static lookup_backend_t const lookup_dispatched {"dispatched", cpu_best<sz_lookup_best>};
+/** The strings dispatch points, in the shape of their kernels. */
+static strings_backend_t const strings_dispatched {"dispatched",
+                                                   cpu_best<sz_strings_to_tape_best>,
+                                                   cpu_best<sz_strings_to_rows_best>,
+                                                   cpu_best<sz_strings_escape_best>,
+                                                   cpu_best<sz_strings_unescape_best>,
+                                                   cpu_best<sz_strings_lookup_best>,
+                                                   cpu_best<sz_strings_normalize_best>};
 
 #pragma endregion Helpers
 
@@ -198,57 +200,61 @@ void test_arithmetic_unit() {
 
 #pragma endregion Arithmetic
 
-#pragma region Sequence
+#pragma region Strings Views
 
-/** Validates @c sz_sequence_t and related construction utilities. */
-void test_sequence_unit() {
-    // Make sure the sequence helper functions work as expected
-    // for both trivial c-style arrays and more complicated STL containers.
+/** Validates @c sz_strings_view_t construction and the views @c sz_strings_get_ reads back. */
+void test_strings_view_unit() {
+    auto string_at = [](sz_strings_view_t const &strings, sz_size_t index) {
+        sz_string_view_t view;
+        sz_strings_get_(&strings, &index, 1, &view);
+        return sz::string_view_t(view.start, view.length);
+    };
     {
-        sz_sequence_t sequence;
-        sz_cptr_t strings[] = {"banana", "apple", "cherry"};
-        sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
-        verify(sequence.count == 3);
-        verify("banana"_sv == sequence.get_start(sequence.handle, 0));
-        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
-        verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
-        verify(sequence.get_length(sequence.handle, 0) == 6);
-        verify(sequence.get_length(sequence.handle, 1) == 5);
-        verify(sequence.get_length(sequence.handle, 2) == 6);
+        sz_strings_view_t strings;
+        sz_cptr_t const fruits[] = {"banana", "apple", "cherry"};
+        sz_strings_from_null_terminated_strings(fruits, 3, &strings);
+        verify(strings.layout == sz_strings_accessor_k && strings.count == 3);
+        verify(string_at(strings, 0) == "banana"_sv);
+        verify(string_at(strings, 1) == "apple"_sv);
+        verify(string_at(strings, 2) == "cherry"_sv);
     }
-    // Empty sequences, empty members, and duplicates are all legal.
+    // Empty collections, empty members, and duplicates are all legal.
     {
-        sz_sequence_t sequence;
-        sz_cptr_t strings[] = {"", "apple", "apple", ""};
-        sz_sequence_from_null_terminated_strings(strings, 0, &sequence);
-        verify(sequence.count == 0);
-        sz_sequence_from_null_terminated_strings(strings, 4, &sequence);
-        verify(sequence.count == 4);
-        verify(sequence.get_length(sequence.handle, 0) == 0);
-        verify(sequence.get_length(sequence.handle, 3) == 0);
-        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
-        verify("apple"_sv == sequence.get_start(sequence.handle, 2));
+        sz_strings_view_t strings;
+        sz_cptr_t const fruits[] = {"", "apple", "apple", ""};
+        sz_strings_from_null_terminated_strings(fruits, 0, &strings);
+        verify(strings.count == 0);
+        sz_strings_from_null_terminated_strings(fruits, 4, &strings);
+        verify(strings.count == 4);
+        verify(string_at(strings, 0).empty() && string_at(strings, 3).empty());
+        verify(string_at(strings, 1) == "apple"_sv && string_at(strings, 2) == "apple"_sv);
     }
-    // Do the same for STL:
+    // An array of views and a tape over the same strings read back alike, block after block.
     {
-        using strings_vector_t = std::vector<std::string>;
-        strings_vector_t strings = {"banana", "apple", "cherry"};
-        sz_sequence_t sequence;
-        sequence.handle = &strings;
-        sequence.count = strings.size();
-        sequence.get_start = [](void const *handle, sz_size_t index) -> sz_cptr_t {
-            auto const &strings = *static_cast<strings_vector_t const *>(handle);
-            return strings[index].data();
-        };
-        sequence.get_length = [](void const *handle, sz_size_t index) -> sz_size_t {
-            auto const &strings = *static_cast<strings_vector_t const *>(handle);
-            return strings[index].size();
-        };
-
-        verify(sequence.count == 3);
-        verify("banana"_sv == sequence.get_start(sequence.handle, 0));
-        verify("apple"_sv == sequence.get_start(sequence.handle, 1));
-        verify("cherry"_sv == sequence.get_start(sequence.handle, 2));
+        std::vector<std::string> numbers;
+        for (std::size_t index = 0; index != 100; ++index) numbers.push_back(std::to_string(index * 7919));
+        std::vector<sz_string_view_t> views;
+        std::string payload;
+        std::vector<sz_u32_t> offsets {0};
+        for (std::string const &number : numbers) {
+            views.push_back({number.data(), number.size()});
+            payload += number;
+            offsets.push_back(static_cast<sz_u32_t>(payload.size()));
+        }
+        sz_strings_view_t from_views, from_tape;
+        sz_strings_from_string_views(views.data(), views.size(), &from_views);
+        from_tape.layout = sz_strings_u32_tape_k, from_tape.count = numbers.size();
+        from_tape.data.u32_tape.data = payload.data(), from_tape.data.u32_tape.offsets = offsets.data();
+        sz_string_view_t views_block[64], tape_block[64];
+        for (sz_size_t block_start = 0; block_start < numbers.size(); block_start += 64) {
+            sz_size_t const block_count = sz_strings_get_block_(&from_views, block_start, views_block);
+            verify(block_count == sz_strings_get_block_(&from_tape, block_start, tape_block));
+            for (sz_size_t position = 0; position != block_count; ++position) {
+                sz::string_view_t const expected = numbers[block_start + position];
+                verify(sz::string_view_t(views_block[position].start, views_block[position].length) == expected);
+                verify(sz::string_view_t(tape_block[position].start, tape_block[position].length) == expected);
+            }
+        }
     }
 }
 
@@ -292,18 +298,18 @@ void test_tape_assign_unit() {
     verify(owned.assign(views) == sz::status_t::success_k);
     verify(owned.allocation_bytes() == 4 * sizeof(sz_u64_t) + 5);
     verify(owned.view().tape_total_bytes() == 5);
-    verify(owned.assign(owned.sequence()) == sz::status_t::success_k);
-    verify(independent.assign(owned.sequence()) == sz::status_t::success_k);
+    verify(owned.assign(owned.strings()) == sz::status_t::success_k);
+    verify(independent.assign(owned.strings()) == sz::status_t::success_k);
     owned.reset();
     verify(independent.size() == 3 && independent[1].empty());
     verify(sz::string_view_t(independent[0].data(), independent[0].size()) == "a\0b"_sv);
     verify(independent.append(independent[0]) == sz::status_t::success_k);
     verify(independent.size() == 4 && independent[3].size() == 3);
-    verify(independent.sequence().get_start == sz_sequence_tape_start);
-    auto const descriptor = independent.sequence();
+    verify(independent.strings().layout == sz_strings_u64_tape_k);
+    auto const descriptor = independent.strings();
     owned = std::move(independent);
-    verify(independent.size() == 0 && owned.sequence().handle == descriptor.handle);
-    sz_sequence_t oversized = owned.sequence();
+    verify(independent.size() == 0 && owned.strings().data.u64_tape.data == descriptor.data.u64_tape.data);
+    sz_strings_view_t oversized = owned.strings();
     oversized.count = STRINGZILLA_SIZE_MAX;
     verify(owned.assign(oversized) == sz::status_t::bad_alloc_k);
     verify(owned.size() == 4);
@@ -361,6 +367,14 @@ void test_tape_overflow_unit() {
             void *block = state.heap.allocate(bytes, state.heap.handle, stream);
             if (block) state.live_bytes += bytes;
             return block;
+        };
+        allocator.reallocate = [](void *block, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                  sz_stream_t stream) -> void * {
+            auto &state = *static_cast<allocation_state_t *>(handle);
+            if (++state.calls == state.fail_at) return nullptr;
+            void *resized = state.heap.reallocate(block, old_bytes, new_bytes, state.heap.handle, stream);
+            if (resized || !new_bytes) state.live_bytes = state.live_bytes - old_bytes + new_bytes;
+            return resized;
         };
         allocator.free = [](void *block, sz_size_t bytes, void *handle, sz_stream_t stream) {
             auto &state = *static_cast<allocation_state_t *>(handle);
@@ -528,24 +542,23 @@ void test_ascii_unit() {
 
 #pragma endregion Byteset
 
-#pragma region Memory
+#pragma region Strings
 
 /**
- *  @brief Known-answer tests for the memory dispatch points and the C++ string wrappers.
+ *  @brief Known-answer tests for the strings dispatch points and the C++ string wrappers.
  *
  *  A regression that the serial-vs-SIMD agreement tests would miss - because both share a wrong
  *  constant - is still caught against an external ground truth; the kernels of each capability face
  *  the same vectors in `cross_<arch>.cpp`.
  */
-void test_memory_unit() {
-    check_memory_unit_(memory_dispatched);
-    check_lookup_unit_(lookup_dispatched);
+void test_strings_unit() {
+    check_strings_unit_(strings_dispatched);
 
     // The case tables follow the Latin-1 letter rule, keeping × and ÷ and ÿ as is.
     {
         char upper_table[256], lower_table[256];
-        sz_lookup_init_upper(upper_table);
-        sz_lookup_init_lower(lower_table);
+        sz_strings_lookup_init_upper(upper_table);
+        sz_strings_lookup_init_lower(lower_table);
         for (int byte = 0; byte != 256; ++byte) {
             bool const is_lower_letter = (byte >= 'a' && byte <= 'z') || (byte >= 0xE0 && byte <= 0xFE && byte != 0xF7);
             bool const is_upper_letter = (byte >= 'A' && byte <= 'Z') || (byte >= 0xC0 && byte <= 0xDE && byte != 0xD7);
@@ -577,19 +590,9 @@ void test_memory_unit() {
         verify(owned[3] == 'c' && owned[4] == 'd'); // Indexing past the NUL works
         verify(owned == sz::string_view_t(with_nul, sizeof(with_nul)));
     }
-
-    // Copies past 1 MB run in both directions on Haswell and Skylake. The length is from
-    // GitHub issue #228, and the misaligned ends exercise the head and tail of that path.
-    {
-        std::size_t const length = 1024ull * 10ull * 103ull;
-        std::vector<char> source(length + 7), target(length + 11);
-        for (std::size_t i = 0; i != source.size(); ++i) source[i] = static_cast<char>('a' + i % 26);
-        verify(memory_dispatched.copy(target.data() + 11, source.data() + 7, length, nullptr) == sz_success_k);
-        expect_equality(source.data() + 7, target.data() + 11, length);
-    }
 }
 
-#pragma endregion Memory
+#pragma endregion Strings
 
 #pragma region STL Reads
 
@@ -1569,7 +1572,7 @@ void test_string_reserve_unit() {
     // C API: grow, shrink, then fit - the buffer, length, contents and terminator stay intact.
     {
         // Fresh blocks arrive full of noise, so a terminator never copied cannot read as one.
-        sz_allocator_t allocator;
+        sz_allocator_t allocator {};
         allocator.allocate = +[](sz_size_t length, void *, sz_stream_t) -> void * {
             void *const block = std::malloc(length);
             if (block) std::memset(block, '#', length);
@@ -1734,19 +1737,12 @@ void test_string_updates_equivalence(test_context_t &context, std::size_t repeti
 
 #pragma region Drivers
 
-/** Adversarial safety driver: feeds zero-length, tiny, overlapping, and embedded-NUL inputs through
- *  the movement and lookup dispatch points, asserting that canary bytes guarding both sides of the
- *  destination remain intact and nothing crashes; the cross files do the same per capability. */
-void test_memory_safety() {
-    check_memory_safety_(memory_dispatched);
-    check_lookup_safety_(lookup_dispatched);
-}
+/** Drives the strings safety checks through the dispatch points; the cross files do the same per
+ *  capability. */
+void test_strings_safety() { check_strings_safety_(strings_dispatched); }
 
-/** Drives the movement and lookup differential tests of the dispatch points against serial. */
-void test_memory_all(test_context_t &context) {
-    check_memory_equivalence_(context, memory_dispatched);
-    check_lookup_equivalence_(context, lookup_dispatched);
-}
+/** Drives the strings differential tests of the dispatch points against serial. */
+void test_strings_all(test_context_t &context) { check_strings_equivalence_(context, strings_dispatched); }
 
 #pragma endregion Drivers
 

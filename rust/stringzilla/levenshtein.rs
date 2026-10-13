@@ -77,10 +77,10 @@ impl LevenshteinEngine {
         Query: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        with_sequence(queries, |sequence| unsafe {
+        with_strings(queries, |strings| unsafe {
             sz_levenshtein_engine_init(
                 engine.as_mut_ptr(),
-                sequence,
+                strings,
                 symbol,
                 stream.capabilities().bits(),
                 core::ptr::null(),
@@ -109,7 +109,7 @@ impl LevenshteinEngine {
     /// being at least the candidate count. The round's scratch grows here when a batch needs more
     /// than the last one did, and is never shrunk.
     ///
-    /// A GPU engine takes a [`Sequence`] and `distances` in memory its device reaches, such as a
+    /// A GPU engine takes a [`Tape`] and `distances` in memory its device reaches, such as a
     /// `Vec` in a [`UnifiedAllocator`]. A stream of another group than the engine's is refused
     /// with [`Status::DeviceMemoryMismatch`].
     pub fn distances<'scope, Candidates>(
@@ -125,15 +125,15 @@ impl LevenshteinEngine {
         let stream = scope.stream_for(self.capability)?;
         let queries = self.count;
         let engine = self as *mut Self;
-        candidates.with_sequence(stream, |sequence| {
-            if distances_stride < sequence.count {
+        candidates.with_strings(stream, |strings| {
+            if distances_stride < strings.count {
                 return Err(Status::UnexpectedDimensions);
             }
             let span = match queries {
                 0 => 0,
                 count => (count - 1)
                     .checked_mul(distances_stride)
-                    .and_then(|rows| rows.checked_add(sequence.count))
+                    .and_then(|rows| rows.checked_add(strings.count))
                     .ok_or(Status::OverflowRisk)?,
             };
             if distances.len() < span {
@@ -142,7 +142,7 @@ impl LevenshteinEngine {
             unsafe {
                 sz_levenshtein_distances(
                     engine,
-                    sequence,
+                    strings,
                     distances.as_mut_ptr(),
                     distances_stride,
                     stream.as_raw(),

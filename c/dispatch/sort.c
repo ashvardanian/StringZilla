@@ -8,24 +8,24 @@
 
 #include "dispatch.h"
 
-static sz_capability_kernels_t const *sz_sequence_argsort_capabilities(void) {
+static sz_capability_kernels_t const *sz_sort_order_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_sequence_argsort_serial,
+        (sz_kernel_punned_t)&sz_sort_order_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_sequence_argsort_haswell,
+        (sz_kernel_punned_t)&sz_sort_order_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_sequence_argsort_skylake,
+        (sz_kernel_punned_t)&sz_sort_order_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_sequence_argsort_neon,
+        (sz_kernel_punned_t)&sz_sort_order_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_sequence_argsort_sve,
+        (sz_kernel_punned_t)&sz_sort_order_sve,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_sequence_argsort_rvv,
+        (sz_kernel_punned_t)&sz_sort_order_rvv,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -40,24 +40,24 @@ static sz_capability_kernels_t const *sz_sequence_argsort_capabilities(void) {
     return lists;
 }
 
-static sz_capability_kernels_t const *sz_sequence_argsort_uncased_capabilities(void) {
+static sz_capability_kernels_t const *sz_sort_uncased_order_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_serial,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_serial,
 #if STRINGZILLA_TARGET_HASWELL
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_haswell,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_haswell,
 #endif
 #if STRINGZILLA_TARGET_SKYLAKE
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_skylake,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_skylake,
 #endif
 #if STRINGZILLA_TARGET_NEON
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_neon,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_neon,
 #endif
 #if STRINGZILLA_TARGET_SVE
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_sve,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_sve,
 #endif
 #if STRINGZILLA_TARGET_RVV
-        (sz_kernel_punned_t)&sz_sequence_argsort_uncased_rvv,
+        (sz_kernel_punned_t)&sz_sort_uncased_order_rvv,
 #endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
@@ -72,29 +72,28 @@ static sz_capability_kernels_t const *sz_sequence_argsort_uncased_capabilities(v
     return lists;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_argsort_best(sz_sequence_t const *sequence, sz_size_t top_count,
-                                                     sz_bool_t reverse, sz_allocator_t *allocator, sz_size_t *order,
-                                                     sz_capability_t capabilities, sz_stream_t stream) {
-    sz_kernel_sequence_argsort_t const kernel = (sz_kernel_sequence_argsort_t)sz_kernel_pick_(
-        capabilities, sz_sequence_argsort_capabilities());
-    return kernel ? kernel(sequence, top_count, reverse, allocator, order, stream) : sz_missing_kernel_k;
+STRINGZILLA_API sz_status_t sz_sort_order_best(sz_strings_view_t const *strings, sz_size_t top_count, sz_bool_t reverse,
+                                               sz_allocator_t *allocator, sz_size_t *order,
+                                               sz_capability_t capabilities, sz_stream_t stream) {
+    sz_kernel_sort_order_t const kernel = (sz_kernel_sort_order_t)sz_kernel_pick_(capabilities,
+                                                                                  sz_sort_order_capabilities());
+    return kernel ? kernel(strings, top_count, reverse, allocator, order, stream) : sz_missing_kernel_k;
 }
 
-STRINGZILLA_API sz_status_t sz_sequence_argsort_uncased_best(              //
-    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse, //
-    sz_allocator_t *allocator, sz_size_t *order,                           //
-    sz_capability_t capabilities, sz_stream_t stream) {
-    sz_kernel_sequence_argsort_t const kernel = (sz_kernel_sequence_argsort_t)sz_kernel_pick_(
-        capabilities, sz_sequence_argsort_uncased_capabilities());
-    return kernel ? kernel(sequence, top_count, reverse, allocator, order, stream) : sz_missing_kernel_k;
+STRINGZILLA_API sz_status_t sz_sort_uncased_order_best(sz_strings_view_t const *strings, sz_size_t top_count,
+                                                       sz_bool_t reverse, sz_allocator_t *allocator, sz_size_t *order,
+                                                       sz_capability_t capabilities, sz_stream_t stream) {
+    sz_kernel_sort_order_t const kernel = (sz_kernel_sort_order_t)sz_kernel_pick_(capabilities,
+                                                                                  sz_sort_uncased_order_capabilities());
+    return kernel ? kernel(strings, top_count, reverse, allocator, order, stream) : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_sort_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                 sz_kernel_punned_t *kernel, sz_capability_t *capability) {
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
-    case sz_kernel_sequence_argsort_k: lists = sz_sequence_argsort_capabilities(); break;
-    case sz_kernel_sequence_argsort_uncased_k: lists = sz_sequence_argsort_uncased_capabilities(); break;
+    case sz_kernel_sort_order_k: lists = sz_sort_order_capabilities(); break;
+    case sz_kernel_sort_uncased_order_k: lists = sz_sort_uncased_order_capabilities(); break;
     default: break;
     }
     *kernel = lists ? sz_kernel_pick_(capabilities, lists) : (sz_kernel_punned_t)STRINGZILLA_NULL;

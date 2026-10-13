@@ -7,7 +7,7 @@ It bundles:
 - the C headers `<stringzilla/stringzilla.h>`, which declare that library, or compile the kernels inline with `STRINGZILLA_HEADER_ONLY=1`,
 - the C++ headers `<stringzilla/stringzilla.hpp>`, built on the library.
 
-The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, `sz_copy_best`/`sz_move_best`/`sz_fill_best`/`sz_lookup_best` memory transforms, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
+The plain C ABI exposes each kernel family as a stable C 99 surface: substring and byte-set search, non-cryptographic hashing and checksums, lexicographic comparison, sorting and intersection of string collections, collection conversions from escaping and normalization to byte translation, and the stateful cross-product engines for edit distances, window overlap, and multi-pattern search.
 The thin C++ binding rebuilds the STL `<string>` and `<string_view>` surface on top of those kernels, adding an owning Small-String-Optimized container, allocation-free splitting and partitioning views, and free functions for hashing, sorting, and translation.
 
 Every verb has a dispatch point, like `sz_find_best`, which runs the best capability a mask shares with the verb's list, and the mask to pass on the CPU is the one `sz_capabilities_enabled_cpu` reports.
@@ -18,8 +18,8 @@ A GPU engine's init uses its stream for its own work alone and sizes a round's d
 Overlap and Levenshtein engines keep no per-round state on a CUDA device, so several streams may score one engine at once, while the rounds of one substrings engine share its arena and its report, so the caller orders them.
 
 The headers compile as freestanding C 99 — set `STRINGZILLA_WITH_LIBC=0` to drop the libc dependency — and as C++20 or newer for the `sz::` layer.
-Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `memory.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro.
-The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `memory/neon.h`, and so on — which the library compiles once, one capability per unit in `c/target/`, and header-only builds include into every translation unit.
+Per-family hubs `find.h`, `hash.h`, `sort.h`, `compare.h`, `intersect.h`, `strings.h`, `small_string.h`, `levenshtein.h`, `overlap.h`, and `substrings.h` declare the family's dispatch points and its kernels, each capability's under its `STRINGZILLA_TARGET_*` macro.
+The kernels are defined under the matching subdirectories — `find/haswell.h`, `hash/icelake.h`, `strings/neon.h`, and so on — which the library compiles once, one capability per unit in `c/target/`, and header-only builds include into every translation unit.
 
 ## Installation
 
@@ -40,10 +40,10 @@ Each family can also be included on its own when you only need a slice of the AP
 ```c
 #include <stringzilla/find.h> // `sz_find_best`, `sz_rfind_best`, byte-set scans
 #include <stringzilla/hash.h> // `sz_hash_best`, `sz_bytesum_best`, incremental state
-#include <stringzilla/sort.h> // `sz_sequence_argsort_best`
+#include <stringzilla/sort.h> // `sz_sort_order_best`
 #include <stringzilla/compare.h> // `sz_equal_best`, `sz_order_best`
-#include <stringzilla/intersect.h> // `sz_sequence_intersect_best`
-#include <stringzilla/memory.h> // `sz_copy_best`, `sz_move_best`, `sz_fill_best`, `sz_lookup_best`
+#include <stringzilla/intersect.h> // `sz_intersect_best`
+#include <stringzilla/strings.h> // `sz_strings_to_tape_best`, `sz_strings_lookup_best`
 #include <stringzilla/small_string.h> // `sz_string_t` SSO container
 #include <stringzilla/levenshtein.h> // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
 #include <stringzilla/overlap.h> // `sz_overlap_engine_init`, `sz_overlap_scores`
@@ -54,10 +54,10 @@ The three engine families prepare a batch of queries once and score it against m
 Each init takes the mask, the allocator and a stream last, and each round is a single verb with no `_best` twin, as the engine already holds the capability its init picked:
 
 ```c
-sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
+sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_strings_view_t const *queries,
                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
                                        sz_allocator_t *allocator, sz_stream_t stream);
-sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_sequence_t const *candidates,
+sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates,
                                      sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream);
 void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream);
 ```
@@ -164,21 +164,25 @@ NVCC with CUDA 12 builds the device backends of the engine families, reached by 
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_capabilities_enabled_rocm`.
 With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
-A device round reads memory the device reaches. `memory.h` declares allocation and sequence reallocation; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
+A device round reads memory the device reaches, and strings only as a tape, never through an accessor, which is host code. `strings.h` declares allocation and gathering into tapes; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 
 - `sz_allocator_init_unified_best` fills a stateless `sz_allocator_t` whose blocks the host and the device share: the heap on the CPU, managed memory on CUDA and ROCm, shared buffers on Metal, each made on the device of the stream it is called with.
-- `sz_sequence_realloc_best` packs a host sequence into a tape of `count + 1` offsets followed by the bytes, or borrows an existing tape the selected device can use. It never frees the source or a previous target allocation; `allocated_bytes` is zero for borrowed storage.
+- `sz_strings_to_tape_best` gathers strings of any layout into a `sz_strings_span_t` tape of payload and offsets, two blocks from the allocator it is given, and `sz_strings_span_free` returns both.
 - `sz_stream_synchronize_best` waits for one stream, after which what a round wrote is readable from the host.
 
 ```c
 sz_capabilities_enabled_cuda(0, &caps);
+sz_capabilities_enabled_cpu(&cpu_caps);
 sz_allocator_init_unified_best(&unified, caps);
-sz_sequence_realloc_best(&candidates, &host_candidates, &unified, &candidates_bytes, caps, stream);
+sz_strings_span_t tape = {0};
+sz_strings_to_tape_best(&host_candidates, NULL, host_candidates.count, &unified, &tape, cpu_caps, NULL);
+sz_strings_view_t candidates;
+sz_strings_from_span(&tape, &candidates);
 sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
 sz_levenshtein_distances(&engine, &candidates, distances, candidates.count, stream);
 sz_stream_synchronize_best(caps, stream);
 sz_levenshtein_engine_free(&engine, stream);
-unified.free((void *)candidates.handle, candidates_bytes, unified.handle, stream);
+sz_strings_span_free(&tape, &unified, stream);
 ```
 
 A null stream is the default stream of the default device, and a vendor's devices are only numbered by its producers, like `sz_capabilities_enabled_cuda(ordinal, &caps)`.
@@ -199,7 +203,7 @@ Scalar and result types from `types.h`:
 - `sz_bool_t` — `{ sz_false_k = 0, sz_true_k = 1 }`.
 - `sz_ordering_t` — `{ sz_less_k = -1, sz_equal_k = 0, sz_greater_k = 1 }`, the C analog of `std::strong_ordering`.
 - `sz_status_t` — `sz_success_k = 0`, `sz_bad_alloc_k`, `sz_invalid_utf8_k`, `sz_contains_duplicates_k`, `sz_overflow_risk_k`, and friends.
-- `sz_sorted_idx_t`, `sz_pgram_t` — a sorted-permutation index and a pointer-sized N-gram, both aliases of `sz_size_t`.
+- `sz_pgram_t` — a pointer-sized N-gram, an alias of `sz_size_t`, which also indexes every permutation.
 
 `sz_byteset_t` is a 256-bit set of byte values used by the byte-set search functions:
 
@@ -223,17 +227,17 @@ status = sz_allocator_init_arena(&allocator, arena, sizeof(arena), 64);
 if (status != sz_success_k) return status;
 ```
 
-`sz_sequence_t` is the read-only adapter over an arbitrary collection of strings used by the sort and intersect families.
-It exposes a `count` plus `get_start`/`get_length` callbacks over an opaque `handle`, and the helper below wires it to a plain array of C strings:
+`sz_strings_view_t` is the read-only collection of strings every collection family takes, in one of three layouts: an Apache Arrow tape of 32-bit or 64-bit offsets, which GPUs read directly, or an accessor writing up to 64 views per call over any other shape.
+Helpers wire it to plain arrays of C strings, of views, of records, and of NUL-padded rows:
 
 ```c
 char const *words[] = {"banana", "apple", "cherry"};
-sz_sequence_t seq;
-sz_sequence_from_null_terminated_strings(words, 3, &seq);
+sz_strings_view_t strings;
+sz_strings_from_null_terminated_strings(words, 3, &strings);
 ```
 
 There is no dedicated `sz_string_view_t` struct in the C ABI — views are passed as the `(pointer, length)` pairs described above.
-The one owning C string type is `sz_string_t`, documented under [Memory Operations](#memory-operations) below.
+The one owning C string type is `sz_string_t`, documented under [String Collections and Containers](#string-collections-and-containers) below.
 
 ### C++ types
 
@@ -538,7 +542,7 @@ int main() {
 }
 ```
 
-Translation — mapping every byte through a 256-entry lookup table — is offered both at the C ABI level through `sz_lookup_best`, documented under [Memory Operations](#memory-operations), and in C++ through `sz::lookup`:
+Translation — mapping every byte through a 256-entry lookup table — is offered both at the C ABI level through `sz_strings_lookup_best`, documented under [String Collections and Containers](#string-collections-and-containers), and in C++ through `sz::lookup`:
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
@@ -555,7 +559,7 @@ int main() {
 }
 ```
 
-The C side ships ready-made table initializers — `sz_lookup_init_lower`, `sz_lookup_init_upper`, and `sz_lookup_init_ascii`.
+The C side ships ready-made table initializers — `sz_strings_lookup_init_lower`, `sz_strings_lookup_init_upper`, and `sz_strings_lookup_init_ascii`.
 To select an ASCII-only fast path, scan for the complement of `sz_byteset_init_ascii` with `sz_find_byteset_best`, which reaches the SIMD byteset kernels instead of a scalar loop.
 
 
@@ -599,7 +603,7 @@ sz_status_t sz_sha256_state_digest_best(sz_sha256_state_t const *state, sz_u8_t 
                                         sz_capability_t capabilities, sz_stream_t stream);
 ```
 
-The same AES primitives back a reproducible pseudo-random fill, useful with `sz_lookup_best` for generating random strings over a chosen alphabet:
+The same AES primitives back a reproducible pseudo-random fill, useful with `sz_strings_lookup_best` for generating random strings over a chosen alphabet:
 
 ```c
 sz_status_t sz_fill_random_best(sz_ptr_t target, sz_size_t length, sz_u64_t nonce, //
@@ -663,9 +667,9 @@ int main() {
 }
 ```
 
-## Sorting and Sequences
+## Sorting and Intersections
 
-These operate on a read-only `sz_sequence_t` and never reorder the underlying data — they fill an `order` permutation array instead.
+These operate on a read-only `sz_strings_view_t` in any layout and never reorder the underlying data — they fill an `order` permutation array instead.
 Sorting is __stable__, so equal elements keep their input order, supports descending order via a `reverse` flag, and supports partial / top-K sorting via `top_count` — pass `0` to sort everything.
 Every allocation these kernels need is routed through the `sz_allocator_t` you supply — pass `NULL` for the default `malloc`-based one — so, unlike `std::sort` or `thrust::sort`, no scratch memory is ever allocated behind your back.
 
@@ -674,18 +678,18 @@ Every allocation these kernels need is routed through the `sz_allocator_t` you s
 The C API fills a caller-owned `order` array and reports success through a `sz_status_t`:
 
 ```c
-sz_status_t sz_sequence_argsort_best(
-    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
-    sz_allocator_t *allocator, sz_sorted_idx_t *order,
+sz_status_t sz_sort_order_best(
+    sz_strings_view_t const *strings, sz_size_t top_count, sz_bool_t reverse,
+    sz_allocator_t *allocator, sz_size_t *order,
     sz_capability_t capabilities, sz_stream_t stream);
 
-sz_status_t sz_sequence_argsort_uncased_best(
-    sz_sequence_t const *sequence, sz_size_t top_count, sz_bool_t reverse,
-    sz_allocator_t *allocator, sz_sorted_idx_t *order,
+sz_status_t sz_sort_uncased_order_best(
+    sz_strings_view_t const *strings, sz_size_t top_count, sz_bool_t reverse,
+    sz_allocator_t *allocator, sz_size_t *order,
     sz_capability_t capabilities, sz_stream_t stream);
 ```
 
-`sz_sequence_argsort_best` orders byte-lexicographically; `sz_sequence_argsort_uncased_best` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
+`sz_sort_order_best` orders byte-lexicographically; `sz_sort_uncased_order_best` orders under Unicode case-folding, folding small chunks on the fly, and malformed UTF-8 sorts by raw byte value so the order stays total and deterministic.
 The `allocator` argument may be `NULL` to use the default allocator.
 
 ```c
@@ -695,13 +699,12 @@ int main(void) {
     sz_capability_t capabilities = sz_cap_serial_k;
     sz_capabilities_enabled_cpu(&capabilities);
 
-    char const *strings[] = {"banana", "apple", "cherry"};
-    sz_sequence_t sequence;
-    sz_sequence_from_null_terminated_strings(strings, 3, &sequence);
+    char const *fruits[] = {"banana", "apple", "cherry"};
+    sz_strings_view_t strings;
+    sz_strings_from_null_terminated_strings(fruits, 3, &strings);
 
-    sz_sorted_idx_t order[3];
-    sz_status_t status =
-        sz_sequence_argsort_best(&sequence, /*top_count*/ 0, sz_false_k, NULL, order, capabilities, NULL);
+    sz_size_t order[3];
+    sz_status_t status = sz_sort_order_best(&strings, /*top_count*/ 0, sz_false_k, NULL, order, capabilities, NULL);
     assert(status == sz_success_k);
     assert(order[0] == 1 && order[1] == 0 && order[2] == 2); // apple, banana, cherry
     return 0;
@@ -710,30 +713,30 @@ int main(void) {
 
 ### Set Intersection
 
-`sz_sequence_intersect_best` computes the intersection of two __deduplicated__ binary string sequences using a hash table, writing matched positions from each side and leaving unmatched slots as `STRINGZILLA_SIZE_MAX`:
+`sz_intersect_best` computes the intersection of two __deduplicated__ binary string collections using a hash table, writing matched positions from each side and leaving unmatched slots as `STRINGZILLA_SIZE_MAX`:
 
 ```c
-sz_status_t sz_sequence_intersect_best(
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence,
+sz_status_t sz_intersect_best(
+    sz_strings_view_t const *first_strings, sz_strings_view_t const *second_strings,
     sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions,
+    sz_size_t *first_positions, sz_size_t *second_positions,
     sz_capability_t capabilities, sz_stream_t stream);
 ```
 
 The `seed` randomizes the hash table to resist adversarial inputs; the position arrays must each fit at least `min(first->count, second->count)` entries.
-The companion `sz_sequence_join_semantics_t` enum documents the SQL-style JOIN modes the family is designed around, namely `sz_join_inner_strict_k`, `sz_join_inner_k`, `sz_join_left_outer_k`, `sz_join_right_outer_k`, `sz_join_full_outer_k`, and `sz_join_cross_k`.
+The companion `sz_join_semantics_t` enum documents the SQL-style JOIN modes the family is designed around, namely `sz_join_inner_strict_k`, `sz_join_inner_k`, `sz_join_left_outer_k`, `sz_join_right_outer_k`, `sz_join_full_outer_k`, and `sz_join_cross_k`.
 
 ```c
 char const *first[]  = {"banana", "apple", "cherry"};
 char const *second[] = {"cherry", "orange", "pineapple", "banana"};
-sz_sequence_t a, b;
-sz_sequence_from_null_terminated_strings(first, 3, &a);
-sz_sequence_from_null_terminated_strings(second, 4, &b);
+sz_strings_view_t a, b;
+sz_strings_from_null_terminated_strings(first, 3, &a);
+sz_strings_from_null_terminated_strings(second, 4, &b);
 
 sz_size_t intersection_count;
-sz_sorted_idx_t a_pos[3], b_pos[3];  // sized to the smaller sequence
-sz_status_t status = sz_sequence_intersect_best(&a, &b, NULL, /*seed*/ 0, &intersection_count, a_pos, b_pos,
-                                                capabilities, NULL);
+sz_size_t a_positions[3], b_positions[3];  // sized to the smaller collection
+sz_status_t status = sz_intersect_best(&a, &b, NULL, /*seed*/ 0, &intersection_count, a_positions, b_positions,
+                                       capabilities, NULL);
 assert(intersection_count == 2); // "banana" and "cherry"
 ```
 
@@ -742,16 +745,16 @@ assert(intersection_count == 2); // "banana" and "cherry"
 Matching the all-`noexcept` surface, the C++ sort takes any container plus a string-extractor callable and writes the permutation into a caller-owned span, returning a `status_t`:
 
 ```cpp
-status_t sz::argsort(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false,
+status_t sz::argsort(container, extractor, span<sz_size_t> order, top_count = 0, reverse = false,
                      capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
-status_t sz::argsort_utf8_uncased(container, extractor, span<sorted_idx_t> order, top_count = 0, reverse = false,
+status_t sz::argsort_utf8_uncased(container, extractor, span<sz_size_t> order, top_count = 0, reverse = false,
                                   capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
 expected<size_t> sz::intersect(first, extractor, second, extractor, seed,
-                               span<sorted_idx_t> first_positions, span<sorted_idx_t> second_positions,
+                               span<sz_size_t> first_positions, span<sz_size_t> second_positions,
                                capabilities = sz::default_capabilities(), stream = nullptr, allocator = {});
 ```
 
-The outputs are sized `std::span<sorted_idx_t>` views over caller-owned storage, and the scratch memory comes from `allocator`.
+The outputs are sized `std::span<sz_size_t>` views over caller-owned storage, and the scratch memory comes from `allocator`.
 Size `order` to `container.size()` — the whole span receives a permutation, and a non-zero `top_count` only requests that the first `top_count` entries be fully sorted.
 Size each position span to `min(first.size(), second.size())`; a shorter span returns `unexpected_dimensions_k`.
 `intersect` returns the number of matched pairs as an `expected<size_t>`, so there is no separate count out-parameter.
@@ -765,7 +768,7 @@ namespace sz = ashvardanian::stringzilla;
 int main() {
     std::vector<sz::string_t> names = {"banana", "apple", "cherry"};
 
-    sz::sorted_idx_t order[3];
+    sz_size_t order[3];
     sz::status_t status = sz::argsort(
         names, [](sz::string_t const &s) -> sz::string_view_t { return s; }, {order, 3});
     assert(status == sz::status_t::success_k);
@@ -779,27 +782,41 @@ int main() {
 
 Without output spans, `sz::argsort`, `sz::argsort_utf8_uncased` and `sz::intersect` allocate their results from the allocator passed last and return them in an `expected`, never throwing.
 
-## Memory Operations
+## String Collections and Containers
 
 ### C
 
-The four memory kernels mirror `memcpy`, `memmove`, `memset`, and a lookup-table transform, all writing into the first argument and minimizing unaligned stores:
+Collections are read through `sz_strings_view_t` in one of three layouts: an Apache Arrow `String` tape with 32-bit offsets, a `LargeString` tape with 64-bit offsets, or an accessor that writes the views of up to 64 strings per call.
+Accessors describe arrays of views, NUL-terminated pointers, struct members, record pointers and NUL-padded rows without copying a byte, while tapes are what Arrow and the GPU kernels read directly.
+Every conversion takes a view, an optional array of indices that reorders, samples or repeats it, and a count, and writes a writable `sz_strings_span_t` tape:
 
 ```c
-sz_status_t sz_copy_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memcpy (no overlap)
-                         sz_capability_t capabilities, sz_stream_t stream);
-sz_status_t sz_move_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, // like memmove (overlap ok)
-                         sz_capability_t capabilities, sz_stream_t stream);
-sz_status_t sz_fill_best(sz_ptr_t target, sz_size_t length, sz_u8_t value, // like memset
-                         sz_capability_t capabilities, sz_stream_t stream);
-sz_status_t sz_lookup_best(sz_ptr_t target, sz_cptr_t source, sz_size_t length, char const lut[256],
-                           sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_to_tape_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                    sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                    sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_escape_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                   sz_escape_kind_t kind, sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                   sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_unescape_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                     sz_escape_kind_t kind, sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                     sz_size_t *malformed_index, sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_normalize_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                      sz_normal_form_t form, sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                      sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_lookup_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                   char const lut[256], sz_allocator_t *allocator, sz_strings_span_t *tape,
+                                   sz_capability_t capabilities, sz_stream_t stream);
+sz_status_t sz_strings_to_rows_best(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
+                                    sz_strings_rows_t const *rows, sz_size_t *longest,
+                                    sz_capability_t capabilities, sz_stream_t stream);
 ```
 
-`sz_lookup_best` applies `target[i] = lut[source[i]]`; `target` and `source` may alias but must not partially overlap, and the table must be exactly 256 bytes.
+Like `realloc`, a zeroed span receives fresh blocks from the allocator, a span an earlier call produced is resized, blocks of matching sizes are kept, and a view of the span itself is converted in place.
+Escaping covers JSON, JSON in ASCII the way Python's `json.dumps` writes it, RFC 4180 CSV, hexadecimal, HTML, URL percent-encoding, and terminal-safe logs, and unescaping reports the first malformed string.
+Normalization brings every string into NFC, NFD, NFKC, NFKD or NFKC_Casefold, and NUL-padded rows serve NumPy `S` arrays and fixed-width record fields.
+A single buffer is a tape of one string, so lowercasing in place looks like this:
 
 ```c
-#include <ctype.h>
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
@@ -807,9 +824,15 @@ int main(void) {
     sz_capabilities_enabled_cpu(&capabilities);
 
     char to_lower[256];
-    sz_lookup_init_lower(to_lower);
+    sz_strings_lookup_init_lower(to_lower);
     char buffer[3] = {'A', 'B', 'C'};
-    sz_lookup_best(buffer, buffer, 3, to_lower, capabilities, NULL);
+    sz_u32_t offsets[2] = {0, 3};
+    sz_strings_span_t tape;
+    tape.layout = sz_strings_u32_tape_k, tape.count = 1;
+    tape.data.u32_tape.data = buffer, tape.data.u32_tape.offsets = offsets;
+    sz_strings_view_t strings;
+    sz_strings_from_span(&tape, &strings);
+    sz_strings_lookup_best(&strings, NULL, 1, to_lower, NULL, &tape, capabilities, NULL);
     assert(buffer[0] == 'a' && buffer[1] == 'b' && buffer[2] == 'c'); // "abc"
     return 0;
 }
@@ -844,9 +867,10 @@ sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_allocator_t *allocator)
 void sz_string_free(sz_string_t *string, sz_allocator_t *allocator);
 ```
 
-`sz_string_expand` opens an uninitialized gap of `added_length` at `offset` that you then populate, often via `sz_copy_best`; `sz_string_erase` removes a range without ever allocating and cannot fail.
+`sz_string_expand` opens an uninitialized gap of `added_length` at `offset` that you then populate, often via `memcpy`; `sz_string_erase` removes a range without ever allocating and cannot fail.
 
 ```c
+#include <string.h>
 #include <stringzilla/stringzilla.h>
 
 int main(void) {
@@ -858,7 +882,7 @@ int main(void) {
 
     sz_ptr_t room = sz_string_expand(&s, 0, 5, &allocator);  // 5-byte gap at offset 0
     if (!room) return 1;
-    sz_copy_best(room, "hello", 5, sz_cap_serial_k, NULL); // five bytes gain nothing from SIMD
+    memcpy(room, "hello", 5);
 
     sz_ptr_t start; sz_size_t length;
     sz_string_range(&s, &start, &length);
@@ -995,7 +1019,7 @@ In C++, every wrapper that takes a mask, like `sz::lookup` or `sz::argsort`, def
 Most operations in StringZilla don't assume any memory ownership.
 But in addition to the read-only search-like operations StringZilla provides a minimalistic C and C++ implementations for a memory owning string "class".
 Like other efficient string implementations, it uses the [Small String Optimization][faq-sso] (SSO) to avoid heap allocations for short strings.
-The owning `sz_string_t` container, its union layout, and the full lifecycle API are documented under [Memory Operations](#memory-operations); this section covers the design rationale behind that layout.
+The owning `sz_string_t` container, its union layout, and the full lifecycle API are documented under [String Collections and Containers](#string-collections-and-containers); this section covers the design rationale behind that layout.
 
 [faq-sso]: https://cpp-optimizations.netlify.app/small_strings/
 
@@ -1013,7 +1037,7 @@ If you use a different compiler, you may want to check its SSO buffer size with 
 
 This design has been since ported to many high-level programming languages.
 Swift, for example, [can store 15 bytes](https://developer.apple.com/documentation/swift/substring/withutf8(_:)#discussion) in the `String` instance itself.
-StringZilla implements SSO at the C level, providing the `sz_string_t` union and a simple API for primary operations, covered with a worked example under [Memory Operations](#memory-operations).
+StringZilla implements SSO at the C level, providing the `sz_string_t` union and a simple API for primary operations, covered with a worked example under [String Collections and Containers](#string-collections-and-containers).
 
 Unlike the conventional C strings, the `sz_string_t` is allowed to contain null characters.
 To safely print those, pass the unpacked length to `printf` as well.

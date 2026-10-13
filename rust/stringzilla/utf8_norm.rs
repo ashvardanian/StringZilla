@@ -1,4 +1,4 @@
-//! Unicode normalization of UTF-8 text — NFC, NFD, NFKC, and NFKD.
+//! Unicode normalization of UTF-8 text — NFC, NFD, NFKC, NFKD, and NFKC_Casefold.
 //!
 //! File: rust/stringzilla/utf8_norm.rs
 //! Author: Ash Vardanian
@@ -12,7 +12,8 @@ use super::*;
 ///
 /// Covers all four standard forms: NFD, NFC, NFKD, and NFKC. NFC is the most common form on the
 /// web; NFD is useful for collation. Compatibility forms (NFKD/NFKC) additionally decompose
-/// ligatures and compatibility characters (e.g., U+FB03 ﬃ → "ffi").
+/// ligatures and compatibility characters (e.g., U+FB03 ﬃ → "ffi"), and NFKC_Casefold folds case
+/// on top of NFKC, so "Straße" becomes "strasse".
 ///
 /// # Arguments
 ///
@@ -180,6 +181,12 @@ mod tests {
             let mut dest = vec![0u8; ligature.len() * 18];
             let len = sz::utf8_norm(ligature, Utf8NormalForm::Nfkc, &mut dest).unwrap();
             assert_eq!(&dest[..len], b"ffi", "ligature NFKC → ffi");
+        }
+        {
+            let source = "Stra\u{DF}e";
+            let mut dest = vec![0u8; source.len() * 18];
+            let len = sz::utf8_norm(source, Utf8NormalForm::NfkcCasefold, &mut dest).unwrap();
+            assert_eq!(&dest[..len], b"strasse", "NFKC_Casefold folds the sharp s");
         }
 
         // Idempotence: norm(norm(x, NFC), NFC) == norm(x, NFC).

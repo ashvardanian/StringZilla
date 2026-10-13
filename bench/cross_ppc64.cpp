@@ -35,11 +35,9 @@ void bench_cross_ppc64([[maybe_unused]] environment_t &env) {
                              sz_sha256_state_digest_powervsx>(env, "powervsx");
         bench_equal_kernels<sz_equal_powervsx>(env, "powervsx");
         bench_order_kernels<sz_order_powervsx>(env, "powervsx");
-        bench_copy_kernels<sz_copy_powervsx>(env, "powervsx");
-        bench_move_kernels<sz_move_powervsx>(env, "powervsx");
-        bench_fill_kernels<sz_fill_powervsx>(env, "powervsx");
         bench_fill_random_kernels<sz_fill_random_powervsx>(env, "powervsx");
-        bench_lookup_kernels<sz_lookup_powervsx>(env, "powervsx");
+        bench_strings_kernels<sz_strings_to_tape_powervsx, sz_strings_escape_powervsx, sz_strings_unescape_powervsx,
+                              sz_strings_lookup_powervsx, sz_strings_normalize_powervsx>(env, "powervsx");
         bench_aes256_ctr_kernels<sz_aes256_key_init_powervsx, sz_aes256_ctr_xor_powervsx>(env, "powervsx");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encrypt_powervsx>(env, "powervsx");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_powervsx, sz_aes256_gcm_encryptor_init_powervsx,

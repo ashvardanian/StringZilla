@@ -194,7 +194,6 @@ pub struct SubstringsEngine {
     haystacks_budget: usize,
     report: *mut SubstringsReport,
     capability: Capabilities,
-    copy: *const c_void,
     allocator: sz_allocator_t,
     memory: *mut c_void,
     memory_bytes: usize,
@@ -218,7 +217,7 @@ impl SubstringsEngine {
     /// `haystacks_budget` how many haystacks it may carry; the round's arena is sized for both
     /// here, zero asking for a default, so no verb allocates, a round carrying more haystacks is
     /// refused, and matches past the budget surface as the report's `shortfall`. A GPU engine's
-    /// verbs take a [`Sequence`] for haystacks and replacements, and every buffer, weights and
+    /// verbs take a [`Tape`] for haystacks and replacements, and every buffer, weights and
     /// lengths included, in memory the device reaches, such as a `Vec` in a [`UnifiedAllocator`].
     pub fn new<Needle>(
         needles: &[Needle],
@@ -233,10 +232,10 @@ impl SubstringsEngine {
         Needle: AsRef<[u8]>,
     {
         let mut engine = MaybeUninit::<Self>::uninit();
-        with_sequence(needles, |sequence| unsafe {
+        with_strings(needles, |strings| unsafe {
             sz_substrings_engine_init(
                 engine.as_mut_ptr(),
-                sequence,
+                strings,
                 case_sensitivity,
                 overlap_policy,
                 hot_states,
@@ -288,10 +287,10 @@ impl SubstringsEngine {
     {
         let stream = scope.stream_for(self.capability)?;
         let engine = self as *mut Self;
-        haystacks.with_sequence(stream, |sequence| {
-            strided_column_check(sequence.count, counts.len(), counts_stride)?;
+        haystacks.with_strings(stream, |strings| {
+            strided_column_check(strings.count, counts.len(), counts_stride)?;
             let output = counts.as_mut_ptr();
-            unsafe { sz_substrings_counts(engine, sequence, output, counts_stride, stream.as_raw()) }.check()
+            unsafe { sz_substrings_counts(engine, strings, output, counts_stride, stream.as_raw()) }.check()
         })?
     }
 
@@ -316,12 +315,12 @@ impl SubstringsEngine {
         let engine = self as *mut Self;
         let capacity = matches.len();
         let output = optional_mut_ptr(matches);
-        haystacks.with_sequence(stream, |sequence| {
-            if matches_offsets.len() < sequence.count + 1 {
+        haystacks.with_strings(stream, |strings| {
+            if matches_offsets.len() < strings.count + 1 {
                 return Err(Status::UnexpectedDimensions);
             }
             let offsets = matches_offsets.as_mut_ptr();
-            unsafe { sz_substrings_find(engine, sequence, output, capacity, offsets, stream.as_raw()) }.check()
+            unsafe { sz_substrings_find(engine, strings, output, capacity, offsets, stream.as_raw()) }.check()
         })?
     }
 
@@ -353,16 +352,16 @@ impl SubstringsEngine {
         let engine = self as *mut Self;
         let capacity = target.len();
         let output = optional_mut_ptr(target);
-        haystacks.with_sequence(stream, |haystacks_sequence| {
-            replacements.with_sequence(stream, |replacements_sequence| {
-                if replacements_sequence.count != needles_count || offsets.len() < haystacks_sequence.count + 1 {
+        haystacks.with_strings(stream, |haystacks_strings| {
+            replacements.with_strings(stream, |replacements_strings| {
+                if replacements_strings.count != needles_count || offsets.len() < haystacks_strings.count + 1 {
                     return Err(Status::UnexpectedDimensions);
                 }
                 unsafe {
                     sz_substrings_replace(
                         engine,
-                        haystacks_sequence,
-                        replacements_sequence,
+                        haystacks_strings,
+                        replacements_strings,
                         output,
                         capacity,
                         offsets.as_mut_ptr(),
@@ -404,17 +403,17 @@ impl SubstringsEngine {
         }
         let stream = scope.stream_for(self.capability)?;
         let engine = self as *mut Self;
-        haystacks.with_sequence(stream, |sequence| {
-            strided_column_check(sequence.count, scores.len(), scores_stride)?;
+        haystacks.with_strings(stream, |strings| {
+            strided_column_check(strings.count, scores.len(), scores_stride)?;
             let lengths = match document_lengths {
-                Some(lengths) if lengths.len() < sequence.count => return Err(Status::UnexpectedDimensions),
+                Some(lengths) if lengths.len() < strings.count => return Err(Status::UnexpectedDimensions),
                 Some(lengths) => lengths.as_ptr(),
                 None => core::ptr::null(),
             };
             unsafe {
                 sz_substrings_bm25_scores(
                     engine,
-                    sequence,
+                    strings,
                     lengths,
                     parameters as *const Bm25Params,
                     needle_weights.as_ptr(),

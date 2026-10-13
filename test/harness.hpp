@@ -639,6 +639,7 @@ inline void with_guarded_buffer_(std::size_t length, body_type_ &&body) {
 inline sz_allocator_t refusing_allocator_() noexcept {
     sz_allocator_t refusing;
     refusing.allocate = +[](sz_size_t, void *, sz_stream_t) -> void * { return nullptr; };
+    refusing.reallocate = +[](void *, sz_size_t, sz_size_t, void *, sz_stream_t) -> void * { return nullptr; };
     refusing.free = +[](void *, sz_size_t, void *, sz_stream_t) {};
     refusing.handle = nullptr;
     return refusing;
@@ -659,7 +660,18 @@ struct handle_checked_heap_t {
             ++heap.live_allocations;
             return std::malloc(length);
         };
+        allocator.reallocate = +[](void *pointer, sz_size_t, sz_size_t new_length, void *handle,
+                                   sz_stream_t) -> void * {
+            handle_checked_heap_t &heap = *static_cast<handle_checked_heap_t *>(handle);
+            if (heap.self != &heap) return nullptr;
+            heap.live_allocations += !pointer;
+            if (new_length) return std::realloc(pointer, new_length);
+            --heap.live_allocations;
+            std::free(pointer);
+            return nullptr;
+        };
         allocator.free = +[](void *pointer, sz_size_t, void *handle, sz_stream_t) {
+            if (!pointer) return;
             --static_cast<handle_checked_heap_t *>(handle)->live_allocations;
             std::free(pointer);
         };
@@ -698,26 +710,38 @@ inline std::string random_string(std::mt19937 &generator, std::size_t length,
     return result;
 }
 
-inline sz_sequence_t sequence_from_(std::span<sz_string_view_t const> views) {
-    sz_sequence_t sequence;
-    sz_sequence_from_string_views(views.data(), views.size(), &sequence);
-    return sequence;
+/** Borrows an accessor-backed collection of the supplied views. */
+inline sz_strings_view_t strings_from_(std::span<sz_string_view_t const> views) {
+    sz_strings_view_t strings;
+    sz_strings_from_string_views(views.data(), views.size(), &strings);
+    return strings;
 }
 
-/** Borrows a sequence view of the supplied strings. */
-inline sz_sequence_t sequence_from_(std::vector<std::string> const &strings) {
-    sz_sequence_t sequence;
-    sequence.handle = &strings;
-    sequence.count = (sz_size_t)strings.size();
-    sequence.get_start = [](void const *handle, sz_size_t index) -> sz_cptr_t {
-        auto const &strings = *static_cast<std::vector<std::string> const *>(handle);
-        return strings[index].data();
+/** Borrows an accessor-backed collection of the supplied strings. */
+inline sz_strings_view_t strings_from_(std::vector<std::string> const &texts) {
+    sz_strings_view_t strings;
+    strings.layout = sz_strings_accessor_k, strings.count = (sz_size_t)texts.size();
+    strings.data.accessor.handle = &texts;
+    strings.data.accessor.get = [](void const *handle, sz_size_t const *indices, sz_size_t count,
+                                   sz_string_view_t *views) {
+        auto const &texts = *static_cast<std::vector<std::string> const *>(handle);
+        for (sz_size_t position = 0; position != count; ++position) {
+            std::string const &text = texts[indices[position]];
+            views[position].start = text.data(), views[position].length = text.size();
+        }
     };
-    sequence.get_length = [](void const *handle, sz_size_t index) -> sz_size_t {
-        auto const &strings = *static_cast<std::vector<std::string> const *>(handle);
-        return strings[index].size();
-    };
-    return sequence;
+    return strings;
+}
+
+/** Packs @p texts into a 32-bit tape over @p payload and @p offsets, which must outlive it. */
+inline sz_strings_view_t strings_tape_from_(std::vector<std::string> const &texts, std::string &payload,
+                                            std::vector<sz_u32_t> &offsets) {
+    payload.clear(), offsets.assign(1, 0);
+    for (std::string const &text : texts) payload += text, offsets.push_back((sz_u32_t)payload.size());
+    sz_strings_view_t strings;
+    strings.layout = sz_strings_u32_tape_k, strings.count = (sz_size_t)texts.size();
+    strings.data.u32_tape.data = payload.data(), strings.data.u32_tape.offsets = offsets.data();
+    return strings;
 }
 
 struct fuzzy_config_t {
@@ -930,7 +954,7 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal);
 #pragma region Basic Utilities
 
 void test_arithmetic_unit();
-void test_sequence_unit();
+void test_strings_view_unit();
 void test_tape_assign_unit();
 void test_tape_overflow_unit();
 void test_allocator_unit();
@@ -1005,9 +1029,9 @@ void test_utf8_uncased_safety(test_context_t &context);
 template <typename string_type>
 void test_ascii_unit();
 
-void test_memory_unit();
-void test_memory_all(test_context_t &context);
-void test_memory_safety();
+void test_strings_unit();
+void test_strings_all(test_context_t &context);
+void test_strings_safety();
 
 template <typename string_type>
 void test_stl_reads_unit();

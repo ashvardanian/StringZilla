@@ -14,7 +14,6 @@
 #define STRINGZILLA_CIPHER_WESTMERE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/cipher/serial.h"
 
 #ifdef __cplusplus
@@ -830,7 +829,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_westmere(sz_aes256_gcm_key_t c
 
     // A caller who drops the status must still be unable to act on forged plaintext.
     if (verdict != sz_success_k) {
-        sz_fill_serial_(target, length, 0);
+        memset(target, 0, length);
         sz_keep_alive_(target);
     }
     return verdict;

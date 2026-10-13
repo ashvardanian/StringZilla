@@ -32,9 +32,9 @@ namespace ashvardanian::stringzilla::test {
 
 /** The dispatched engine builder over the CPU capabilities, in the shape of its capability kernels,
  *  whose mask sits before the allocator. */
-static sz_status_t levenshtein_engine_init_dispatched_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
-                                                       sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
-                                                       sz_stream_t stream) {
+static sz_status_t levenshtein_engine_init_dispatched_(sz_levenshtein_engine_t *engine,
+                                                       sz_strings_view_t const *queries, sz_levenshtein_symbol_t symbol,
+                                                       sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), allocator, stream);
 }
 

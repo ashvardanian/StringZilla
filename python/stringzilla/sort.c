@@ -7,10 +7,10 @@
 #include "stringzilla.h"
 
 /** Dispatches to the byte-wise or Unicode case-folded argsort backend. */
-sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_sequence_t const *sequence, sz_sorted_idx_t *order, sz_size_t top,
+sz_status_t Strs_run_argsort_(sz_bool_t uncased, sz_strings_view_t const *strings, sz_size_t *order, sz_size_t top,
                               sz_bool_t reverse, sz_capability_t capabilities) {
-    return uncased ? sz_sequence_argsort_uncased_best(sequence, top, reverse, NULL, order, capabilities, NULL)
-                   : sz_sequence_argsort_best(sequence, top, reverse, NULL, order, capabilities, NULL);
+    return uncased ? sz_sort_uncased_order_best(strings, top, reverse, NULL, order, capabilities, NULL)
+                   : sz_sort_order_best(strings, top, reverse, NULL, order, capabilities, NULL);
 }
 
 char const doc_argsort[] =                                                                                //
@@ -94,16 +94,16 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
     // With `top` set, only the leading `top` indices are ordered, so we expose just those.
     sz_size_t const result_count = (top != 0 && top < count) ? top : count;
 
-    // Optionally bind a caller-provided output buffer of `sz_sorted_idx_t` for a zero-allocation path.
+    // Optionally bind a caller-provided output buffer of `sz_size_t` for a zero-allocation path.
     Py_buffer out_view;
     sz_bool_t have_out = sz_false_k;
     if (out_obj && out_obj != Py_None) {
         // PyBUF_CONTIG = writable + C-contiguous; rejects strided/read-only targets up front.
         if (PyObject_GetBuffer(out_obj, &out_view, PyBUF_CONTIG) != 0) return NULL;
-        if (out_view.itemsize != (Py_ssize_t)sizeof(sz_sorted_idx_t)) {
+        if (out_view.itemsize != (Py_ssize_t)sizeof(sz_size_t)) {
             PyErr_Format(PyExc_TypeError,
                          "out must be a contiguous buffer of %zu-byte unsigned integers (e.g. numpy.uintp)",
-                         sizeof(sz_sorted_idx_t));
+                         sizeof(sz_size_t));
             PyBuffer_Release(&out_view);
             return NULL;
         }
@@ -121,8 +121,7 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
     // the caller's buffer; for top-k we sort into a scratch allocation and copy out only the leading `top`,
     // never writing past `result_count` of the caller's buffer.
     sz_bool_t const sort_into_out = have_out && result_count == count;
-    sz_sorted_idx_t *order = sort_into_out ? (sz_sorted_idx_t *)out_view.buf
-                                           : (sz_sorted_idx_t *)malloc(sizeof(sz_sorted_idx_t) * count);
+    sz_size_t *order = sort_into_out ? (sz_size_t *)out_view.buf : (sz_size_t *)malloc(sizeof(sz_size_t) * count);
     if (!order && count) {
         if (have_out) PyBuffer_Release(&out_view);
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the sorting operation");
@@ -130,17 +129,12 @@ PyObject *Strs_argsort(Strs *self, PyObject *const *args, Py_ssize_t positional_
     }
 
     // Call our sorting algorithm (`reverse` and `uncased` are handled natively).
-    sz_sequence_t sequence = {0};
-    sequence.count = count;
-    sequence.handle = self;
-    sequence.get_start = Strs_get_start_;
-    sequence.get_length = Strs_get_length_;
-    // Skip an empty sequence: the kernels report its zero-byte scratch as a failed allocation.
-    sz_status_t status = count ? Strs_run_argsort_(uncased, &sequence, order, top, reverse, capabilities)
-                               : sz_success_k;
+    sz_strings_view_t strings;
+    sz_py_export_strings_as_view((PyObject *)self, &strings);
+    // Skip an empty collection: the kernels report its zero-byte scratch as a failed allocation.
+    sz_status_t status = count ? Strs_run_argsort_(uncased, &strings, order, top, reverse, capabilities) : sz_success_k;
     if (status == sz_success_k && have_out && !sort_into_out)
-        status = sz_copy_best((sz_ptr_t)out_view.buf, (sz_cptr_t)order, result_count * sizeof(sz_sorted_idx_t),
-                              capabilities, NULL);
+        memcpy(out_view.buf, order, result_count * sizeof(sz_size_t));
     if (status != sz_success_k) {
         if (!sort_into_out) free(order);
         if (have_out) PyBuffer_Release(&out_view);

@@ -17,18 +17,17 @@ std::size_t test_cross_loongarch64(environment_t const &env) {
     check("test_compare_unit_loongsonasx",
           [] { check_compare_unit_({"loongsonasx", sz_equal_loongsonasx, sz_order_loongsonasx}); });
 
-    constexpr memory_backend_t memory_loongsonasx {"loongsonasx", sz_copy_loongsonasx, sz_move_loongsonasx,
-                                                   sz_fill_loongsonasx};
-    check("test_memory_unit_loongsonasx", [&] { check_memory_unit_(memory_loongsonasx); });
-    check("test_memory_equivalence_loongsonasx",
-          [&](test_context_t &context) { check_memory_equivalence_(context, memory_loongsonasx); });
-    check("test_memory_safety_loongsonasx", [&] { check_memory_safety_(memory_loongsonasx); });
-
-    constexpr lookup_backend_t lookup_loongsonasx {"loongsonasx", sz_lookup_loongsonasx};
-    check("test_lookup_unit_loongsonasx", [&] { check_lookup_unit_(lookup_loongsonasx); });
-    check("test_lookup_equivalence_loongsonasx",
-          [&](test_context_t &context) { check_lookup_equivalence_(context, lookup_loongsonasx); });
-    check("test_lookup_safety_loongsonasx", [&] { check_lookup_safety_(lookup_loongsonasx); });
+    constexpr strings_backend_t strings_loongsonasx {"loongsonasx",
+                                                     sz_strings_to_tape_loongsonasx,
+                                                     sz_strings_to_rows_loongsonasx,
+                                                     sz_strings_escape_loongsonasx,
+                                                     sz_strings_unescape_loongsonasx,
+                                                     sz_strings_lookup_loongsonasx,
+                                                     sz_strings_normalize_loongsonasx};
+    check("test_strings_unit_loongsonasx", [&] { check_strings_unit_(strings_loongsonasx); });
+    check("test_strings_equivalence_loongsonasx",
+          [&](test_context_t &context) { check_strings_equivalence_(context, strings_loongsonasx); });
+    check("test_strings_safety_loongsonasx", [&] { check_strings_safety_(strings_loongsonasx); });
 
     constexpr find_backend_t find_loongsonasx {
         .name = "loongsonasx",

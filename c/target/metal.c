@@ -4,6 +4,7 @@
  *  @date September 29, 2026
  *  @brief The engines' @c metal kernels and the Metal runtime exports, defined once for the library.
  */
+#include "stringzilla/strings.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
@@ -12,6 +13,7 @@
 
 #include "stringzilla/levenshtein/metal.h"
 #include "stringzilla/overlap/metal.h"
+#include "stringzilla/strings/metal.h"
 #include "stringzilla/substrings/metal.h"
 #include "stringzilla/utf8_norm/metal.h"
 #include "stringzilla/utf8_uncased_fold/metal.h"
@@ -43,12 +45,6 @@ STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream) { return sz
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator) {
     return sz_allocator_init_unified_metal_(allocator);
-}
-
-STRINGZILLA_API sz_status_t sz_sequence_realloc_metal(sz_sequence_t *target, sz_sequence_t const *source,
-                                                      sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                      sz_stream_t stream) {
-    return sz_sequence_realloc_metal_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {

@@ -1907,11 +1907,12 @@ check_proper_names_capitalized() {
 # Rejects an abbreviation from `abbreviations_refused`, such as `hi` or `lo` for register halves, because
 # names and prose spell words out. A bare one in a comment always fires; in code only a name new since HEAD
 # fires, so touching a line never forces a rename the commit is not about. A path HEAD lacks, whether new or a
-# rename git cannot pair, is weighed against every name in HEAD's headers, as it reuses the library's types.
+# rename git cannot pair, is weighed against every name in HEAD's headers and in its own directory, as it
+# reuses the library's types and its siblings' names.
 check_abbreviations_spelled_out() {
     local abbreviated previous_text
     previous_text=$(git show "HEAD:$staged_path" 2> /dev/null) ||
-        previous_text=${head_header_names:=$(git grep -h -o -w -E '[A-Za-z_][A-Za-z0-9_]*' HEAD -- include | sort -u)}
+        previous_text=$(git grep -h -o -w -E '[A-Za-z_][A-Za-z0-9_]*' HEAD -- include "${staged_path%/*}" | sort -u)
     abbreviated=$(awk -v abbreviations="$abbreviations_refused" '
         BEGIN { count = split(abbreviations, words, " "); for (word = 1; word <= count; ++word) banned[words[word]] = 1 }
         function has_banned_segment(token,    segments, total, segment) {
@@ -2796,17 +2797,18 @@ check_call_result_not_indexed() {
         "$staged_path indexes through a call or a cast; index the owning container, or bind a named local:"
 }
 
-# Rejects a LibC string or memory call in include/stringzilla, because the headers must also compile without LibC,
-# under `STRINGZILLA_WITH_LIBC=0`; types.h keeps the sanctioned allocator and assert.
+# Rejects a LibC string call in include/stringzilla, because the headers must also compile without LibC, under
+# `STRINGZILLA_WITH_LIBC=0`. Only `memcpy`, `memmove` and `memset` pass: every freestanding GCC and Clang target
+# provides them, and types.h declares them when LibC is absent.
 check_libc_absent_from_library() {
     [ "$staged_path" != include/stringzilla/types.h ] || return 0
     local calls
     calls=$(added_code_text |
-        grep -wE 'memset|memcpy|memmove|memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' |
-        grep -vE '__builtin_|sz_(copy|fill|move|equal|order|hash)|alloc(ator)?->' || true)
+        grep -wE 'memcmp|strlen|strcpy|strncpy|strcat|strcmp|strncmp|strchr|strrchr|strstr|strcasecmp|strncasecmp' |
+        grep -vE '__builtin_|sz_(equal|order|hash)|alloc(ator)?->' || true)
     [ -z "$calls" ] || reject_with_reason "$calls" \
-        "$staged_path calls LibC; use sz_copy, sz_fill, sz_move or sz_equal, or stage through a" \
-        "            sz_u(128|256|512)_vec_t union's .u8s[] buffer:"
+        "$staged_path calls a LibC string function; use sz_equal, sz_order or the find family, or stage through" \
+        "            a sz_u(128|256|512)_vec_t union's .u8s[] buffer:"
 }
 
 # Rejects iostreams, because the streambuf machinery drags virtual dispatch into every binary; LibC's

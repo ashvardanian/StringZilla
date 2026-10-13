@@ -3,11 +3,11 @@
  *  @author Ash Vardanian
  *  @date September 20, 2026
  *  @brief Core device code the CUDA and ROCm kernels share: the lanes, the block scan, the tile
- *      queues, the chained tiles and the tape a kernel reads a sequence from.
+ *      queues, the chained tiles and the tape a kernel reads strings from.
  *
  *  Every family with a SIMT backend writes its walks once, in its `simt.cuh`, and both nvcc and
  *  hipcc compile them. What those walks share lives here for the same reason the host tape
- *  accessors live in `types.h` rather than in a family. The host side of every vendor is its own:
+ *  readers live in `types.h` rather than in a family. The host side of every vendor is its own:
  *  `cuda.cuh` and `rocm.cuh` each drive their runtime, and nothing here calls one.
  *
  *  Written in C, as every `.cuh` in this library is. A walk takes its cross-lane and tile-queue
@@ -222,21 +222,21 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_utf8_cut_simt_(sz_u8_t const *text, sz_siz
 
 #pragma endregion Chained Tiles
 
-#pragma region Device Sequences
+#pragma region Device Tapes
 
-/** Reads one string out of a tape on the device, as @ref sz_sequence_tape_start does on a host. */
-static __device__ sz_cptr_t sz_sequence_tape_start_simt_(void const *handle, sz_size_t index) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_cptr_t)handle + offsets[index];
+/** The first byte of string @p index of a tape the device reads, and one past the last string's end
+ *  for @p index equal to the count. A warp reads one layout, so the branch never diverges. */
+STRINGZILLA_DEVICE sz_cptr_t sz_strings_start_simt_(sz_strings_view_t strings, sz_size_t index) {
+    return strings.layout == sz_strings_u32_tape_k ? strings.data.u32_tape.data + strings.data.u32_tape.offsets[index]
+                                                   : strings.data.u64_tape.data + strings.data.u64_tape.offsets[index];
 }
 
-/** Reads one length out of a tape, from the device. */
-static __device__ sz_size_t sz_sequence_tape_length_simt_(void const *handle, sz_size_t index) {
-    sz_u64_t const *offsets = (sz_u64_t const *)handle;
-    return (sz_size_t)(offsets[index + 1] - offsets[index]);
+/** The bytes string @p index of a tape the device reads spans. */
+STRINGZILLA_DEVICE sz_size_t sz_strings_length_simt_(sz_strings_view_t strings, sz_size_t index) {
+    return (sz_size_t)(sz_strings_start_simt_(strings, index + 1) - sz_strings_start_simt_(strings, index));
 }
 
-#pragma endregion Device Sequences
+#pragma endregion Device Tapes
 
 #endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 

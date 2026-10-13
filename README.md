@@ -214,7 +214,7 @@ namespace sz = ashvardanian::stringzilla;
 sz::string_view_t("the quick brown fox").find("brown"); // 10
 ```
 
-The library covers search, hashing, sorting, comparison, set intersection, memory operations, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
+The library covers search, hashing, sorting, comparison, set intersection, collection conversions like escaping, normalization and Arrow-compatible tapes, and lazy UTF-8 segmentation, plus the engines for edit distances, window overlap, and multi-pattern search, each with a host arm, a CUDA and ROCm one, and a Metal one.
 
 ### Rust
 
@@ -463,23 +463,21 @@ This results in much better vectorization for intra-core parallelism, and parall
 
 [rapidfuzz]: https://github.com/rapidfuzz/RapidFuzz
 
-### Memory Copying, Fills, and Moves
+### Escaping, Normalizing, and Gathering Collections
 
-A lot has been written about the time computers spend copying memory and how that operation is implemented in LibC.
-Interestingly, the operation can still be improved, as most Assembly implementations use outdated instructions.
-Even performance-oriented STL replacements, like Meta's [Folly v2024.09.23 focus on AVX2](https://github.com/facebook/folly/blob/main/folly/memset.S), and don't take advantage of the new masked instructions in AVX-512 or SVE.
+Strings in data pipelines travel in columns: log streams, Arrow arrays, Pandas series, the nodes of a parsed document.
+StringZilla converts a whole collection in one call, reading any layout, from Arrow `String` and `LargeString` tapes to an accessor over arbitrary records, and writing an Arrow-compatible tape it sizes exactly once.
+Escaping covers JSON, JSON in ASCII the way Python's `json.dumps` writes it, RFC 4180 CSV, hexadecimal, HTML, URL percent-encoding, and terminal-safe logs that neutralize bidirectional overrides, and unescaping reverses each, naming the first malformed string.
+Every kernel skips the bytes that need no work with the SIMD byte-set search, measures its output exactly before writing it, and works in place when it converts a tape onto itself, growing or shrinking the blocks through the caller's allocator.
+Normalization adds NFKC_Casefold to the four UAX #15 forms, the caseless key that search engines match on, folding clean runs with the case-folding kernels and rewriting only the segments that change.
 
-In AVX-512, StringZilla uses non-temporal stores to avoid cache pollution, when dealing with very large strings.
-Moreover, it handles the unaligned head and the tails of the `target` buffer separately, ensuring that writes in big copies are always aligned to cache-line boundaries.
-That's true for both AVX2 and AVX-512 backends.
+Single-threaded on an Apple M5 Pro, over 4 MiB of English sentences, the NEON kernels move:
 
-StringZilla also contains "drafts" of smarter, but less efficient algorithms, that minimize the number of unaligned loads, performing shuffles and permutations.
-That's a topic for future research, as the performance gains are not yet satisfactory.
-
-> § Reading materials.
-> [`memset` benchmarks](https://github.com/nadavrot/memset_benchmark?tab=readme-ov-file) by Nadav Rotem.
-> [Cache Associativity](https://en.algorithmica.org/hpc/cpu-cache/associativity/) by Sergey Slotin.
-
+- JSON escaping at 3.37 GB/s and unescaping at 3.33 GB/s, 2.8× and 3.2× the serial code.
+- CSV escaping at 2.78 GB/s and unescaping at 3.96 GB/s, 2.3× and 2.6× the serial code.
+- HTML escaping at 2.99 GB/s and unescaping at 2.84 GB/s, 2.5× and 2.4× the serial code.
+- Gathering into a tape at 14.8 GB/s, the speed of `memcpy`.
+- NFC normalization at 1.66 GB/s and NFKC_Casefold at 0.61 GB/s over multilingual XL-Sum articles, 2.1× and 1.8× the serial code.
 
 ### Hashing
 
@@ -555,7 +553,7 @@ That is also why there is no Ice Lake tier for it: SHA-NI has no VEX or EVEX enc
 Independent messages are a different story: they compress in parallel lanes, sixteen at a time on AVX-512 and eight on AVX2, which is what `sz_sha256_multistate_update_best` exposes.
 That lane-parallel form nearly triples the hash rate of dedicated SHA-NI silicon on token-sized inputs, and still leads by half again on line-sized ones.
 Lanes retire independently, so a batch of mixed lengths stays vectorized to each lane's own last block rather than dropping to scalar when one lane runs short.
-A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sequence_argsort_best` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
+A group still costs as much as its longest member, so feeding inputs in length order is the caller's lever — `sz_sort_order_best` produces that ordering, and per-backend numbers are in [`include/stringzilla/hash/README.md`](include/stringzilla/hash/README.md).
 
 ### AES-256 Encryption
 

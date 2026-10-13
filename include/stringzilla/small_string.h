@@ -31,7 +31,6 @@
 #include "stringzilla/types.h"
 
 #include "stringzilla/compare/serial.h" // `sz_equal_serial_`, `sz_order_serial_`
-#include "stringzilla/memory/serial.h"  // `sz_copy_serial_`, `sz_move_serial_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -191,7 +190,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
  *  @brief Grows the string by adding an uninitialized region of @p added_length at the given
  *      @p offset.
  *
- *  Would often be used in conjunction with one or more @c sz_copy_best calls to populate the
+ *  Would often be used in conjunction with one or more @c memcpy calls to populate the
  *  allocated region. Similar to @c sz_string_reserve, but changes the length of the @p string.
  *
  *  @param[inout] string String to grow.
@@ -356,7 +355,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_reserve(sz_string_t *string, sz_size_t new
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle, STRINGZILLA_NULL);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
-    sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
+    memcpy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;
@@ -384,7 +383,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_shrink_to_fit(sz_string_t *string, sz_allo
     sz_ptr_t new_start = (sz_ptr_t)allocator->allocate(new_space, allocator->handle, STRINGZILLA_NULL);
     if (!new_start) return STRINGZILLA_NULL_CHAR;
 
-    sz_copy_serial_(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
+    memcpy(new_start, string_start, string_length + 1); // ? The terminator moves with the contents
     string->external.start = new_start;
     string->external.space = new_space;
     string->external.padding = 0;
@@ -416,7 +415,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
 
     // If we are lucky, no memory allocations will be needed.
     if (string_length + added_length < string_space) {
-        sz_move_serial_(string_start + offset + added_length, string_start + offset, string_length - offset);
+        memmove(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         // Even if the string is on the stack, the `+=` won't affect the tail of the string.
         string->external.length += added_length;
@@ -431,7 +430,7 @@ STRINGZILLA_INLINE sz_ptr_t sz_string_expand( //
         if (!string_start) return STRINGZILLA_NULL_CHAR;
 
         // Copy into the new buffer.
-        sz_move_serial_(string_start + offset + added_length, string_start + offset, string_length - offset);
+        memmove(string_start + offset + added_length, string_start + offset, string_length - offset);
         string_start[string_length + added_length] = 0;
         string->external.length = string_length + added_length;
     }
@@ -469,7 +468,7 @@ STRINGZILLA_INLINE sz_size_t sz_string_erase(sz_string_t *string, sz_size_t offs
     // the erasing is as easy as setting the length to the offset.
     // In every other case, we must `memmove` the tail of the string to the left.
     if (offset + length < string_length)
-        sz_move_serial_(string_start + offset, string_start + offset + length, string_length - offset - length);
+        memmove(string_start + offset, string_start + offset + length, string_length - offset - length);
 
     // The `string->external.length = offset` assignment would discard last characters
     // of the on-the-stack string, but inplace subtraction would work.

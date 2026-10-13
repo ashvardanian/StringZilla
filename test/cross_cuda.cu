@@ -60,6 +60,14 @@ std::size_t test_cross_cuda(environment_t const &env, std::size_t ordinal) {
     };
     check.section("Cross CUDA", sz_cap_cuda_k);
     check_device_kernels_(check, cuda);
+    strings_backend_t const strings_cuda {"cuda",
+                                          sz_strings_to_tape_cuda,
+                                          sz_strings_to_rows_cuda,
+                                          sz_strings_escape_cuda,
+                                          sz_strings_unescape_cuda,
+                                          sz_strings_lookup_cuda,
+                                          sz_strings_normalize_cuda};
+    check_device_strings_(check, cuda_runtime, strings_cuda);
 #endif
 #if STRINGZILLA_TARGET_HOPPER
     device_backend_t hopper_runtime = runtime;

@@ -75,25 +75,18 @@ PyObject *Strs_intersect(Strs *self, PyObject *const *args, Py_ssize_t positiona
     }
 
     // Both outputs must fit `min(first_count, second_count)` indices; one allocation covers both halves.
-    sz_sorted_idx_t *positions = (sz_sorted_idx_t *)malloc(2 * max_size * sizeof(sz_sorted_idx_t));
+    sz_size_t *positions = (sz_size_t *)malloc(2 * max_size * sizeof(sz_size_t));
     if (!positions) {
         PyErr_Format(PyExc_MemoryError, "Unable to allocate memory for the intersection positions");
         return NULL;
     }
 
-    sz_sequence_t first_sequence = {0}, second_sequence = {0};
-    first_sequence.count = first_count;
-    first_sequence.handle = self;
-    first_sequence.get_start = Strs_get_start_;
-    first_sequence.get_length = Strs_get_length_;
-    second_sequence.count = second_count;
-    second_sequence.handle = other;
-    second_sequence.get_start = Strs_get_start_;
-    second_sequence.get_length = Strs_get_length_;
-
+    sz_strings_view_t first, second;
+    sz_py_export_strings_as_view((PyObject *)self, &first);
+    sz_py_export_strings_as_view(other_obj, &second);
     sz_size_t intersection_count = 0;
-    sz_status_t status = sz_sequence_intersect_best(&first_sequence, &second_sequence, NULL, seed, &intersection_count,
-                                                    positions, positions + max_size, capabilities, NULL);
+    sz_status_t status = sz_intersect_best(&first, &second, NULL, seed, &intersection_count, positions,
+                                           positions + max_size, capabilities, NULL);
     if (status != sz_success_k) {
         free(positions);
         sz_py_raise_status(status, "intersect()");

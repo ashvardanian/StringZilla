@@ -64,7 +64,8 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_rocm_(sz_size_t staged_node
 /** Prepares the forest on the device the caller already made current, for the tier whose @p kernel
  *  the rounds will launch and whose @p capability the engine records, which is every step of
  *  @ref sz_overlap_engine_init_scoped_rocm_ but the device scope. */
-STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t *engine,
+                                                            sz_strings_view_t const *queries,
                                                             sz_size_t const *window_widths,
                                                             sz_size_t window_widths_count, void const *kernel,
                                                             sz_capability_t capability, sz_allocator_t *allocator,
@@ -105,8 +106,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
     sz_u32_t *const nodes = (sz_u32_t *)engine->nodes;
     sz_u32_t *const keys_counts = (sz_u32_t *)engine->keys_counts;
     sz_size_t widest_nodes = 0;
+    sz_string_view_t views[64];
     for (sz_size_t index = 0; index != engine->count; ++index) {
-        sz_cptr_t const text = queries->get_start(queries->handle, index);
+        if (index % 64 == 0) sz_strings_get_block_(queries, index, views);
+        sz_cptr_t const text = views[index % 64].start;
         sz_size_t const length = engine->lengths[index];
         sz_u32_t *const arena = nodes + engine->nodes_offsets[index];
         sz_size_t const entries = engine->nodes_offsets[index + 1] - engine->nodes_offsets[index];
@@ -161,8 +164,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
  *  The chain that feeds the trees is host working space no kernel ever reads, so it comes from the
  *  host allocator rather than from @p allocator.
  *
- *  @param[in] queries Read on the @b host, so its accessors must be host-callable, unlike
- *      a round's candidates.
+ *  @param[in] queries Read on the @b host, so in any layout, unlike a round's candidates.
  *  @param[in] candidates_budget Ignored, as rounds keep no per-candidate state on this backend.
  *  @param[in] kernel The tier's kernel, which the launch geometry is resolved for.
  *  @param[in] capability The tier's capability, which the engine records.
@@ -178,7 +180,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
  *  is past @ref sz_overlap_gpu_widest_window_k, which bounds the bytes a chunk re-walks to start.
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
-    sz_overlap_engine_t *engine, sz_sequence_t const *queries, sz_size_t const *window_widths,
+    sz_overlap_engine_t *engine, sz_strings_view_t const *queries, sz_size_t const *window_widths,
     sz_size_t window_widths_count, sz_size_t candidates_budget, void const *kernel, sz_capability_t capability,
     sz_allocator_t *allocator, sz_stream_t stream) {
     int caller = 0;
@@ -193,7 +195,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
 
 /** Enqueues one round of the tier's @p kernel on the device the caller already made current,
  *  which is every step of @ref sz_overlap_scores_scoped_rocm_ but the device scope. */
-STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
                                                        sz_size_t scores_candidate_stride, void const *kernel,
                                                        sz_stream_t stream) {
@@ -203,9 +205,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
     if (!candidates->count || !engine->count) return sz_success_k;
     if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
     if (!sz_memory_accessible_rocm_(scores)) return sz_device_memory_mismatch_k;
-    if (candidates->get_start != sz_sequence_tape_start || candidates->get_length != sz_sequence_tape_length ||
-        !sz_memory_accessible_rocm_(candidates->handle))
-        return sz_device_memory_mismatch_k;
+    if (!sz_strings_accessible_rocm_(candidates)) return sz_device_memory_mismatch_k;
 
     sz_overlap_geometry_rocm_t const *const geometry = (sz_overlap_geometry_rocm_t const *)sz_overlap_engine_head_(
         engine);
@@ -220,12 +220,13 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
     // into constant memory on every launch and no kernel can call them.
     sz_overlap_engine_t launched_engine = *engine;
     launched_engine.allocator.allocate = STRINGZILLA_NULL;
+    launched_engine.allocator.reallocate = STRINGZILLA_NULL;
     launched_engine.allocator.free = STRINGZILLA_NULL;
     launched_engine.allocator.handle = STRINGZILLA_NULL;
     launched_engine.memory = STRINGZILLA_NULL, launched_engine.memory_bytes = 0;
     launched_engine.scratch = STRINGZILLA_NULL, launched_engine.scratch_bytes = 0;
 
-    sz_sequence_t launched_candidates = *candidates;
+    sz_strings_view_t launched_candidates = *candidates;
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)rows, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
@@ -237,18 +238,15 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
 
 /**
  *  @brief The tier's @p kernel of @ref sz_overlap_scores, on the engine's device.
- *  @pre @p candidates carries @b device accessors, as @ref sz_sequence_realloc_best binds them,
- *      because the kernel is what calls them, once per candidate, uniform across the wavefront.
+ *  @pre @p candidates is a tape the device reaches, as @ref sz_strings_to_tape_best writes one with
+ *      a unified allocator.
  *  @return @c sz_success_k, @c sz_device_memory_mismatch_k when the engine, the scores or the
  *      candidates are memory the device of @p stream cannot reach, or @c sz_device_code_mismatch_k
  *      when the launch itself is refused.
  *  @note Enqueues on @p stream and returns; the caller joins it before reading @p scores.
- *
- *  Only the handle can be checked from this side, so host accessors reach the device as an invalid
- *  address rather than a status.
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_t *engine,
-                                                              sz_sequence_t const *candidates, sz_f32_t *scores,
+                                                              sz_strings_view_t const *candidates, sz_f32_t *scores,
                                                               sz_size_t scores_query_stride,
                                                               sz_size_t scores_candidate_stride, void const *kernel,
                                                               sz_stream_t stream) {
@@ -263,7 +261,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_
 
 #if STRINGZILLA_TARGET_ROCM
 
-static __global__ void sz_overlap_scores_rocm_kernel_(sz_overlap_engine_t engine, sz_sequence_t candidates,
+static __global__ void sz_overlap_scores_rocm_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
                                                       sz_f32_t *scores, sz_size_t scores_query_stride,
                                                       sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
     sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
@@ -271,7 +269,7 @@ static __global__ void sz_overlap_scores_rocm_kernel_(sz_overlap_engine_t engine
                             sz_tile_queue_next_simt_);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                         sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                         sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                         sz_stream_t stream) {
@@ -280,7 +278,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *eng
                                                stream);
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_sequence_t const *candidates,
+STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
                                                    sz_f32_t *scores, sz_size_t scores_query_stride,
                                                    sz_size_t scores_candidate_stride, sz_stream_t stream) {
     return sz_overlap_scores_scoped_rocm_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,

@@ -27,7 +27,7 @@
 #include <vector> // `std::vector`
 
 #include "cross.hpp"   // `overlap_backend_t`, `check_overlap_equivalence_`, `check_overlap_safety_`
-#include "harness.hpp" // `sequence_from_`, `test_context_t`
+#include "harness.hpp" // `strings_from_`, `test_context_t`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -35,7 +35,7 @@ namespace ashvardanian::stringzilla::test {
 
 /** The dispatched engine constructor over the CPU capabilities, in the shape of its capability
  *  kernels, whose mask sits before the allocator. */
-static sz_status_t overlap_engine_init_dispatched_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+static sz_status_t overlap_engine_init_dispatched_(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                                    sz_size_t const *window_widths, sz_size_t window_widths_count,
                                                    sz_size_t candidates_budget, sz_allocator_t *allocator,
                                                    sz_stream_t stream) {
@@ -51,13 +51,13 @@ static void check_overlap_pair_(std::string const &query, std::string const &can
                                 sz_f32_t expected) {
     handle_checked_heap_t heap;
     std::vector<std::string> const queries = {query}, candidates = {candidate};
-    sz_sequence_t const query_sequence = sequence_from_(queries);
-    sz_sequence_t const candidate_sequence = sequence_from_(candidates);
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const candidate_strings = strings_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &query_sequence, &width, 1, 0, sz::default_capabilities(), &heap.allocator,
+    verify(sz_overlap_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(), &heap.allocator,
                                   nullptr) == sz_success_k);
     sz_f32_t share = -1.0f;
-    verify(sz_overlap_scores(&engine, &candidate_sequence, &share, 1, 1, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, &share, 1, 1, nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
     verify(share == expected);
@@ -76,13 +76,13 @@ void test_overlap_unit() {
     std::vector<std::string> const candidates = {fox, "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ", "the", ""};
     std::vector<std::size_t> const widths = {1, 2, 3, 4, 6, 8, 43};
     handle_checked_heap_t heap;
-    sz_sequence_t const query_sequence = sequence_from_(queries);
-    sz_sequence_t const sequence = sequence_from_(candidates);
+    sz_strings_view_t const query_strings = strings_from_(queries);
+    sz_strings_view_t const candidate_strings = strings_from_(candidates);
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0, sz::default_capabilities(),
+    verify(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, sz::default_capabilities(),
                                   &heap.allocator, nullptr) == sz_success_k);
     sz_f32_t shares[4 * 7];
-    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7, 7, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7, 7, nullptr) == sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
         verify(shares[0 * 7 + width_index] == 1.0f);
         verify(shares[1 * 7 + width_index] == 0.0f);
@@ -94,10 +94,14 @@ void test_overlap_unit() {
     for (std::size_t width_index = 3; width_index != widths.size(); ++width_index)
         verify(shares[2 * 7 + width_index] == 0.0f);
 
-    // A candidate stride wider than the widths leaves the gap it names alone, and every share lands where it says.
+    // A candidate stride wider than the widths leaves the gap it names alone, and every share lands
+    // where it says, read this time from a tape of the same candidates.
+    std::string payload;
+    std::vector<sz_u32_t> offsets;
+    sz_strings_view_t const candidate_tape = strings_tape_from_(candidates, payload, offsets);
     sz_f32_t padded[4 * 9];
     for (sz_f32_t &slot : padded) slot = -1.0f;
-    verify(sz_overlap_scores(&engine, &sequence, padded, 4 * 9, 9, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_tape, padded, 4 * 9, 9, nullptr) == sz_success_k);
     for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
         for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
             verify(padded[candidate * 9 + width_index] == shares[candidate * 7 + width_index]);
@@ -105,13 +109,13 @@ void test_overlap_unit() {
     }
 
     // A stride under the axis it spans would write one row into its neighbour's, so it is refused.
-    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7, 6, nullptr) == sz_unexpected_dimensions_k);
-    verify(sz_overlap_scores(&engine, &sequence, shares, 4 * 7 - 1, 7, nullptr) == sz_unexpected_dimensions_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7, 6, nullptr) == sz_unexpected_dimensions_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7 - 1, 7, nullptr) == sz_unexpected_dimensions_k);
     sz_overlap_engine_free(&engine, nullptr);
 
     // Zero widths answer nothing, and are refused before anything is prepared.
     sz_overlap_engine_t refused {};
-    verify(sz_overlap_engine_init(&refused, &query_sequence, widths.data(), 0, 0, sz::default_capabilities(),
+    verify(sz_overlap_engine_init(&refused, &query_strings, widths.data(), 0, 0, sz::default_capabilities(),
                                   &heap.allocator, nullptr) == sz_unexpected_dimensions_k);
     verify(heap.live_allocations == 0);
 

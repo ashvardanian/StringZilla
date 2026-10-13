@@ -98,6 +98,15 @@ void bench_kernel_nullary(environment_t &env, corpus_t const &corpus, std::strin
     }
 }
 
+/** The checksum a transforming adapter validates its output with: the library's fastest, as the
+ *  timed call includes it, or the serial one in header-only builds, which have no kernel finder. */
+inline sz_kernel_bytesum_t output_checksum_kernel() noexcept {
+    sz_kernel_punned_t punned = nullptr;
+    sz_capability_t capability = 0;
+    sz_find_kernel_punned(sz_kernel_bytesum_k, sz::default_capabilities(), &punned, &capability);
+    return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
+}
+
 #pragma endregion Cross Sections
 
 #pragma region Find
@@ -465,8 +474,8 @@ struct sha256_multistate_from_sz {
             sz_sha256_state_init_serial(&states[lane_index], nullptr);
             bytes_passed += lane_length;
         }
-        sz_sequence_t texts;
-        sz_sequence_from_string_views(lanes, multistate_lanes_k, &texts);
+        sz_strings_view_t texts;
+        sz_strings_from_string_views(lanes, multistate_lanes_k, &texts);
         update_(states, &texts, nullptr);
         digest_(states, multistate_lanes_k, digests, nullptr);
         // Multiplied rather than XOR-ed, so two lanes swapping digests cannot cancel out - lane
@@ -629,7 +638,7 @@ void bench_order_kernels(environment_t &env, std::string_view kit) {
 #pragma region Sequence
 
 using strings_t = std::vector<std::string_view>;
-using permute_t = std::vector<sz_sorted_idx_t>;
+using permute_t = std::vector<sz_size_t>;
 
 /** Helper function to distill a large @b permute_t object down to one comparable hash integer. */
 template <typename entries_type_>
@@ -638,25 +647,29 @@ bool is_sorting_permutation(entries_type_ const &entries, permute_t const &permu
                           [&](std::size_t i, std::size_t j) { return entries[i] < entries[j]; });
 }
 
-/** Helper function to accumulate the total length of all strings in a sequence. */
+/** Helper function to accumulate the total length of all strings in a collection. */
 inline std::size_t accumulate_lengths(strings_t const &strings) {
     return std::accumulate(strings.begin(), strings.end(), (std::size_t)0,
                            [](std::size_t sum, std::string_view const &str) { return sum + str.size(); });
 }
 
-/** Reads a string start from a @c strings_t collection. */
-inline sz_cptr_t strings_get_start_(void const *handle, sz_size_t i) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
-    return array[i].data();
+/** Borrows an accessor-backed collection of @p strings, reading a block of views per call. */
+inline sz_strings_view_t strings_view_of_(strings_t const &strings) {
+    sz_strings_view_t view;
+    view.layout = sz_strings_accessor_k, view.count = strings.size();
+    view.data.accessor.handle = &strings;
+    view.data.accessor.get = [](void const *handle, sz_size_t const *indices, sz_size_t count,
+                                sz_string_view_t *views) {
+        strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
+        for (sz_size_t position = 0; position != count; ++position) {
+            std::string_view const string = array[indices[position]];
+            views[position].start = string.data(), views[position].length = string.size();
+        }
+    };
+    return view;
 }
 
-/** Reads a string length from a @c strings_t collection. */
-inline sz_size_t strings_get_length_(void const *handle, sz_size_t i) {
-    strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
-    return array[i].size();
-}
-
-template <sz_kernel_sequence_argsort_t func_>
+template <sz_kernel_sort_order_t func_>
 struct argsort_strings_via_sz {
     strings_t const &input;
     permute_t &output;
@@ -665,12 +678,7 @@ struct argsort_strings_via_sz {
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
 
-        // Prepare the sequence structure for the callback.
-        sz_sequence_t array;
-        array.count = input.size();
-        array.handle = &input;
-        array.get_start = strings_get_start_;
-        array.get_length = strings_get_length_;
+        sz_strings_view_t const array = strings_view_of_(input);
         sz_allocator_t allocator;
         if (sz_allocator_init_heap(&allocator) != sz_success_k)
             throw std::runtime_error("The heap allocator could not be initialized.");
@@ -708,7 +716,7 @@ inline bool is_uncased_sorting_permutation(std::vector<std::string> const &folde
                           [&](std::size_t i, std::size_t j) { return folded[i] < folded[j]; });
 }
 
-template <sz_kernel_sequence_argsort_t func_>
+template <sz_kernel_sort_order_t func_>
 struct argsort_ci_strings_via_sz {
     strings_t const &input;
     std::vector<std::string> const &folded;
@@ -719,12 +727,7 @@ struct argsort_ci_strings_via_sz {
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
 
-        // Prepare the sequence structure for the callback.
-        sz_sequence_t array;
-        array.count = input.size();
-        array.handle = &input;
-        array.get_start = strings_get_start_;
-        array.get_length = strings_get_length_;
+        sz_strings_view_t const array = strings_view_of_(input);
         sz_allocator_t allocator;
         if (sz_allocator_init_heap(&allocator) != sz_success_k)
             throw std::runtime_error("The heap allocator could not be initialized.");
@@ -754,7 +757,7 @@ struct intersect_inputs_t {
     }
 };
 
-template <sz_kernel_sequence_intersect_t func_>
+template <sz_kernel_intersect_t func_>
 struct intersect_strings_via_sz {
     strings_t const &input_a;
     strings_t const &input_b;
@@ -765,18 +768,7 @@ struct intersect_strings_via_sz {
         : input_a(inputs.tokens_a), input_b(inputs.tokens_b), output_a(inputs.permute_a), output_b(inputs.permute_b) {}
 
     call_result_t operator()() const {
-
-        // Prepare the sequence structure for the callback.
-        sz_sequence_t array_a, array_b;
-        array_a.count = input_a.size();
-        array_a.handle = &input_a;
-        array_a.get_start = strings_get_start_;
-        array_a.get_length = strings_get_length_;
-        array_b.count = input_b.size();
-        array_b.handle = &input_b;
-        array_b.get_start = strings_get_start_;
-        array_b.get_length = strings_get_length_;
-
+        sz_strings_view_t const array_a = strings_view_of_(input_a), array_b = strings_view_of_(input_b);
         sz_size_t intersections = 0;
         sz_allocator_t allocator;
         if (sz_allocator_init_heap(&allocator) != sz_success_k)
@@ -793,42 +785,38 @@ struct intersect_strings_via_sz {
 };
 
 /** Times one capability's argsort of the corpus words, in byte order and in case-folded order. */
-template <sz_kernel_sequence_argsort_t argsort_, sz_kernel_sequence_argsort_t argsort_uncased_>
-void bench_sequence_argsort_kernels(environment_t &env, std::string_view kit) {
+template <sz_kernel_sort_order_t argsort_, sz_kernel_sort_order_t argsort_uncased_>
+void bench_sort_order_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.words();
     permute_t permute(corpus.tokens.size());
-    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_argsort_{}", kit), "sz_sequence_argsort_serial",
-                         argsort_strings_via_sz<sz_sequence_argsort_serial> {corpus.tokens, permute},
+    bench_kernel_nullary(env, corpus, fmt::format("sz_sort_order_{}", kit), "sz_sort_order_serial",
+                         argsort_strings_via_sz<sz_sort_order_serial> {corpus.tokens, permute},
                          argsort_strings_via_sz<argsort_> {corpus.tokens, permute});
     std::vector<std::string> const folded = fold_tokens(corpus.tokens);
-    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_argsort_uncased_{}", kit),
-                         "sz_sequence_argsort_uncased_serial",
-                         argsort_ci_strings_via_sz<sz_sequence_argsort_uncased_serial> {corpus.tokens, folded, permute},
+    bench_kernel_nullary(env, corpus, fmt::format("sz_sort_uncased_order_{}", kit), "sz_sort_uncased_order_serial",
+                         argsort_ci_strings_via_sz<sz_sort_uncased_order_serial> {corpus.tokens, folded, permute},
                          argsort_ci_strings_via_sz<argsort_uncased_> {corpus.tokens, folded, permute});
 }
 
 /** Times one capability's intersection of every distinct corpus word with a sample of them. */
-template <sz_kernel_sequence_intersect_t intersect_>
-void bench_sequence_intersect_kernels(environment_t &env, std::string_view kit) {
+template <sz_kernel_intersect_t intersect_>
+void bench_intersect_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.words();
     intersect_inputs_t inputs(corpus, env.settings.seed.value);
-    bench_kernel_nullary(env, corpus, fmt::format("sz_sequence_intersect_{}", kit), "sz_sequence_intersect_serial",
-                         intersect_strings_via_sz<sz_sequence_intersect_serial> {inputs},
+    bench_kernel_nullary(env, corpus, fmt::format("sz_intersect_{}", kit), "sz_intersect_serial",
+                         intersect_strings_via_sz<sz_intersect_serial> {inputs},
                          intersect_strings_via_sz<intersect_> {inputs});
 }
 
 #pragma endregion Sequence
 
-#pragma region Memory
+#pragma region Random Fills
 
-/** Bytes past the dataset the output buffers keep, for the widest shift and unaligned exports. */
-constexpr std::size_t max_shift_length = 299;
-
-/** A page-aligned copy of the dataset to write into, with room after it for the widest shift. */
+/** A page-aligned copy of the dataset to write into. */
 struct dataset_copy_t {
     std::vector<char> storage;
 
-    explicit dataset_copy_t(corpus_t const &corpus) : storage(4096 + corpus.dataset.size() + max_shift_length) {
+    explicit dataset_copy_t(corpus_t const &corpus) : storage(4096 + corpus.dataset.size()) {
         std::memcpy(data(), corpus.dataset.data(), corpus.dataset.size());
     }
     dataset_copy_t(dataset_copy_t const &) = delete;
@@ -838,66 +826,6 @@ struct dataset_copy_t {
     char *data() noexcept {
         std::uintptr_t const address = reinterpret_cast<std::uintptr_t>(storage.data());
         return storage.data() + (round_up_to_multiple<4096>(address) - address);
-    }
-};
-
-/** Wraps a @b memcpy-like kernel into a callable for @c bench_unary. */
-template <sz_kernel_copy_t copy_func_, int page_misalignment_ = 0>
-struct copy_from_sz {
-
-    corpus_t const &corpus;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - corpus.dataset.data();
-        output_offset -= output_offset % sz_default_alignment_k;
-        // Ensure unaligned exports if needed
-        output_offset += page_misalignment_;
-        copy_func_(output + output_offset, slice.data(), slice.size(), nullptr);
-        return {slice.size()};
-    }
-};
-
-/** Wraps a @b memmove-like kernel into a callable for @c bench_unary, shifting forward and back. */
-template <sz_kernel_move_t move_func_, int shift_ = 0>
-struct move_from_sz {
-
-    corpus_t const &corpus;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - corpus.dataset.data();
-        // Shift forward
-        move_func_(output + output_offset + shift_, output + output_offset, slice.size(), nullptr);
-        // Shift backward to revert the changes
-        move_func_(output + output_offset, output + output_offset + shift_, slice.size(), nullptr);
-        return {slice.size() * 2};
-    }
-};
-
-/** Wraps a @b memset-like kernel into a callable for @c bench_unary. */
-template <sz_kernel_fill_t fill_func_>
-struct fill_from_sz {
-
-    corpus_t const &corpus;
-    sz_ptr_t output;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - corpus.dataset.data();
-        fill_func_(output + output_offset, slice.size(), slice.front(), nullptr);
-        return {slice.size(), static_cast<check_value_t>(slice.front())};
     }
 };
 
@@ -921,66 +849,6 @@ struct fill_random_from_sz {
     }
 };
 
-/** Wraps a lookup-table kernel into something similar to @c std::transform. */
-template <sz_kernel_lookup_t lookup_func_>
-struct lookup_from_sz {
-
-    corpus_t const &corpus;
-    sz_ptr_t output;
-    sz_cptr_t lookup_table;
-
-    inline call_result_t operator()(std::size_t token_index) const noexcept {
-        return operator()(corpus.tokens[token_index]);
-    }
-
-    inline call_result_t operator()(std::string_view slice) const noexcept {
-        std::size_t output_offset = slice.data() - corpus.dataset.data();
-        lookup_func_(output + output_offset, slice.data(), slice.size(), lookup_table, nullptr);
-        return {slice.size(), static_cast<check_value_t>(slice.front())};
-    }
-};
-
-/** The cyclic rotation of the alphabet every lookup benchmark transforms through. */
-inline std::array<unsigned char, 256> rotated_alphabet() noexcept {
-    std::array<unsigned char, 256> table {};
-    std::iota(table.begin(), table.end(), static_cast<unsigned char>(1)); // The last byte wraps around to 0
-    return table;
-}
-
-/** Times one capability's copy into cache-line aligned and one-byte shifted output. */
-template <sz_kernel_copy_t copy_>
-void bench_copy_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.lines();
-    dataset_copy_t output(corpus);
-    sz_ptr_t o = output.data();
-    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_copy_{}(align)", kit), copy_from_sz<copy_> {corpus, o}),
-               "sz_copy_serial(align)");
-    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_copy_{}(shift)", kit), copy_from_sz<copy_, 1> {corpus, o}),
-               "sz_copy_serial(shift)");
-}
-
-/** Times one capability's move, shifting each line forward and back by a byte and a cache line. */
-template <sz_kernel_move_t move_>
-void bench_move_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.lines();
-    dataset_copy_t output(corpus);
-    sz_ptr_t o = output.data();
-    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_move_{}(by1)", kit), move_from_sz<move_, 1> {corpus, o}),
-               "sz_move_serial(by1)");
-    log_kernel(env, bench_unary(env, corpus, fmt::format("sz_move_{}(by64)", kit), move_from_sz<move_, 64> {corpus, o}),
-               "sz_move_serial(by64)");
-}
-
-/** Times one capability's fill, each line overwritten with its own first byte. */
-template <sz_kernel_fill_t fill_>
-void bench_fill_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.lines();
-    dataset_copy_t output(corpus);
-    log_kernel(env,
-               bench_unary(env, corpus, fmt::format("sz_fill_{}", kit), fill_from_sz<fill_> {corpus, output.data()}),
-               "sz_fill_serial");
-}
-
 /** Times one capability's random fill, each line seeded with its own first byte. */
 template <sz_kernel_fill_random_t fill_random_>
 void bench_fill_random_kernels(environment_t &env, std::string_view kit) {
@@ -992,20 +860,203 @@ void bench_fill_random_kernels(environment_t &env, std::string_view kit) {
                        fill_random_from_sz<fill_random_> {corpus, o});
 }
 
-/** Times one capability's lookup, rotating the alphabet of every line by one. */
-template <sz_kernel_lookup_t lookup_>
-void bench_lookup_kernels(environment_t &env, std::string_view kit) {
-    corpus_t const &corpus = env.corpora.lines();
-    dataset_copy_t output(corpus);
-    std::array<unsigned char, 256> const alphabet = rotated_alphabet();
-    log_kernel(
-        env,
-        bench_unary(env, corpus, fmt::format("sz_lookup_{}", kit),
-                    lookup_from_sz<lookup_> {corpus, output.data(), reinterpret_cast<sz_cptr_t>(alphabet.data())}),
-        "sz_lookup_serial");
+#pragma endregion Random Fills
+
+#pragma region Strings
+
+/** The cyclic rotation of the alphabet every lookup benchmark transforms through. */
+inline std::array<unsigned char, 256> rotated_alphabet() noexcept {
+    std::array<unsigned char, 256> table {};
+    std::iota(table.begin(), table.end(), static_cast<unsigned char>(1)); // The last byte wraps around to 0
+    return table;
 }
 
-#pragma endregion Memory
+/** An escape kind and the name its benchmark rows carry. */
+struct escape_kind_named_t {
+    char const *name;
+    sz_escape_kind_t kind;
+};
+
+/** The kinds the escape rows time: JSON and CSV for serializers, HTML for pages, URLs for links. */
+inline constexpr escape_kind_named_t strings_escape_kinds[] = {
+    {"json", sz_escape_json_k}, {"csv", sz_escape_csv_k}, {"html", sz_escape_html_k}, {"url", sz_escape_url_k}};
+
+/** A normalization form and the name its benchmark rows carry. */
+struct normal_form_named_t {
+    char const *name;
+    sz_normal_form_t form;
+};
+
+/** The forms the normalize rows time: NFC for storage, NFKC for identifiers, NFKC_Casefold for
+ *  search keys. */
+inline constexpr normal_form_named_t strings_normal_forms[] = {
+    {"nfc", sz_normal_form_nfc_k}, {"nfkc", sz_normal_form_nfkc_k}, {"nfkc_casefold", sz_normal_form_nfkc_casefold_k}};
+
+/** One strings kernel call over every string of a view into a tape, other arguments bound. */
+using strings_call_t = std::function<sz_status_t(sz_strings_view_t const *, sz_allocator_t *, sz_strings_span_t *)>;
+
+/** Gathers the strings with @p kernel. */
+inline strings_call_t strings_to_tape_call(sz_kernel_strings_to_tape_t kernel) {
+    return [kernel](sz_strings_view_t const *strings, sz_allocator_t *allocator, sz_strings_span_t *tape) {
+        return kernel(strings, nullptr, strings->count, allocator, tape, nullptr);
+    };
+}
+
+/** Escapes the strings for @p kind with @p kernel. */
+inline strings_call_t strings_escape_call(sz_kernel_strings_escape_t kernel, sz_escape_kind_t kind) {
+    return [kernel, kind](sz_strings_view_t const *strings, sz_allocator_t *allocator, sz_strings_span_t *tape) {
+        return kernel(strings, nullptr, strings->count, kind, allocator, tape, nullptr);
+    };
+}
+
+/** Unescapes the strings from @p kind with @p kernel. */
+inline strings_call_t strings_unescape_call(sz_kernel_strings_unescape_t kernel, sz_escape_kind_t kind) {
+    return [kernel, kind](sz_strings_view_t const *strings, sz_allocator_t *allocator, sz_strings_span_t *tape) {
+        sz_size_t malformed_index = 0;
+        return kernel(strings, nullptr, strings->count, kind, allocator, tape, &malformed_index, nullptr);
+    };
+}
+
+/** Maps the strings through @p lut with @p kernel. */
+inline strings_call_t strings_lookup_call(sz_kernel_strings_lookup_t kernel, sz_cptr_t lut) {
+    return [kernel, lut](sz_strings_view_t const *strings, sz_allocator_t *allocator, sz_strings_span_t *tape) {
+        return kernel(strings, nullptr, strings->count, lut, allocator, tape, nullptr);
+    };
+}
+
+/** Brings the strings into @p form with @p kernel. */
+inline strings_call_t strings_normalize_call(sz_kernel_strings_normalize_t kernel, sz_normal_form_t form) {
+    return [kernel, form](sz_strings_view_t const *strings, sz_allocator_t *allocator, sz_strings_span_t *tape) {
+        return kernel(strings, nullptr, strings->count, form, allocator, tape, nullptr);
+    };
+}
+
+/** A check value over the @p bytes at @p data, so a dropped, extra or changed byte shows. */
+inline check_value_t strings_check_value(sz_kernel_bytesum_t checksum, sz_cptr_t data, std::size_t bytes) {
+    sz_u64_t sum = 0;
+    checksum(data, bytes, &sum, nullptr);
+    return static_cast<check_value_t>(sum) * 31 + bytes;
+}
+
+/**
+ *  @brief The lines of a corpus as one tape, as Apache Arrow and GPU kernels read them, or escaped
+ *      as @c escaped_as for the unescape rows.
+ *
+ *  Built once a kept row asks for it, and shared by the serial adapter and the timed one.
+ */
+struct strings_input_t {
+    corpus_t const &corpus;
+    std::optional<sz_escape_kind_t> escaped_as;
+    sz_allocator_t heap {};
+    sz_strings_span_t tape {};
+
+    explicit strings_input_t(corpus_t const &corpus, std::optional<sz_escape_kind_t> escaped_as = std::nullopt)
+        : corpus(corpus), escaped_as(escaped_as) {
+        if (sz_allocator_init_heap(&heap) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+    }
+    ~strings_input_t() noexcept { sz_strings_span_free(&tape, &heap, nullptr); }
+    strings_input_t(strings_input_t const &) = delete;
+    strings_input_t &operator=(strings_input_t const &) = delete;
+
+    void preprocess() {
+        if (tape.count) return;
+        std::vector<sz_string_view_t> lines(corpus.tokens.size());
+        for (std::size_t index = 0; index != lines.size(); ++index)
+            lines[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
+        sz_strings_view_t strings;
+        sz_strings_from_string_views(lines.data(), lines.size(), &strings);
+        sz_status_t const status =
+            escaped_as ? sz_strings_escape_serial(&strings, nullptr, strings.count, *escaped_as, &heap, &tape, nullptr)
+                       : sz_strings_to_tape_serial(&strings, nullptr, strings.count, &heap, &tape, nullptr);
+        if (status != sz_success_k) throw std::runtime_error("The lines would not gather into a tape.");
+    }
+
+    /** Offset @p index of the tape, whichever its width. */
+    std::size_t offset(std::size_t index) const noexcept {
+        return tape.layout == sz_strings_u32_tape_k ? tape.data.u32_tape.offsets[index]
+                                                    : tape.data.u64_tape.offsets[index];
+    }
+
+    /** The @p count lines from @p first, viewed in place as a slice of the tape. */
+    sz_strings_view_t slice(std::size_t first, std::size_t count) const noexcept {
+        sz_strings_view_t strings, slice;
+        sz_strings_from_span(&tape, &strings);
+        sz_strings_slice(&strings, first, 1, count, nullptr, &slice);
+        return slice;
+    }
+};
+
+/** Runs one strings call over the batch of lines from each token index into a tape it reuses, and
+ *  sums the bytes the call wrote. */
+struct strings_from_sz_t {
+    strings_call_t call;
+    strings_input_t &input;
+    std::size_t batch;
+    sz_allocator_t heap {};
+    sz_strings_span_t tape {};
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    strings_from_sz_t(strings_call_t call, strings_input_t &input, std::size_t batch)
+        : call(std::move(call)), input(input), batch(batch) {
+        if (sz_allocator_init_heap(&heap) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+    }
+    ~strings_from_sz_t() noexcept { sz_strings_span_free(&tape, &heap, nullptr); }
+    strings_from_sz_t(strings_from_sz_t const &) = delete;
+    strings_from_sz_t &operator=(strings_from_sz_t const &) = delete;
+
+    void preprocess() { input.preprocess(); }
+
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, input.tape.count - token_index);
+        sz_strings_view_t const strings = input.slice(token_index, count);
+        if (call(&strings, &heap, &tape) != sz_success_k) throw std::runtime_error("The strings kernel failed.");
+        bool const narrow = tape.layout == sz_strings_u32_tape_k;
+        sz_cptr_t const written = narrow ? tape.data.u32_tape.data : tape.data.u64_tape.data;
+        std::size_t const written_bytes = narrow ? tape.data.u32_tape.offsets[count]
+                                                 : tape.data.u64_tape.offsets[count];
+        return {input.offset(token_index + count) - input.offset(token_index),
+                strings_check_value(checksum, written, written_bytes)};
+    }
+};
+
+/** Times one capability's gathering, escaping, unescaping, lookup and normalization over batches
+ *  of lines, each checked against the serial kernel of the same verb. */
+template <sz_kernel_strings_to_tape_t to_tape_, sz_kernel_strings_escape_t escape_,
+          sz_kernel_strings_unescape_t unescape_, sz_kernel_strings_lookup_t lookup_,
+          sz_kernel_strings_normalize_t normalize_>
+void bench_strings_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    std::size_t const batch = candidates_per_call(env, corpus);
+    std::array<unsigned char, 256> const alphabet = rotated_alphabet();
+    sz_cptr_t const lut = reinterpret_cast<sz_cptr_t>(alphabet.data());
+    strings_input_t lines(corpus);
+    bench_kernel_unary(env, corpus, fmt::format("sz_strings_to_tape_{}", kit), "sz_strings_to_tape_serial",
+                       strings_from_sz_t {strings_to_tape_call(sz_strings_to_tape_serial), lines, batch},
+                       strings_from_sz_t {strings_to_tape_call(to_tape_), lines, batch});
+    for (auto const &[name, kind] : strings_escape_kinds) {
+        bench_kernel_unary(env, corpus, fmt::format("sz_strings_escape_{}_{}", name, kit),
+                           fmt::format("sz_strings_escape_{}_serial", name),
+                           strings_from_sz_t {strings_escape_call(sz_strings_escape_serial, kind), lines, batch},
+                           strings_from_sz_t {strings_escape_call(escape_, kind), lines, batch});
+        strings_input_t escaped(corpus, kind);
+        bench_kernel_unary(env, corpus, fmt::format("sz_strings_unescape_{}_{}", name, kit),
+                           fmt::format("sz_strings_unescape_{}_serial", name),
+                           strings_from_sz_t {strings_unescape_call(sz_strings_unescape_serial, kind), escaped, batch},
+                           strings_from_sz_t {strings_unescape_call(unescape_, kind), escaped, batch});
+    }
+    bench_kernel_unary(env, corpus, fmt::format("sz_strings_lookup_{}", kit), "sz_strings_lookup_serial",
+                       strings_from_sz_t {strings_lookup_call(sz_strings_lookup_serial, lut), lines, batch},
+                       strings_from_sz_t {strings_lookup_call(lookup_, lut), lines, batch});
+    for (auto const &[name, form] : strings_normal_forms)
+        bench_kernel_unary(env, corpus, fmt::format("sz_strings_normalize_{}_{}", name, kit),
+                           fmt::format("sz_strings_normalize_{}_serial", name),
+                           strings_from_sz_t {strings_normalize_call(sz_strings_normalize_serial, form), lines, batch},
+                           strings_from_sz_t {strings_normalize_call(normalize_, form), lines, batch});
+}
+
+#pragma endregion Strings
 
 #pragma region Cipher
 
@@ -1325,18 +1376,18 @@ inline check_value_t levenshtein_check_value_rolling_(std::span<sz_size_t const>
 }
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
-inline sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_sequence_t const *queries,
+inline sz_status_t levenshtein_engine_init_cpu_(sz_levenshtein_engine_t *engine, sz_strings_view_t const *queries,
                                                 sz_levenshtein_symbol_t symbol, sz_allocator_t *allocator,
                                                 sz_stream_t stream) {
     return sz_levenshtein_engine_init(engine, queries, symbol, sz::default_capabilities(), allocator, stream);
 }
 
-/** A prepared batch over rolling corpus tokens or a borrowed resident sequence. */
+/** A prepared batch over rolling corpus tokens or a borrowed resident tape. */
 template <typename function_type_>
 struct levenshtein_distances_from_sz {
     function_type_ function;
     check_value_t (*check)(std::span<sz_size_t const>);
-    std::variant<std::reference_wrapper<corpus_t const>, sz_sequence_t> source;
+    std::variant<std::reference_wrapper<corpus_t const>, sz_strings_view_t> source;
     std::vector<sz_string_view_t> query_views, views;
 
     /** Host lengths avoid migrating device tape offsets during the timed readback. */
@@ -1361,7 +1412,7 @@ struct levenshtein_distances_from_sz {
 
     /** Both borrowed candidate views must outlive the arm. */
     levenshtein_distances_from_sz(sz_kernel_levenshtein_engine_init_t init, function_type_ function,
-                                  std::span<sz_string_view_t const> queries, sz_sequence_t candidates,
+                                  std::span<sz_string_view_t const> queries, sz_strings_view_t candidates,
                                   std::span<sz_string_view_t const> candidate_views, sz_levenshtein_symbol_t symbol,
                                   std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(levenshtein_check_value), source(candidates),
@@ -1379,7 +1430,7 @@ struct levenshtein_distances_from_sz {
     levenshtein_distances_from_sz &operator=(levenshtein_distances_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
-        sz_sequence_t candidates {};
+        sz_strings_view_t candidates {};
         std::span<sz_string_view_t const> candidate_views = fixed_views;
         if (auto const *rolling = std::get_if<std::reference_wrapper<corpus_t const>>(&source)) {
             corpus_t const &corpus = rolling->get();
@@ -1387,10 +1438,10 @@ struct levenshtein_distances_from_sz {
                 std::string_view const token = corpus.tokens[(token_index + 1 + candidate) % corpus.tokens.size()];
                 views[candidate] = {token.data(), token.size()};
             }
-            sz_sequence_from_string_views(views.data(), views.size(), &candidates);
+            sz_strings_from_string_views(views.data(), views.size(), &candidates);
             candidate_views = views;
         }
-        else candidates = std::get<sz_sequence_t>(source);
+        else candidates = std::get<sz_strings_view_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
         if (function(&engine, &candidates, runtime ? device_distances.data() : answers.data(), candidates.count,
                      stream) != sz_success_k)
@@ -1409,8 +1460,8 @@ struct levenshtein_distances_from_sz {
     /** Builds the engine and its answer buffers, once the filter keeps the row. */
     void preprocess() {
         if (engine.memory) return;
-        std::size_t const candidates = std::holds_alternative<sz_sequence_t>(source)
-                                           ? std::get<sz_sequence_t>(source).count
+        std::size_t const candidates = std::holds_alternative<sz_strings_view_t>(source)
+                                           ? std::get<sz_strings_view_t>(source).count
                                            : views.size();
         sz_allocator_t allocator;
         if (runtime) allocator = runtime->get().unified;
@@ -1424,8 +1475,8 @@ struct levenshtein_distances_from_sz {
             count, 0, pinned_alloc<sz_size_t>(runtime ? runtime->get().pinned : allocator, stream));
         if (runtime && device_distances.resize_uninitialized(count) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the distances.");
-        sz_sequence_t queries {};
-        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
+        sz_strings_view_t queries {};
+        sz_strings_from_string_views(query_views.data(), query_views.size(), &queries);
         if (init(&engine, &queries, symbol, &allocator, stream) != sz_success_k) {
             sz_levenshtein_engine_free(&engine, stream);
             throw std::runtime_error("The engine could not be prepared.");
@@ -1500,15 +1551,15 @@ struct overlap_corpus_t {
 
     overlap_corpus_t(std::span<sz_string_view_t const> views, device_backend_t const &runtime)
         : views(views.begin(), views.end()), candidates(unified_alloc<char>(runtime.unified, runtime.stream)) {
-        sz_sequence_t source {};
-        sz_sequence_from_string_views(this->views.data(), this->views.size(), &source);
+        sz_strings_view_t source {};
+        sz_strings_from_string_views(this->views.data(), this->views.size(), &source);
         if (sz::failed(candidates.assign(source))) throw std::runtime_error("Unified memory could not hold the tape.");
         if (sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
             throw std::runtime_error("The tape would not reach the device.");
     }
-    sz_sequence_t host_candidates() const noexcept {
-        sz_sequence_t result {};
-        sz_sequence_from_string_views(views.data(), views.size(), &result);
+    sz_strings_view_t host_candidates() const noexcept {
+        sz_strings_view_t result {};
+        sz_strings_from_string_views(views.data(), views.size(), &result);
         return result;
     }
     std::size_t bytes() const noexcept { return candidates.view().tape_total_bytes(); }
@@ -1527,7 +1578,7 @@ inline check_value_t overlap_check_value_quantized_(std::span<sz_f32_t const> sc
 }
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
-inline sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_sequence_t const *queries,
+inline sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
                                             sz_size_t const *window_widths, sz_size_t window_widths_count,
                                             sz_size_t candidates_budget, sz_allocator_t *allocator,
                                             sz_stream_t stream) {
@@ -1535,12 +1586,12 @@ inline sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_sequ
                                   sz::default_capabilities(), allocator, stream);
 }
 
-/** The same prepared forest scores rolling corpus tokens or a borrowed resident sequence. */
+/** The same prepared forest scores rolling corpus tokens or a borrowed resident tape. */
 template <typename function_type_>
 struct scores_from_sz {
     function_type_ function;
     check_value_t (*check)(std::span<sz_f32_t const>);
-    std::variant<std::reference_wrapper<corpus_t const>, sz_sequence_t> source;
+    std::variant<std::reference_wrapper<corpus_t const>, sz_strings_view_t> source;
     std::vector<sz_string_view_t> views;
 
     /** Host lengths keep timed metrics from migrating device tape offsets. */
@@ -1560,7 +1611,7 @@ struct scores_from_sz {
 
     /** The candidate descriptor and the query borrow their memory for the arm's lifetime. */
     scores_from_sz(sz_kernel_overlap_engine_init_t init, function_type_ function, std::string_view query,
-                   std::size_t width, sz_sequence_t candidates, std::span<sz_string_view_t const> candidate_views,
+                   std::size_t width, sz_strings_view_t candidates, std::span<sz_string_view_t const> candidate_views,
                    std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
         : function(function), check(overlap_check_value_quantized_), source(candidates), fixed_views(candidate_views),
           width(width), runtime(runtime), init(init), query(query) {
@@ -1574,7 +1625,7 @@ struct scores_from_sz {
     scores_from_sz &operator=(scores_from_sz const &) = delete;
 
     call_result_t operator()(std::size_t token_index) {
-        sz_sequence_t candidates {};
+        sz_strings_view_t candidates {};
         std::span<sz_string_view_t const> candidate_views = fixed_views;
         if (auto const *rolling = std::get_if<std::reference_wrapper<corpus_t const>>(&source)) {
             corpus_t const &corpus = rolling->get();
@@ -1582,13 +1633,13 @@ struct scores_from_sz {
                 std::string_view const text = corpus.tokens[(token_index + candidate) % corpus.tokens.size()];
                 views[candidate] = {text.data(), text.size()};
             }
-            sz_sequence_from_string_views(views.data(), views.size(), &candidates);
+            sz_strings_from_string_views(views.data(), views.size(), &candidates);
             candidate_views = views;
         }
-        else candidates = std::get<sz_sequence_t>(source);
+        else candidates = std::get<sz_strings_view_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, device_scores.size() == 0 ? scores.data() : device_scores.data(), scores.size(), 1,
-                     stream) != sz_success_k)
+        if (function(&engine, &candidates, device_scores.size() == 0 ? scores.data() : device_scores.data(),
+                     scores.size(), 1, stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
         if (device_scores.size() != 0 &&
             copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
@@ -1607,23 +1658,23 @@ struct scores_from_sz {
     /** Builds the forest and its score buffers, once the filter keeps the row. */
     void preprocess() {
         if (engine.memory) return;
-        std::size_t const candidates = std::holds_alternative<sz_sequence_t>(source)
-                                           ? std::get<sz_sequence_t>(source).count
+        std::size_t const candidates = std::holds_alternative<sz_strings_view_t>(source)
+                                           ? std::get<sz_strings_view_t>(source).count
                                            : views.size();
         sz_allocator_t allocator;
         if (runtime) allocator = runtime->get().unified;
         else if (sz_allocator_init_heap(&allocator) != sz_success_k)
             throw std::runtime_error("The heap allocator could not be initialized.");
         sz_string_view_t const view {query.data(), query.size()};
-        sz_sequence_t queries {};
-        sz_sequence_from_string_views(&view, 1, &queries);
+        sz_strings_view_t queries {};
+        sz_strings_from_string_views(&view, 1, &queries);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
         bool const separate = runtime && runtime->get().separate();
         scores = pinned_vector<sz_f32_t>(candidates, 0.0f,
                                          pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : allocator, stream));
         if (separate && device_scores.resize_uninitialized(candidates) != sz::status_t::success_k)
             throw std::runtime_error("The device would not hold the scores.");
-        if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_sequence_t>(source).count : 0, &allocator,
+        if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_strings_view_t>(source).count : 0, &allocator,
                  stream) != sz_success_k) {
             sz_overlap_engine_free(&engine, stream);
             throw std::runtime_error("The query forest could not be prepared.");
@@ -1648,7 +1699,7 @@ void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
 #pragma region Substrings
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
-inline sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_sequence_t const *needles,
+inline sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_strings_view_t const *needles,
                                                sz_substrings_case_sensitivity_t sensitivity,
                                                sz_substrings_overlap_policy_t policy, sz_size_t hot_states,
                                                sz_size_t matches_budget, sz_size_t haystacks_budget,
@@ -1966,15 +2017,6 @@ void bench_utf8_linebreaks_kernels(environment_t &env, std::string_view kit) {
 
 #pragma region UTF8 Norm
 
-/** The checksum a transforming adapter validates its output with: the library's fastest, as the
- *  timed call includes it, or the serial one in header-only builds, which have no kernel finder. */
-inline sz_kernel_bytesum_t output_checksum_kernel() noexcept {
-    sz_kernel_punned_t punned = nullptr;
-    sz_capability_t capability = 0;
-    sz_find_kernel_punned(sz_kernel_bytesum_k, sz::default_capabilities(), &punned, &capability);
-    return punned ? reinterpret_cast<sz_kernel_bytesum_t>(punned) : &sz_bytesum_serial;
-}
-
 /** Gives the device buffers the allocators of @p backend, which they keep empty until staged. */
 inline void utf8_outputs_allocators_(device_backend_t const &backend, device_vector<char> &device_text,
                                      device_vector<char> &device_output, device_vector<sz_size_t> &device_length) {
@@ -1987,9 +2029,8 @@ inline void utf8_outputs_allocators_(device_backend_t const &backend, device_vec
  *  and the outputs in the device's own memory. */
 inline void utf8_outputs_prepare_(corpus_t const &corpus,
                                   std::optional<std::reference_wrapper<device_backend_t const>> runtime,
-                                  std::size_t growth, pinned_vector<char> &output,
-                                  device_vector<char> &device_text, device_vector<char> &device_output,
-                                  device_vector<sz_size_t> &device_length) {
+                                  std::size_t growth, pinned_vector<char> &output, device_vector<char> &device_text,
+                                  device_vector<char> &device_output, device_vector<sz_size_t> &device_length) {
     std::size_t longest = 0;
     for (token_view_t const &token : corpus.tokens) longest = std::max(longest, token.size());
     std::size_t const capacity = longest * growth;
@@ -2053,15 +2094,17 @@ struct utf8_norm_from_sz {
     call_result_t operator()(std::size_t token_index) {
         token_view_t const token = corpus.tokens[token_index];
         sz_cptr_t const source = device_text.size() == 0 ? token.data()
-                                                     : device_text.data() + (token.data() - corpus.dataset.data());
+                                                         : device_text.data() + (token.data() - corpus.dataset.data());
         sz_size_t length = 0;
-        if (function(source, token.size(), sz_normal_form_nfc_k, device_output.size() == 0 ? output.data() : device_output.data(),
+        if (function(source, token.size(), sz_normal_form_nfc_k,
+                     device_output.size() == 0 ? output.data() : device_output.data(),
                      device_length.size() == 0 ? &length : device_length.data(),
                      runtime ? runtime->get().stream : nullptr) != sz_success_k)
             throw std::runtime_error("The normalization failed.");
-        std::span<char const> const normalized =
-            device_output.size() == 0 ? std::span<char const>(output.data(), length)
-                                  : utf8_outputs_fetch_(runtime->get(), device_output, device_length, output);
+        std::span<char const> const normalized = device_output.size() == 0
+                                                     ? std::span<char const>(output.data(), length)
+                                                     : utf8_outputs_fetch_(runtime->get(), device_output, device_length,
+                                                                           output);
         sz_u64_t sum = 0;
         checksum(normalized.data(), normalized.size(), &sum, nullptr);
         return {token.size(), static_cast<check_value_t>(sum)};
@@ -2143,15 +2186,16 @@ struct utf8_uncased_fold_from_sz {
     call_result_t operator()(std::size_t token_index) {
         token_view_t const token = corpus.tokens[token_index];
         sz_cptr_t const source = device_text.size() == 0 ? token.data()
-                                                     : device_text.data() + (token.data() - corpus.dataset.data());
+                                                         : device_text.data() + (token.data() - corpus.dataset.data());
         sz_size_t length = 0;
         if (function(source, token.size(), device_output.size() == 0 ? output.data() : device_output.data(),
                      device_length.size() == 0 ? &length : device_length.data(),
                      runtime ? runtime->get().stream : nullptr) != sz_success_k)
             throw std::runtime_error("The case folding failed.");
-        std::span<char const> const folded =
-            device_output.size() == 0 ? std::span<char const>(output.data(), length)
-                                  : utf8_outputs_fetch_(runtime->get(), device_output, device_length, output);
+        std::span<char const> const folded = device_output.size() == 0
+                                                 ? std::span<char const>(output.data(), length)
+                                                 : utf8_outputs_fetch_(runtime->get(), device_output, device_length,
+                                                                       output);
         sz_u64_t sum = 0;
         checksum(folded.data(), folded.size(), &sum, nullptr);
         return {token.size(), static_cast<check_value_t>(sum)};

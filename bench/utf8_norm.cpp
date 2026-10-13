@@ -32,7 +32,7 @@
  *  @endcode
  *
  *  This file is the sibling of `utf8_uncased.cpp`, `utf8_traverse.cpp`, `utf8_scan.cpp`,
- *  `utf8_segment.cpp`, `token.cpp`, `find.cpp`, `sequence.cpp`, and `memory.cpp`.
+ *  `utf8_segment.cpp`, `token.cpp`, `find.cpp`, `sort.cpp`, and `strings.cpp`.
  */
 #include <fmt/format.h>
 

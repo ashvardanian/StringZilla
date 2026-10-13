@@ -10,6 +10,7 @@
  */
 #include <stdio.h>  // `printf` for debug builds
 #include <stdlib.h> // `malloc` to export strings into UTF-8
+#include <string.h> // `memcpy`
 
 #include <node_api.h> // `napi_*` functions
 
@@ -236,8 +237,8 @@ napi_value utf8UncasedNeedleConstructor(napi_env env, napi_callback_info info) {
         return NULL;
     }
     sz_ptr_t const needle_copy = (sz_ptr_t)(needle + 1);
-    if (!check_status(env, sz_copy_best(needle_copy, (sz_cptr_t)needle_data, needle_length, sz_cap_cpus_k, NULL)) ||
-        !check_status(env, sz_utf8_uncased_needle_init_best(needle_copy, needle_length, needle, sz_cap_cpus_k, NULL))) {
+    if (needle_length) memcpy(needle_copy, needle_data, needle_length);
+    if (!check_status(env, sz_utf8_uncased_needle_init_best(needle_copy, needle_length, needle, sz_cap_cpus_k, NULL))) {
         free(needle);
         return NULL;
     }

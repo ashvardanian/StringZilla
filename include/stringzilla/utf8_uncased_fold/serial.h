@@ -1520,13 +1520,27 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_serial_(sz_cptr_t source, sz_s
 /** Iterator state for streaming through folded UTF-8 runes. Handles one-to-many case folding
  *  expansions transparently, such as 'ß' (U+00DF, C3 9F) → "ss" (U+0073 U+0073, 73 73). */
 typedef struct {
-    sz_cptr_t ptr;              // Current position in UTF-8 string
-    sz_cptr_t end;              // End of string
-    sz_rune_t pending[4];       // Buffered folded runes from one-to-many expansions
-    sz_size_t pending_count;    // Number of pending folded runes
-    sz_size_t pending_idx;      // Current index into pending buffer
-    sz_cptr_t codepoint_begin;  // Source codepoint that produced the pending runes; `ptr` has already left it
-    sz_size_t codepoint_length; // Its length in bytes, so its span is `[begin, begin + length)`
+
+    /** Current position in the UTF-8 string. */
+    sz_cptr_t ptr;
+
+    /** End of the string. */
+    sz_cptr_t end;
+
+    /** Folded runes buffered from a one-to-many expansion. */
+    sz_rune_t pending[4];
+
+    /** Number of buffered folded runes. */
+    sz_size_t pending_count;
+
+    /** The next buffered rune to return. */
+    sz_size_t pending_index;
+
+    /** Source codepoint that produced the buffered runes, which @c ptr has already left. */
+    sz_cptr_t codepoint_begin;
+
+    /** Its length in bytes, so its span is `[begin, begin + length)`. */
+    sz_size_t codepoint_length;
 } sz_utf8_folded_iter_t;
 
 /** Initializes a folded rune iterator. */
@@ -1535,7 +1549,7 @@ STRINGZILLA_CONSTEXPR void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iter
     iterator->ptr = string;
     iterator->end = string + length;
     iterator->pending_count = 0;
-    iterator->pending_idx = 0;
+    iterator->pending_index = 0;
     iterator->codepoint_begin = string;
     iterator->codepoint_length = 0;
 }
@@ -1552,7 +1566,7 @@ STRINGZILLA_CONSTEXPR void sz_utf8_folded_iter_init_(sz_utf8_folded_iter_t *iter
  */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t *it, sz_rune_t *out_rune) {
     // Refill pending buffer if exhausted
-    if (it->pending_idx >= it->pending_count) {
+    if (it->pending_index >= it->pending_count) {
         if (it->ptr >= it->end) return sz_false_k;
 
         // ASCII fast-path: fold inline without buffering
@@ -1563,7 +1577,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t 
             it->codepoint_length = 1;
             it->ptr++;
             it->pending_count = 0; // Clear pending buffer
-            it->pending_idx = 0;   // Signal first rune of new codepoint for source tracking
+            it->pending_index = 0; // Signal first rune of new codepoint for source tracking
             return sz_true_k;
         }
 
@@ -1578,7 +1592,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t 
             it->codepoint_length = 1;
             it->ptr++;
             it->pending_count = 0;
-            it->pending_idx = 0;
+            it->pending_index = 0;
             return sz_true_k;
         }
 
@@ -1594,10 +1608,10 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t 
         it->pending[2] = 0xFFFFFFFDu;
         it->pending[3] = 0xFFFFFFFCu;
         it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
-        it->pending_idx = 0;
+        it->pending_index = 0;
     }
 
-    *out_rune = it->pending[it->pending_idx++];
+    *out_rune = it->pending[it->pending_index++];
     return sz_true_k;
 }
 
@@ -1605,11 +1619,21 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_iter_next_(sz_utf8_folded_iter_t 
  *  case folding expansions transparently in reverse order, such as 'ß' (U+00DF, C3 9F) → "ss"
  *  (U+0073 U+0073, 73 73). */
 typedef struct {
-    sz_cptr_t ptr;           // Current position (points to byte after current sequence)
-    sz_cptr_t start;         // Start of string (stop when ptr reaches this)
-    sz_rune_t pending[4];    // Buffered folded runes from one-to-many expansions (in reverse order)
-    sz_size_t pending_count; // Number of pending folded runes
-    sz_size_t pending_idx;   // Current index into pending buffer
+
+    /** Current position, the byte after the sequence last decoded. */
+    sz_cptr_t ptr;
+
+    /** Start of the string, where the walk stops. */
+    sz_cptr_t start;
+
+    /** Folded runes buffered from a one-to-many expansion, returned last to first. */
+    sz_rune_t pending[4];
+
+    /** Number of buffered folded runes. */
+    sz_size_t pending_count;
+
+    /** How many buffered runes were returned already. */
+    sz_size_t pending_index;
 } sz_utf8_folded_reverse_iter_t;
 
 /** Initializes a reverse folded rune iterator, which iterates from end towards start. */
@@ -1618,7 +1642,7 @@ STRINGZILLA_CONSTEXPR void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reve
     it->ptr = end;
     it->start = start;
     it->pending_count = 0;
-    it->pending_idx = 0;
+    it->pending_index = 0;
 }
 
 /**
@@ -1633,9 +1657,9 @@ STRINGZILLA_CONSTEXPR void sz_utf8_folded_reverse_iter_init_(sz_utf8_folded_reve
 STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded_reverse_iter_t *it,
                                                                   sz_rune_t *out_rune) {
     // Return pending runes if any (stored in reverse order, consumed in reverse)
-    if (it->pending_idx < it->pending_count) {
-        *out_rune = it->pending[it->pending_count - 1 - it->pending_idx];
-        it->pending_idx++;
+    if (it->pending_index < it->pending_count) {
+        *out_rune = it->pending[it->pending_count - 1 - it->pending_index];
+        it->pending_index++;
         return sz_true_k;
     }
 
@@ -1654,7 +1678,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded
         it->ptr = sequence_end - 1;
         *out_rune = sz_ascii_fold_(last_byte);
         it->pending_count = 0;
-        it->pending_idx = 0;
+        it->pending_index = 0;
         return sz_true_k;
     }
 
@@ -1674,7 +1698,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded
         it->ptr = sequence_end - 1;
         *out_rune = sz_rune_malformed_byte_(last_byte);
         it->pending_count = 0;
-        it->pending_idx = 0;
+        it->pending_index = 0;
         return sz_true_k;
     }
     it->ptr = candidate;
@@ -1685,7 +1709,7 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_utf8_folded_reverse_iter_prev_(sz_utf8_folded
     it->pending[2] = 0xFFFFFFFDu;
     it->pending[3] = 0xFFFFFFFCu;
     it->pending_count = sz_unicode_fold_codepoint_(rune, it->pending);
-    it->pending_idx = 1; // We'll return the last one now, then the rest in subsequent calls
+    it->pending_index = 1; // We'll return the last one now, then the rest in subsequent calls
 
     // Return the last folded rune first (since we're going backwards)
     *out_rune = it->pending[it->pending_count - 1];

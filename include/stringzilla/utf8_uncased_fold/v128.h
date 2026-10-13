@@ -11,7 +11,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/utf8_uncased_fold/serial.h"
-#include "stringzilla/memory/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
+#include "stringzilla/compare/v128.h" // `sz_load_partial_v128_`, `sz_store_partial_v128_`
 
 #ifdef __cplusplus
 extern "C" {

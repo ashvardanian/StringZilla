@@ -45,7 +45,7 @@ At the C++ level all benchmarks also validate the results against the serial ker
 They have the broadest coverage of the library, and are the most important to keep up-to-date:
 
 - `bench/main.cpp` - runs every family file, then every `bench/cross_<arch>.cpp`, built as `stringzilla_bench`, and header-only as `stringzilla_cpu_header_bench`.
-- `bench/token.cpp`, `bench/find.cpp`, `bench/sequence.cpp`, `bench/container.cpp`, and the other family files - the dispatch points against the STL and LibC baselines.
+- `bench/token.cpp`, `bench/find.cpp`, `bench/sort.cpp`, `bench/container.cpp`, and the other family files - the dispatch points against the STL and LibC baselines.
 - `bench/cross_<arch>.cpp` - every capability's kernels against the serial ones, through the adapters in `bench/cross.hpp`.
 - `bench/cross_cuda.cu`, `bench/cross_rocm.hip`, and `bench/cross_metal.cpp` - each GPU vendor's engines against the dispatched CPU entry.
 
@@ -119,7 +119,7 @@ Every name in these families is always defined, as 0 or 1, and tested with `#if`
 
 C names put the capability last, `sz_<family>_<what>_<capability>`, like `sz_find_haswell`.
 Only a role suffix may follow it: `_t` for a type, `_k` for a constant, `_kernel_` for a GPU entry point, or the trailing `_` of an internal name, like `sz_levenshtein_u64x1_sweep_serial_` and `sz_overlap_scores_blackwell_kernel_`.
-A dispatch point puts `best` in the capability's place, like `sz_copy_best`, and the kernels it picks from are its twins, like `sz_copy_haswell`.
+A dispatch point puts `best` in the capability's place, like `sz_strings_lookup_best`, and the kernels it picks from are its twins, like `sz_strings_lookup_haswell`.
 
 Code that several capabilities share belongs to one of three layers, named in the capability's place:
 
@@ -155,7 +155,7 @@ Each of these words has one meaning across the library:
 | `stream`                               | A `cudaStream_t`, `hipStream_t` or `id<MTLCommandQueue>`, which names its device | The trailing `void *stream` of every consumer                                   |
 | `queue`                                | A tile work queue, never a stream                                                | `sz_tile_queue_t`                                                               |
 | `unified`                              | Memory both the host and the stream's device address                            | `sz_allocator_init_unified_best`                                                |
-| `tape`                                 | One block holding a sequence's offsets and bytes                                | What `sz_sequence_realloc_best` writes                                          |
+| `tape`                                 | Strings' bytes back to back, and the `count + 1` offsets into them              | What `sz_strings_to_tape_best` writes                                           |
 | A capability, like `haswell` or `cuda` | One bit of a mask                                                                | The last token before the role suffix                                           |
 | `kernel`                               | A GPU entry point                                                                | `_kernel_`, right after the capability                                          |
 
@@ -469,8 +469,8 @@ All of them feature file-level documentation, and are designed to be self-explan
 You can easily log their descriptions until the first `*/` with the following `sed` and `awk` commands:
 
 ```sh
-sed '/\*\//q' bench/memory.cpp
-awk '/\*\// { exit } { print }' bench/memory.cpp
+sed '/\*\//q' bench/strings.cpp
+awk '/\*\// { exit } { print }' bench/strings.cpp
 ```
 
 ### Benchmarking Hardware-Specific Optimizations
@@ -670,7 +670,7 @@ Shared libraries stay off in both configurations, since WASI has no dynamic load
 
 ## CUDA
 
-`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `memory.h`, like `sz_allocator_init_unified_cuda` and `sz_sequence_realloc_cuda`.
+`STRINGZILLA_BUILD_CUDA` adds `c/target/cuda.cu` to `stringzilla_static` and `stringzilla_shared`: the engines' `cuda` kernels, compiled from each family's `simt.cuh`, and the CUDA device exports: the producers `sz_device_count_cuda`, `sz_capabilities_detected_cuda` and `sz_stream_init_cuda`, and the twins behind the `_best` dispatch points in `strings.h`, like `sz_allocator_init_unified_cuda` and `sz_strings_to_tape_cuda`.
 `stringzilla_test` includes CUDA checks from `test/cross_cuda.cu` alongside the CPU checks and other enabled vendors:
 
 ```sh
@@ -690,7 +690,7 @@ cuda-memcheck ./build_debug/stringzilla_test
 
 ## Metal and ROCm
 
-`STRINGZILLA_BUILD_METAL` adds `c/target/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `memory.h` dispatch points, like `sz_stream_synchronize_metal`.
+`STRINGZILLA_BUILD_METAL` adds `c/target/metal.c` to the same libraries on Apple platforms: the engines' `metal` kernels, whose `metal.metal` shaders travel as embedded source and compile on the device at first use, and the Metal device exports, the producers and the `_metal` twins behind the `strings.h` dispatch points, like `sz_stream_synchronize_metal`.
 `STRINGZILLA_BUILD_ROCM` adds `c/target/rocm.hip` the same way, with the `rocm` kernels and the `sz_rocm_*` device exports, and every vendor asked for sits side by side in one library.
 
 The Metal backends of all three engine families build into `stringzilla_test` on Apple platforms, which needs `STRINGZILLA_BUILD_METAL` on and checks them against the serial answers:

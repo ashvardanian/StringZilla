@@ -194,9 +194,10 @@ public final class StringZilla {
             "sz_sha256_state_digest_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
     private static final MethodHandle STRINGZILLA_FILL_RANDOM = downCritical(
             "sz_fill_random_best", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_LONG, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_LOOKUP = downCritical(
-            "sz_lookup_best",
-            FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, JAVA_LONG, ADDRESS));
+    private static final MethodHandle STRINGZILLA_STRINGS_LOOKUP = downCritical(
+            "sz_strings_lookup_best",
+            FunctionDescriptor.of(
+                    JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
 
     // endregion
 
@@ -207,16 +208,19 @@ public final class StringZilla {
     private static final MethodHandle STRINGZILLA_UTF8_FIND_DENORMALIZED = downCritical(
             "sz_utf8_find_denormalized_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_SEQUENCE_ARGSORT = down(
-            "sz_sequence_argsort_best",
+    private static final MethodHandle STRINGZILLA_SORT_ORDER = down(
+            "sz_sort_order_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_SEQUENCE_ARGSORT_UNCASED = down(
-            "sz_sequence_argsort_uncased_best",
+    private static final MethodHandle STRINGZILLA_SORT_UNCASED_ORDER = down(
+            "sz_sort_uncased_order_best",
             FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_LONG, JAVA_INT, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
-    private static final MethodHandle STRINGZILLA_SEQUENCE_INTERSECT = down(
-            "sz_sequence_intersect_best",
+    private static final MethodHandle STRINGZILLA_INTERSECT = down(
+            "sz_intersect_best",
             FunctionDescriptor.of(
                     JAVA_INT, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS, ADDRESS, ADDRESS, JAVA_LONG, ADDRESS));
+
+    /** {@code sz_strings_layout_t}: Apache Arrow tapes with 32-bit or 64-bit offsets, or an accessor. */
+    private static final int STRINGS_U32_TAPE = 0, STRINGS_U64_TAPE = 1, STRINGS_ACCESSOR = 2;
 
     // endregion
 
@@ -248,13 +252,7 @@ public final class StringZilla {
         try {
             long[] match = new long[1];
             check("sz_find_best", (int) STRINGZILLA_FIND.invokeExact(
-                    haystack,
-                    haystack.byteSize(),
-                    needle,
-                    n,
-                    MemorySegment.ofArray(match),
-                    CPUS,
-                    MemorySegment.NULL));
+                    haystack, haystack.byteSize(), needle, n, MemorySegment.ofArray(match), CPUS, MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
@@ -270,13 +268,7 @@ public final class StringZilla {
         try {
             long[] match = new long[1];
             check("sz_rfind_best", (int) STRINGZILLA_RFIND.invokeExact(
-                    haystack,
-                    haystack.byteSize(),
-                    needle,
-                    n,
-                    MemorySegment.ofArray(match),
-                    CPUS,
-                    MemorySegment.NULL));
+                    haystack, haystack.byteSize(), needle, n, MemorySegment.ofArray(match), CPUS, MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
@@ -715,11 +707,7 @@ public final class StringZilla {
     public static void fillRandom(byte[] buffer, long nonce) {
         try {
             check("sz_fill_random_best", (int) STRINGZILLA_FILL_RANDOM.invokeExact(
-                    MemorySegment.ofArray(buffer),
-                    (long) buffer.length,
-                    nonce,
-                    CPUS,
-                    MemorySegment.NULL));
+                    MemorySegment.ofArray(buffer), (long) buffer.length, nonce, CPUS, MemorySegment.NULL));
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -729,14 +717,24 @@ public final class StringZilla {
     public static void lookup(byte[] destination, byte[] source, byte[] lut) {
         if (lut.length != 256) throw new IllegalArgumentException("LUT must be 256 bytes");
         if (destination.length < source.length) throw new IllegalArgumentException("destination too small");
-        try {
-            check("sz_lookup_best", (int) STRINGZILLA_LOOKUP.invokeExact(
-                    MemorySegment.ofArray(destination),
-                    MemorySegment.ofArray(source),
-                    (long) source.length,
+        if (source.length == 0) return;
+        // A tape holds addresses, which a heap array lacks, so the bytes are mapped in place off-heap: the view and
+        // the tape share their blocks, leaving the kernel nothing to allocate.
+        try (Arena arena = Arena.ofConfined()) {
+            MemorySegment bytes = arena.allocate(source.length);
+            MemorySegment.copy(source, 0, bytes, JAVA_BYTE, 0, source.length);
+            MemorySegment offsets = arena.allocate(JAVA_INT, 2);
+            offsets.setAtIndex(JAVA_INT, 1, source.length);
+            check("sz_strings_lookup_best", (int) STRINGZILLA_STRINGS_LOOKUP.invokeExact(
+                    stringsView(arena, STRINGS_U32_TAPE, 1, bytes, offsets),
+                    MemorySegment.NULL,
+                    1L,
                     MemorySegment.ofArray(lut),
+                    MemorySegment.NULL,
+                    stringsView(arena, STRINGS_U32_TAPE, 1, bytes, offsets),
                     CPUS,
                     MemorySegment.NULL));
+            MemorySegment.copy(bytes, JAVA_BYTE, 0, destination, 0, source.length);
         } catch (Throwable t) {
             throw rethrow(t);
         }
@@ -746,11 +744,14 @@ public final class StringZilla {
 
     // region UTF-8 Normalization
 
+    /** Unicode normalization forms, {@code NFKC_CASEFOLD} being NFKC with full case folding and without
+     *  default-ignorable codepoints, the Unicode toNFKC_Casefold that caseless keys match on. */
     public enum NormalForm {
         NFD,
         NFC,
         NFKD,
-        NFKC
+        NFKC,
+        NFKC_CASEFOLD
     }
 
     private static int formCode(NormalForm f) {
@@ -759,6 +760,7 @@ public final class StringZilla {
             case NFC -> 1;
             case NFKD -> 2;
             case NFKC -> 3;
+            case NFKC_CASEFOLD -> 4;
         };
     }
 
@@ -824,23 +826,23 @@ public final class StringZilla {
         if (n == 0) return 0;
         if (order.length < n) throw new IllegalArgumentException("order must hold at least " + n + " entries");
         try (Arena a = Arena.ofConfined()) {
-            SeqTable t = new SeqTable(items, a);
-            MemorySegment orderSeg = a.allocate(JAVA_LONG.byteSize() * n);
-            MethodHandle mh = uncased ? STRINGZILLA_SEQUENCE_ARGSORT_UNCASED : STRINGZILLA_SEQUENCE_ARGSORT;
-            check(uncased ? "sz_sequence_argsort_uncased_best" : "sz_sequence_argsort_best", (int) mh.invokeExact(
-                    t.sequence,
-                    top,
-                    reverse ? 1 : 0,
-                    MemorySegment.NULL,
-                    orderSeg,
-                    CPUS,
-                    MemorySegment.NULL));
-            int count = top > 0 ? (int) Math.min(top, n) : n;
-            MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
-            return count;
+            return argSortStrings(tapeOf(items, a), n, order, reverse, top, uncased, a);
         } catch (Throwable e) {
             throw rethrow(e);
         }
+    }
+
+    /** Sorts the {@code n} strings an off-heap {@code sz_strings_view_t} describes into {@code order}. */
+    private static int argSortStrings(
+            MemorySegment strings, int n, long[] order, boolean reverse, long top, boolean uncased, Arena arena)
+            throws Throwable {
+        MemorySegment orderSeg = arena.allocate(JAVA_LONG, n);
+        MethodHandle mh = uncased ? STRINGZILLA_SORT_UNCASED_ORDER : STRINGZILLA_SORT_ORDER;
+        check(uncased ? "sz_sort_uncased_order_best" : "sz_sort_order_best", (int)
+                mh.invokeExact(strings, top, reverse ? 1 : 0, MemorySegment.NULL, orderSeg, CPUS, MemorySegment.NULL));
+        int count = top > 0 ? (int) Math.min(top, n) : n;
+        MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
+        return count;
     }
 
     /** Allocating convenience: returns a fresh permutation array. */
@@ -869,20 +871,8 @@ public final class StringZilla {
         // A range past the text would throw inside the FFM upcall, and that terminates the JVM.
         for (int i = 0; i < n; i++) java.util.Objects.checkFromIndexSize(starts[i], lengths[i], text.length);
         try (Arena a = Arena.ofConfined()) {
-            SeqTable t = new SeqTable(text, starts, lengths, n, a);
-            MemorySegment orderSeg = a.allocate(JAVA_LONG.byteSize() * n);
-            MethodHandle mh = uncased ? STRINGZILLA_SEQUENCE_ARGSORT_UNCASED : STRINGZILLA_SEQUENCE_ARGSORT;
-            check(uncased ? "sz_sequence_argsort_uncased_best" : "sz_sequence_argsort_best", (int) mh.invokeExact(
-                    t.sequence,
-                    top,
-                    reverse ? 1 : 0,
-                    MemorySegment.NULL,
-                    orderSeg,
-                    CPUS,
-                    MemorySegment.NULL));
-            int count = top > 0 ? (int) Math.min(top, n) : n;
-            MemorySegment.copy(orderSeg, JAVA_LONG, 0, order, 0, count);
-            return count;
+            SegmentRanges ranges = new SegmentRanges(text, starts, lengths, a);
+            return argSortStrings(ranges.strings(n, a), n, order, reverse, top, uncased, a);
         } catch (Throwable e) {
             throw rethrow(e);
         }
@@ -905,21 +895,11 @@ public final class StringZilla {
         if (firstPositions.length < minN || secondPositions.length < minN)
             throw new IllegalArgumentException("position arrays must hold at least " + minN + " entries");
         try (Arena ar = Arena.ofConfined()) {
-            SeqTable ta = new SeqTable(a, ar);
-            SeqTable tb = new SeqTable(b, ar);
             MemorySegment size = ar.allocate(JAVA_LONG.byteSize());
             MemorySegment fp = ar.allocate(JAVA_LONG.byteSize() * minN);
             MemorySegment sp = ar.allocate(JAVA_LONG.byteSize() * minN);
-            check("sz_sequence_intersect_best", (int) STRINGZILLA_SEQUENCE_INTERSECT.invokeExact(
-                    ta.sequence,
-                    tb.sequence,
-                    MemorySegment.NULL,
-                    seed,
-                    size,
-                    fp,
-                    sp,
-                    CPUS,
-                    MemorySegment.NULL));
+            check("sz_intersect_best", (int) STRINGZILLA_INTERSECT.invokeExact(
+                    tapeOf(a, ar), tapeOf(b, ar), MemorySegment.NULL, seed, size, fp, sp, CPUS, MemorySegment.NULL));
             int count = (int) size.get(JAVA_LONG, 0);
             MemorySegment.copy(fp, JAVA_LONG, 0, firstPositions, 0, count);
             MemorySegment.copy(sp, JAVA_LONG, 0, secondPositions, 0, count);
@@ -1340,11 +1320,7 @@ public final class StringZilla {
         public Hasher update(byte[] data) {
             try {
                 check("sz_hash_state_update_best", (int) STRINGZILLA_HASH_STATE_UPDATE.invokeExact(
-                        state,
-                        MemorySegment.ofArray(data),
-                        (long) data.length,
-                        CPUS,
-                        MemorySegment.NULL));
+                        state, MemorySegment.ofArray(data), (long) data.length, CPUS, MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
                 throw rethrow(t);
@@ -1410,11 +1386,7 @@ public final class StringZilla {
         public Sha256 update(byte[] data) {
             try {
                 check("sz_sha256_state_update_best", (int) STRINGZILLA_SHA256_UPDATE.invokeExact(
-                        state,
-                        MemorySegment.ofArray(data),
-                        (long) data.length,
-                        CPUS,
-                        MemorySegment.NULL));
+                        state, MemorySegment.ofArray(data), (long) data.length, CPUS, MemorySegment.NULL));
                 return this;
             } catch (Throwable t) {
                 throw rethrow(t);
@@ -1483,12 +1455,7 @@ public final class StringZilla {
         try {
             long[] match = new long[1];
             check("sz_find_byteset_best", (int) STRINGZILLA_FIND_BYTESET.invokeExact(
-                    haystack,
-                    haystack.byteSize(),
-                    bytesetSeg,
-                    MemorySegment.ofArray(match),
-                    CPUS,
-                    MemorySegment.NULL));
+                    haystack, haystack.byteSize(), bytesetSeg, MemorySegment.ofArray(match), CPUS, MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
@@ -1500,12 +1467,7 @@ public final class StringZilla {
         try {
             long[] match = new long[1];
             check("sz_rfind_byteset_best", (int) STRINGZILLA_RFIND_BYTESET.invokeExact(
-                    haystack,
-                    haystack.byteSize(),
-                    bytesetSeg,
-                    MemorySegment.ofArray(match),
-                    CPUS,
-                    MemorySegment.NULL));
+                    haystack, haystack.byteSize(), bytesetSeg, MemorySegment.ofArray(match), CPUS, MemorySegment.NULL));
             return match[0] == 0 ? -1 : match[0] - haystack.address();
         } catch (Throwable t) {
             throw rethrow(t);
@@ -1993,72 +1955,71 @@ public final class StringZilla {
         }
     }
 
-    /** Off-heap string table backing a sz_sequence_t, with FFM upcall callbacks */
-    private static final class SeqTable {
-        final MemorySegment data; // concatenated bytes (off-heap)
-        final long[] starts; // per-item byte offset into data
-        final long[] lengths; // per-item byte length
-        final MemorySegment sequence; // the sz_sequence_t struct { handle, count, get_start, get_length }
+    /** Writes a 32-byte {@code sz_strings_view_t}, or the {@code sz_strings_span_t} sharing its layout: the layout
+     *  at 0, the count at 8, then a tape's bytes and offsets, or an accessor's {@code get} and {@code handle}. */
+    private static MemorySegment stringsView(
+            Arena arena, int layout, long count, MemorySegment first, MemorySegment second) {
+        MemorySegment view = arena.allocate(32, 8);
+        view.set(JAVA_INT, 0, layout);
+        view.set(JAVA_LONG, 8, count);
+        view.set(ADDRESS, 16, first);
+        view.set(ADDRESS, 24, second);
+        return view;
+    }
 
-        SeqTable(java.util.List<byte[]> items, Arena arena) {
-            int n = items.size();
-            long total = 0;
-            for (byte[] it : items) total += it.length;
-            data = arena.allocate(Math.max(total, 1));
-            starts = new long[n];
-            lengths = new long[n];
-            long off = 0;
-            for (int i = 0; i < n; i++) {
-                byte[] it = items.get(i);
-                starts[i] = off;
-                lengths[i] = it.length;
-                if (it.length > 0) MemorySegment.copy(it, 0, data, JAVA_BYTE, off, it.length);
-                off += it.length;
-            }
-            sequence = buildSequence(n, arena);
+    /** Copies {@code items} into an off-heap tape of 64-bit offsets, which native code reads directly. */
+    private static MemorySegment tapeOf(java.util.List<byte[]> items, Arena arena) {
+        int n = items.size();
+        MemorySegment offsets = arena.allocate(JAVA_LONG, n + 1);
+        long total = 0;
+        for (int i = 0; i < n; i++) offsets.setAtIndex(JAVA_LONG, i + 1, total += items.get(i).length);
+        MemorySegment data = arena.allocate(Math.max(total, 1));
+        for (int i = 0; i < n; i++) {
+            byte[] item = items.get(i);
+            MemorySegment.copy(item, 0, data, JAVA_BYTE, offsets.getAtIndex(JAVA_LONG, i), item.length);
         }
+        return stringsView(arena, STRINGS_U64_TAPE, n, data, offsets);
+    }
 
-        // Sorts the (start, length) ranges of a single buffer; reuses the caller's offset arrays.
-        SeqTable(byte[] text, long[] segmentStarts, long[] segmentLengths, int n, Arena arena) {
+    /** The {@code (start, length)} ranges of one off-heap copy of a buffer, read through an accessor upcall. */
+    private static final class SegmentRanges {
+        private final MemorySegment data;
+        private final long[] starts;
+        private final long[] lengths;
+
+        SegmentRanges(byte[] text, long[] starts, long[] lengths, Arena arena) {
             data = arena.allocate(Math.max(text.length, 1));
-            if (text.length > 0) MemorySegment.copy(text, 0, data, JAVA_BYTE, 0, text.length);
-            starts = segmentStarts;
-            lengths = segmentLengths;
-            sequence = buildSequence(n, arena);
+            MemorySegment.copy(text, 0, data, JAVA_BYTE, 0, text.length);
+            this.starts = starts;
+            this.lengths = lengths;
         }
 
-        private MemorySegment buildSequence(int n, Arena arena) {
-            MethodHandle startMH, lengthMH;
-            try {
-                startMH = MethodHandles.lookup()
-                        .bind(
-                                this,
-                                "start",
-                                MethodType.methodType(MemorySegment.class, MemorySegment.class, long.class));
-                lengthMH = MethodHandles.lookup()
-                        .bind(this, "length", MethodType.methodType(long.class, MemorySegment.class, long.class));
-            } catch (ReflectiveOperationException e) {
-                throw new RuntimeException(e);
+        /** The view of the first {@code n} ranges, whose accessor stub lives as long as {@code arena}. */
+        MemorySegment strings(int n, Arena arena) throws ReflectiveOperationException {
+            MethodHandle get = MethodHandles.lookup()
+                    .bind(
+                            this,
+                            "get",
+                            MethodType.methodType(
+                                    void.class,
+                                    MemorySegment.class,
+                                    MemorySegment.class,
+                                    long.class,
+                                    MemorySegment.class));
+            MemorySegment stub =
+                    LINKER.upcallStub(get, FunctionDescriptor.ofVoid(ADDRESS, ADDRESS, JAVA_LONG, ADDRESS), arena);
+            return stringsView(arena, STRINGS_ACCESSOR, n, stub, MemorySegment.NULL);
+        }
+
+        /** The {@code sz_strings_get_t} upcall, writing the 16-byte view of every requested range. */
+        void get(MemorySegment handle, MemorySegment indices, long count, MemorySegment views) {
+            MemorySegment requested = indices.reinterpret(count * JAVA_LONG.byteSize());
+            MemorySegment written = views.reinterpret(count * 16);
+            for (long position = 0; position < count; position++) {
+                int index = (int) requested.getAtIndex(JAVA_LONG, position);
+                written.set(JAVA_LONG, position * 16, data.address() + starts[index]);
+                written.set(JAVA_LONG, position * 16 + 8, lengths[index]);
             }
-            MemorySegment startStub =
-                    LINKER.upcallStub(startMH, FunctionDescriptor.of(ADDRESS, ADDRESS, JAVA_LONG), arena);
-            MemorySegment lengthStub =
-                    LINKER.upcallStub(lengthMH, FunctionDescriptor.of(JAVA_LONG, ADDRESS, JAVA_LONG), arena);
-            MemorySegment seq = arena.allocate(32);
-            seq.set(ADDRESS, 0, MemorySegment.NULL); // handle (unused; data is captured in the upcall)
-            seq.set(JAVA_LONG, 8, n); // count
-            seq.set(ADDRESS, 16, startStub); // get_start
-            seq.set(ADDRESS, 24, lengthStub); // get_length
-            return seq;
-        }
-
-        // Invoked by the native sort/intersect. The handle arg is unused (data is captured here).
-        MemorySegment start(MemorySegment handle, long idx) {
-            return data.asSlice(starts[(int) idx], lengths[(int) idx]);
-        }
-
-        long length(MemorySegment handle, long idx) {
-            return lengths[(int) idx];
         }
     }
 

@@ -20,8 +20,7 @@
 #define STRINGZILLA_ROCM_CUH_
 
 #include "stringzilla/types.cuh"
-#include "stringzilla/capabilities.h"  // `sz_cap_rocm_k`
-#include "stringzilla/memory/serial.h" // `sz_sequence_realloc_serial_`
+#include "stringzilla/capabilities.h" // `sz_cap_rocm_k`
 
 #if STRINGZILLA_ARCH_ROCM_
 #include <hip/hip_runtime.h> // `hipLaunchKernel`, `hipMallocManaged`, `hipSetDevice`
@@ -61,6 +60,16 @@ STRINGZILLA_INLINE sz_bool_t sz_memory_accessible_rocm_(void const *pointer) {
         return sz_false_k;
     if (attributes.type == hipMemoryTypeManaged) return sz_true_k;
     return attributes.type == hipMemoryTypeDevice && attributes.device == device ? sz_true_k : sz_false_k;
+}
+
+/** Whether @p strings is a tape the device reaches, its payload null only when all are empty. */
+STRINGZILLA_INLINE sz_bool_t sz_strings_accessible_rocm_(sz_strings_view_t const *strings) {
+    sz_bool_t const wide = (sz_bool_t)(strings->layout == sz_strings_u64_tape_k);
+    sz_cptr_t const data = wide ? strings->data.u64_tape.data : strings->data.u32_tape.data;
+    void const *const offsets = wide ? (void const *)strings->data.u64_tape.offsets
+                                     : (void const *)strings->data.u32_tape.offsets;
+    return (sz_bool_t)(strings->layout != sz_strings_accessor_k && (!data || sz_memory_accessible_rocm_(data)) &&
+                       sz_memory_accessible_rocm_(offsets));
 }
 
 /*  Each allocator below is stateless, ignoring @c handle, and works on the device of its stream. */
@@ -112,10 +121,48 @@ STRINGZILLA_INLINE void sz_free_pinned_rocm_(void *pointer, sz_size_t bytes, voi
     sz_device_leave_rocm_(caller);
 }
 
+/** Moves a block into a fresh one from @p allocate with a copy on @p stream, then frees the old one
+ *  through @p release, which waits for the device. */
+STRINGZILLA_INLINE void *sz_reallocate_rocm_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes, void *handle,
+                                             sz_stream_t stream, sz_allocate_t allocate, sz_free_t release) {
+    if (!new_bytes) {
+        release(pointer, old_bytes, handle, stream);
+        return STRINGZILLA_NULL;
+    }
+    void *const moved = allocate(new_bytes, handle, stream);
+    if (!moved || !pointer) return moved;
+    if (hipMemcpyAsync(moved, pointer, sz_min_of_two(old_bytes, new_bytes), hipMemcpyDefault, (hipStream_t)stream) !=
+        hipSuccess) {
+        release(moved, new_bytes, handle, stream);
+        return STRINGZILLA_NULL;
+    }
+    release(pointer, old_bytes, handle, stream);
+    return moved;
+}
+
+STRINGZILLA_INLINE void *sz_reallocate_unified_rocm_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes,
+                                                     void *handle, sz_stream_t stream) {
+    return sz_reallocate_rocm_(pointer, old_bytes, new_bytes, handle, stream, &sz_allocate_unified_rocm_,
+                               &sz_free_device_rocm_);
+}
+
+STRINGZILLA_INLINE void *sz_reallocate_device_rocm_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes,
+                                                    void *handle, sz_stream_t stream) {
+    return sz_reallocate_rocm_(pointer, old_bytes, new_bytes, handle, stream, &sz_allocate_device_rocm_,
+                               &sz_free_device_rocm_);
+}
+
+STRINGZILLA_INLINE void *sz_reallocate_pinned_rocm_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes,
+                                                    void *handle, sz_stream_t stream) {
+    return sz_reallocate_rocm_(pointer, old_bytes, new_bytes, handle, stream, &sz_allocate_pinned_rocm_,
+                               &sz_free_pinned_rocm_);
+}
+
 /** Initializes an allocator handing back memory both the host and the device address, each call
  *  on its stream's device. */
 STRINGZILLA_INLINE void sz_allocator_init_unified_rocm_(sz_allocator_t *allocator) {
     allocator->allocate = &sz_allocate_unified_rocm_;
+    allocator->reallocate = &sz_reallocate_unified_rocm_;
     allocator->free = &sz_free_device_rocm_;
     allocator->handle = STRINGZILLA_NULL;
 }
@@ -241,35 +288,6 @@ STRINGZILLA_INLINE void sz_prefetch_rocm_(void const *pointer, sz_size_t bytes, 
 
 #pragma endregion Launches
 
-#pragma region Device Sequences
-
-/** Prepares a host-readable tape on the stream's device without changing its accessor kind. */
-STRINGZILLA_INLINE sz_status_t sz_sequence_realloc_rocm_(sz_sequence_t *target, sz_sequence_t const *source,
-                                                         sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                         sz_stream_t stream) {
-    int caller = 0;
-    sz_status_t status = sz_device_enter_rocm_(stream, &caller);
-    if (status != sz_success_k) return status;
-    sz_sequence_t next = *source;
-    sz_size_t bytes = 0;
-    if (source->get_start != sz_sequence_tape_start || source->get_length != sz_sequence_tape_length ||
-        !sz_memory_accessible_rocm_(source->handle))
-        status = sz_sequence_realloc_serial_(&next, source, allocator, &bytes, stream);
-    if (status == sz_success_k && !sz_memory_accessible_rocm_(next.handle)) {
-        if (bytes) allocator->free((void *)next.handle, bytes, allocator->handle, stream);
-        status = sz_device_memory_mismatch_k;
-    }
-    if (status == sz_success_k) {
-        sz_u64_t const *offsets = (sz_u64_t const *)next.handle;
-        sz_prefetch_rocm_(next.handle, (sz_size_t)offsets[next.count], stream);
-        *target = next, *allocated_bytes = bytes;
-    }
-    sz_device_leave_rocm_(caller);
-    return status;
-}
-
-#pragma endregion Device Sequences
-
 #pragma region Devices
 
 /** How many ROCm devices the runtime sees, or zero. */
@@ -350,6 +368,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *alloc
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_device_rocm_;
+    allocator->reallocate = sz_reallocate_device_rocm_;
     allocator->free = sz_free_device_rocm_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
@@ -357,15 +376,10 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_pinned_rocm_;
+    allocator->reallocate = sz_reallocate_pinned_rocm_;
     allocator->free = sz_free_pinned_rocm_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
-                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_stream_t stream) {
-    return sz_sequence_realloc_rocm_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {

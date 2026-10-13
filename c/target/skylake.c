@@ -9,7 +9,6 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/skylake.h"
-#include "stringzilla/memory/skylake.h"
 #include "stringzilla/hash/skylake.h"
 #include "stringzilla/find/skylake.h"
 #include "stringzilla/sort/skylake.h"

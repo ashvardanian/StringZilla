@@ -9,7 +9,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/serial.h"
-#include "stringzilla/memory/serial.h"
+#include "stringzilla/strings/serial.h"
 #include "stringzilla/hash/serial.h"
 #include "stringzilla/cipher/serial.h"
 #include "stringzilla/find/serial.h"

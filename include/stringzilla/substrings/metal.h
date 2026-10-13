@@ -11,16 +11,15 @@
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
  *  the kernels read must come from @ref sz_allocator_init_unified_metal on that stream's device,
- *  and haystacks and replacements must be tapes from @ref sz_sequence_realloc_metal, since the
- *  kernels read the tapes themselves. A round's dispatches run in order inside one command buffer,
- *  so each sees what the one before it wrote, and nothing is read back until the caller
- *  synchronizes.
+ *  and haystacks and replacements must be tapes, as @ref sz_strings_to_tape_best writes them with
+ *  that allocator, since the kernels read the tapes themselves. A round's dispatches run in order
+ *  inside one command buffer, so each sees what the one before it wrote, and nothing is read back
+ *  until the caller synchronizes.
  */
 #ifndef STRINGZILLA_SUBSTRINGS_METAL_H_
 #define STRINGZILLA_SUBSTRINGS_METAL_H_
 
 #include "stringzilla/metal.h"
-#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/substrings/serial.h"
 
 #if STRINGZILLA_TARGET_METAL
@@ -84,6 +83,8 @@ enum {
     sz_substrings_lengths_buffer_metal_k,
     sz_substrings_weights_buffer_metal_k,
     sz_substrings_scores_buffer_metal_k,
+    sz_substrings_haystacks_offsets_buffer_metal_k,
+    sz_substrings_replacements_offsets_buffer_metal_k,
     sz_substrings_buffers_metal_k,
 };
 
@@ -109,7 +110,7 @@ typedef struct {
     sz_u64_t report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
     sz_u64_t emitted, reported, keep_offsets, gap_offsets, overflow_rows;
     sz_u64_t slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
-    sz_u64_t haystacks_count, counts_stride, matches_capacity, target_ceiling;
+    sz_u64_t haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
     sz_u64_t document_lengths, scores_stride, tally_hashed;
     sz_f32_t saturation, normalization, average_length, unused;
     sz_u64_t pass, scan_count, scan_elements_per_tile, scan_tiles, clear_words;
@@ -215,22 +216,23 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_scan_metal_(sz_metal_call_t *call, 
 /** Binds what every verb reads, the engine's two blocks and the haystacks' tape, the first thing
  *  every verb checks. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_resident_metal_(sz_substrings_engine_t const *engine,
-                                                             sz_metal_call_t *call, sz_sequence_t const *haystacks,
+                                                             sz_metal_call_t *call, sz_strings_view_t const *haystacks,
                                                              sz_metal_bound_t *buffers) {
     if (!sz_metal_resolve_call_(call, engine->memory, engine->memory_bytes,
                                 buffers + sz_substrings_memory_buffer_metal_k) ||
         !sz_metal_resolve_call_(call, engine->scratch, engine->scratch_bytes,
                                 buffers + sz_substrings_scratch_buffer_metal_k))
         return sz_device_memory_mismatch_k;
-    return sz_metal_tape_call_(call, haystacks, buffers + sz_substrings_haystacks_buffer_metal_k);
+    return sz_metal_tape_call_(call, haystacks, buffers + sz_substrings_haystacks_buffer_metal_k,
+                               buffers + sz_substrings_haystacks_offsets_buffer_metal_k);
 }
 
 /** Zeroes @p arguments and fills what every dispatch of a round reads: the blocks' host addresses
  *  and the automaton. */
 STRINGZILLA_INLINE void sz_substrings_arguments_metal_(sz_substrings_engine_t const *engine,
-                                                       sz_sequence_t const *haystacks,
+                                                       sz_strings_view_t const *haystacks,
                                                        sz_substrings_arguments_metal_t *arguments) {
-    sz_fill_serial_((char *)arguments, sizeof(*arguments), 0);
+    memset(arguments, 0, sizeof(*arguments));
     arguments->engine_host = (sz_u64_t)engine->memory, arguments->scratch_host = (sz_u64_t)engine->scratch;
     arguments->hot_rows = (sz_u64_t)engine->hot_rows, arguments->byte_to_class = (sz_u64_t)engine->byte_to_class;
     arguments->base = (sz_u64_t)engine->base, arguments->check = (sz_u64_t)engine->check;
@@ -242,7 +244,7 @@ STRINGZILLA_INLINE void sz_substrings_arguments_metal_(sz_substrings_engine_t co
     arguments->max_source_match_bytes = engine->max_source_match_bytes;
     arguments->overlap_policy = (sz_u64_t)engine->overlap_policy;
     arguments->case_sensitivity = (sz_u64_t)engine->case_sensitivity;
-    arguments->haystacks_count = haystacks->count;
+    arguments->haystacks_count = haystacks->count, arguments->haystacks_layout = (sz_u64_t)haystacks->layout;
 }
 
 /**
@@ -256,7 +258,7 @@ STRINGZILLA_INLINE void sz_substrings_arguments_metal_(sz_substrings_engine_t co
  *      leave them in the round block.
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t const *engine, sz_metal_call_t *call,
-                                                         sz_metal_bound_t *buffers, sz_sequence_t const *haystacks,
+                                                         sz_metal_bound_t *buffers, sz_strings_view_t const *haystacks,
                                                          sz_bool_t emitting, sz_size_t *haystack_offsets,
                                                          sz_substrings_arguments_metal_t *arguments) {
     sz_substrings_arena_metal_t const arena = sz_substrings_arena_metal_(engine, haystacks->count);
@@ -341,7 +343,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
-    sz_substrings_engine_t *engine, sz_sequence_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_allocator_t unified;
@@ -380,8 +382,9 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     return sz_metal_commit_(&call, sz_success_k);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                       sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *engine,
+                                                       sz_strings_view_t const *haystacks, sz_size_t *counts,
+                                                       sz_size_t counts_stride, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arguments_metal_t arguments;
     sz_metal_call_t call;
@@ -404,7 +407,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *e
     return sz_metal_commit_(&call, status);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
+STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
                                                      sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
@@ -439,8 +442,9 @@ STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *eng
     return sz_metal_commit_(&call, status);
 }
 
-STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *engine, sz_sequence_t const *haystacks,
-                                                        sz_sequence_t const *replacements, sz_ptr_t target,
+STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *engine,
+                                                        sz_strings_view_t const *haystacks,
+                                                        sz_strings_view_t const *replacements, sz_ptr_t target,
                                                         sz_size_t target_capacity, sz_size_t *offsets,
                                                         sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
@@ -457,7 +461,8 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
     if (status == sz_success_k)
-        status = sz_metal_tape_call_(&call, replacements, buffers + sz_substrings_replacements_buffer_metal_k);
+        status = sz_metal_tape_call_(&call, replacements, buffers + sz_substrings_replacements_buffer_metal_k,
+                                     buffers + sz_substrings_replacements_offsets_buffer_metal_k);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (!sz_metal_resolve_call_(&call, offsets, boundaries * sizeof(sz_size_t),
                                 buffers + sz_substrings_offsets_buffer_metal_k))
@@ -468,7 +473,7 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *
 
     sz_substrings_arguments_metal_(engine, haystacks, &arguments);
     status = sz_substrings_walk_metal_(engine, &call, buffers, haystacks, sz_true_k, STRINGZILLA_NULL, &arguments);
-    arguments.target_ceiling = target_capacity;
+    arguments.target_ceiling = target_capacity, arguments.replacements_layout = (sz_u64_t)replacements->layout;
     // The offsets kernels retire when the matches did not fit, so the caller's array
     // is zeroed first.
     if (status == sz_success_k)
@@ -495,7 +500,7 @@ STRINGZILLA_API sz_status_t sz_substrings_replace_metal(sz_substrings_engine_t *
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine_t *engine,
-                                                            sz_sequence_t const *haystacks,
+                                                            sz_strings_view_t const *haystacks,
                                                             sz_f32_t const *document_lengths,
                                                             sz_substrings_bm25_t const *parameters,
                                                             sz_f32_t const *needle_weights, sz_f32_t *scores,

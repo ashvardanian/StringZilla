@@ -10,7 +10,6 @@
 #define STRINGZILLA_CIPHER_SERIAL_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/memory/serial.h" // `sz_fill_serial_`
 #include "stringzilla/cipher/tables.h" // `sz_aes_sbox_`
 
 #ifdef __cplusplus
@@ -680,7 +679,7 @@ STRINGZILLA_API sz_status_t sz_aes256_gcm_decrypt_serial(sz_aes256_gcm_key_t con
 
     // A caller who drops the status must still be unable to act on forged plaintext.
     if (verdict != sz_success_k) {
-        sz_fill_serial_(target, length, 0);
+        memset(target, 0, length);
         sz_keep_alive_(target);
     }
     return verdict;

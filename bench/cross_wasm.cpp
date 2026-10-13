@@ -35,11 +35,9 @@ void bench_cross_wasm([[maybe_unused]] environment_t &env) {
             env, "v128");
         bench_equal_kernels<sz_equal_v128>(env, "v128");
         bench_order_kernels<sz_order_v128>(env, "v128");
-        bench_copy_kernels<sz_copy_v128>(env, "v128");
-        bench_move_kernels<sz_move_v128>(env, "v128");
-        bench_fill_kernels<sz_fill_v128>(env, "v128");
         bench_fill_random_kernels<sz_fill_random_v128>(env, "v128");
-        bench_lookup_kernels<sz_lookup_v128>(env, "v128");
+        bench_strings_kernels<sz_strings_to_tape_v128, sz_strings_escape_v128, sz_strings_unescape_v128,
+                              sz_strings_lookup_v128, sz_strings_normalize_v128>(env, "v128");
         bench_aes256_ctr_kernels<sz_aes256_key_init_v128, sz_aes256_ctr_xor_v128>(env, "v128");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encrypt_v128>(env, "v128");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_v128, sz_aes256_gcm_encryptor_init_v128,
@@ -63,11 +61,10 @@ void bench_cross_wasm([[maybe_unused]] environment_t &env) {
                                   sz_hash_state_digest_v128relaxed>(env, "v128relaxed");
         bench_equal_kernels<sz_equal_v128relaxed>(env, "v128relaxed");
         bench_order_kernels<sz_order_v128relaxed>(env, "v128relaxed");
-        bench_copy_kernels<sz_copy_v128relaxed>(env, "v128relaxed");
-        bench_move_kernels<sz_move_v128relaxed>(env, "v128relaxed");
-        bench_fill_kernels<sz_fill_v128relaxed>(env, "v128relaxed");
         bench_fill_random_kernels<sz_fill_random_v128relaxed>(env, "v128relaxed");
-        bench_lookup_kernels<sz_lookup_v128relaxed>(env, "v128relaxed");
+        bench_strings_kernels<sz_strings_to_tape_v128relaxed, sz_strings_escape_v128relaxed,
+                              sz_strings_unescape_v128relaxed, sz_strings_lookup_v128relaxed,
+                              sz_strings_normalize_v128relaxed>(env, "v128relaxed");
         bench_aes256_ctr_kernels<sz_aes256_key_init_v128relaxed, sz_aes256_ctr_xor_v128relaxed>(env, "v128relaxed");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_v128relaxed, sz_aes256_gcm_encrypt_v128relaxed>(env,
                                                                                                         "v128relaxed");

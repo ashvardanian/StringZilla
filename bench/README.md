@@ -10,8 +10,8 @@ The family files time the dispatch points against the standard baselines, like `
 
 - `find.cpp` — bidirectional substring, byte, and byteset search.
 - `token.cpp` — token-level hashing, checksums, equality, and ordering.
-- `sequence.cpp` — sorting, partitioning, and set intersection of string arrays.
-- `memory.cpp` — copies, moves, fills, and lookup-table transforms.
+- `sort.cpp` — sorting, partitioning, and set intersection of string arrays.
+- `strings.cpp` — random fills, lookup-table transforms, and JSON and CSV escaping of string collections.
 - `cipher.cpp` — AES-256 counter mode and Galois/counter mode throughput.
 - `container.cpp` — STL associative containers with string keys.
 - `levenshtein.cpp` — one-to-one and one-to-many edit distances, over bytes and over runes.

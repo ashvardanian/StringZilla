@@ -16,7 +16,7 @@ The CUDA rows hash the whole corpus per call, digests included, where the CPU ro
 Lanes are grouped by vector width, and a group advances one block per turn until its longest member is done.
 Shorter lanes retire as they finish and are simply left out of the remaining turns, so a batch of ragged lengths is correct and stays vectorized throughout — but a group still costs as much as its longest message, and a lane that retires early leaves its slot idle.
 Throughput therefore depends on how evenly lengths are distributed inside a group, which is entirely the caller's to arrange: feeding messages in length order puts similar lengths together and keeps groups full.
-`sz_sequence_argsort_best` produces that ordering.
+`sz_sort_order_best` produces that ordering.
 
 The two ends of that behaviour are visible in the benchmark, which carries `_one_short` and `_one_long` variants of every multi-state row: trimming one lane of sixteen barely moves the numbers, while stretching one lane to eight times its neighbours drags every backend down to roughly the serial rate, batched or not.
 

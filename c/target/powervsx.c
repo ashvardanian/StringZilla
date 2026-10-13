@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/powervsx.h"
-#include "stringzilla/memory/powervsx.h"
+#include "stringzilla/strings/powervsx.h"
 #include "stringzilla/hash/powervsx.h"
 #include "stringzilla/cipher/powervsx.h"
 #include "stringzilla/find/powervsx.h"

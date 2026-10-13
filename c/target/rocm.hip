@@ -4,7 +4,7 @@
  *  @date September 29, 2026
  *  @brief The @c rocm kernels and the ROCm device exports, defined once for the library.
  */
-#include "stringzilla/memory.h"
+#include "stringzilla/strings.h"
 #include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
@@ -15,6 +15,7 @@
 #include "stringzilla/hash/rocm.cuh"
 #include "stringzilla/levenshtein/rocm.cuh"
 #include "stringzilla/overlap/rocm.cuh"
+#include "stringzilla/strings/rocm.cuh"
 #include "stringzilla/substrings/rocm.cuh"
 #include "stringzilla/utf8_uncased_fold/rocm.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh"
@@ -41,6 +42,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *alloc
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_device_rocm_;
+    allocator->reallocate = sz_reallocate_device_rocm_;
     allocator->free = sz_free_device_rocm_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
@@ -48,15 +50,10 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_pinned_rocm_;
+    allocator->reallocate = sz_reallocate_pinned_rocm_;
     allocator->free = sz_free_pinned_rocm_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_sequence_realloc_rocm(sz_sequence_t *target, sz_sequence_t const *source,
-                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_stream_t stream) {
-    return sz_sequence_realloc_rocm_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {

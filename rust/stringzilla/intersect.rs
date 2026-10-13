@@ -26,8 +26,8 @@ pub fn intersection<Element: AsRef<[u8]>>(
     data1: &[Element],
     data2: &[Element],
     seed: u64,
-    positions1: &mut [SortedIdx],
-    positions2: &mut [SortedIdx],
+    positions1: &mut [usize],
+    positions2: &mut [usize],
 ) -> Result<usize, Status> {
     intersection_by(
         data1,
@@ -78,8 +78,8 @@ pub fn intersection_by<Element1, Element2, Key1, Key2>(
     data2: &[Element2],
     key2: Key2,
     seed: u64,
-    positions1: &mut [SortedIdx],
-    positions2: &mut [SortedIdx],
+    positions1: &mut [usize],
+    positions2: &mut [usize],
 ) -> Result<usize, Status>
 where
     Key1: Fn(&Element1) -> &[u8],
@@ -91,11 +91,11 @@ where
     }
 
     let mut intersection_count: usize = 0;
-    with_sequence_by(data1, key1, |sequence1| {
-        with_sequence_by(data2, key2, |sequence2| unsafe {
-            sz_sequence_intersect_best(
-                sequence1,
-                sequence2,
+    with_strings_by(data1, key1, |strings1| {
+        with_strings_by(data2, key2, |strings2| unsafe {
+            sz_intersect_best(
+                strings1,
+                strings2,
                 core::ptr::null(),
                 seed,
                 &mut intersection_count,

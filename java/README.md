@@ -129,6 +129,7 @@ StringZilla.Match match = StringZilla.uncasedIndexOf(haystack, needle); // casel
 
 byte[] composed = StringZilla.normalize("é".getBytes(UTF_8), StringZilla.NormalForm.NFC);   // "e" + U+0301 → "é"
 byte[] ascii = StringZilla.normalize("ﬁ".getBytes(UTF_8), StringZilla.NormalForm.NFKC);     // ligature "ﬁ" → "fi"
+byte[] key = StringZilla.normalize("Straße".getBytes(UTF_8), StringZilla.NormalForm.NFKC_CASEFOLD); // → "strasse"
 ```
 
 ## Sorting and Set Operations

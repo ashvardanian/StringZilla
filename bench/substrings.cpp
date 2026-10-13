@@ -55,7 +55,7 @@ struct substrings_build_from_sz {
         sz_substrings_engine_t engine;
         if (sz_allocator_init_heap(&allocator) != sz_success_k)
             throw std::runtime_error("The heap allocator could not be initialized.");
-        sz_sequence_t const needles = dictionary.needle_sequence();
+        sz_strings_view_t const needles = dictionary.needle_strings();
         if (sz_substrings_engine_init(&engine, &needles, dictionary.sensitivity, sz_substrings_overlapping_k,
                                       STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, capabilities, &allocator,
                                       nullptr) != sz_success_k)

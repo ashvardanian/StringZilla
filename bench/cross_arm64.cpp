@@ -32,12 +32,10 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_bytesum_kernels<sz_bytesum_neon>(env, "neon");
         bench_equal_kernels<sz_equal_neon>(env, "neon");
         bench_order_kernels<sz_order_neon>(env, "neon");
-        bench_copy_kernels<sz_copy_neon>(env, "neon");
-        bench_move_kernels<sz_move_neon>(env, "neon");
-        bench_fill_kernels<sz_fill_neon>(env, "neon");
-        bench_lookup_kernels<sz_lookup_neon>(env, "neon");
+        bench_strings_kernels<sz_strings_to_tape_neon, sz_strings_escape_neon, sz_strings_unescape_neon,
+                              sz_strings_lookup_neon, sz_strings_normalize_neon>(env, "neon");
         bench_map_kernels<sz_order_neon>(env, "neon");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_neon, sz_sequence_argsort_uncased_neon>(env, "neon");
+        bench_sort_order_kernels<sz_sort_order_neon, sz_sort_uncased_order_neon>(env, "neon");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_neon, sz_levenshtein_distances_neon>(
             env, "neon", sz_levenshtein_bytes_k);
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_neon, sz_levenshtein_distances_neon>(
@@ -60,7 +58,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
                                         sz_aes256_gcm_encryptor_update_neonaes, sz_aes256_gcm_encryptor_digest_neonaes>(
             env, "neonaes");
         bench_unordered_map_kernels<sz_hash_neonaes, sz_equal_neon>(env, "neonaes", "neon");
-        bench_sequence_intersect_kernels<sz_sequence_intersect_neonaes>(env, "neonaes");
+        bench_intersect_kernels<sz_intersect_neonaes>(env, "neonaes");
     }
 #endif // STRINGZILLA_TARGET_NEONAES
 #if STRINGZILLA_TARGET_NEONSHA
@@ -80,11 +78,9 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_bytesum_kernels<sz_bytesum_sve>(env, "sve");
         bench_equal_kernels<sz_equal_sve>(env, "sve");
         bench_order_kernels<sz_order_sve>(env, "sve");
-        bench_copy_kernels<sz_copy_sve>(env, "sve");
-        bench_move_kernels<sz_move_sve>(env, "sve");
-        bench_fill_kernels<sz_fill_sve>(env, "sve");
-        bench_lookup_kernels<sz_lookup_sve>(env, "sve");
-        bench_sequence_argsort_kernels<sz_sequence_argsort_sve, sz_sequence_argsort_uncased_sve>(env, "sve");
+        bench_strings_kernels<sz_strings_to_tape_sve, sz_strings_escape_sve, sz_strings_unescape_sve,
+                              sz_strings_lookup_sve, sz_strings_normalize_sve>(env, "sve");
+        bench_sort_order_kernels<sz_sort_order_sve, sz_sort_uncased_order_sve>(env, "sve");
     }
 #endif // STRINGZILLA_TARGET_SVE
 #if STRINGZILLA_TARGET_SVE2

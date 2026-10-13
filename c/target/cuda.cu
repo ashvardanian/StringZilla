@@ -8,7 +8,7 @@
 #define STRINGZILLA_TARGET_HOPPER 0
 #undef STRINGZILLA_TARGET_BLACKWELL
 #define STRINGZILLA_TARGET_BLACKWELL 0
-#include "stringzilla/memory.h"
+#include "stringzilla/strings.h"
 #include "stringzilla/hash.h"
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
@@ -19,6 +19,7 @@
 #include "stringzilla/hash/cuda.cuh"
 #include "stringzilla/levenshtein/cuda.cuh"
 #include "stringzilla/overlap/cuda.cuh"
+#include "stringzilla/strings/cuda.cuh"
 #include "stringzilla/substrings/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/cuda.cuh"
 #include "stringzilla/utf8_norm/cuda.cuh"
@@ -45,6 +46,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *alloc
 
 STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_device_cuda_;
+    allocator->reallocate = sz_reallocate_device_cuda_;
     allocator->free = sz_free_device_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
@@ -52,15 +54,10 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *alloca
 
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator) {
     allocator->allocate = sz_allocate_pinned_cuda_;
+    allocator->reallocate = sz_reallocate_pinned_cuda_;
     allocator->free = sz_free_pinned_cuda_;
     allocator->handle = STRINGZILLA_NULL;
     return sz_success_k;
-}
-
-STRINGZILLA_API sz_status_t sz_sequence_realloc_cuda(sz_sequence_t *target, sz_sequence_t const *source,
-                                                     sz_allocator_t *allocator, sz_size_t *allocated_bytes,
-                                                     sz_stream_t stream) {
-    return sz_sequence_realloc_cuda_(target, source, allocator, allocated_bytes, stream);
 }
 
 STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {

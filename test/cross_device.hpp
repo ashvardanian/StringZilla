@@ -134,7 +134,7 @@ struct levenshtein_device_corpus_t {
     /** @b [queries, candidates], written by whichever round ran. */
     unified_vector<sz_size_t> distances;
 
-    sz_sequence_t query_sequence() const { return sequence_from_(query_views); }
+    sz_strings_view_t query_strings() const { return strings_from_(query_views); }
 
     /** The candidates copied into one tape, which every device round reads. */
     tape_t device_tape;
@@ -210,7 +210,8 @@ struct levenshtein_device_corpus_t {
         return drawn;
     }
 
-    /** Points the views into the arenas and binds the sequences, once neither arena grows. */
+    /** Points the views into the arenas and copies the candidates into the tape, once neither arena
+     *  grows. */
     void bind_() {
         std::size_t written = 0;
         for (sz_string_view_t &view : query_views) view.start = query_arena.data() + written, written += view.length;
@@ -226,14 +227,14 @@ struct levenshtein_device_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 inline std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_device_corpus_t const &corpus,
                                                             sz_levenshtein_symbol_t symbol) {
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init_serial(&engine, &query_sequence, symbol, &heap.allocator, nullptr) ==
+    verify(sz_levenshtein_engine_init_serial(&engine, &query_strings, symbol, &heap.allocator, nullptr) ==
            sz_success_k);
     std::vector<sz_size_t> expected(corpus.distances.size());
-    sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-    verify(sz_levenshtein_distances_serial(&engine, &corpus_device_tape_sequence, expected.data(), corpus.count(),
+    sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+    verify(sz_levenshtein_distances_serial(&engine, &corpus_device_tape_strings, expected.data(), corpus.count(),
                                            nullptr) == sz_success_k);
     sz_levenshtein_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -277,17 +278,17 @@ inline void check_levenshtein_device_equivalence_(auto const &backend, levenshte
             std::size_t const queries = levenshtein_device_sweep_queries_k;
             if (count * query_symbols * queries > (std::size_t)levenshtein_device_sweep_budget_k) continue;
             levenshtein_device_corpus_t corpus(backend.runtime, count, query_symbols, queries, alphabet);
-            sz_sequence_t const query_sequence = corpus.query_sequence();
+            sz_strings_view_t const query_strings = corpus.query_strings();
             sz_levenshtein_engine_t engine {};
-            sz_status_t const prepared = sz_levenshtein_engine_init(&engine, &query_sequence, symbol,
+            sz_status_t const prepared = sz_levenshtein_engine_init(&engine, &query_strings, symbol,
                                                                     backend.runtime.capabilities, STRINGZILLA_NULL,
                                                                     backend.runtime.stream);
             if (prepared != sz_success_k)
                 fail_backend_(backend.name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
-            sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
+            sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
             sz_status_t const produced = backend.levenshtein_distances(
-                &engine, &corpus_device_tape_sequence, corpus.distances.data(), corpus.count(), backend.runtime.stream);
+                &engine, &corpus_device_tape_strings, corpus.distances.data(), corpus.count(), backend.runtime.stream);
             // The planes the round reads live in the engine's block, so the join comes before
             // it is released.
             join_(backend.runtime, backend.runtime.stream);
@@ -323,18 +324,18 @@ inline void check_levenshtein_device_short_queries_(std::mt19937 &generator, aut
         query_views[0].start = query.data(), query_views[0].length = query.size();
         for (std::size_t index = 0; index != count; ++index)
             views[index].start = arena.data() + index % offsets_k, views[index].length = index % longest_candidate_k;
-        sz_sequence_t const queries = sequence_from_(query_views);
-        sz_sequence_t host_candidates {};
-        sz_sequence_from_string_views(views.data(), views.size(), &host_candidates);
+        sz_strings_view_t const queries = strings_from_(query_views);
+        sz_strings_view_t host_candidates {};
+        sz_strings_from_string_views(views.data(), views.size(), &host_candidates);
         tape_t candidates {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
         verify(candidates.assign(host_candidates) == status_t::success_k);
 
         sz_levenshtein_engine_t engine {};
         verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                           STRINGZILLA_NULL, backend.runtime.stream) == sz_success_k);
-        sz_sequence_t const candidates_sequence = candidates.sequence();
-        sz_status_t const produced = backend.levenshtein_distances(&engine, &candidates_sequence, distances.data(),
-                                                                   count, backend.runtime.stream);
+        sz_strings_view_t const candidate_strings = candidates.strings();
+        sz_status_t const produced = backend.levenshtein_distances(&engine, &candidate_strings, distances.data(), count,
+                                                                   backend.runtime.stream);
         // The planes the round reads live in the engine's block, so the join comes before
         // it is released.
         join_(backend.runtime, backend.runtime.stream);
@@ -371,13 +372,13 @@ inline void check_levenshtein_device_skewed_(std::mt19937 &generator, auto const
             if (total * sz_levenshtein_query_words(query_symbols) > (std::size_t)levenshtein_device_skewed_budget_k)
                 continue;
             levenshtein_device_corpus_t corpus(backend.runtime, generator, lengths, query_symbols, 2, alphabet);
-            sz_sequence_t const query_sequence = corpus.query_sequence();
+            sz_strings_view_t const query_strings = corpus.query_strings();
             sz_levenshtein_engine_t engine {};
-            verify(sz_levenshtein_engine_init(&engine, &query_sequence, symbol, backend.runtime.capabilities,
+            verify(sz_levenshtein_engine_init(&engine, &query_strings, symbol, backend.runtime.capabilities,
                                               STRINGZILLA_NULL, backend.runtime.stream) == sz_success_k);
-            sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
+            sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
             sz_status_t const produced = backend.levenshtein_distances(
-                &engine, &corpus_device_tape_sequence, corpus.distances.data(), corpus.count(), backend.runtime.stream);
+                &engine, &corpus_device_tape_strings, corpus.distances.data(), corpus.count(), backend.runtime.stream);
             join_(backend.runtime, backend.runtime.stream);
             sz_levenshtein_engine_free(&engine, backend.runtime.stream);
             if (produced != sz_success_k) fail_backend_(backend.name, "a skewed batch was refused");
@@ -401,8 +402,8 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
     std::array<sz_string_view_t, texts.size()> views;
     for (std::size_t index = 0; index != texts.size(); ++index)
         views[index] = {texts[index].data(), texts[index].size()};
-    sz_sequence_t queries {};
-    sz_sequence_from_string_views(views.data(), views.size(), &queries);
+    sz_strings_view_t queries {};
+    sz_strings_from_string_views(views.data(), views.size(), &queries);
     std::array<std::string, 19> candidates_text {"x",
                                                  std::string(16385, 'a'),
                                                  "",
@@ -438,11 +439,11 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
                 std::string const &text = candidates_text[reverse ? candidate_views.size() - 1 - index : index];
                 candidate_views[index] = {text.data(), text.size()};
             }
-            sz_sequence_t reference {};
-            sz_sequence_from_string_views(candidate_views.data(), candidate_views.size(), &reference);
+            sz_strings_view_t reference {};
+            sz_strings_from_string_views(candidate_views.data(), candidate_views.size(), &reference);
             tape_t tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
             verify(tape.assign(candidate_views) == status_t::success_k);
-            sz_sequence_t const candidates = tape.sequence();
+            sz_strings_view_t const candidates = tape.strings();
             std::fill(distances.begin(), distances.end(), STRINGZILLA_SIZE_MAX);
             if (!reverse)
                 verify(sz_levenshtein_distances_serial(&host, &reference, expected.data(), stride, nullptr) ==
@@ -468,11 +469,11 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
             query_views[index] = {texts[index].data(), texts[index].size()};
         }
         std::reverse_copy(query_views.begin(), query_views.end(), candidate_views.begin());
-        sz_sequence_t queries {};
-        sz_sequence_from_string_views(query_views.data(), query_views.size(), &queries);
+        sz_strings_view_t queries {};
+        sz_strings_from_string_views(query_views.data(), query_views.size(), &queries);
         tape_t tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
         verify(tape.assign(candidate_views) == status_t::success_k);
-        sz_sequence_t const candidates = tape.sequence();
+        sz_strings_view_t const candidates = tape.strings();
         std::size_t const stride = 43;
         unified_vector<sz_size_t> distances(texts.size() * stride, STRINGZILLA_SIZE_MAX,
                                             unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
@@ -497,34 +498,32 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
     }
 }
 
-/** One backend refusing host memory, sequence handle and outputs alike, rather than staging it. */
+/** One backend refusing host memory, accessors and outputs alike, rather than staging it. */
 inline void check_levenshtein_device_memory_safety_(std::mt19937 &generator, auto const &backend) {
     levenshtein_device_corpus_t corpus(backend.runtime, 8, 200, 1, levenshtein_device_alphabet_t::bytes_k);
     std::fill(corpus.distances.begin(), corpus.distances.end(), STRINGZILLA_SIZE_MAX);
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.runtime.capabilities,
+    verify(sz_levenshtein_engine_init(&engine, &query_strings, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                       STRINGZILLA_NULL, backend.runtime.stream) == sz_success_k);
     std::string text(64, '\0');
     randomize_string(generator, text);
     std::array<sz_string_view_t, 1> const host_views {sz_string_view_t {text.data(), text.size()}};
-    sz_sequence_t host_candidates {};
-    sz_sequence_from_string_views(host_views.data(), host_views.size(), &host_candidates);
+    sz_strings_view_t host_candidates {};
+    sz_strings_from_string_views(host_views.data(), host_views.size(), &host_candidates);
     std::vector<sz_size_t> host_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX);
-    sz_sequence_t const candidates = corpus.device_tape.sequence();
+    sz_strings_view_t const candidates = corpus.device_tape.strings();
     verify(backend.levenshtein_distances(&engine, &candidates, host_distances.data(), corpus.count(),
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
     verify(backend.levenshtein_distances(&engine, &host_candidates, corpus.distances.data(), corpus.count(),
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
     verify(backend.levenshtein_distances(&engine, &candidates, corpus.distances.data(), corpus.count() - 1,
                                          backend.runtime.stream) == sz_unexpected_dimensions_k);
-    sz_sequence_t foreign = candidates;
-    foreign.get_start = [](void const *, sz_size_t) -> sz_cptr_t { return nullptr; };
-    sz_status_t const accessor_status = backend.runtime.selected.kind() == sz::device_kind_t::metal_k
-                                            ? sz_device_code_mismatch_k
-                                            : sz_device_memory_mismatch_k;
-    verify(backend.levenshtein_distances(&engine, &foreign, corpus.distances.data(), corpus.count(),
-                                         backend.runtime.stream) == accessor_status);
+    // An accessor is host code, so it is refused even over bytes the device reaches.
+    sz_strings_view_t resident_accessor;
+    sz_strings_from_string_views(corpus.views.data(), corpus.views.size(), &resident_accessor);
+    verify(backend.levenshtein_distances(&engine, &resident_accessor, corpus.distances.data(), corpus.count(),
+                                         backend.runtime.stream) == sz_device_memory_mismatch_k);
     join_(backend.runtime, backend.runtime.stream);
     sz_levenshtein_engine_free(&engine, backend.runtime.stream);
     for (sz_size_t const untouched : host_distances) verify(untouched == STRINGZILLA_SIZE_MAX);
@@ -537,7 +536,7 @@ inline void check_levenshtein_device_threads_(auto const &backend) {
     sz_stream_t const queue = backend.runtime.stream;
     stream_t const second(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
     levenshtein_device_corpus_t corpus(backend.runtime, 3, 16385, 2, levenshtein_device_alphabet_t::bytes_k);
-    sz_sequence_t const queries = corpus.query_sequence(), candidates = corpus.device_tape.sequence();
+    sz_strings_view_t const queries = corpus.query_strings(), candidates = corpus.device_tape.strings();
     sz_levenshtein_engine_t engine {};
     verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities, nullptr,
                                       queue) == sz_success_k);
@@ -548,13 +547,13 @@ inline void check_levenshtein_device_threads_(auto const &backend) {
     std::vector<sz_string_view_t> reversed_views(corpus.views.rbegin(), corpus.views.rend());
     tape_t reversed_tape {unified_alloc<char>(backend.runtime.unified, queue)};
     verify(reversed_tape.assign(reversed_views) == status_t::success_k);
-    sz_sequence_t const reversed = reversed_tape.sequence();
+    sz_strings_view_t const reversed = reversed_tape.strings();
     std::vector<sz_size_t> reversed_expected = expected;
     for (std::size_t row = 0; row != corpus.query_views.size(); ++row)
         std::reverse(reversed_expected.begin() + row * corpus.count(),
                      reversed_expected.begin() + (row + 1) * corpus.count());
     join_(backend.runtime, queue);
-    auto const round = [&](sz_stream_t stream, sz_sequence_t const &inputs, sz_size_t *output,
+    auto const round = [&](sz_stream_t stream, sz_strings_view_t const &inputs, sz_size_t *output,
                            std::vector<sz_size_t> const &reference) {
         verify(sz_levenshtein_distances(&engine, &inputs, output, corpus.count(), stream) == sz_success_k);
         join_(backend.runtime, stream);
@@ -572,12 +571,12 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
     sz_stream_t const queue = backend.runtime.stream;
     levenshtein_device_corpus_t corpus(backend.runtime, 129, 1024, levenshtein_device_sweep_queries_k,
                                        levenshtein_device_alphabet_t::bytes_k);
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, sz_levenshtein_bytes_k);
     sz_levenshtein_engine_t engine {};
-    verify(sz_levenshtein_engine_init(&engine, &query_sequence, sz_levenshtein_bytes_k, backend.runtime.capabilities,
+    verify(sz_levenshtein_engine_init(&engine, &query_strings, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                       STRINGZILLA_NULL, queue) == sz_success_k);
-    sz_sequence_t const freed = corpus.device_tape.sequence();
+    sz_strings_view_t const freed = corpus.device_tape.strings();
     verify(sz_levenshtein_distances(&engine, &freed, corpus.distances.data(), corpus.count(), queue) == sz_success_k);
     corpus.device_tape.reset();
     verify(sz_stream_synchronize_best(backend.runtime.capabilities, queue) == sz_success_k);
@@ -595,9 +594,8 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
  *  @brief A corpus both sides address: one arena, its views, and room for one round's scores.
  *
  *  Unified storage is readable from the host, so the serial reference runs against these very bytes
- *  rather than a second copy of them, and the two candidate sequences differ only in whose
- *  accessors they carry. The queries stay plain host strings, because an engine's builder reads
- *  them on the host and no kernel ever sees them.
+ *  rather than a second copy of them. The queries stay plain host strings, because an engine's
+ *  builder reads them on the host and no kernel ever sees them.
  */
 struct overlap_device_corpus_t {
 
@@ -614,7 +612,7 @@ struct overlap_device_corpus_t {
     unified_vector<sz_f32_t> scores;
 
     /** Host accessors, which is what an engine's builder calls. */
-    sz_sequence_t query_sequence() const { return sequence_from_(queries); }
+    sz_strings_view_t query_strings() const { return strings_from_(queries); }
 
     /** The candidates copied into one tape, which every device round reads. */
     tape_t device_tape;
@@ -665,7 +663,7 @@ struct overlap_device_corpus_t {
         }
     }
 
-    /** Cuts the arena into candidates of @p lengths bytes and binds the sequences over them. */
+    /** Cuts the arena into candidates of @p lengths bytes and copies them into the tape. */
     void bind_(std::vector<std::size_t> const &lengths) {
         std::size_t written = 0;
         for (std::size_t index = 0; index != lengths.size(); ++index) {
@@ -682,14 +680,14 @@ struct overlap_device_corpus_t {
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 inline std::vector<sz_f32_t> overlap_serial_reference_(overlap_device_corpus_t const &corpus,
                                                        std::span<sz_size_t const> widths) {
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init_serial(&engine, &query_sequence, widths.data(), widths.size(), 0, &heap.allocator,
+    verify(sz_overlap_engine_init_serial(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator,
                                          nullptr) == sz_success_k);
     std::vector<sz_f32_t> expected(corpus.scores.size(), -1.0f);
-    sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-    verify(sz_overlap_scores_serial(&engine, &corpus_device_tape_sequence, expected.data(), corpus.query_stride(),
+    sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+    verify(sz_overlap_scores_serial(&engine, &corpus_device_tape_strings, expected.data(), corpus.query_stride(),
                                     corpus.candidate_stride(), nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -709,16 +707,16 @@ inline void check_overlap_device_equivalence_(std::mt19937 &generator, auto cons
             for (std::size_t query_length : {12u, 777u}) {
                 overlap_device_corpus_t corpus(backend.runtime, generator, queries_count, count, query_length,
                                                widths.size());
-                sz_sequence_t const query_sequence = corpus.query_sequence();
+                sz_strings_view_t const query_strings = corpus.query_strings();
                 std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus,
                                                                                  {widths.data(), widths.size()});
                 sz_overlap_engine_t engine {};
-                if (sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0,
+                if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
                                            backend.runtime.capabilities, STRINGZILLA_NULL,
                                            backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
-                sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-                if (backend.overlap_scores(&engine, &corpus_device_tape_sequence, corpus.scores.data(),
+                sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+                if (backend.overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(),
                                            corpus.query_stride(), corpus.candidate_stride(),
                                            backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device-resident batch was refused");
@@ -736,15 +734,16 @@ inline void check_overlap_device_skewed_(std::mt19937 &generator, auto const &ba
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
         overlap_device_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
-        sz_sequence_t const query_sequence = corpus.query_sequence();
+        sz_strings_view_t const query_strings = corpus.query_strings();
         std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
+        // The lone-long batch carries more candidates than Metal's default round budget.
         sz_overlap_engine_t engine {};
-        if (sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0,
+        if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), lengths.size(),
                                    backend.runtime.capabilities, STRINGZILLA_NULL,
                                    backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        if (backend.overlap_scores(&engine, &corpus_device_tape_sequence, corpus.scores.data(), corpus.query_stride(),
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        if (backend.overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
                                    corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a skewed batch was refused");
         join_(backend.runtime, backend.runtime.stream);
@@ -760,43 +759,40 @@ inline void check_overlap_device_memory_safety_(std::mt19937 &generator, auto co
     std::array<sz_size_t, 2> const widths {4, 6};
     overlap_device_corpus_t corpus(backend.runtime, generator, 1, 8, 333, widths.size());
     std::fill(corpus.scores.begin(), corpus.scores.end(), -1.0f);
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0, backend.runtime.capabilities,
+    if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
                                STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
 
-    // The corpus's own views are unified, so a host-resident sequence needs its own plain storage.
+    // The corpus's own views are unified, so host-resident strings need their own plain storage.
     std::string text(64, '\0');
     randomize_string(generator, text);
     std::array<sz_string_view_t, 1> const host_views {sz_string_view_t {text.data(), text.size()}};
-    sz_sequence_t host_candidates {};
-    sz_sequence_from_string_views(host_views.data(), host_views.size(), &host_candidates);
+    sz_strings_view_t host_candidates {};
+    sz_strings_from_string_views(host_views.data(), host_views.size(), &host_candidates);
 
     std::vector<sz_f32_t> host_scores(corpus.scores.size(), -1.0f);
-    sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-    if (backend.overlap_scores(&engine, &corpus_device_tape_sequence, host_scores.data(), corpus.query_stride(),
+    sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+    if (backend.overlap_scores(&engine, &corpus_device_tape_strings, host_scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host scores were not refused");
     if (backend.overlap_scores(&engine, &host_candidates, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
-        fail_backend_(backend.name, "a host-resident sequence handle was not refused");
-    sz_sequence_t foreign = corpus_device_tape_sequence;
-    foreign.get_start = [](void const *, sz_size_t) -> sz_cptr_t { return nullptr; };
-    sz_status_t const accessor_status = backend.runtime.selected.kind() == sz::device_kind_t::metal_k
-                                            ? sz_device_code_mismatch_k
-                                            : sz_device_memory_mismatch_k;
-    verify(backend.overlap_scores(&engine, &foreign, corpus.scores.data(), corpus.query_stride(),
-                                  corpus.candidate_stride(), backend.runtime.stream) == accessor_status);
+        fail_backend_(backend.name, "host-resident candidates were not refused");
+    // An accessor is host code, so it is refused even over bytes the device reaches.
+    sz_strings_view_t resident_accessor;
+    sz_strings_from_string_views(corpus.views.data(), corpus.views.size(), &resident_accessor);
+    verify(backend.overlap_scores(&engine, &resident_accessor, corpus.scores.data(), corpus.query_stride(),
+                                  corpus.candidate_stride(), backend.runtime.stream) == sz_device_memory_mismatch_k);
     // Metal reserves per-candidate storage; CUDA and ROCm ignore this budget.
     if (backend.runtime.selected.kind() == sz::device_kind_t::metal_k) {
         sz_overlap_engine_t narrow {};
-        verify(sz_overlap_engine_init(&narrow, &query_sequence, widths.data(), widths.size(), corpus.views.size() - 1,
+        verify(sz_overlap_engine_init(&narrow, &query_strings, widths.data(), widths.size(), corpus.views.size() - 1,
                                       backend.runtime.capabilities, STRINGZILLA_NULL,
                                       backend.runtime.stream) == sz_success_k);
-        verify(backend.overlap_scores(&narrow, &corpus_device_tape_sequence, corpus.scores.data(),
-                                      corpus.query_stride(), corpus.candidate_stride(),
-                                      backend.runtime.stream) == sz_unexpected_dimensions_k);
+        verify(backend.overlap_scores(&narrow, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
+                                      corpus.candidate_stride(), backend.runtime.stream) == sz_unexpected_dimensions_k);
         sz_overlap_engine_free(&narrow, backend.runtime.stream);
     }
     join_(backend.runtime, backend.runtime.stream);
@@ -815,25 +811,25 @@ inline void check_overlap_device_width_safety_(std::mt19937 &generator, auto con
 
     // The one candidate is the query's own bytes in unified storage, so the text scores itself.
     overlap_device_corpus_t corpus(backend.runtime, generator, 1, 1, 256, widest.size());
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     corpus.arena.assign(corpus.queries.front().begin(), corpus.queries.front().end());
     corpus.views[0].start = corpus.arena.data(), corpus.views[0].length = corpus.arena.size();
     tape_t itself {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
     verify(itself.assign(corpus.views) == status_t::success_k);
 
     sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_sequence, past.data(), past.size(), 0, backend.runtime.capabilities,
+    if (sz_overlap_engine_init(&engine, &query_strings, past.data(), past.size(), 0, backend.runtime.capabilities,
                                STRINGZILLA_NULL, backend.runtime.stream) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "a width past the ring was not refused");
-    if (sz_overlap_engine_init(&engine, &query_sequence, too_many.data(), too_many.size(), 0,
+    if (sz_overlap_engine_init(&engine, &query_strings, too_many.data(), too_many.size(), 0,
                                backend.runtime.capabilities, STRINGZILLA_NULL,
                                backend.runtime.stream) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "more widths than the registers hold were not refused");
-    if (sz_overlap_engine_init(&engine, &query_sequence, widest.data(), widest.size(), 0, backend.runtime.capabilities,
+    if (sz_overlap_engine_init(&engine, &query_strings, widest.data(), widest.size(), 0, backend.runtime.capabilities,
                                STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "the widest window the ring holds was refused");
-    sz_sequence_t const itself_sequence = itself.sequence();
-    if (backend.overlap_scores(&engine, &itself_sequence, corpus.scores.data(), corpus.query_stride(),
+    sz_strings_view_t const itself_strings = itself.strings();
+    if (backend.overlap_scores(&engine, &itself_strings, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
@@ -845,7 +841,7 @@ inline void check_overlap_device_width_safety_(std::mt19937 &generator, auto con
 inline void check_overlap_device_streams_(std::mt19937 &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
     overlap_device_corpus_t corpus(backend.runtime, generator, 8, 4096, 777, widths.size());
-    sz_sequence_t const query_sequence = corpus.query_sequence();
+    sz_strings_view_t const query_strings = corpus.query_strings();
     std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus, {widths.data(), widths.size()});
     unified_vector<sz_f32_t> second(corpus.scores.size(), -1.0f,
                                     unified_alloc<sz_f32_t>(backend.runtime.unified, backend.runtime.stream));
@@ -853,14 +849,14 @@ inline void check_overlap_device_streams_(std::mt19937 &generator, auto const &b
     stream_t const second_stream(backend.runtime.selected.ordinal(), backend.runtime.init, backend.runtime.free);
 
     sz_overlap_engine_t engine {};
-    verify(sz_overlap_engine_init(&engine, &query_sequence, widths.data(), widths.size(), 0,
+    verify(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
                                   backend.runtime.capabilities, STRINGZILLA_NULL,
                                   backend.runtime.stream) == sz_success_k);
     try {
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(sz_overlap_scores(&engine, &corpus_device_tape_sequence, corpus.scores.data(), corpus.query_stride(),
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
                                  corpus.candidate_stride(), first_stream.handle) == sz_success_k);
-        verify(sz_overlap_scores(&engine, &corpus_device_tape_sequence, second.data(), corpus.query_stride(),
+        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, second.data(), corpus.query_stride(),
                                  corpus.candidate_stride(), second_stream.handle) == sz_success_k);
         join_(backend.runtime, first_stream.handle);
         join_(backend.runtime, second_stream.handle);
@@ -926,7 +922,7 @@ struct substrings_device_vocabulary_t {
     sz_allocator_t unified {};
 
     /** Host accessors, which is all the builder needs. */
-    sz_sequence_t needles() const { return sequence_from_(views); }
+    sz_strings_view_t needles() const { return strings_from_(views); }
 
     substrings_device_vocabulary_t(device_backend_t const &runtime, std::vector<std::string> const &strings)
         : arena(unified_alloc<char>(runtime.unified, runtime.stream)), views(strings.size()), unified(runtime.unified) {
@@ -963,7 +959,7 @@ struct substrings_device_engines_t {
                                 sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
                                 auto const &backend)
         : stream(backend.runtime.stream) {
-        sz_sequence_t const needles = vocabulary.needles();
+        sz_strings_view_t const needles = vocabulary.needles();
         try {
             verify(sz_substrings_engine_init_serial(&host, &needles, sensitivity, policy,
                                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, &heap.allocator,
@@ -989,7 +985,7 @@ struct substrings_device_engines_t {
 /** One match, ordered so two backends' reports compare as sequences rather than as multisets. */
 struct substrings_device_case_t {
 
-    /** Which haystack of the sequence this match was found in. */
+    /** Which haystack of the collection this match was found in. */
     sz_size_t haystack_index {};
 
     /** Which needle of the vocabulary matched. */
@@ -1026,7 +1022,7 @@ inline std::vector<substrings_device_case_t> substrings_device_matches_sorted_(s
 
 /** Every match the serial tier reports, sized from the report its own sizing call leaves. */
 inline std::vector<substrings_device_case_t> substrings_device_matches_serial_(sz_substrings_engine_t *engine,
-                                                                               sz_sequence_t const *haystacks) {
+                                                                               sz_strings_view_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
     verify(sz_substrings_find_serial(engine, haystacks, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
     std::vector<sz_substrings_match_t> matches(engine->report->matches_emitted);
@@ -1038,7 +1034,7 @@ inline std::vector<substrings_device_case_t> substrings_device_matches_serial_(s
 
 /** Every match the device tier reports, joined per call since no verb joins for the caller. */
 inline std::vector<substrings_device_case_t> device_matches_(auto const &backend, sz_substrings_engine_t *engine,
-                                                             sz_sequence_t const *haystacks) {
+                                                             sz_strings_view_t const *haystacks) {
     unified_vector<sz_size_t> offsets(haystacks->count + 1, 0,
                                       unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
     verify(backend.substrings_find(engine, haystacks, nullptr, 0, offsets.data(), backend.runtime.stream) ==
@@ -1103,11 +1099,11 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
                                   sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
                                   sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
     substrings_device_engines_t engines(vocabulary, sensitivity, policy, backend);
-    sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
+    sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
     std::vector<substrings_device_case_t> const expected = substrings_device_matches_serial_(
-        &engines.host, &corpus_device_tape_sequence);
+        &engines.host, &corpus_device_tape_strings);
     std::vector<substrings_device_case_t> const reported = device_matches_(backend, &engines.device,
-                                                                           &corpus_device_tape_sequence);
+                                                                           &corpus_device_tape_strings);
     sz_size_t const device_total = reported.size();
     if (fidelity == sz_substrings_cover_exact_k) {
         verify(reported.size() == expected.size());
@@ -1116,8 +1112,7 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     else {
         // Every match the overlapping walk found, which is what a cover may draw from.
         substrings_device_engines_t overlapping(vocabulary, sensitivity, sz_substrings_overlapping_k, backend);
-        verify_is_a_cover_(reported,
-                           substrings_device_matches_serial_(&overlapping.host, &corpus_device_tape_sequence));
+        verify_is_a_cover_(reported, substrings_device_matches_serial_(&overlapping.host, &corpus_device_tape_strings));
         overlapping.reset();
         verify(overlapping.heap.live_allocations == 0);
     }
@@ -1127,9 +1122,9 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     unified_vector<sz_size_t> device_counts(haystacks.size(), 0,
                                             unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
     std::vector<sz_size_t> serial_counts(haystacks.size(), 0);
-    verify(sz_substrings_counts_serial(&engines.host, &corpus_device_tape_sequence, serial_counts.data(), 1, nullptr) ==
+    verify(sz_substrings_counts_serial(&engines.host, &corpus_device_tape_strings, serial_counts.data(), 1, nullptr) ==
            sz_success_k);
-    verify(backend.substrings_counts(&engines.device, &corpus_device_tape_sequence, device_counts.data(), 1,
+    verify(backend.substrings_counts(&engines.device, &corpus_device_tape_strings, device_counts.data(), 1,
                                      backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     for (std::size_t index = 0; index != haystacks.size(); ++index)
@@ -1138,7 +1133,7 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     // The dispatched verb picks the same kernel by the engine's recorded capability, so both agree.
     unified_vector<sz_size_t> dispatched_counts(
         haystacks.size(), 0, unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-    verify(sz_substrings_counts(&engines.device, &corpus_device_tape_sequence, dispatched_counts.data(), 1,
+    verify(sz_substrings_counts(&engines.device, &corpus_device_tape_strings, dispatched_counts.data(), 1,
                                 backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     for (std::size_t index = 0; index != haystacks.size(); ++index)
@@ -1162,13 +1157,13 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     unified_vector<sz_size_t> device_offsets(haystacks.size() + 1, 0,
                                              unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
     std::vector<sz_size_t> serial_offsets(haystacks.size() + 1, 0);
-    sz_sequence_t const replacement_corpus_device_tape_sequence = replacement_corpus.device_tape.sequence();
-    verify(backend.substrings_replace(&engines.device, &corpus_device_tape_sequence,
-                                      &replacement_corpus_device_tape_sequence, nullptr, 0, device_offsets.data(),
+    sz_strings_view_t const replacement_corpus_device_tape_strings = replacement_corpus.device_tape.strings();
+    verify(backend.substrings_replace(&engines.device, &corpus_device_tape_strings,
+                                      &replacement_corpus_device_tape_strings, nullptr, 0, device_offsets.data(),
                                       backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
-    verify(sz_substrings_replace_serial(&engines.host, &corpus_device_tape_sequence,
-                                        &replacement_corpus_device_tape_sequence, nullptr, 0, serial_offsets.data(),
+    verify(sz_substrings_replace_serial(&engines.host, &corpus_device_tape_strings,
+                                        &replacement_corpus_device_tape_strings, nullptr, 0, serial_offsets.data(),
                                         nullptr) == sz_success_k);
     for (std::size_t index = 0; index != haystacks.size() + 1; ++index)
         verify(device_offsets[index] == serial_offsets[index]);
@@ -1176,14 +1171,14 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     sz_size_t const rewritten = serial_offsets[haystacks.size()];
     unified_vector<char> device_tape(rewritten, unified_alloc<char>(backend.runtime.unified, backend.runtime.stream));
     std::vector<char> serial_tape(rewritten);
-    verify(backend.substrings_replace(&engines.device, &corpus_device_tape_sequence,
-                                      &replacement_corpus_device_tape_sequence,
+    verify(backend.substrings_replace(&engines.device, &corpus_device_tape_strings,
+                                      &replacement_corpus_device_tape_strings,
                                       device_tape.empty() ? nullptr : device_tape.data(), rewritten,
                                       device_offsets.data(), backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     verify(engines.device.report->shortfall == 0);
-    verify(sz_substrings_replace_serial(&engines.host, &corpus_device_tape_sequence,
-                                        &replacement_corpus_device_tape_sequence,
+    verify(sz_substrings_replace_serial(&engines.host, &corpus_device_tape_strings,
+                                        &replacement_corpus_device_tape_strings,
                                         serial_tape.empty() ? nullptr : serial_tape.data(), rewritten,
                                         serial_offsets.data(), nullptr) == sz_success_k);
     for (std::size_t index = 0; index != rewritten; ++index) verify(device_tape[index] == serial_tape[index]);
@@ -1219,10 +1214,10 @@ inline void check_bm25_against_serial_(auto const &backend, substrings_device_co
         std::vector<sz_f32_t> serial_scores(haystacks.size(), -1);
         unified_vector<sz_f32_t> device_scores(
             haystacks.size(), -1, unified_alloc<sz_f32_t>(backend.runtime.unified, backend.runtime.stream));
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(sz_substrings_bm25_scores_serial(&engines.host, &corpus_device_tape_sequence, lengths, &parameters,
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(sz_substrings_bm25_scores_serial(&engines.host, &corpus_device_tape_strings, lengths, &parameters,
                                                 weights.data(), serial_scores.data(), 1, nullptr) == sz_success_k);
-        verify(backend.substrings_bm25_scores(&engines.device, &corpus_device_tape_sequence, lengths, &parameters,
+        verify(backend.substrings_bm25_scores(&engines.device, &corpus_device_tape_strings, lengths, &parameters,
                                               weights.data(), device_scores.data(), 1,
                                               backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
@@ -1389,8 +1384,8 @@ inline void test_substrings_device_safety(auto const &backend) {
     // else is resident.
     {
         std::vector<sz_size_t> host_counts(haystacks.size(), 0);
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_sequence, host_counts.data(), 1,
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_strings, host_counts.data(), 1,
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
     }
 
@@ -1398,8 +1393,8 @@ inline void test_substrings_device_safety(auto const &backend) {
     {
         unified_vector<sz_size_t> counts(haystacks.size(), STRINGZILLA_SIZE_MAX,
                                          unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_sequence, counts.data(), 0,
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_strings, counts.data(), 0,
                                          backend.runtime.stream) == sz_unexpected_dimensions_k);
         verify(counts[0] == STRINGZILLA_SIZE_MAX);
     }
@@ -1408,8 +1403,8 @@ inline void test_substrings_device_safety(auto const &backend) {
     {
         unified_vector<sz_size_t> counts(haystacks.size(), 0,
                                          unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_sequence, counts.data(), 1,
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(backend.substrings_counts(&engines.device, &corpus_device_tape_strings, counts.data(), 1,
                                          backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         verify(counts[0] == 4);
@@ -1420,8 +1415,8 @@ inline void test_substrings_device_safety(auto const &backend) {
     {
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, 0,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(backend.substrings_find(&engines.device, &corpus_device_tape_sequence, nullptr, 0, offsets.data(),
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(backend.substrings_find(&engines.device, &corpus_device_tape_strings, nullptr, 0, offsets.data(),
                                        backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         verify(engines.device.report->matches_emitted == 4);
@@ -1435,25 +1430,25 @@ inline void test_substrings_device_safety(auto const &backend) {
         substrings_device_corpus_t replacement_corpus(backend.runtime, replacements);
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, 0,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        sz_sequence_t const replacement_corpus_device_tape_sequence = replacement_corpus.device_tape.sequence();
-        verify(backend.substrings_replace(&engines.device, &corpus_device_tape_sequence,
-                                          &replacement_corpus_device_tape_sequence, nullptr, 0, offsets.data(),
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        sz_strings_view_t const replacement_corpus_device_tape_strings = replacement_corpus.device_tape.strings();
+        verify(backend.substrings_replace(&engines.device, &corpus_device_tape_strings,
+                                          &replacement_corpus_device_tape_strings, nullptr, 0, offsets.data(),
                                           backend.runtime.stream) == sz_status_unknown_k);
     }
 
     // A vocabulary a round cannot emit within its budget leaves every later kernel retired, so the
     // outputs keep whatever they held and the report alone says the round did not fit.
     {
-        sz_sequence_t const needles = vocabulary.needles();
+        sz_strings_view_t const needles = vocabulary.needles();
         sz_substrings_engine_t tiny {};
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
         verify(sz_substrings_engine_init(&tiny, &needles, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 1, 0, backend.runtime.capabilities,
                                          &vocabulary.unified, backend.runtime.stream) == sz_success_k);
-        sz_sequence_t const corpus_device_tape_sequence = corpus.device_tape.sequence();
-        verify(backend.substrings_find(&tiny, &corpus_device_tape_sequence, nullptr, 0, offsets.data(),
+        sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.strings();
+        verify(backend.substrings_find(&tiny, &corpus_device_tape_strings, nullptr, 0, offsets.data(),
                                        backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         verify(tiny.report->matches_emitted == 4 && tiny.report->shortfall == 3);
@@ -1465,15 +1460,15 @@ inline void test_substrings_device_safety(auto const &backend) {
     // is refused rather than grown under a stream that may still be reading it.
     {
         substrings_device_corpus_t pair(backend.runtime, std::vector<std::string> {"abcd", "abcd"});
-        sz_sequence_t const needles = vocabulary.needles();
+        sz_strings_view_t const needles = vocabulary.needles();
         sz_substrings_engine_t narrow {};
         unified_vector<sz_size_t> offsets(3, 0,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
         verify(sz_substrings_engine_init(&narrow, &needles, sz_substrings_cased_k, sz_substrings_overlapping_k,
                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 1, backend.runtime.capabilities,
                                          &vocabulary.unified, backend.runtime.stream) == sz_success_k);
-        sz_sequence_t const pair_device_tape_sequence = pair.device_tape.sequence();
-        verify(backend.substrings_find(&narrow, &pair_device_tape_sequence, nullptr, 0, offsets.data(),
+        sz_strings_view_t const pair_device_tape_strings = pair.device_tape.strings();
+        verify(backend.substrings_find(&narrow, &pair_device_tape_strings, nullptr, 0, offsets.data(),
                                        backend.runtime.stream) == sz_unexpected_dimensions_k);
         sz_substrings_engine_free(&narrow, backend.runtime.stream);
     }
@@ -1641,6 +1636,209 @@ inline void check_utf8_norm_device_safety_(test_context_t &context, auto const &
 
 #pragma endregion UTF8 Norm Checks
 
+#pragma region Strings Checks
+
+/** The same strings where a device reaches them, in both layouts a device verb reads: a tape of
+ *  32-bit offsets the host gathers into unified blocks, and a packed tape of 64-bit ones. */
+class strings_device_tapes_t {
+
+    /** Where the 32-bit tape's blocks come from and return to. */
+    sz_allocator_t unified_;
+
+    /** The 32-bit tape, gathered on the host into unified blocks. */
+    sz_strings_span_t narrow_ {};
+
+    /** The packed 64-bit tape. */
+    tape_t wide_;
+
+  public:
+    strings_device_tapes_t(device_backend_t const &runtime, std::vector<std::string> const &strings)
+        : unified_(runtime.unified), wide_(unified_alloc<char>(runtime.unified, runtime.stream)) {
+        sz_strings_view_t const host = strings_from_(strings);
+        verify(sz_strings_to_tape_best(&host, nullptr, host.count, &unified_, &narrow_, sz_cap_serial_k, nullptr) ==
+               sz_success_k);
+        verify(wide_.assign(strings.begin(), strings.end()) == status_t::success_k);
+    }
+    strings_device_tapes_t(strings_device_tapes_t const &) = delete;
+    strings_device_tapes_t &operator=(strings_device_tapes_t const &) = delete;
+    ~strings_device_tapes_t() noexcept { sz_strings_span_free(&narrow_, &unified_, nullptr); }
+
+    /** Both layouts, by name. */
+    std::array<named_strings_t, 2> all() const noexcept {
+        sz_strings_view_t narrow;
+        sz_strings_from_span(&narrow_, &narrow);
+        return {{{"a 32-bit tape", narrow}, {"a 64-bit tape", wide_.strings()}}};
+    }
+};
+
+/** Writes @p strings into unified rows of widths around a vector's from both device layouts, in
+ *  order and through @p order, demanding serial's bytes, stride gaps and longest length. */
+inline void check_strings_device_rows_(device_backend_t const &runtime, strings_backend_t const &kernels,
+                                       std::vector<std::string> const &strings,
+                                       unified_vector<sz_size_t> const &order) {
+    strings_layouts_t const host(strings);
+    sz_strings_view_t const host_view = host.u32_tape();
+    strings_device_tapes_t const tapes(runtime, strings);
+    sz_size_t const *const selections[] = {nullptr, order.data()};
+    for (named_strings_t const &layout : tapes.all())
+        for (sz_size_t const *selection : selections)
+            for (sz_size_t const width : {0, 1, 7, 33, 64}) {
+                sz_size_t const count = selection ? order.size() : strings.size(), stride = width + 3;
+                std::vector<char> expected(count * stride, '#');
+                unified_vector<char> written(count * stride, '#', unified_alloc<char>(runtime.unified, runtime.stream));
+                unified_vector<sz_size_t> written_longest(1, 0,
+                                                          unified_alloc<sz_size_t>(runtime.unified, runtime.stream));
+                sz_strings_rows_t const expected_rows {expected.data(), stride, width};
+                sz_strings_rows_t const written_rows {written.data(), stride, width};
+                sz_size_t expected_longest = 0;
+                verify(sz_strings_to_rows_serial(&host_view, selection, count, &expected_rows, &expected_longest,
+                                                 nullptr) == sz_success_k);
+                verify(kernels.to_rows(&layout.view, selection, count, &written_rows, written_longest.data(),
+                                       runtime.stream) == sz_success_k);
+                join_(runtime, runtime.stream);
+                if (!std::equal(expected.begin(), expected.end(), written.begin()) ||
+                    written_longest[0] != expected_longest)
+                    fail_backend_(kernels.name, fmt::format("rows {} wide from {} {} differ from serial", width,
+                                                            layout.name, selection ? "reordered" : "in order")
+                                                    .c_str());
+            }
+}
+
+/** Runs one verb of @p kernels and of serial over @p strings, the device reading both its layouts,
+ *  in order and through @p order, into a zeroed span and in place, demanding the same outcome. */
+inline void check_strings_device_verb_(device_backend_t const &runtime, strings_backend_t const &kernels,
+                                       strings_verb_t verb, std::vector<std::string> const &strings,
+                                       unified_vector<sz_size_t> const &order) {
+    sized_heap_t heap;
+    sz_allocator_t unified = runtime.unified;
+    strings_layouts_t const host(strings);
+    sz_strings_view_t const host_view = host.u32_tape();
+    strings_device_tapes_t const tapes(runtime, strings);
+    sz_size_t const *const selections[] = {nullptr, order.data()};
+    for (sz_size_t const *selection : selections) {
+        sz_size_t const count = selection ? order.size() : strings.size();
+        sz_strings_span_t reference {};
+        strings_outcome_t const expected = strings_outcome_(strings_serial_backend_(), verb, host_view, selection,
+                                                            count, &heap.allocator, reference);
+        sz_strings_span_free(&reference, &heap.allocator, nullptr);
+        auto const demand = [&](char const *layout, char const *span, strings_outcome_t const &outcome) {
+            if (outcome == expected) return;
+            fmt::println(stderr, "{} from {} {} into {}: {} instead of {}", strings_verb_name_(verb), layout,
+                         selection ? "reordered" : "in order", span, outcome, expected);
+            fail_backend_(kernels.name, "a device strings kernel disagreed with serial");
+        };
+
+        for (named_strings_t const &layout : tapes.all()) {
+            sz_strings_span_t fresh {};
+            demand(layout.name, "a zeroed span",
+                   strings_outcome_(kernels, verb, layout.view, selection, count, &unified, fresh, &runtime));
+            sz_strings_span_free(&fresh, &unified, runtime.stream);
+        }
+
+        sz_strings_span_t aliased {};
+        verify(sz_strings_to_tape_best(&host_view, nullptr, strings.size(), &unified, &aliased, sz_cap_serial_k,
+                                       nullptr) == sz_success_k);
+        sz_strings_view_t own;
+        sz_strings_from_span(&aliased, &own);
+        demand("the tape it writes", "itself",
+               strings_outcome_(kernels, verb, own, selection, count, &unified, aliased, &runtime));
+        sz_strings_span_free(&aliased, &unified, runtime.stream);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/**
+ *  @brief Holds one vendor's strings kernels to serial over device-resident tapes: gathering, a
+ *      lookup, rows, every escape kind both ways, and every normalization form.
+ *
+ *  The collections are empty, all empty strings past a block of 64, and random mixes of
+ *  escape-worthy bytes, letters and marks to normalize, empty strings and ill-formed UTF-8.
+ *  Unescaping reads both what serial escaped, which succeeds, and the raw strings, which are
+ *  malformed somewhere for most kinds.
+ */
+inline void check_strings_device_equivalence_(test_context_t &context, device_backend_t const &runtime,
+                                              strings_backend_t const &kernels) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> characters = alphabet_characters(
+        "aZ09 ,;&#%+~-._/<>'\"\\\n\r\t\x01\x1f\x7f\xC3\xA9\xE2\x82\xAC\xF0\x9F\x98\x80\xC2\x85\xE2\x80\xAE");
+    // Ill-formed bytes, then marks, a syllable, jamo, a ligature, a fraction and an ignorable.
+    for (char const *character :
+         {"\xFF", "\xC0", "\x80", "\xED\xA0", "\xCC\x81", "\xCC\x96", "\xC3\x9F", "\xEA\xB0\x80", "\xE1\x84\x80",
+          "\xE1\x85\xA1", "\xEF\xAC\x81", "\xC2\xBD", "\xE2\x84\xAB", "\xC2\xAD"})
+        characters.push_back(character);
+    characters.push_back(std::string(1, '\0'));
+
+    std::vector<std::vector<std::string>> collections {{}, std::vector<std::string>(70)};
+    std::uniform_int_distribution<std::size_t> count_distribution(1, 300), length_distribution(0, 40);
+    for (std::size_t iteration = 0; iteration != context.iterations(2); ++iteration) {
+        std::vector<std::string> strings(count_distribution(generator));
+        for (std::string &string : strings) {
+            std::size_t const length = length_distribution(generator);
+            string = random_string(generator, length == 40 ? 300 : length, characters);
+        }
+        collections.push_back(std::move(strings));
+    }
+
+    sized_heap_t heap;
+    for (std::vector<std::string> const &strings : collections) {
+        // Up to twice as many indices as strings, repeating some and skipping others, where the
+        // device reads them.
+        unified_vector<sz_size_t> order(unified_alloc<sz_size_t>(runtime.unified, runtime.stream));
+        if (!strings.empty()) {
+            order.resize(1 + generator() % (2 * strings.size()));
+            for (sz_size_t &index : order) index = generator() % strings.size();
+        }
+        check_strings_device_rows_(runtime, kernels, strings, order);
+        for (strings_verb_t const verb : strings_verbs_()) {
+            check_strings_device_verb_(runtime, kernels, verb, strings, order);
+            if (verb.kernel != sz_kernel_strings_unescape_k) continue;
+            strings_layouts_t const layouts(strings);
+            sz_strings_span_t escaped {};
+            verify(strings_outcome_(strings_serial_backend_(), {sz_kernel_strings_escape_k, verb.kind},
+                                    layouts.u32_tape(), nullptr, strings.size(), &heap.allocator, escaped)
+                       .status == sz_success_k);
+            check_strings_device_verb_(runtime, kernels, verb, strings_in_(escaped), order);
+            sz_strings_span_free(&escaped, &heap.allocator, nullptr);
+        }
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/** Every device verb refuses an accessor, host code even over bytes the device reaches, and an
+ *  output span whose blocks the device cannot reach, leaving that span as it was. */
+inline void check_strings_device_safety_(device_backend_t const &runtime, strings_backend_t const &kernels) {
+    std::vector<std::string> const strings {"kitten", "", "sitting"};
+    strings_device_tapes_t const tapes(runtime, strings);
+    sz_strings_view_t const accessor = strings_from_(strings);
+    sz_allocator_t unified = runtime.unified;
+    for (strings_verb_t const verb : strings_verbs_()) {
+        sz_strings_span_t untouched {};
+        verify(
+            strings_outcome_(kernels, verb, accessor, nullptr, strings.size(), &unified, untouched, &runtime).status ==
+            sz_device_memory_mismatch_k);
+        verify(untouched.count == 0);
+    }
+    unified_vector<char> rows_data(3 * 8, '#', unified_alloc<char>(runtime.unified, runtime.stream));
+    unified_vector<sz_size_t> longest(1, 0, unified_alloc<sz_size_t>(runtime.unified, runtime.stream));
+    sz_strings_rows_t const rows {rows_data.data(), 8, 8};
+    verify(kernels.to_rows(&accessor, nullptr, strings.size(), &rows, longest.data(), runtime.stream) ==
+           sz_device_memory_mismatch_k);
+
+    sized_heap_t heap;
+    std::vector<std::string> const reused {"a reused span", "", "of other sizes"};
+    sz_strings_span_t host_span = span_from_(reused, sz_strings_u32_tape_k, heap.allocator);
+    for (named_strings_t const &layout : tapes.all())
+        verify(kernels.to_tape(&layout.view, nullptr, strings.size(), &unified, &host_span, runtime.stream) ==
+               sz_device_memory_mismatch_k);
+    join_(runtime, runtime.stream);
+    verify(strings_in_(host_span) == reused);
+    verify(std::all_of(rows_data.begin(), rows_data.end(), [](char byte) { return byte == '#'; }));
+    sz_strings_span_free(&host_span, &heap.allocator, nullptr);
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+#pragma endregion Strings Checks
+
 #pragma region Drivers
 
 /** Registers the Levenshtein checks of one vendor's kernels, of one tier's, or of the dispatch
@@ -1686,6 +1884,15 @@ inline void check_device_substrings_(cross_section_t &check, auto const &backend
     check("test_substrings_safety_" + suffix, [&] { test_substrings_device_safety(backend); });
 }
 
+/** Registers the strings checks of one vendor's kernels in @p check, which no tier narrows. */
+inline void check_device_strings_(cross_section_t &check, device_backend_t const &runtime,
+                                  strings_backend_t const &kernels) {
+    std::string const suffix = kernels.name;
+    check("test_strings_equivalence_" + suffix,
+          [&](test_context_t &context) { check_strings_device_equivalence_(context, runtime, kernels); });
+    check("test_strings_safety_" + suffix, [&] { check_strings_device_safety_(runtime, kernels); });
+}
+
 /** Multi-state SHA-256 on the device against serial, with half the lanes carrying a buffered prefix
  *  from an earlier call, so the head, body and tail paths all run. */
 inline void check_sha256_multistate_device_equivalence_(test_context_t &context, auto const &backend) {
@@ -1719,8 +1926,8 @@ inline void check_sha256_multistate_device_equivalence_(test_context_t &context,
         states[lane] = expected[lane];
     }
 
-    sz_sequence_t const sequence = texts.sequence();
-    verify(backend.sha256_multistate_update(states.data(), &sequence, runtime.stream) == sz_success_k);
+    sz_strings_view_t const texts_strings = texts.strings();
+    verify(backend.sha256_multistate_update(states.data(), &texts_strings, runtime.stream) == sz_success_k);
     verify(backend.sha256_multistate_digest(states.data(), lanes_count, digests.data(), runtime.stream) ==
            sz_success_k);
     verify(sz_stream_synchronize_best(runtime.capabilities, runtime.stream) == sz_success_k);
@@ -1733,17 +1940,16 @@ inline void check_sha256_multistate_device_equivalence_(test_context_t &context,
            "Device multi-state SHA-256 disagreed with serial");
 }
 
-/** An empty batch is a no-op, and a sequence the device cannot address is refused, not read. */
+/** An empty tape is a no-op, and strings the device cannot address are refused, not read. */
 inline void check_sha256_multistate_device_safety_(auto const &backend) {
     sz_stream_t const stream = backend.runtime.stream;
-    sz_sequence_t empty {};
-    sz_sequence_from_string_views(nullptr, 0, &empty);
+    sz_strings_view_t const empty {};
     verify(backend.sha256_multistate_update(nullptr, &empty, stream) == sz_success_k);
     verify(backend.sha256_multistate_digest(nullptr, 0, nullptr, stream) == sz_success_k);
 
     std::array<sz_string_view_t, 2> const views {sz_string_view_t {"abc", 3}, {"", 0}};
-    sz_sequence_t host {};
-    sz_sequence_from_string_views(views.data(), views.size(), &host);
+    sz_strings_view_t host {};
+    sz_strings_from_string_views(views.data(), views.size(), &host);
     std::array<sz_sha256_state_t, 2> states {};
     std::array<sz_u8_t, 2 * STRINGZILLA_SHA256_DIGEST_LENGTH> digests {};
     verify(backend.sha256_multistate_update(states.data(), &host, stream) == sz_device_memory_mismatch_k);
@@ -1772,37 +1978,6 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
     }
 }
 
-/** A copy lands every string in one unified tape, and copying that tape again only re-points it. */
-inline void check_sequence_realloc_device_(auto const &backend) {
-    std::array<sz_string_view_t, 3> const views {sz_string_view_t {"kitten", 6}, {"", 0}, {"sitting", 7}};
-    sz_sequence_t host {};
-    sz_sequence_from_string_views(views.data(), views.size(), &host);
-    tape_t tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-    verify(tape.assign(host) == status_t::success_k);
-    verify(tape.allocation_bytes() == 4 * sizeof(sz_u64_t) + 13);
-    for (std::size_t index = 0; index != views.size(); ++index) {
-        auto const copied = tape[index];
-        verify(std::string_view(copied.data(), copied.size()) ==
-               std::string_view(views[index].start, views[index].length));
-    }
-    sz_sequence_t again {};
-    sz_size_t again_bytes = 1;
-    sz_sequence_t const tape_sequence = tape.sequence();
-    sz_allocator_t allocator = backend.runtime.unified;
-    verify(sz_sequence_realloc_best(&again, &tape_sequence, &allocator, &again_bytes, backend.runtime.capabilities,
-                                    backend.runtime.stream) == sz_success_k);
-    verify(again_bytes == 0 && again.handle == tape_sequence.handle && again.get_start == tape_sequence.get_start);
-    verify(tape.sequence().get_start == sz_sequence_tape_start);
-    verify(tape[2].size() == 7);
-    void const *const original = tape_sequence.handle;
-    verify(tape.assign(tape_sequence) == status_t::success_k);
-    verify(tape.sequence().handle != original);
-    tape_t independent {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-    verify(independent.assign(tape.sequence()) == status_t::success_k);
-    tape.reset();
-    verify(std::string_view(independent[2].data(), independent[2].size()) == "sitting");
-}
-
 /** The dispatching entry points, over the capabilities of the device the checks launch on, and the
  *  refusals and asynchrony only a dispatch point's engine init promises. */
 inline std::size_t test_cross_dispatch_device(environment_t const &env, device_backend_t const &runtime) {
@@ -1823,7 +1998,6 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
     check.detected = runtime.capabilities;
     check.section("Cross Dispatch", runtime.capabilities);
     check_device_kernels_(check, dispatched);
-    check("test_sequence_realloc_dispatched", [&] { check_sequence_realloc_device_(dispatched); });
     check("test_levenshtein_threads_dispatched", [&] { check_levenshtein_device_threads_(dispatched); });
     check("test_levenshtein_deferred_free_dispatched", [&] { check_levenshtein_device_deferred_free_(dispatched); });
     check("test_overlap_streams_dispatched",

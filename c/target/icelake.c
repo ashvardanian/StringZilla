@@ -10,7 +10,7 @@
 #define STRINGZILLA_TARGET_WESTMERE 0
 #include "stringzilla/stringzilla.h"
 
-#include "stringzilla/memory/icelake.h"
+#include "stringzilla/strings/icelake.h"
 #include "stringzilla/hash/icelake.h"
 #include "stringzilla/cipher/icelake.h"
 #include "stringzilla/find/icelake.h"

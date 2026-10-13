@@ -10,7 +10,7 @@
 #define STRINGZILLA_INTERSECT_WESTMERE_H_
 
 #include "stringzilla/types.h"
-#include "stringzilla/intersect/serial.h" // `sz_sequence_intersect_serial_`
+#include "stringzilla/intersect/serial.h" // `sz_intersect_serial_`
 #include "stringzilla/hash/westmere.h"    // `sz_hash_westmere_`
 
 #ifdef __cplusplus
@@ -29,13 +29,13 @@ extern "C" {
 #pragma GCC target("sse4.2", "aes")
 #endif
 
-STRINGZILLA_API sz_status_t sz_sequence_intersect_westmere(                    //
-    sz_sequence_t const *first_sequence, sz_sequence_t const *second_sequence, //
-    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,   //
-    sz_sorted_idx_t *first_positions, sz_sorted_idx_t *second_positions, sz_stream_t stream) {
+STRINGZILLA_API sz_status_t sz_intersect_westmere(                                   //
+    sz_strings_view_t const *first_strings, sz_strings_view_t const *second_strings, //
+    sz_allocator_t *allocator, sz_u64_t seed, sz_size_t *intersection_count,         //
+    sz_size_t *first_positions, sz_size_t *second_positions, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    return sz_sequence_intersect_serial_(first_sequence, second_sequence, allocator, seed, intersection_count,
-                                         first_positions, second_positions, sz_hash_westmere_);
+    return sz_intersect_serial_(first_strings, second_strings, allocator, seed, intersection_count, first_positions,
+                                second_positions, sz_hash_westmere_);
 }
 
 #if defined(__clang__)

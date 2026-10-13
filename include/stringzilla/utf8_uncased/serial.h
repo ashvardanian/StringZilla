@@ -1639,7 +1639,7 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_uncased_search_serial_( //
         if (!sz_utf8_folded_iter_next_(&haystack_iter, &rune)) break;
         window_runes[window_count] = rune;
         // Update source and skip only when starting a new character (not mid-expansion)
-        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
+        if (haystack_iter.pending_index <= 1 || haystack_iter.pending_count == 0) {
             current_source = pre_advance_cursor;
             current_skip = 0;
         }
@@ -1648,8 +1648,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_uncased_search_serial_( //
         window_hash = window_hash * 257 + rune;
         window_count++;
         // For next rune from same expansion, increment skip
-        if (haystack_iter.pending_idx > 0 && haystack_iter.pending_idx < haystack_iter.pending_count)
-            current_skip = haystack_iter.pending_idx;
+        if (haystack_iter.pending_index > 0 && haystack_iter.pending_index < haystack_iter.pending_count)
+            current_skip = haystack_iter.pending_index;
     }
     if (window_count < needle_prefix_count) {
         *match_length = 0;
@@ -1719,15 +1719,15 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_utf8_uncased_search_serial_( //
 
         window_runes[ring_head] = new_rune;
         // Update source and skip only when starting a new character (not mid-expansion)
-        if (haystack_iter.pending_idx <= 1 || haystack_iter.pending_count == 0) {
+        if (haystack_iter.pending_index <= 1 || haystack_iter.pending_count == 0) {
             current_source = pre_advance_cursor;
             current_skip = 0;
         }
         window_sources[ring_head] = current_source;
         window_skip_counts[ring_head] = current_skip;
         // For next rune from same expansion, increment skip
-        if (haystack_iter.pending_idx > 0 && haystack_iter.pending_idx < haystack_iter.pending_count)
-            current_skip = haystack_iter.pending_idx;
+        if (haystack_iter.pending_index > 0 && haystack_iter.pending_index < haystack_iter.pending_count)
+            current_skip = haystack_iter.pending_index;
 
         ring_head = next_head;
         window_start = window_sources[ring_head];

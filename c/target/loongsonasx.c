@@ -7,7 +7,7 @@
 #include "stringzilla/stringzilla.h"
 
 #include "stringzilla/compare/loongsonasx.h"
-#include "stringzilla/memory/loongsonasx.h"
+#include "stringzilla/strings/loongsonasx.h"
 #include "stringzilla/hash/loongsonasx.h"
 #include "stringzilla/find/loongsonasx.h"
 #include "stringzilla/substrings/loongsonasx.h"

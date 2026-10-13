@@ -35,7 +35,8 @@ extern "C" {
 STRINGZILLA_API sz_status_t sz_utf8_norm_v128relaxed(sz_cptr_t source, sz_size_t source_length, sz_normal_form_t form,
                                                      sz_ptr_t target, sz_size_t *target_length, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_v128_);
+    *target_length = sz_utf8_norm_engine_(source, source_length, form, target, &sz_utf8_norm_classify_v128_,
+                                          &sz_utf8_uncased_fold_v128_);
     return sz_success_k;
 }
 
@@ -43,7 +44,8 @@ STRINGZILLA_API sz_status_t sz_utf8_find_denormalized_v128relaxed(sz_cptr_t sour
                                                                   sz_normal_form_t form, sz_cptr_t *match,
                                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_v128_);
+    *match = sz_utf8_find_denormalized_engine_(source, source_length, form, &sz_utf8_norm_classify_v128_,
+                                               &sz_utf8_uncased_fold_v128_);
     return sz_success_k;
 }
 

@@ -2,19 +2,45 @@
  *  @file python/stringzilla/utf8_norm.c
  *  @author Ash Vardanian
  *  @date June 15, 2026
- *  @brief Unicode normalization of UTF-8 text — NFC, NFD, NFKC, and NFKD.
+ *  @brief Unicode normalization of UTF-8 text — NFC, NFD, NFKC, NFKD and NFKC_Casefold.
  */
 #include "stringzilla.h"
+
+int sz_py_export_normal_form(PyObject *form_object, char const *context, sz_normal_form_t *form) {
+    static struct {
+        char const *name;
+        sz_normal_form_t form;
+    } const forms[] = {
+        {"NFC", sz_normal_form_nfc_k},
+        {"NFD", sz_normal_form_nfd_k},
+        {"NFKC", sz_normal_form_nfkc_k},
+        {"NFKD", sz_normal_form_nfkd_k},
+        {"NFKC_Casefold", sz_normal_form_nfkc_casefold_k},
+    };
+    if (!PyUnicode_Check(form_object)) {
+        PyErr_Format(PyExc_TypeError, "%s argument 'form' must be a string", context);
+        return -1;
+    }
+    for (sz_size_t index = 0; index != sizeof(forms) / sizeof(forms[0]); ++index)
+        if (PyUnicode_CompareWithASCIIString(form_object, forms[index].name) == 0) {
+            *form = forms[index].form;
+            return 0;
+        }
+    PyErr_Format(PyExc_ValueError, "%s unknown form '%U': expected 'NFC', 'NFD', 'NFKC', 'NFKD', or 'NFKC_Casefold'",
+                 context, form_object);
+    return -1;
+}
 
 char const doc_utf8_norm[] =                                                                             //
     "Normalize a UTF-8 string to a Unicode normalization form.\n"                                        //
     "\n"                                                                                                 //
-    "Transforms the input into NFD, NFC, NFKD, or NFKC, mirroring\n"                                     //
-    "`unicodedata.normalize` but returning raw UTF-8 bytes.\n"                                           //
+    "Transforms the input into NFD, NFC, NFKD, or NFKC, mirroring `unicodedata.normalize` but\n"         //
+    "returning raw UTF-8 bytes, or into NFKC_Casefold, the Unicode toNFKC_Casefold: NFKC with full\n"    //
+    "case folding and no default-ignorable codepoints.\n"                                                //
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
     "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
-    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                             //
+    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.\n"                            //
     "    validate (bool): If True, validate UTF-8 before processing. Default: False.\n"                  //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
@@ -25,7 +51,9 @@ char const doc_utf8_norm[] =                                                    
     "    >>> sz.utf8_norm('caf\\u00e9', 'NFD')  # decompose\n"                                           //
     "    b'cafe\\xcc\\x81'\n"                                                                            //
     "    >>> sz.utf8_norm('\\ufb01', 'NFKD')  # fi ligature\n"                                           //
-    "    b'fi'";
+    "    b'fi'\n"                                                                                        //
+    "    >>> sz.utf8_norm('Stra\\u00dfe\\u00ad', 'NFKC_Casefold')  # folded, soft hyphen dropped\n"      //
+    "    b'strasse'";
 
 PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t positional_args_count,
                              PyObject *args_names_tuple) {
@@ -79,23 +107,8 @@ PyObject *Str_like_utf8_norm(PyObject *self, PyObject *const *args, Py_ssize_t p
     sz_capability_t capabilities;
     if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
-    // Parse the `form` string into sz_normal_form_t
     sz_normal_form_t form;
-    Py_ssize_t form_len = 0;
-    char const *form_str = PyUnicode_AsUTF8AndSize(form_obj, &form_len);
-    if (!form_str) {
-        PyErr_SetString(PyExc_TypeError, "utf8_norm() argument 'form' must be a string");
-        return NULL;
-    }
-    if (strncmp(form_str, "NFD", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfd_k; }
-    else if (strncmp(form_str, "NFC", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfc_k; }
-    else if (strncmp(form_str, "NFKD", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkd_k; }
-    else if (strncmp(form_str, "NFKC", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkc_k; }
-    else {
-        PyErr_Format(PyExc_ValueError, "utf8_norm() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'",
-                     form_str);
-        return NULL;
-    }
+    if (sz_py_export_normal_form(form_obj, "utf8_norm()", &form) != 0) return NULL;
 
     PyObject *str_obj = is_member ? self : args[0];
 
@@ -149,7 +162,7 @@ char const doc_utf8_find_denormalized[] =                                       
     "\n"                                                                                                 //
     "Args:\n"                                                                                            //
     "    text (Str or str or bytes): The input UTF-8 string.\n"                                          //
-    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD'.\n"                                             //
+    "    form (str): One of 'NFC', 'NFD', 'NFKC', 'NFKD', 'NFKC_Casefold'.\n"                            //
     "    capabilities (Capability, optional): Capabilities to run, by default the CPU's enabled ones.\n" //
     "\n"                                                                                                 //
     "Returns:\n"                                                                                         //
@@ -205,23 +218,8 @@ PyObject *Str_like_utf8_find_denormalized(PyObject *self, PyObject *const *args,
     sz_capability_t capabilities;
     if (sz_py_export_capabilities(capabilities_object, &capabilities) != 0) return NULL;
 
-    // Parse the `form` string into sz_normal_form_t
     sz_normal_form_t form;
-    Py_ssize_t form_len = 0;
-    char const *form_str = PyUnicode_AsUTF8AndSize(form_obj, &form_len);
-    if (!form_str) {
-        PyErr_SetString(PyExc_TypeError, "utf8_find_denormalized() argument 'form' must be a string");
-        return NULL;
-    }
-    if (strncmp(form_str, "NFD", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfd_k; }
-    else if (strncmp(form_str, "NFC", (sz_size_t)form_len) == 0 && form_len == 3) { form = sz_normal_form_nfc_k; }
-    else if (strncmp(form_str, "NFKD", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkd_k; }
-    else if (strncmp(form_str, "NFKC", (sz_size_t)form_len) == 0 && form_len == 4) { form = sz_normal_form_nfkc_k; }
-    else {
-        PyErr_Format(PyExc_ValueError,
-                     "utf8_find_denormalized() unknown form '%s': expected 'NFC', 'NFD', 'NFKC', or 'NFKD'", form_str);
-        return NULL;
-    }
+    if (sz_py_export_normal_form(form_obj, "utf8_find_denormalized()", &form) != 0) return NULL;
 
     PyObject *str_obj = is_member ? self : args[0];
 

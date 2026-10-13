@@ -38,7 +38,7 @@ constant uint sz_levenshtein_gpu_warp_lanes_metal_k = 32;
 struct sz_levenshtein_arguments_metal_t {
     ulong engine_host;
     ulong masks, masks_offsets, symbol_to_class, lengths, order;
-    ulong candidates_count, distances_stride;
+    ulong candidates_count, distances_stride, candidates_layout;
 };
 
 /** One prepared query, as @c sz_levenshtein_engine_row_ materializes it. */
@@ -120,18 +120,19 @@ inline void sz_levenshtein_step_metal_(thread ulong *positive, thread ulong *neg
  *  the thread's registers, as @c sz_levenshtein_sweep_simt_ runs on CUDA. */
 template <uint words_, bool runes_>
 kernel void sz_levenshtein_threaded_metal_kernel_(device uchar *engine [[buffer(0)]],
-                                                  device ulong const *candidates [[buffer(1)]],
-                                                  device ulong *distances [[buffer(2)]],
-                                                  constant sz_levenshtein_arguments_metal_t &arguments [[buffer(3)]],
+                                                  device uchar const *candidates [[buffer(1)]],
+                                                  device uchar const *candidates_offsets [[buffer(2)]],
+                                                  device ulong *distances [[buffer(3)]],
+                                                  constant sz_levenshtein_arguments_metal_t &arguments [[buffer(4)]],
                                                   uint2 position [[thread_position_in_grid]]) {
     ulong const candidate = position.x;
     if (candidate >= arguments.candidates_count) return;
     device uint const *order = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.order);
     ulong const query_index = order[position.y];
     sz_levenshtein_query_metal_t const query = sz_levenshtein_row_metal_<runes_>(engine, arguments, query_index);
-    sz_sequence_tape_metal_t const tape = {candidates};
-    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
-    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
+    device uchar const *text = sz_strings_start_metal_(tape, candidate);
+    ulong const text_length = sz_strings_length_metal_(tape, candidate);
 
     ulong positive[words_], negative[words_];
     for (uint word = 0; word != words_; ++word) positive[word] = ~0ul, negative[word] = 0;
@@ -167,19 +168,20 @@ kernel void sz_levenshtein_threaded_metal_kernel_(device uchar *engine [[buffer(
  */
 template <uint words_per_lane_, bool runes_>
 kernel void sz_levenshtein_warped_metal_kernel_(
-    device uchar *engine [[buffer(0)]], device ulong const *candidates [[buffer(1)]],
-    device ulong *distances [[buffer(2)]], constant sz_levenshtein_arguments_metal_t &arguments [[buffer(3)]],
-    uint2 group [[threadgroup_position_in_grid]], uint simdgroup [[simdgroup_index_in_threadgroup]],
-    uint simdgroups [[simdgroups_per_threadgroup]], uint lane [[thread_index_in_simdgroup]]) {
+    device uchar *engine [[buffer(0)]], device uchar const *candidates [[buffer(1)]],
+    device uchar const *candidates_offsets [[buffer(2)]], device ulong *distances [[buffer(3)]],
+    constant sz_levenshtein_arguments_metal_t &arguments [[buffer(4)]], uint2 group [[threadgroup_position_in_grid]],
+    uint simdgroup [[simdgroup_index_in_threadgroup]], uint simdgroups [[simdgroups_per_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]) {
     ulong const candidate = (ulong)group.x * simdgroups + simdgroup;
     // Simdgroup uniform, so the shuffles below still see every lane.
     if (candidate >= arguments.candidates_count) return;
     device uint const *order = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.order);
     ulong const query_index = order[group.y];
     sz_levenshtein_query_metal_t const query = sz_levenshtein_row_metal_<runes_>(engine, arguments, query_index);
-    sz_sequence_tape_metal_t const tape = {candidates};
-    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
-    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
+    device uchar const *text = sz_strings_start_metal_(tape, candidate);
+    ulong const text_length = sz_strings_length_metal_(tape, candidate);
     ulong const words = sz_size_divide_round_up_metal_<ulong>(query.length, 64);
     ulong const live_lanes = sz_size_divide_round_up_metal_<ulong>(words, words_per_lane_);
     ulong const first_word = (ulong)lane * words_per_lane_;
@@ -258,145 +260,153 @@ kernel void sz_levenshtein_warped_metal_kernel_(
 /*  One threaded entry point per word count below the warped rung, over bytes then runes, named as
  *  the host's tables spell it. */
 template [[host_name("sz_levenshtein_distances_w1_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<1, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<1, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w2_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<2, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<2, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w3_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<3, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<3, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w4_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<4, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<4, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w5_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<5, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<5, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w6_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<6, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<6, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w7_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<7, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<7, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w8_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<8, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<8, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w9_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<9, false>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<9, false>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w10_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<10, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<10, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w11_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<11, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<11, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w12_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<12, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<12, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w13_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<13, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<13, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w14_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<14, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<14, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_w15_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<15, false>(device uchar *, device ulong const *, device ulong *,
-                                                 constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<15, false>(device uchar *, device uchar const *, device uchar const *,
+                                                 device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w1_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<1, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<1, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w2_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<2, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<2, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w3_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<3, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<3, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w4_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<4, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<4, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w5_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<5, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<5, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w6_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<6, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<6, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w7_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<7, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<7, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w8_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<8, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<8, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w9_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<9, true>(device uchar *, device ulong const *, device ulong *,
-                                               constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<9, true>(device uchar *, device uchar const *, device uchar const *,
+                                               device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w10_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<10, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<10, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w11_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<11, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<11, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w12_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<12, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<12, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w13_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<13, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<13, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w14_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<14, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<14, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_distances_utf8_w15_metal_kernel_")]] kernel void
-sz_levenshtein_threaded_metal_kernel_<15, true>(device uchar *, device ulong const *, device ulong *,
-                                                constant sz_levenshtein_arguments_metal_t &, uint2);
+sz_levenshtein_threaded_metal_kernel_<15, true>(device uchar *, device uchar const *, device uchar const *,
+                                                device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2);
 
 /*  One warped entry point per words-per-lane above the crossing, over bytes then runes, named as
  *  the host's tables spell it. */
 template [[host_name("sz_levenshtein_distances_k1_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<1, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<1, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k2_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<2, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<2, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k3_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<3, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<3, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k4_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<4, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<4, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k5_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<5, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<5, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k6_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<6, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<6, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k7_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<7, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<7, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_k8_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<8, false>(device uchar *, device ulong const *, device ulong *,
-                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
+sz_levenshtein_warped_metal_kernel_<8, false>(device uchar *, device uchar const *, device uchar const *,
+                                              device ulong *, constant sz_levenshtein_arguments_metal_t &, uint2, uint,
+                                              uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k1_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<1, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<1, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k2_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<2, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<2, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k3_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<3, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<3, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k4_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<4, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<4, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k5_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<5, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<5, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k6_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<6, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<6, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k7_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<7, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<7, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 template [[host_name("sz_levenshtein_distances_utf8_k8_metal_kernel_")]] kernel void
-sz_levenshtein_warped_metal_kernel_<8, true>(device uchar *, device ulong const *, device ulong *,
+sz_levenshtein_warped_metal_kernel_<8, true>(device uchar *, device uchar const *, device uchar const *, device ulong *,
                                              constant sz_levenshtein_arguments_metal_t &, uint2, uint, uint, uint);
 
 struct sz_levenshtein_long_arguments_metal_t {
@@ -408,11 +418,12 @@ struct sz_levenshtein_long_arguments_metal_t {
 
 template <bool runes_>
 kernel void sz_levenshtein_long_metal_kernel_(device uchar *engine [[buffer(0)]],
-                                              device ulong const *candidates [[buffer(1)]],
-                                              device ulong *distances [[buffer(2)]],
-                                              device ulong *scratch [[buffer(3)]],
-                                              device ulong const *candidate_order [[buffer(4)]],
-                                              constant sz_levenshtein_long_arguments_metal_t &arguments [[buffer(5)]],
+                                              device uchar const *candidates [[buffer(1)]],
+                                              device uchar const *candidates_offsets [[buffer(2)]],
+                                              device ulong *distances [[buffer(3)]],
+                                              device ulong *scratch [[buffer(4)]],
+                                              device ulong const *candidate_order [[buffer(5)]],
+                                              constant sz_levenshtein_long_arguments_metal_t &arguments [[buffer(6)]],
                                               uint2 position [[thread_position_in_grid]]) {
     if (position.x >= arguments.candidate_count) return;
     device uint const *const order = sz_reach_metal_<uint>(engine, arguments.common.engine_host,
@@ -421,9 +432,9 @@ kernel void sz_levenshtein_long_metal_kernel_(device uchar *engine [[buffer(0)]]
     ulong const candidate = candidate_order[arguments.candidate_first + position.x];
     sz_levenshtein_query_metal_t const query = sz_levenshtein_row_metal_<runes_>(engine, arguments.common, query_index);
     ulong const words = (query.length + 63) / 64;
-    sz_sequence_tape_metal_t const tape = {candidates};
-    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
-    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.common.candidates_layout};
+    device uchar const *text = sz_strings_start_metal_(tape, candidate);
+    ulong const text_length = sz_strings_length_metal_(tape, candidate);
     ulong score = query.length;
     if (!words) {
         if (runes_) {
@@ -469,10 +480,10 @@ kernel void sz_levenshtein_long_metal_kernel_(device uchar *engine [[buffer(0)]]
 }
 
 template [[host_name("sz_levenshtein_long_metal_kernel_")]] kernel void sz_levenshtein_long_metal_kernel_<false>(
-    device uchar *, device ulong const *, device ulong *, device ulong *, device ulong const *,
+    device uchar *, device uchar const *, device uchar const *, device ulong *, device ulong *, device ulong const *,
     constant sz_levenshtein_long_arguments_metal_t &, uint2);
 template [[host_name("sz_levenshtein_long_utf8_metal_kernel_")]] kernel void sz_levenshtein_long_metal_kernel_<true>(
-    device uchar *, device ulong const *, device ulong *, device ulong *, device ulong const *,
+    device uchar *, device uchar const *, device uchar const *, device ulong *, device ulong *, device ulong const *,
     constant sz_levenshtein_long_arguments_metal_t &, uint2);
 
 struct sz_levenshtein_tiled_arguments_metal_t {
@@ -489,14 +500,12 @@ inline uint4 sz_levenshtein_edge_load_metal_(device uchar const *edge, uint lane
 }
 
 template <bool ordered_>
-kernel void sz_levenshtein_tiled_metal_kernel_(device uchar *engine [[buffer(0)]],
-                                               device ulong const *candidates [[buffer(1)]],
-                                               device ulong *distances [[buffer(2)]],
-                                               device uchar *workspace [[buffer(3)]],
-                                               device ulong const *candidate_order [[buffer(4)]],
-                                               constant sz_levenshtein_long_arguments_metal_t &batch [[buffer(5)]],
-                                               uint2 group [[threadgroup_position_in_grid]],
-                                               uint lane [[thread_index_in_threadgroup]]) {
+kernel void sz_levenshtein_tiled_metal_kernel_(
+    device uchar *engine [[buffer(0)]], device uchar const *candidates [[buffer(1)]],
+    device uchar const *candidates_offsets [[buffer(2)]], device ulong *distances [[buffer(3)]],
+    device uchar *workspace [[buffer(4)]], device ulong const *candidate_order [[buffer(5)]],
+    constant sz_levenshtein_long_arguments_metal_t &batch [[buffer(6)]], uint2 group [[threadgroup_position_in_grid]],
+    uint lane [[thread_index_in_threadgroup]]) {
     ulong const pair = group.y;
     device uint const *const order = sz_reach_metal_<uint>(engine, batch.common.engine_host, batch.common.order);
     ulong const query_index = ordered_ ? order[pair / batch.candidate_count]
@@ -505,12 +514,12 @@ kernel void sz_levenshtein_tiled_metal_kernel_(device uchar *engine [[buffer(0)]
     ulong const candidate = ordered_ ? candidate_order[candidate_position] : candidate_position;
     device uint const *lengths = sz_reach_metal_<uint>(engine, batch.common.engine_host, batch.common.lengths);
     uint const query_length = lengths[query_index];
-    sz_sequence_tape_metal_t const tape = {candidates};
-    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, batch.common.candidates_layout};
+    ulong const text_length = sz_strings_length_metal_(tape, candidate);
     if (query_length <= 16384 || text_length <= 16384 || text_length > 0xFFFFFF00ul) return;
     device ulong const *offsets = (device ulong const *)(engine + batch.query_offsets);
     device uchar const *query_text = engine + batch.query_text + offsets[query_index];
-    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
+    device uchar const *text = sz_strings_start_metal_(tape, candidate);
     bool const query_shorter = query_length <= text_length;
     device uchar const *shorter = query_shorter ? query_text : text;
     device uchar const *longer = query_shorter ? text : query_text;
@@ -610,9 +619,9 @@ kernel void sz_levenshtein_tiled_metal_kernel_(device uchar *engine [[buffer(0)]
     }
 }
 template [[host_name("sz_levenshtein_tiled_metal_kernel_")]] kernel void sz_levenshtein_tiled_metal_kernel_<true>(
-    device uchar *, device ulong const *, device ulong *, device uchar *, device ulong const *,
+    device uchar *, device uchar const *, device uchar const *, device ulong *, device uchar *, device ulong const *,
     constant sz_levenshtein_long_arguments_metal_t &, uint2, uint);
 template [[host_name("sz_levenshtein_tiled_identity_metal_kernel_")]] kernel void
-sz_levenshtein_tiled_metal_kernel_<false>(device uchar *, device ulong const *, device ulong *, device uchar *,
-                                          device ulong const *, constant sz_levenshtein_long_arguments_metal_t &, uint2,
-                                          uint);
+sz_levenshtein_tiled_metal_kernel_<false>(device uchar *, device uchar const *, device uchar const *, device ulong *,
+                                          device uchar *, device ulong const *,
+                                          constant sz_levenshtein_long_arguments_metal_t &, uint2, uint);

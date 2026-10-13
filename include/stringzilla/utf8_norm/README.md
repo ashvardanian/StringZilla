@@ -1,6 +1,6 @@
 # Norm: UTF-8 Unicode Normalization
 
-This directory holds the kernels behind `sz_utf8_norm_best` and `sz_utf8_find_denormalized_best`, which bring UTF-8 text into a UAX-15 normalization form — NFC, NFD, NFKC, or NFKD.
+This directory holds the kernels behind `sz_utf8_norm_best` and `sz_utf8_find_denormalized_best`, which bring UTF-8 text into a UAX-15 normalization form — NFC, NFD, NFKC, or NFKD — or into the UAX-44 NFKC_Casefold that caseless matching keys on.
 Normalization reorders combining marks and composes or decomposes characters so that strings that look the same compare equal byte for byte.
 The companion quick-check scan finds the first character that breaks the requested form, so callers can skip the rewrite when a string is already normalized.
 Every operation has a serial baseline plus per-ISA SIMD backends, and each `_best` dispatch point runs the best kernel among the capabilities its caller passes.

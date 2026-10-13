@@ -119,9 +119,10 @@ int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, P
  *  sets a Python exception and returns 0. */
 sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
     if (PyUnicode_Check(object)) {
-        // Handle Python `str` object
+        // Handle Python `str` object, which a lone surrogate keeps from encoding
         Py_ssize_t signed_length;
         *start = PyUnicode_AsUTF8AndSize(object, &signed_length);
+        if (!*start) return 0;
         *length = (sz_size_t)signed_length;
         return 1;
     }

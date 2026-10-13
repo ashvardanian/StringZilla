@@ -336,13 +336,15 @@ def icu_unicode_at_least(version: str) -> bool:
 
 
 def icu_normalizer(form: str) -> Callable[[str], str]:
-    """Return an ICU `Normalizer2`-backed normalizer `text -> str` for NFC/NFD/NFKC/NFKD. Skips without PyICU."""
+    """Return an ICU `Normalizer2`-backed normalizer `text -> str` for NFC/NFD/NFKC/NFKD/NFKC_Casefold. Skips
+    without PyICU."""
     icu = pytest.importorskip("icu", reason="PyICU not installed")
     getters = {
         "NFC": icu.Normalizer2.getNFCInstance,
         "NFD": icu.Normalizer2.getNFDInstance,
         "NFKC": icu.Normalizer2.getNFKCInstance,
         "NFKD": icu.Normalizer2.getNFKDInstance,
+        "NFKC_Casefold": icu.Normalizer2.getNFKCCasefoldInstance,
     }
     normalizer = getters[form]()
     return lambda text: normalizer.normalize(text)

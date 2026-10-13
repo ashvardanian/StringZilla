@@ -199,29 +199,27 @@ struct levenshtein_simt_corpus_t {
 
     std::size_t bytes(levenshtein_simt_order_t order) const {
         std::size_t total = 0;
-        sz_sequence_t const candidates = host_candidates(order);
-        for (sz_size_t index = 0; index != candidates.count; ++index)
-            total += candidates.get_length(candidates.handle, index);
+        for (sz_string_view_t const &view : host_candidate_views(order)) total += view.length;
         return total;
     }
 
-    /** The device accessors over one ordering of the texts. */
-    sz_sequence_t device_candidates(levenshtein_simt_order_t order) const {
-        return order == levenshtein_simt_order_t::sorted_k   ? sorted_tape.sequence()
-               : order == levenshtein_simt_order_t::skewed_k ? skewed_tape.sequence()
-                                                             : shuffled_tape.sequence();
+    /** The device tape of one ordering of the texts. */
+    sz_strings_view_t device_candidates(levenshtein_simt_order_t order) const {
+        return order == levenshtein_simt_order_t::sorted_k   ? sorted_tape.strings()
+               : order == levenshtein_simt_order_t::skewed_k ? skewed_tape.strings()
+                                                             : shuffled_tape.strings();
     }
 
-    /** The host accessors over one ordering of the texts. */
+    /** The host views of one ordering of the texts. */
     std::span<sz_string_view_t const> host_candidate_views(levenshtein_simt_order_t order) const {
         return order == levenshtein_simt_order_t::sorted_k   ? std::span<sz_string_view_t const>(host_sorted_views)
                : order == levenshtein_simt_order_t::skewed_k ? std::span<sz_string_view_t const>(host_skewed_views)
                                                              : std::span<sz_string_view_t const>(host_views);
     }
-    sz_sequence_t host_candidates(levenshtein_simt_order_t order) const {
+    sz_strings_view_t host_candidates(levenshtein_simt_order_t order) const {
         auto const views = host_candidate_views(order);
-        sz_sequence_t result {};
-        sz_sequence_from_string_views(views.data(), views.size(), &result);
+        sz_strings_view_t result {};
+        sz_strings_from_string_views(views.data(), views.size(), &result);
         return result;
     }
 };
@@ -411,7 +409,7 @@ inline void bench_overlap_scores(simt_backend_t const &backend, environment_t co
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, validator,
                       scores_from_sz {backend.overlap_engine_init, backend.overlap_scores, query, width,
-                                      resident.candidates.sequence(), resident.views, std::cref(backend.runtime)}),
+                                      resident.candidates.strings(), resident.views, std::cref(backend.runtime)}),
           base);
 }
 
@@ -464,7 +462,7 @@ inline bool substrings_fills_a_wave(sz_substrings_engine_t const &engine, substr
 /** Overlapping matches one round of @p engine emits over @p resident, counted by a sizing round. */
 inline std::size_t substrings_matches_emitted(simt_backend_t const &backend, sz_substrings_engine_t &engine,
                                               substrings_corpus_t const &resident,
-                                              sz_sequence_t const &device_haystacks) {
+                                              sz_strings_view_t const &device_haystacks) {
     unified_vector<sz_size_t> offsets(resident.views.size() + 1, 0,
                                       unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
     if (backend.substrings_find(&engine, &device_haystacks, nullptr, 0, offsets.data(), backend.runtime.stream) !=
@@ -495,7 +493,7 @@ inline bool substrings_fits_the_device(simt_backend_t const &backend, sz_substri
 /** Per-haystack counts, the device arm logged against the CPU one. */
 inline void bench_substrings_counts(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
                                     substrings_engine_t &host, substrings_engine_t &device,
-                                    substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                    substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                     std::string const &suffix) {
     auto dispatched = substrings_counts_from_sz {sz_substrings_counts, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_counts") + suffix;
@@ -512,7 +510,7 @@ inline void bench_substrings_counts(simt_backend_t const &backend, environment_t
 /** Every match, the device arm logged against the CPU one. */
 inline void bench_substrings_find(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
                                   substrings_engine_t &host, substrings_engine_t &device,
-                                  substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                  substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                   std::string const &suffix) {
     auto dispatched = substrings_find_from_sz {sz_substrings_find, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_find") + suffix;
@@ -529,8 +527,8 @@ inline void bench_substrings_find(simt_backend_t const &backend, environment_t c
 inline void bench_substrings_replace(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
                                      substrings_engine_t &host, substrings_engine_t &device,
                                      substrings_dictionary_t const &dictionary, substrings_corpus_t const &resident,
-                                     sz_sequence_t const &device_haystacks, sz_sequence_t const &device_replacements,
-                                     std::string const &suffix) {
+                                     sz_strings_view_t const &device_haystacks,
+                                     sz_strings_view_t const &device_replacements, std::string const &suffix) {
     auto dispatched = substrings_replace_from_sz {sz_substrings_replace, host, resident, resident.haystacks(),
                                                   dictionary.replacements()};
     std::string const device_name = simt_arm(backend, "sz_substrings_replace") + suffix;
@@ -547,7 +545,7 @@ inline void bench_substrings_replace(simt_backend_t const &backend, environment_
 /** BM25 scores, the device arm logged against the CPU one. */
 inline void bench_substrings_bm25(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
                                   substrings_engine_t &host, substrings_engine_t &device,
-                                  substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                  substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                   std::string const &suffix) {
     auto dispatched = substrings_bm25_from_sz {sz_substrings_bm25_scores, host, resident, resident.haystacks()};
     std::string const device_name = simt_arm(backend, "sz_substrings_bm25_scores") + suffix;
@@ -563,7 +561,7 @@ inline void bench_substrings_bm25(simt_backend_t const &backend, environment_t c
 
 /** One vocabulary slice walked by each verb under each accepted policy, once the round is sound. */
 inline void bench_substrings_slice(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
-                                   substrings_corpus_t const &resident, sz_sequence_t const &device_haystacks,
+                                   substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                    std::optional<substrings_ranking_t> &ranking, substrings_slice_t slice,
                                    sz_substrings_case_sensitivity_t sensitivity) {
     std::string const suffix = substrings_label(slice, sensitivity);
@@ -597,7 +595,7 @@ inline void bench_substrings_slice(simt_backend_t const &backend, environment_t 
     tape_t replacements_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
     if (sz::failed(replacements_tape.assign(dictionary.replacements())))
         throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_sequence_t const device_replacements = replacements_tape.sequence();
+    sz_strings_view_t const device_replacements = replacements_tape.strings();
     if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
         throw std::runtime_error("The tape would not reach the device.");
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
@@ -646,7 +644,7 @@ inline void bench_substrings_small_batch(simt_backend_t const &backend, environm
     tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
     if (sz::failed(haystacks_tape.assign(resident.haystacks())))
         throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_sequence_t const device_haystacks = haystacks_tape.sequence();
+    sz_strings_view_t const device_haystacks = haystacks_tape.strings();
     if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
         throw std::runtime_error("The tape would not reach the device.");
     for (sz_substrings_overlap_policy_t const policy :
@@ -689,7 +687,7 @@ inline void bench_substrings_documents(simt_backend_t const &backend, environmen
     tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
     if (sz::failed(haystacks_tape.assign(resident.haystacks())))
         throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_sequence_t const device_haystacks = haystacks_tape.sequence();
+    sz_strings_view_t const device_haystacks = haystacks_tape.strings();
     if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
         throw std::runtime_error("The tape would not reach the device.");
     substrings_engine_t host(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, heap);
@@ -715,7 +713,7 @@ inline void bench_substrings_simt(simt_backend_t const &backend, environment_t c
         tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
         if (sz::failed(haystacks_tape.assign(resident.haystacks())))
             throw std::runtime_error("Unified memory could not hold the tape.");
-        sz_sequence_t const device_haystacks = haystacks_tape.sequence();
+        sz_strings_view_t const device_haystacks = haystacks_tape.strings();
         if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
             throw std::runtime_error("The tape would not reach the device.");
         fmt::println("Starting multi-pattern search benchmarks...");
@@ -767,6 +765,7 @@ struct sha256_multistate_tape_from_sz_t {
     sz_kernel_sha256_multistate_digest_t digest;
     device_backend_t const &runtime;
     tape_t texts;
+    std::size_t texts_bytes = 0;
     unified_vector<sz_sha256_state_t> states;
     unified_vector<sz_u8_t> digests;
 
@@ -781,8 +780,10 @@ struct sha256_multistate_tape_from_sz_t {
     void preprocess() {
         if (!states.empty()) return;
         std::vector<sz_string_view_t> views(corpus.tokens.size());
-        for (std::size_t index = 0; index != views.size(); ++index)
+        for (std::size_t index = 0; index != views.size(); ++index) {
             views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
+            texts_bytes += views[index].length;
+        }
         if (texts.assign(views) != status_t::success_k) throw std::runtime_error("The tape could not be staged.");
         states.resize(views.size());
         digests.resize(views.size() * STRINGZILLA_SHA256_DIGEST_LENGTH);
@@ -790,14 +791,12 @@ struct sha256_multistate_tape_from_sz_t {
     }
 
     call_result_t operator()(std::size_t) {
-        sz_sequence_t const sequence = texts.sequence();
-        if (update(states.data(), &sequence, runtime.stream) != sz_success_k ||
+        sz_strings_view_t const strings = texts.strings();
+        if (update(states.data(), &strings, runtime.stream) != sz_success_k ||
             digest(states.data(), states.size(), digests.data(), runtime.stream) != sz_success_k ||
             sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
             throw std::runtime_error("The multi-state SHA-256 failed.");
-        // Packed offsets bracket every message, so the last minus the first is all the bytes.
-        sz_u64_t const *offsets = static_cast<sz_u64_t const *>(sequence.handle);
-        return {static_cast<std::size_t>(offsets[sequence.count] - offsets[0]), digests[0], sequence.count};
+        return {texts_bytes, digests[0], strings.count};
     }
 };
 

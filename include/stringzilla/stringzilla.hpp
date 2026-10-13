@@ -49,6 +49,7 @@
 #include <cstddef> // `std::size_t`
 #include <cstdint> // `std::int8_t`
 #include <cstdlib> // `std::rand`
+#include <cstring> // `std::memcpy`, `std::memmove`, `std::memset`
 
 #include <array>       // `std::array`
 #include <concepts>    // `std::convertible_to`
@@ -1830,6 +1831,21 @@ inline void free_through_(void *ptr, sz_size_t n, void *allocator_state, void *)
     return reinterpret_cast<allocator_type_ *>(allocator_state)->deallocate(reinterpret_cast<value_type_ *>(ptr), n);
 }
 
+/** Moves a block into a fresh one of @p new_bytes, as a C++ allocator cannot resize in place. */
+template <typename allocator_type_>
+inline void *reallocate_through_(void *pointer, sz_size_t old_bytes, sz_size_t new_bytes, void *allocator_state,
+                                 void *stream) noexcept {
+    if (!new_bytes) {
+        if (pointer) free_through_<allocator_type_>(pointer, old_bytes, allocator_state, stream);
+        return nullptr;
+    }
+    void *moved = allocate_through_<allocator_type_>(new_bytes, allocator_state, stream);
+    if (!moved || !pointer) return moved;
+    std::memcpy(moved, pointer, sz_min_of_two(old_bytes, new_bytes));
+    free_through_<allocator_type_>(pointer, old_bytes, allocator_state, stream);
+    return moved;
+}
+
 /**
  *  @brief Lends the byte @p allocator to @p callback as a C-style @c sz_allocator_t.
  *  @return The status the callback reports.
@@ -1838,6 +1854,7 @@ template <typename allocator_type_, typename allocator_callback_>
 inline status_t with_allocator_(allocator_type_ &allocator, allocator_callback_ &&callback) noexcept {
     sz_allocator_t c_allocator;
     c_allocator.allocate = &allocate_through_<allocator_type_>;
+    c_allocator.reallocate = &reallocate_through_<allocator_type_>;
     c_allocator.free = &free_through_<allocator_type_>;
     c_allocator.handle = &allocator;
     return static_cast<status_t>(callback(c_allocator));
@@ -2252,7 +2269,7 @@ class basic_string_slice {
     /** Exports this entire view. Not an STL function, but useful for concatenations.
      *  The STL variant expects at least two arguments. */
     size_type copy(value_type *destination) const noexcept {
-        best_call_<sz_copy_best>(destination, start_, length_);
+        if (length_) std::memcpy(destination, start_, length_); // ? An empty view may hold a null start
         return length_;
     }
 
@@ -2311,7 +2328,7 @@ class basic_string_slice {
     size_type copy(value_type *destination, size_type count, size_type n = 0) const noexcept(false) {
         if (n > size()) throw std::out_of_range("string_slice_t::copy");
         count = sz_min_of_two(count, length_ - n);
-        best_call_<sz_copy_best>(destination, start_ + n, count);
+        if (count) std::memcpy(destination, start_ + n, count);
         return count;
     }
 
@@ -3149,7 +3166,7 @@ class basic_string {
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return (start = sz_string_init_length(&string_, length, &allocator)) ? sz_success_k : sz_bad_alloc_k;
         }));
-        best_call_<sz_fill_best>(start, length, value);
+        std::memset(start, value, length);
     }
 
     void init(string_view_t other) noexcept(false) {
@@ -3157,7 +3174,7 @@ class basic_string {
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return (start = sz_string_init_length(&string_, other.size(), &allocator)) ? sz_success_k : sz_bad_alloc_k;
         }));
-        best_call_<sz_copy_best>(start, other.data(), other.size());
+        if (other.size()) std::memcpy(start, other.data(), other.size());
     }
 
     void move(basic_string &other) noexcept {
@@ -3968,7 +3985,7 @@ class basic_string {
                                                                                             : sz_bad_alloc_k;
         });
         if (failed(status)) return status;
-        best_call_<sz_copy_best>(data() + normalized_offset, string.data(), string.size());
+        if (string.size()) std::memcpy(data() + normalized_offset, string.data(), string.size());
         return status_t::success_k;
     }
 
@@ -3983,7 +4000,7 @@ class basic_string {
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
         status_t const status = try_preparing_replacement(normalized_offset, normalized_length, replacement.size());
         if (failed(status)) return status;
-        best_call_<sz_copy_best>(data() + normalized_offset, replacement.data(), replacement.size());
+        if (replacement.size()) std::memcpy(data() + normalized_offset, replacement.data(), replacement.size());
         return status_t::success_k;
     }
 
@@ -4117,7 +4134,7 @@ class basic_string {
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, offset, repeats, &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
-        best_call_<sz_fill_best>(data() + offset, repeats, character);
+        std::memset(data() + offset, character, repeats);
         return *this;
     }
 
@@ -4133,7 +4150,7 @@ class basic_string {
         raise(with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, offset, other.size(), &allocator) ? sz_success_k : sz_bad_alloc_k;
         }));
-        best_call_<sz_copy_best>(data() + offset, other.data(), other.size());
+        if (other.size()) std::memcpy(data() + offset, other.data(), other.size());
         return *this;
     }
 
@@ -4238,7 +4255,7 @@ class basic_string {
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + str.size() > max_size()) throw std::length_error("sz::basic_string::replace");
         raise(try_preparing_replacement(pos, count, str.size()));
-        best_call_<sz_copy_best>(data() + pos, str.data(), str.size());
+        if (str.size()) std::memcpy(data() + pos, str.data(), str.size());
         return *this;
     }
 
@@ -4314,7 +4331,7 @@ class basic_string {
         if (pos > size()) throw std::out_of_range("sz::basic_string::replace");
         if (size() - count + count2 > max_size()) throw std::length_error("sz::basic_string::replace");
         raise(try_preparing_replacement(pos, count, count2));
-        best_call_<sz_fill_best>(data() + pos, count2, character);
+        std::memset(data() + pos, character, count2);
         return *this;
     }
 
@@ -4394,7 +4411,7 @@ class basic_string {
      */
     basic_string &assign(size_type repeats, char_type character) noexcept(false) {
         resize(repeats, character);
-        best_call_<sz_fill_best>(data(), repeats, character);
+        std::memset(data(), character, repeats);
         return *this;
     }
 
@@ -4636,7 +4653,7 @@ class basic_string {
     /**
      *  @brief Replaces @b (in-place) all characters in the string using the provided lookup
      *      @p table.
-     *  @sa sz_lookup_best
+     *  @sa sz_strings_lookup_best
      */
     basic_string &lookup(look_up_table_t const &table) noexcept {
         lookup(table, data());
@@ -4647,14 +4664,9 @@ class basic_string {
      *  @brief Maps all characters in the current string into the @p output buffer using the
      *      provided lookup @p table.
      *  @param[out] output The buffer to write the transformed string into.
-     *  @sa sz_lookup_best
+     *  @sa sz_strings_lookup_best
      */
-    void lookup(look_up_table_t const &table, pointer output) const noexcept {
-        sz_ptr_t start;
-        sz_size_t length;
-        sz_string_range(&string_, &start, &length);
-        best_call_<sz_lookup_best>((sz_ptr_t)output, (sz_cptr_t)start, (sz_size_t)length, (sz_cptr_t)table.raw());
-    }
+    void lookup(look_up_table_t const &table, pointer output) const noexcept;
 
     /**
      *  @brief Count UTF-8 characters in the string (not bytes).
@@ -4838,7 +4850,7 @@ status_t basic_string<allocator_>::try_resize(size_type count, value_type charac
 
     // Fill the trailing characters.
     if (count > string_length) {
-        best_call_<sz_fill_best>(string_start + string_length, count - string_length, character);
+        std::memset(string_start + string_length, character, count - string_length);
         string_start[count] = '\0';
         // Safe for both SSO and heap strings: on little-endian, internal.length
         // overlaps with LSB of external.length, so += affects only the length byte.
@@ -4902,12 +4914,12 @@ status_t basic_string<allocator_>::try_append(const_pointer str, size_type lengt
             auto str_offset_in_this = str - data();
             sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &allocator);
             if (!start) return sz_bad_alloc_k;
-            best_call_<sz_copy_best>(start + this_span.size(), start + str_offset_in_this, length);
+            std::memcpy(start + this_span.size(), start + str_offset_in_this, length);
         }
         else {
             sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, length, &allocator);
             if (!start) return sz_bad_alloc_k;
-            best_call_<sz_copy_best>(start + this_span.size(), str, length);
+            if (length) std::memcpy(start + this_span.size(), str, length);
         }
         return sz_success_k;
     });
@@ -4958,7 +4970,7 @@ status_t basic_string<allocator_>::try_replace_all_(pattern_type pattern, string
             string_view_t match_view = *matches_iterator;
             replacement.copy(const_cast<pointer>(compacted_end));
             compacted_end += replacement.length();
-            best_call_<sz_move_best>((sz_ptr_t)compacted_end, match_view.begin(), match_view.length());
+            std::memmove(const_cast<pointer>(compacted_end), match_view.begin(), match_view.length());
             compacted_end += match_view.length();
             ++matches_iterator;
         } while (matches_iterator != end_sentinel_t {});
@@ -5000,7 +5012,7 @@ status_t basic_string<allocator_>::try_replace_all_(pattern_type pattern, string
         do {
             string_view_t slice_view = *splits_iterator;
             compacted_begin -= slice_view.length();
-            best_call_<sz_move_best>((sz_ptr_t)compacted_begin, slice_view.begin(), slice_view.length());
+            std::memmove(const_cast<pointer>(compacted_begin), slice_view.begin(), slice_view.length());
             compacted_begin -= replacement.length();
             replacement.copy(const_cast<pointer>(compacted_begin));
             ++splits_iterator;
@@ -5173,23 +5185,48 @@ inline status_t fill_random(string_span_t string) noexcept {
  *      lookup @p table.
  *  @param[in] capabilities Capabilities to pick from.
  *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
- *  @sa sz_lookup_best
+ *  @sa sz_strings_lookup_best
  */
 inline status_t lookup(string_view_t source, look_up_table_t const &table, char *target,
                        sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) noexcept {
-    return static_cast<status_t>(sz_lookup_best((sz_ptr_t)target, (sz_cptr_t)source.data(), (sz_size_t)source.size(),
-                                                (sz_cptr_t)table.raw(), capabilities, stream));
+    // A one-string tape over the caller's buffers, in the offsets width the kernel writes, so it
+    // allocates nothing; in place it shares the offsets, making it the very tape the kernel reads.
+    sz_size_t const length = source.size();
+    sz_u32_t narrow_source[2] = {0, (sz_u32_t)length}, narrow_target[2] = {0, (sz_u32_t)length};
+    sz_u64_t wide_source[2] = {0, length}, wide_target[2] = {0, length};
+    bool const in_place = source.data() == target;
+    sz_strings_view_t strings;
+    sz_strings_span_t tape;
+    strings.count = tape.count = 1;
+    if (length <= 0xFFFFFFFFull) {
+        strings.layout = tape.layout = sz_strings_u32_tape_k;
+        strings.data.u32_tape.data = source.data(), strings.data.u32_tape.offsets = narrow_source;
+        tape.data.u32_tape.data = target, tape.data.u32_tape.offsets = in_place ? narrow_source : narrow_target;
+    }
+    else {
+        strings.layout = tape.layout = sz_strings_u64_tape_k;
+        strings.data.u64_tape.data = source.data(), strings.data.u64_tape.offsets = wide_source;
+        tape.data.u64_tape.data = target, tape.data.u64_tape.offsets = in_place ? wide_source : wide_target;
+    }
+    return static_cast<status_t>(
+        sz_strings_lookup_best(&strings, nullptr, 1, (sz_cptr_t)table.raw(), nullptr, &tape, capabilities, stream));
 }
 
 /**
  *  @brief Replaces @b (in-place) all characters in the string using the provided lookup table.
  *  @param[in] capabilities Capabilities to pick from.
  *  @param[in] stream Null on the CPU, or the stream of the device @p capabilities describes.
- *  @sa sz_lookup_best
+ *  @sa sz_strings_lookup_best
  */
 inline status_t lookup(string_span_t string, look_up_table_t const &table,
                        sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr) noexcept {
     return lookup(string_view_t(string.data(), string.size()), table, string.data(), capabilities, stream);
+}
+
+template <typename allocator_>
+void basic_string<allocator_>::lookup(look_up_table_t const &table, pointer output) const noexcept {
+    [[maybe_unused]] status_t const status = ashvardanian::stringzilla::lookup(view(), table, output);
+    sz_assert_(status == status_t::success_k);
 }
 
 /**
@@ -5197,32 +5234,38 @@ inline status_t lookup(string_span_t string, look_up_table_t const &table,
  *  @sa argsort, intersect
  */
 template <typename container_type_, typename string_extractor_>
-struct sequence_args_ {
+struct strings_args_ {
+
+    /** The elements, read by index. */
     container_type_ const &container;
+
+    /** Turns one element into the string it holds. */
     string_extractor_ const &extractor;
+
+    /** The @c sz_strings_get_t accessor, extracting every requested element. */
+    static void get(void const *handle, sz_size_t const *indices, sz_size_t count, sz_string_view_t *views) {
+        strings_args_ const *args = reinterpret_cast<strings_args_ const *>(handle);
+        for (sz_size_t position = 0; position != count; ++position) {
+            string_view_t member = args->extractor(args->container[indices[position]]);
+            views[position].start = member.data();
+            views[position].length = static_cast<sz_size_t>(member.size());
+        }
+    }
+
+    /** The accessor-backed collection of every element, borrowing these arguments. */
+    sz_strings_view_t view() const noexcept {
+        sz_strings_view_t strings;
+        strings.layout = sz_strings_accessor_k, strings.count = static_cast<sz_size_t>(container.size());
+        strings.data.accessor.get = &get, strings.data.accessor.handle = this;
+        return strings;
+    }
 };
-
-template <typename container_type_, typename string_extractor_>
-sz_cptr_t call_sequence_member_start_(void const *sequence_args_ptr, sz_size_t i) {
-    using sequence_args_t = sequence_args_<container_type_, string_extractor_>;
-    sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
-    string_view_t member = args->extractor(args->container[i]);
-    return member.data();
-}
-
-template <typename container_type_, typename string_extractor_>
-sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t i) {
-    using sequence_args_t = sequence_args_<container_type_, string_extractor_>;
-    sequence_args_t const *args = reinterpret_cast<sequence_args_t const *>(sequence_args_ptr);
-    string_view_t member = args->extractor(args->container[i]);
-    return static_cast<sz_size_t>(member.size());
-}
 
 /**
  *  @brief Computes the permutation of an array, that would lead to sorted order. The elements of
  *      the array must be convertible to a @c string_view_t with the given extractor. Unlike the
- *      @c sz_sequence_argsort_best C interface, overwrites the output span.
- *  @sa sz_sequence_argsort_best
+ *      @c sz_sort_order_best C interface, overwrites the output span.
+ *  @sa sz_sort_order_best
  *
  *  @param[in] container The array of string-like elements to sort.
  *  @param[in] extractor The function object that extracts the string from the object.
@@ -5237,59 +5280,50 @@ sz_size_t call_sequence_member_length_(void const *sequence_args_ptr, sz_size_t 
  *  @return @c success_k, @c unexpected_dimensions_k if @p order is too short, or @c bad_alloc_k.
  */
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
-status_t argsort(container_type_ const &container, string_extractor_ const &extractor, std::span<sorted_idx_t> order,
+status_t argsort(container_type_ const &container, string_extractor_ const &extractor, std::span<sz_size_t> order,
                  std::size_t top_count = 0, bool reverse = false, sz_capability_t capabilities = default_capabilities(),
                  sz_stream_t stream = nullptr, allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
     // Pack the arguments into a single structure to reference it from the callback.
-    using args_t = sequence_args_<container_type_, string_extractor_>;
+    using args_t = strings_args_<container_type_, string_extractor_>;
     args_t args {container, extractor};
-    sz_sequence_t sequence;
-    sequence.handle = &args;
-    sequence.count = container.size();
-    sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
-    sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
+    sz_strings_view_t const strings = args.view();
 
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        return sz_sequence_argsort_best(&sequence, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
-                                        &c_allocator, order.data(), capabilities, stream);
+        return sz_sort_order_best(&strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
+                                  &c_allocator, order.data(), capabilities, stream);
     });
 }
 
 /**
  *  @brief Uncased (Unicode case-folded) counterpart of @c argsort over an output span.
- *  @sa sz_sequence_argsort_uncased_best
+ *  @sa sz_sort_uncased_order_best
  */
 template <typename container_type_, typename string_extractor_, typename allocator_type_ = std::allocator<char>>
 status_t argsort_utf8_uncased(container_type_ const &container, string_extractor_ const &extractor,
-                              std::span<sorted_idx_t> order, std::size_t top_count = 0, bool reverse = false,
+                              std::span<sz_size_t> order, std::size_t top_count = 0, bool reverse = false,
                               sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr,
                               allocator_type_ allocator = {}) noexcept {
     if (order.size() < container.size()) return status_t::unexpected_dimensions_k;
 
-    using args_t = sequence_args_<container_type_, string_extractor_>;
+    using args_t = strings_args_<container_type_, string_extractor_>;
     args_t args {container, extractor};
-    sz_sequence_t sequence;
-    sequence.handle = &args;
-    sequence.count = container.size();
-    sequence.get_start = call_sequence_member_start_<container_type_, string_extractor_>;
-    sequence.get_length = call_sequence_member_length_<container_type_, string_extractor_>;
+    sz_strings_view_t const strings = args.view();
 
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        return sz_sequence_argsort_uncased_best(&sequence, static_cast<sz_size_t>(top_count),
-                                                static_cast<sz_bool_t>(reverse), &c_allocator, order.data(),
-                                                capabilities, stream);
+        return sz_sort_uncased_order_best(&strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
+                                          &c_allocator, order.data(), capabilities, stream);
     });
 }
 
 /**
  *  @brief Locates the positions of identically valued elements in 2 deduplicated string arrays.
- *  @sa sz_sequence_intersect_best
+ *  @sa sz_intersect_best
  *
  *  @param[in] first_container The first array of string-like elements.
  *  @param[in] first_extractor Extracts the string from each object of the first array.
@@ -5311,7 +5345,7 @@ expected<std::size_t> intersect(                                                
     first_container_ const &first_container, first_extractor_ const &first_extractor,     //
     second_container_ const &second_container, second_extractor_ const &second_extractor, //
     std::uint64_t seed,                                                                   //
-    std::span<sorted_idx_t> first_positions, std::span<sorted_idx_t> second_positions,    //
+    std::span<sz_size_t> first_positions, std::span<sz_size_t> second_positions,          //
     sz_capability_t capabilities = default_capabilities(), sz_stream_t stream = nullptr,  //
     allocator_type_ allocator = {}) noexcept {
 
@@ -5320,27 +5354,19 @@ expected<std::size_t> intersect(                                                
         return {0, status_t::unexpected_dimensions_k};
 
     // Pack the arguments into a single structure to reference it from the callback.
-    using first_t = sequence_args_<first_container_, first_extractor_>;
-    using second_t = sequence_args_<second_container_, second_extractor_>;
+    using first_t = strings_args_<first_container_, first_extractor_>;
+    using second_t = strings_args_<second_container_, second_extractor_>;
     first_t first_args {first_container, first_extractor};
     second_t second_args {second_container, second_extractor};
+    sz_strings_view_t const first_strings = first_args.view(), second_strings = second_args.view();
 
-    sz_sequence_t first_sequence, second_sequence;
-    first_sequence.count = first_container.size(), second_sequence.count = second_container.size();
-    first_sequence.handle = &first_args, second_sequence.handle = &second_args;
-    first_sequence.get_start = call_sequence_member_start_<first_container_, first_extractor_>;
-    first_sequence.get_length = call_sequence_member_length_<first_container_, first_extractor_>;
-    second_sequence.get_start = call_sequence_member_start_<second_container_, second_extractor_>;
-    second_sequence.get_length = call_sequence_member_length_<second_container_, second_extractor_>;
-
-    std::size_t intersection_count = 0;
+    sz_size_t intersection_count = 0;
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     status_t status = with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        static_assert(sizeof(sz_size_t) == sizeof(std::size_t), "sz_size_t must be the same size as std::size_t.");
-        return sz_sequence_intersect_best(&first_sequence, &second_sequence, &c_allocator, static_cast<sz_u64_t>(seed),
-                                          reinterpret_cast<sz_size_t *>(&intersection_count), first_positions.data(),
-                                          second_positions.data(), capabilities, stream);
+        return sz_intersect_best(&first_strings, &second_strings, &c_allocator, static_cast<sz_u64_t>(seed),
+                                 &intersection_count, first_positions.data(), second_positions.data(), capabilities,
+                                 stream);
     });
     return {intersection_count, status};
 }
@@ -5357,7 +5383,7 @@ concept string_extractor = requires(extractor_type_ const &extract, container_ty
 /** Indices into a sorted or intersected array, in memory from the caller's allocator. */
 template <typename allocator_type_>
 using sorted_indices =
-    std::vector<sorted_idx_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<sorted_idx_t>>;
+    std::vector<sz_size_t, typename std::allocator_traits<allocator_type_>::template rebind_alloc<sz_size_t>>;
 
 /** Resizes @p container, reading its throw as @c bad_alloc_k, for the @c noexcept functions that
  *  return STL containers. */

@@ -315,23 +315,23 @@ static __global__ void sz_substrings_scan_sized_simt_kernel_(sz_size_t *chunk_sl
  *  large corpus outrun any fixed budget, which is the readback this inversion exists to remove.
  */
 STRINGZILLA_DEVICE sz_size_t sz_substrings_chunk_bytes_simt_(sz_substrings_engine_t const *engine,
-                                                             sz_sequence_t haystacks) {
-    sz_u64_t const *offsets = (sz_u64_t const *)haystacks.handle;
+                                                             sz_strings_view_t haystacks) {
+    sz_size_t const bytes = (sz_size_t)(sz_strings_start_simt_(haystacks, haystacks.count) -
+                                        sz_strings_start_simt_(haystacks, 0));
     sz_size_t const budget = engine->chunk_budget ? engine->chunk_budget : 1;
-    sz_size_t const share = sz_size_divide_round_up((sz_size_t)(offsets[haystacks.count] - offsets[0]), budget);
+    sz_size_t const share = sz_size_divide_round_up(bytes, budget);
     return sz_max_of_two(sz_max_of_two(share, 4 * (sz_size_t)engine->max_source_match_bytes), (sz_size_t)1);
 }
 
 /** Writes how many chunks each haystack is cut into, which the scan then turns into
  *  its chunk range. */
-static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
-                                                               sz_size_t *chunk_offsets) {
+static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_engine_t engine,
+                                                               sz_strings_view_t haystacks, sz_size_t *chunk_offsets) {
     sz_size_t const chunk_bytes = sz_substrings_chunk_bytes_simt_(&engine, haystacks);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     for (; index < haystacks.count; index += stride)
-        chunk_offsets[index] = sz_substrings_chunks_for_simt_(sz_sequence_tape_length_simt_(haystacks.handle, index),
-                                                              chunk_bytes);
+        chunk_offsets[index] = sz_substrings_chunks_for_simt_(sz_strings_length_simt_(haystacks, index), chunk_bytes);
 }
 
 /**
@@ -588,7 +588,7 @@ enum { sz_substrings_chunks_per_thread_simt_k = 8 };
  */
 STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t const *engine,
                                                         sz_substrings_case_sensitivity_t case_sensitivity,
-                                                        sz_u32_t staged_count, sz_sequence_t haystacks,
+                                                        sz_u32_t staged_count, sz_strings_view_t haystacks,
                                                         sz_size_t const *chunk_offsets,
                                                         sz_substrings_report_t const *report, sz_size_t *chunk_slots,
                                                         sz_substrings_match_t *matches, sz_substrings_gpu_pass_t pass) {
@@ -607,8 +607,8 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
 
     for (; chunk_index < chunk_count; chunk_index += stride) {
         sz_size_t const haystack_index = sz_substrings_haystack_of_simt_(chunk_offsets, haystacks.count, chunk_index);
-        sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
-        sz_size_t const length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
+        sz_cptr_t const haystack = sz_strings_start_simt_(haystacks, haystack_index);
+        sz_size_t const length = sz_strings_length_simt_(haystacks, haystack_index);
         sz_size_t const local_index = chunk_index - chunk_offsets[haystack_index];
         sz_size_t const chunk_begin = local_index * chunk_bytes;
         sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
@@ -631,7 +631,8 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
  *  the residency of a walk that does not fold. */
 
 static __global__ void sz_substrings_walk_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                             sz_sequence_t haystacks, sz_size_t const *chunk_offsets,
+                                                             sz_strings_view_t haystacks,
+                                                             sz_size_t const *chunk_offsets,
                                                              sz_substrings_report_t const *report,
                                                              sz_size_t *chunk_slots, sz_substrings_match_t *matches,
                                                              sz_substrings_gpu_pass_t pass) {
@@ -640,7 +641,8 @@ static __global__ void sz_substrings_walk_cased_simt_kernel_(sz_substrings_engin
 }
 
 static __global__ void sz_substrings_walk_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                               sz_sequence_t haystacks, sz_size_t const *chunk_offsets,
+                                                               sz_strings_view_t haystacks,
+                                                               sz_size_t const *chunk_offsets,
                                                                sz_substrings_report_t const *report,
                                                                sz_size_t *chunk_slots, sz_substrings_match_t *matches,
                                                                sz_substrings_gpu_pass_t pass) {
@@ -789,7 +791,7 @@ sz_substrings_bm25_prepare_simt_(sz_substrings_engine_t const *engine, sz_u32_t 
  *  A block rather than a grid per haystack keeps the tally in shared memory. Where a batch holds
  *  too few haystacks to fill the device, Hopper's tier walks each with a cluster of blocks instead.
  */
-static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t engine, sz_sequence_t haystacks,
+static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
                                                        sz_f32_t const *document_lengths,
                                                        sz_substrings_bm25_t parameters, sz_f32_t const *needle_weights,
                                                        sz_u32_t *overflow_rows, sz_f32_t *scores,
@@ -800,8 +802,8 @@ static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t en
     sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(engine.needles_count);
     sz_size_t haystack_index;
     for (haystack_index = blockIdx.x; haystack_index < haystacks.count; haystack_index += gridDim.x) {
-        sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
-        sz_size_t const length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
+        sz_cptr_t const haystack = sz_strings_start_simt_(haystacks, haystack_index);
+        sz_size_t const length = sz_strings_length_simt_(haystacks, haystack_index);
         sz_f64_t const norm = sz_substrings_bm25_norm(
             &parameters, document_lengths ? (sz_f64_t)document_lengths[haystack_index] : (sz_f64_t)length);
         sz_substrings_bm25_walk_simt_(&engine, &block.staged, haystack, length, haystack_index, threadIdx.x, blockDim.x,
@@ -994,7 +996,8 @@ static __global__ void sz_substrings_stored_simt_kernel_(sz_substrings_report_t 
  *  Offsets are relative to the haystack's own start, because the base is only known after the scan
  *  across haystacks that this kernel feeds.
  */
-static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_sequence_t haystacks, sz_sequence_t replacements,
+static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_strings_view_t haystacks,
+                                                                  sz_strings_view_t replacements,
                                                                   sz_size_t const *haystack_offsets,
                                                                   sz_substrings_match_t const *matches,
                                                                   sz_substrings_report_t const *report,
@@ -1018,8 +1021,7 @@ static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_sequence_t 
                 sz_size_t const needle = matches[match_index].needle_index;
                 // Shrinking matches make this wrap, which is exactly right: only the prefix sums are ever
                 // read, every one of them names a real offset, and modular arithmetic reproduces each.
-                drift_here = sz_sequence_tape_length_simt_(replacements.handle, needle) -
-                             matches[match_index].byte_length;
+                drift_here = sz_strings_length_simt_(replacements, needle) - matches[match_index].byte_length;
                 previous_end = match_index == first
                                    ? 0
                                    : matches[match_index - 1].byte_offset + matches[match_index - 1].byte_length;
@@ -1033,8 +1035,7 @@ static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_sequence_t 
 
         // The scan's own aggregate is the haystack's total drift, so no second pass reduces what it knows.
         if (threadIdx.x == 0)
-            output_sizes[haystack_index] = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index) +
-                                           drift_carry;
+            output_sizes[haystack_index] = sz_strings_length_simt_(haystacks, haystack_index) + drift_carry;
         __syncthreads(); // ! The next haystack resets the carry this one is still reading.
     }
 }
@@ -1060,12 +1061,10 @@ STRINGZILLA_DEVICE void sz_substrings_copy_clipped_simt_(sz_ptr_t output, sz_siz
  *  prose has stretches of tens of bytes and striding a whole block across one of them would
  *  leave most lanes idle.
  */
-static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_sequence_t haystacks, sz_sequence_t replacements,
-                                                               sz_size_t const *haystack_offsets,
-                                                               sz_substrings_match_t const *matches,
-                                                               sz_size_t const *gap_offsets,
-                                                               sz_size_t const *output_offsets,
-                                                               sz_substrings_report_t const *report, sz_ptr_t output) {
+static __global__ void sz_substrings_rewrite_copy_simt_kernel_(
+    sz_strings_view_t haystacks, sz_strings_view_t replacements, sz_size_t const *haystack_offsets,
+    sz_substrings_match_t const *matches, sz_size_t const *gap_offsets, sz_size_t const *output_offsets,
+    sz_substrings_report_t const *report, sz_ptr_t output) {
     sz_size_t const output_bytes_total = output_offsets[haystacks.count];
     sz_size_t const tile_count = sz_size_divide_round_up(output_bytes_total, sz_substrings_gpu_rewrite_tile_bytes_k);
     unsigned const warp_index = threadIdx.x / 32u, warps_per_block = blockDim.x / 32u, lane = threadIdx.x % 32u;
@@ -1080,8 +1079,8 @@ static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_sequence_t hay
         sz_size_t haystack_index = sz_substrings_last_not_above_simt_(output_offsets, haystacks.count + 1, tile_begin);
 
         for (; haystack_index < haystacks.count && output_offsets[haystack_index] < tile_end; ++haystack_index) {
-            sz_cptr_t const haystack = sz_sequence_tape_start_simt_(haystacks.handle, haystack_index);
-            sz_size_t const haystack_length = sz_sequence_tape_length_simt_(haystacks.handle, haystack_index);
+            sz_cptr_t const haystack = sz_strings_start_simt_(haystacks, haystack_index);
+            sz_size_t const haystack_length = sz_strings_length_simt_(haystacks, haystack_index);
             sz_size_t const base = output_offsets[haystack_index];
             sz_size_t const first = haystack_offsets[haystack_index], last = haystack_offsets[haystack_index + 1];
             // Every match contributes a gap and a replacement; one more stretch closes the haystack.
@@ -1109,10 +1108,9 @@ static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_sequence_t hay
                                                  gap_source_end - previous_end, lane);
                 if (closes) continue;
                 needle = matches[match_index].needle_index;
-                sz_substrings_copy_clipped_simt_(output, tile_begin, tile_end,
-                                                 gap_begin + (gap_source_end - previous_end),
-                                                 sz_sequence_tape_start_simt_(replacements.handle, needle),
-                                                 sz_sequence_tape_length_simt_(replacements.handle, needle), lane);
+                sz_substrings_copy_clipped_simt_(
+                    output, tile_begin, tile_end, gap_begin + (gap_source_end - previous_end),
+                    sz_strings_start_simt_(replacements, needle), sz_strings_length_simt_(replacements, needle), lane);
             }
         }
     }

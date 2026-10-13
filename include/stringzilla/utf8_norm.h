@@ -2,7 +2,7 @@
  *  @file include/stringzilla/utf8_norm.h
  *  @author Ash Vardanian
  *  @date June 14, 2026
- *  @brief Hardware-accelerated single-pass Unicode normalization (NFD / NFC / NFKD / NFKC).
+ *  @brief Hardware-accelerated single-pass Unicode normalization, from NFD to NFKC_Casefold.
  *
  *  Includes core APIs:
  *
@@ -11,7 +11,9 @@
  *
  *  Normalization is built from three UAX #15 primitives - decomposition, canonical ordering, and
  *  composition - sharing one ISA-agnostic table set (`utf8_norm/tables.h`, generated from the UCD
- *  by the recipe embedded in that header). It is intentionally locale-independent.
+ *  by the recipe embedded in that header). It is intentionally locale-independent. NFKC_Casefold is
+ *  the UAX #44 toNFKC_Casefold: every codepoint maps to its NFKC_CF image, empty for the default
+ *  ignorables, and the result recomposes to NFC.
  */
 #ifndef STRINGZILLA_UTF8_NORM_H_
 #define STRINGZILLA_UTF8_NORM_H_
@@ -33,10 +35,12 @@ extern "C" {
  *  Decomposition forms (NFD, NFKD) can expand the input; the target must hold up to
  *  `source_length * 18` bytes for the worst single-codepoint compatibility decomposition. The
  *  composing forms (NFC, NFKC) never exceed the decomposed length, so the same bound is safe.
+ *  NFKC_Casefold grows a byte into 11 at most, for U+FDFA, within the same bound.
  *
  *  Malformed UTF-8 is handled losslessly: any byte that does not begin a well-formed codepoint is
  *  an opaque 1-byte barrier - it is passed through unchanged, does not decompose, compose, or take
- *  part in canonical ordering, and processing resyncs at the next byte.
+ *  part in canonical ordering, and processing resyncs at the next byte. NFKC_Casefold keeps the
+ *  default ignorable right after such a byte, which erased would let it fuse with the bytes beyond.
  *
  *  On CUDA, ROCm and Metal normalization is enqueued on @p stream, which names the device: the
  *  source, target and length slot must be memory that device reaches, and the length lands once
@@ -46,7 +50,7 @@ extern "C" {
  *
  *  @param[in] source UTF-8 string to normalize.
  *  @param[in] source_length Number of bytes in @p source.
- *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
+ *  @param[in] form A @c sz_normal_form_t: NFD, NFC, NFKD, NFKC or NFKC_Casefold.
  *  @param[out] target Buffer to receive the normalized UTF-8 string.
  *  @param[out] target_length Number of bytes written to @p target.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.
@@ -70,7 +74,7 @@ STRINGZILLA_API sz_status_t sz_utf8_norm_best(                        //
  *
  *  @param[in] source UTF-8 string to test.
  *  @param[in] source_length Number of bytes in @p source.
- *  @param[in] form One of @c sz_normal_form_nfd_k, @c _nfc_k, @c _nfkd_k, @c _nfkc_k.
+ *  @param[in] form A @c sz_normal_form_t: NFD, NFC, NFKD, NFKC or NFKC_Casefold.
  *  @param[out] match @c STRINGZILLA_NULL_CHAR if @p source is already in @p form, else a pointer to
  *      the first byte of the first codepoint breaking it: a non-Yes QC or out of canonical order.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu reports.

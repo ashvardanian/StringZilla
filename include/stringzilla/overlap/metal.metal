@@ -73,7 +73,7 @@ struct sz_overlap_arguments_metal_t {
     ulong nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     ulong segments, counts;
     ulong queries_count, widths_count, candidates_count, segments_count;
-    ulong scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width;
+    ulong scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout;
 };
 
 /**
@@ -233,7 +233,7 @@ inline ulong sz_overlap_owner_metal_(device uint const *offsets, ulong candidate
  *  one thread, from the same residues serial computes.
  */
 template <typename nodes_pointer_>
-inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch, sz_sequence_tape_metal_t tape,
+inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch, sz_strings_tape_metal_t tape,
                                     constant sz_overlap_arguments_metal_t &arguments, nodes_pointer_ nodes,
                                     threadgroup uint const *filter, uint levels, thread uint const *level_bases,
                                     ulong query, uint segment) {
@@ -241,8 +241,8 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
     device uint const *widths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.widths);
     device uint const *powers = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.powers);
     ulong const candidate = sz_overlap_owner_metal_(offsets, arguments.candidates_count, segment);
-    device uchar const *text = sz_sequence_tape_start_metal_(tape, candidate);
-    ulong const text_length = sz_sequence_tape_length_metal_(tape, candidate);
+    device uchar const *text = sz_strings_start_metal_(tape, candidate);
+    ulong const text_length = sz_strings_length_metal_(tape, candidate);
     ulong const segment_start = (ulong)(segment - offsets[candidate]) * sz_overlap_segment_bytes_metal_k;
     ulong const segment_end = min(text_length, segment_start + sz_overlap_segment_bytes_metal_k);
     ulong const origin = segment_start + 1 >= arguments.widest_width ? segment_start + 1 - arguments.widest_width : 0;
@@ -289,19 +289,20 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
 
 /** Every candidate's first segment, and the total after the last, as one threadgroup's scan. */
 kernel void sz_overlap_segments_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                              device ulong const *candidates [[buffer(2)]],
-                                              constant sz_overlap_arguments_metal_t &arguments [[buffer(4)]],
+                                              device uchar const *candidates [[buffer(2)]],
+                                              device uchar const *candidates_offsets [[buffer(3)]],
+                                              constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]],
                                               uint thread_index [[thread_index_in_threadgroup]],
                                               uint lane [[thread_index_in_simdgroup]],
                                               uint simdgroup [[simdgroup_index_in_threadgroup]]) {
-    sz_sequence_tape_metal_t const tape = {candidates};
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
     device uint *offsets = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.segments);
     ulong const count = arguments.candidates_count;
     ulong const chunk = sz_size_divide_round_up_metal_<ulong>(count, sz_overlap_scan_threads_metal_k);
     ulong const first = min(count, (ulong)thread_index * chunk), last = min(count, first + chunk);
     uint total = 0;
     for (ulong candidate = first; candidate != last; ++candidate)
-        total += sz_overlap_segments_of_metal_(sz_sequence_tape_length_metal_(tape, candidate));
+        total += sz_overlap_segments_of_metal_(sz_strings_length_metal_(tape, candidate));
 
     threadgroup uint simdgroup_totals[sz_overlap_scan_threads_metal_k / 32];
     uint const within = simd_prefix_exclusive_sum(total);
@@ -313,7 +314,7 @@ kernel void sz_overlap_segments_metal_kernel_(device uchar *scratch [[buffer(1)]
     uint running = simdgroup_totals[simdgroup] + within;
     for (ulong candidate = first; candidate != last; ++candidate) {
         offsets[candidate] = running;
-        running += sz_overlap_segments_of_metal_(sz_sequence_tape_length_metal_(tape, candidate));
+        running += sz_overlap_segments_of_metal_(sz_strings_length_metal_(tape, candidate));
     }
     if (last == count) offsets[count] = running; // Threads past the end agree on the total.
 }
@@ -328,12 +329,13 @@ kernel void sz_overlap_segments_metal_kernel_(device uchar *scratch [[buffer(1)]
  */
 kernel void sz_overlap_scores_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
-    device ulong const *candidates [[buffer(2)]], constant sz_overlap_arguments_metal_t &arguments [[buffer(4)]],
-    threadgroup uint *staged_nodes [[threadgroup(0)]], threadgroup uint *filter [[threadgroup(1)]],
-    uint2 group [[threadgroup_position_in_grid]], uint2 groups [[threadgroups_per_grid]],
-    uint thread_index [[thread_index_in_threadgroup]], uint2 group_size [[threads_per_threadgroup]]) {
+    device uchar const *candidates [[buffer(2)]], device uchar const *candidates_offsets [[buffer(3)]],
+    constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]], threadgroup uint *staged_nodes [[threadgroup(0)]],
+    threadgroup uint *filter [[threadgroup(1)]], uint2 group [[threadgroup_position_in_grid]],
+    uint2 groups [[threadgroups_per_grid]], uint thread_index [[thread_index_in_threadgroup]],
+    uint2 group_size [[threads_per_threadgroup]]) {
     uint const segment = group.x * group_size.x + thread_index;
-    sz_sequence_tape_metal_t const tape = {candidates};
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
     device uint const *nodes = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.nodes);
     device ulong const *nodes_offsets = sz_reach_metal_<ulong>(engine, arguments.engine_host, arguments.nodes_offsets);
     device uint const *keys_counts = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.keys_counts);
@@ -372,20 +374,21 @@ kernel void sz_overlap_scores_metal_kernel_(
 
 /** One thread per candidate and query: the counters become shares, cleared for the next round. */
 kernel void sz_overlap_shares_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
-                                            device ulong const *candidates [[buffer(2)]],
-                                            device float *scores [[buffer(3)]],
-                                            constant sz_overlap_arguments_metal_t &arguments [[buffer(4)]],
+                                            device uchar const *candidates [[buffer(2)]],
+                                            device uchar const *candidates_offsets [[buffer(3)]],
+                                            device float *scores [[buffer(4)]],
+                                            constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]],
                                             uint2 position [[thread_position_in_grid]]) {
     ulong const candidate = position.x, query = position.y;
     if (candidate >= arguments.candidates_count || query >= arguments.queries_count) return;
-    sz_sequence_tape_metal_t const tape = {candidates};
+    sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
     device uint const *widths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.widths);
     device uint const *lengths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.lengths);
     device uint *counts = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.counts) +
                           (query * arguments.candidates_count + candidate) * arguments.widths_count;
     device float *candidate_scores = scores + query * arguments.scores_query_stride +
                                      candidate * arguments.scores_candidate_stride;
-    ulong const length = sz_sequence_tape_length_metal_(tape, candidate), query_length = lengths[query];
+    ulong const length = sz_strings_length_metal_(tape, candidate), query_length = lengths[query];
     for (ulong index = 0; index != arguments.widths_count; ++index) {
         ulong const width = widths[index];
         bool const scored = width && width <= query_length && width <= length;
