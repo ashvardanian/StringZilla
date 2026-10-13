@@ -39,9 +39,10 @@ namespace ashvardanian::stringzilla::test {
 
 #pragma region Compare
 
-/** Lengths every comparison and byte-scan size ladder switches at, plus one either side of each. */
-inline constexpr sz_size_t backend_ladder_lengths_[] = {1,  7,  8,  9,  15,  16,  17,  31, 32,
-                                                        33, 63, 64, 65, 127, 128, 129, 255};
+/** Lengths every comparison and byte-scan size ladder switches at, and the tails whole-tape kernels
+ *  copy aside at 66, 130 and 448 bytes, plus one either side of each. */
+inline constexpr sz_size_t backend_ladder_lengths_[] = {1,  7,  8,  9,   15,  16,  17,  31,  32,  33,  63,  64,
+                                                        65, 66, 67, 127, 128, 129, 130, 131, 255, 447, 448, 449};
 
 /** One backend's comparison kernels: a capability's, or the dispatch points in their shape. */
 struct compare_backend_t {
@@ -111,6 +112,9 @@ struct strings_backend_t {
     sz_kernel_strings_unescape_t unescape = nullptr;
     sz_kernel_strings_lookup_t lookup = nullptr;
     sz_kernel_strings_normalize_t normalize = nullptr;
+    sz_kernel_strings_split_t split = nullptr;
+    sz_kernel_strings_split_lines_t split_lines = nullptr;
+    sz_kernel_strings_join_t join = nullptr;
 };
 
 /** The serial collection kernels, every other backend's reference. */
@@ -121,7 +125,10 @@ inline strings_backend_t strings_serial_backend_() noexcept {
             sz_strings_escape_serial,
             sz_strings_unescape_serial,
             sz_strings_lookup_serial,
-            sz_strings_normalize_serial};
+            sz_strings_normalize_serial,
+            sz_strings_split_serial,
+            sz_strings_split_lines_serial,
+            sz_strings_join_serial};
 }
 
 /** Every escape kind, in the order of @c sz_escape_kind_t. */
@@ -320,21 +327,26 @@ struct named_strings_t {
  *  Its views point into it, so it never copies or moves.
  */
 class strings_layouts_t {
-    std::string payload_; // A string only the slice skips, then every string back to back
+
+    /** A string only the slice skips, then every string back to back, ending where its allocation
+     *  does, so a kernel reading past the last string trips the address sanitizer. */
+    std::vector<char> payload_;
     std::vector<sz_u32_t> u32_offsets_, prefixed_offsets_;
     std::vector<sz_u64_t> u64_offsets_;
     std::vector<sz_string_view_t> views_;
 
   public:
-    explicit strings_layouts_t(std::vector<std::string> const &strings) : payload_("skipped") {
-        prefixed_offsets_ = {0, static_cast<sz_u32_t>(payload_.size())};
+    explicit strings_layouts_t(std::vector<std::string> const &strings) {
+        std::string payload = "skipped";
+        prefixed_offsets_ = {0, static_cast<sz_u32_t>(payload.size())};
         u32_offsets_ = {0}, u64_offsets_ = {0};
         for (std::string const &string : strings) {
-            payload_ += string;
-            prefixed_offsets_.push_back(static_cast<sz_u32_t>(payload_.size()));
+            payload += string;
+            prefixed_offsets_.push_back(static_cast<sz_u32_t>(payload.size()));
             u32_offsets_.push_back(prefixed_offsets_.back() - prefixed_offsets_[1]);
             u64_offsets_.push_back(u32_offsets_.back());
         }
+        payload_.assign(payload.begin(), payload.end());
         for (std::size_t index = 0; index != strings.size(); ++index)
             views_.push_back({payload_.data() + prefixed_offsets_[index + 1], strings[index].size()});
     }
@@ -411,6 +423,433 @@ inline strings_outcome_t strings_outcome_(strings_backend_t const &backend, stri
         verify(span_offset_(tape, index) <= span_offset_(tape, index + 1));
     outcome.strings = strings_in_(tape);
     return outcome;
+}
+
+/** A split as the checks run it: at the bytes of @c delimiters as @c kind, or at line breaks for
+ *  the @c sz_kernel_strings_split_lines_k kernel. */
+struct split_verb_t {
+    sz_kernel_kind_t kernel = sz_kernel_strings_split_k;
+    sz_split_kind_t kind = sz_split_each_k;
+    std::string delimiters = {};
+};
+
+/** The name failures report @p verb by: its kernel, then its kind and delimiters. */
+inline std::string split_verb_name_(split_verb_t const &verb) {
+    if (verb.kernel == sz_kernel_strings_split_lines_k) return sz_kernel_name(verb.kernel);
+    std::string delimiters;
+    for (char const delimiter : verb.delimiters) delimiters += fmt::format("\\x{:02x}", (unsigned char)delimiter);
+    return fmt::format("{} {} at \"{}\"", sz_kernel_name(verb.kernel), verb.kind == sz_split_runs_k ? "runs" : "each",
+                       delimiters);
+}
+
+/** Every split the checks run: at one byte and at a set with a byte above 0x7F, each and runs, and
+ *  at line breaks. */
+inline std::vector<split_verb_t> split_verbs_() {
+    return {
+        {sz_kernel_strings_split_k, sz_split_each_k, " "},
+        {sz_kernel_strings_split_k, sz_split_runs_k, " "},
+        {sz_kernel_strings_split_k, sz_split_each_k, ",;\xff"},
+        {sz_kernel_strings_split_k, sz_split_runs_k, " \t\n\v\f\r"},
+        {sz_kernel_strings_split_lines_k},
+    };
+}
+
+/** Python's `bytes.split(sep)` with each byte of @p delimiters a separator: each ends a part. */
+inline std::vector<std::string> split_each_oracle_(std::string_view text, std::string_view delimiters) {
+    std::vector<std::string> parts(1);
+    for (char const character : text)
+        if (delimiters.find(character) != std::string_view::npos) parts.emplace_back();
+        else parts.back() += character;
+    return parts;
+}
+
+/** Python's `bytes.split()` with the bytes of @p delimiters as its whitespace: every run ends a
+ *  part, and empty parts are dropped. */
+inline std::vector<std::string> split_runs_oracle_(std::string_view text, std::string_view delimiters) {
+    std::vector<std::string> parts;
+    std::string part;
+    for (char const character : text)
+        if (delimiters.find(character) == std::string_view::npos) part += character;
+        else if (!part.empty()) parts.push_back(part), part.clear();
+    if (!part.empty()) parts.push_back(part);
+    return parts;
+}
+
+/** Python's `str.splitlines()` over the UTF-8 bytes of @p text. */
+inline std::vector<std::string> split_lines_oracle_(std::string_view text) {
+    auto const byte_at = [&](std::size_t index) { return index < text.size() ? (unsigned char)text[index] : 0u; };
+    std::vector<std::string> lines;
+    std::string line;
+    for (std::size_t index = 0; index < text.size();) {
+        unsigned const byte = byte_at(index), next = byte_at(index + 1), after = byte_at(index + 2);
+        std::size_t width = 0;
+        if (byte == '\r') width = next == '\n' ? 2 : 1;
+        else if (byte == '\n' || byte == '\v' || byte == '\f' || byte == 0x1C || byte == 0x1D || byte == 0x1E)
+            width = 1;
+        else if (byte == 0xC2 && next == 0x85) width = 2;
+        else if (byte == 0xE2 && next == 0x80 && (after == 0xA8 || after == 0xA9)) width = 3;
+        if (width) lines.push_back(line), line.clear(), index += width;
+        else line += text[index++];
+    }
+    if (!line.empty()) lines.push_back(line);
+    return lines;
+}
+
+/** What @p verb must split @p text into. */
+inline std::vector<std::string> split_oracle_(split_verb_t const &verb, std::string_view text) {
+    if (verb.kernel == sz_kernel_strings_split_lines_k) return split_lines_oracle_(text);
+    return verb.kind == sz_split_runs_k ? split_runs_oracle_(text, verb.delimiters)
+                                        : split_each_oracle_(text, verb.delimiters);
+}
+
+/** Splits the @p length bytes at @p text with @p backend into @p tape and reads back what it left,
+ *  checking a written tape as @c strings_outcome_ does, and that a failed call left it intact. */
+inline strings_outcome_t split_outcome_(strings_backend_t const &backend, split_verb_t const &verb, sz_cptr_t text,
+                                        sz_size_t length, sz_allocator_t *allocator, sz_strings_span_t &tape) {
+    sz_byteset_t delimiters;
+    sz_byteset_init(&delimiters);
+    for (char const delimiter : verb.delimiters) sz_byteset_add(&delimiters, delimiter);
+    sz_strings_span_t const prior = tape;
+    std::vector<std::string> const prior_strings = strings_in_(tape);
+    strings_outcome_t outcome;
+    outcome.status = verb.kernel == sz_kernel_strings_split_lines_k
+                         ? backend.split_lines(text, length, allocator, &tape, nullptr)
+                         : backend.split(text, length, &delimiters, verb.kind, allocator, &tape, nullptr);
+    if (outcome.status == sz_success_k)
+        verify(tape.layout == sz_strings_u32_tape_k && tape.data.u32_tape.offsets != nullptr &&
+               tape.data.u32_tape.offsets[0] == 0);
+    else verify(std::memcmp(&tape, &prior, sizeof(tape)) == 0 && strings_in_(tape) == prior_strings);
+    for (sz_size_t index = 0; index < tape.count; ++index)
+        verify(span_offset_(tape, index) <= span_offset_(tape, index + 1));
+    outcome.strings = strings_in_(tape);
+    return outcome;
+}
+
+/** Splits @p text with @p verb of @p backend into every kind of span, demanding the oracle's parts:
+ *  a zeroed span, reused ones of both offset widths and other sizes, one borrowed at the final
+ *  sizes with no allocator, and one whose payload is the very text it splits. */
+inline void check_split_spans_(strings_backend_t const &backend, split_verb_t const &verb, std::string const &text) {
+    std::vector<std::string> const expected = split_oracle_(verb, text);
+    std::vector<std::string> const reused {"a reused span", "", "of other sizes"};
+    sized_heap_t heap;
+    auto const demand = [&](char const *span, strings_outcome_t const &outcome) {
+        if (outcome.status == sz_success_k && outcome.strings == expected && heap.mismatches == 0) return;
+        fmt::println(stderr, "{} of {} bytes into {}: {} instead of {}", split_verb_name_(verb), text.size(), span,
+                     outcome, expected);
+        fail_backend_(backend.name, "a split disagreed with its oracle");
+    };
+
+    sz_strings_span_t fresh {};
+    demand("a zeroed span", split_outcome_(backend, verb, text.data(), text.size(), &heap.allocator, fresh));
+    sz_strings_span_free(&fresh, &heap.allocator, nullptr);
+
+    for (sz_strings_layout_t const width : {sz_strings_u32_tape_k, sz_strings_u64_tape_k}) {
+        sz_strings_span_t tape = span_from_(reused, width, heap.allocator);
+        demand(width == sz_strings_u32_tape_k ? "a reused 32-bit span" : "a reused 64-bit span",
+               split_outcome_(backend, verb, text.data(), text.size(), &heap.allocator, tape));
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
+
+    std::size_t payload_bytes = 0;
+    for (std::string const &part : expected) payload_bytes += part.size();
+    std::vector<char> payload(payload_bytes, '#');
+    std::vector<sz_u32_t> offsets(expected.size() + 1, 0);
+    offsets.back() = static_cast<sz_u32_t>(payload_bytes);
+    sz_strings_span_t borrowed {};
+    borrowed.layout = sz_strings_u32_tape_k, borrowed.count = expected.size();
+    borrowed.data.u32_tape.data = payload.data(), borrowed.data.u32_tape.offsets = offsets.data();
+    demand("a borrowed span", split_outcome_(backend, verb, text.data(), text.size(), nullptr, borrowed));
+    verify(borrowed.data.u32_tape.data == payload.data() && borrowed.data.u32_tape.offsets == offsets.data());
+
+    sz_strings_span_t own = span_from_({text}, sz_strings_u32_tape_k, heap.allocator);
+    demand("the span holding it",
+           split_outcome_(backend, verb, own.data.u32_tape.data, text.size(), &heap.allocator, own));
+    sz_strings_span_free(&own, &heap.allocator, nullptr);
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/** Python's `str.join` generalized to rows of @p columns, each framed by @p frames. */
+inline std::string join_oracle_(std::vector<std::vector<std::string>> const &columns, std::size_t rows,
+                                std::vector<std::string> const &frames, std::string const &between) {
+    std::string joined;
+    for (std::size_t row = 0; row != rows; ++row) {
+        if (row) joined += between;
+        joined += frames[0];
+        for (std::size_t column = 0; column != columns.size(); ++column)
+            joined += columns[column][row], joined += frames[column + 1];
+    }
+    return joined;
+}
+
+/** Joins @p columns with @p backend, measuring first and then writing into exactly that many bytes
+ *  between canaries, and demands @p expected. */
+inline void check_join_(strings_backend_t const &backend, std::vector<sz_strings_view_t> const &columns,
+                        std::size_t rows, std::vector<std::string> const &frames, std::string const &between,
+                        std::string const &expected) {
+    std::vector<sz_string_view_t> frame_views;
+    for (std::string const &frame : frames) frame_views.push_back({frame.data(), frame.size()});
+    sz_string_view_t const between_view {between.data(), between.size()};
+    sz_size_t length = 0;
+    verify(backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, nullptr, &length,
+                        nullptr) == sz_success_k);
+    if (length != expected.size()) fail_backend_(backend.name, "a join measured other than its oracle's length");
+    with_guarded_buffer_(length, [&](sz_ptr_t output, std::size_t) {
+        verify(backend.join(columns.data(), columns.size(), rows, frame_views.data(), between_view, output, &length,
+                            nullptr) == sz_success_k);
+        if (std::string_view(output, length) != expected)
+            fail_backend_(backend.name, "a join wrote other than its oracle");
+    });
+}
+
+/** Holds one backend's splits and joins to Python's answers: `bytes.split` at a separator and at
+ *  whitespace, `str.splitlines` at every break it knows and at none it does not, and `str.join`
+ *  with frames, then joins too long to measure. */
+inline void check_strings_split_unit_(strings_backend_t const &backend) {
+    using strings_t = std::vector<std::string>;
+    sized_heap_t heap;
+    auto const split = [&](split_verb_t const &verb, std::string_view text) {
+        sz_strings_span_t tape {};
+        strings_outcome_t const outcome = split_outcome_(backend, verb, text.data(), text.size(), &heap.allocator,
+                                                         tape);
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        verify(outcome.status == sz_success_k);
+        return outcome.strings;
+    };
+
+    // `bytes.split(sep)`: a text of n delimiters always makes n + 1 parts, empty ones included.
+    split_verb_t const comma {sz_kernel_strings_split_k, sz_split_each_k, ","};
+    verify(split(comma, "a,b,,c") == strings_t({"a", "b", "", "c"}));
+    verify(split(comma, "") == strings_t({""}));
+    verify(split(comma, ",a,") == strings_t({"", "a", ""}));
+    verify(split(comma, ",") == strings_t({"", ""}));
+    verify(split(comma, "abc") == strings_t({"abc"}));
+    verify(split({sz_kernel_strings_split_k, sz_split_each_k, ",;"}, "a;b,c") == strings_t({"a", "b", "c"}));
+
+    // `bytes.split()`: every run of whitespace ends one part, and the runs at either end none.
+    split_verb_t const whitespace {sz_kernel_strings_split_k, sz_split_runs_k, " \t\n\v\f\r"};
+    verify(split(whitespace, "") == strings_t {});
+    verify(split(whitespace, "  ") == strings_t {});
+    verify(split(whitespace, " a  b ") == strings_t({"a", "b"}));
+    verify(split(whitespace, "\ta\nb\r\n c\f") == strings_t({"a", "b", "c"}));
+    verify(split(whitespace, "\v\fx\x1cy") == strings_t({"x\x1cy"}));
+    verify(split(whitespace, "a\xC2\xA0z") == strings_t({"a\xC2\xA0z"}));
+
+    // `str.splitlines()`: LF, VT, FF, CR, FS, GS, RS, CR LF as one, NEL, LS and PS, no empty line
+    // after a final break, and neither US, a lone 0x85, NBSP nor a near miss of LS a break.
+    split_verb_t const lines {sz_kernel_strings_split_lines_k};
+    verify(split(lines, "") == strings_t {});
+    verify(split(lines, "\n") == strings_t({""}));
+    verify(split(lines, "a\nb") == strings_t({"a", "b"}));
+    verify(split(lines, "a\n") == strings_t({"a"}));
+    verify(split(lines, "a\n\nb") == strings_t({"a", "", "b"}));
+    verify(split(lines, "a\r\nb\rc\n") == strings_t({"a", "b", "c"}));
+    verify(split(lines, "\r\r\n") == strings_t({"", ""}));
+    verify(split(lines, "\n\r") == strings_t({"", ""}));
+    verify(split(lines, "a\r") == strings_t({"a"}));
+    verify(split(lines, "a\vb\fc") == strings_t({"a", "b", "c"}));
+    verify(split(lines, "a\x1c" "b\x1d" "c\x1e" "d") == strings_t({"a", "b", "c", "d"})); // "\x1cb" is one escape
+    verify(split(lines, "a\xC2\x85z") == strings_t({"a", "z"}));
+    verify(split(lines, "a\xE2\x80\xA8z\xE2\x80\xA9" "c") == strings_t({"a", "z", "c"})); // "\xA9c" is one escape
+    verify(split(lines, "\x1f") == strings_t({"\x1f"}));
+    verify(split(lines, "a\x85z") == strings_t({"a\x85z"}));
+    verify(split(lines, "\xC2\xA0") == strings_t({"\xC2\xA0"}));
+    verify(split(lines, "a\xE2\x80\xA7z\xE2\x80\xAA") == strings_t({"a\xE2\x80\xA7z\xE2\x80\xAA"}));
+
+    // No bytes at a null text make one empty part at each delimiter, and no part at all otherwise.
+    for (split_verb_t const &verb : split_verbs_()) {
+        sz_strings_span_t tape {};
+        verify(split_outcome_(backend, verb, nullptr, 0, &heap.allocator, tape).strings == split_oracle_(verb, ""));
+        sz_strings_span_free(&tape, &heap.allocator, nullptr);
+    }
+
+    // `str.join` is one column between empty frames; rows of several columns read any layouts, and
+    // no rows join into nothing.
+    {
+        strings_layouts_t const letters({"a", "bb"}), digits({"1", "22"});
+        for (named_strings_t const &letters_layout : letters.all())
+            for (named_strings_t const &digits_layout : digits.all())
+                check_join_(backend, {letters_layout.view, digits_layout.view}, 2, {"(", ",", ")"}, ";",
+                            "(a,1);(bb,22)");
+        check_join_(backend, {letters.u32_tape()}, 2, {"", ""}, ", ", "a, bb");
+        check_join_(backend, {}, 2, {"x"}, "-", "x-x");
+        check_join_(backend, {letters.u32_tape()}, 0, {"[", "]"}, ",", "");
+    }
+
+    // Lengths only measured, never read, overflow in the frames, in every row, and between rows.
+    {
+        strings_layouts_t const letters({"a", "bb", "c", "d"});
+        sz_strings_view_t const column = letters.u32_tape();
+        sz_size_t const half = std::numeric_limits<sz_size_t>::max() / 2 + 1, length_before = 7;
+        sz_string_view_t const halves[2] = {{nullptr, half}, {nullptr, half}};
+        sz_string_view_t const quarters[2] = {{nullptr, half / 2}, {nullptr, 0}};
+        sz_string_view_t const empties[2] = {{nullptr, 0}, {nullptr, 0}};
+        sz_size_t length = length_before;
+        verify(backend.join(&column, 1, 4, halves, {nullptr, 0}, nullptr, &length, nullptr) == sz_bad_alloc_k);
+        verify(backend.join(&column, 1, 4, quarters, {nullptr, 0}, nullptr, &length, nullptr) == sz_bad_alloc_k);
+        verify(backend.join(&column, 1, 4, empties, {nullptr, half}, nullptr, &length, nullptr) == sz_bad_alloc_k);
+        verify(length == length_before);
+    }
+    verify(heap.mismatches == 0 && heap.blocks.empty());
+}
+
+/** Demands that one backend split random texts and join random columns as the oracles do: texts of
+ *  dense delimiters, of sparse ones in long words, and of every line break, short and long lines,
+ *  CR LF and ill-formed bytes among them, into every kind of span, and columns of any layouts and
+ *  frames across the blocks of 64 rows. */
+inline void check_strings_split_equivalence_(test_context_t &context, strings_backend_t const &candidate) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> const dense = alphabet_characters("ab ,;\t\n\r\xff");
+    std::vector<std::string> sparse(40, "x");
+    for (char const *rare : {" ", ",", "\n", "\xff"}) sparse.push_back(rare);
+    std::vector<std::string> const breaks {"a",
+                                           "b",
+                                           " ",
+                                           "\n",
+                                           "\r",
+                                           "\r\n",
+                                           "\v",
+                                           "\f",
+                                           "\x1c",
+                                           "\x1d",
+                                           "\x1e",
+                                           "\x1f",
+                                           "\xC2\x85",
+                                           "\x85",
+                                           "\xC2",
+                                           "\xE2\x80\xA8",
+                                           "\xE2\x80\xA9",
+                                           "\xE2\x80",
+                                           "\xE2\x80\xAA",
+                                           "\xC3\xA9",
+                                           "\xE2\x80\x9C",
+                                           "words in a longer line"};
+    std::vector<std::string> const *const alphabets[] = {&dense, &sparse, &breaks};
+    std::vector<split_verb_t> const verbs = split_verbs_();
+    std::uniform_int_distribution<std::size_t> length_distribution(0, 300);
+    for (std::size_t iteration = 0; iteration != context.iterations(20); ++iteration)
+        for (std::vector<std::string> const *characters : alphabets) {
+            std::size_t const length = length_distribution(generator);
+            std::string const text = random_string(generator, length == 300 ? 3000 : length, *characters);
+            for (split_verb_t const &verb : verbs) check_split_spans_(candidate, verb, text);
+        }
+
+    std::vector<std::string> const cells = alphabet_characters("ab,\"\n \xC3\xA9");
+    std::uniform_int_distribution<std::size_t> columns_distribution(0, 3), rows_distribution(0, 150),
+        cell_distribution(0, 12), frame_distribution(0, 3), layout_distribution(0, 3);
+    for (std::size_t iteration = 0; iteration != context.iterations(30); ++iteration) {
+        std::size_t const columns_count = columns_distribution(generator), rows = rows_distribution(generator);
+        std::vector<std::vector<std::string>> columns(columns_count, std::vector<std::string>(rows));
+        std::array<std::optional<strings_layouts_t>, 3> layouts;
+        std::vector<sz_strings_view_t> views;
+        for (std::size_t column = 0; column != columns_count; ++column) {
+            for (std::string &cell : columns[column]) {
+                std::size_t const cell_length = cell_distribution(generator);
+                cell = random_string(generator, cell_length == 12 ? 100 : cell_length, cells);
+            }
+            layouts[column].emplace(columns[column]);
+            std::array<named_strings_t, 4> const named = layouts[column]->all();
+            views.push_back(named[layout_distribution(generator)].view);
+        }
+        std::vector<std::string> frames(columns_count + 1);
+        for (std::string &frame : frames) frame = random_string(generator, frame_distribution(generator), cells);
+        std::string const between = random_string(generator, frame_distribution(generator), cells);
+        check_join_(candidate, views, rows, frames, between, join_oracle_(columns, rows, frames, between));
+    }
+}
+
+/** Feeds one backend's splits texts of every length a vector ladder switches at, at every
+ *  cache-line offset and at the very end of their heap blocks, into borrowed blocks of exactly the
+ *  sizes written between canaries; every line break across every lane of the first blocks of 16 and
+ *  64 bytes; and allocators that refuse a growth at every step, which must leave every span as it
+ *  was before the call. */
+inline void check_strings_split_safety_(strings_backend_t const &backend) {
+    std::vector<split_verb_t> const verbs = split_verbs_();
+    std::string const pattern = "ab ,;\r\n\xC2\x85 \xE2\x80\xA8x\xff\t\x1c";
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        std::string text;
+        for (std::size_t index = 0; index != length; ++index) text.push_back(pattern[index % pattern.size()]);
+        std::vector<char> const exact(text.begin(), text.end());
+        for (split_verb_t const &verb : verbs) {
+            std::vector<std::string> const expected = split_oracle_(verb, text);
+            sized_heap_t heap;
+            sz_strings_span_t tape {};
+            verify(split_outcome_(backend, verb, exact.data(), exact.size(), &heap.allocator, tape).strings ==
+                   expected);
+            sz_strings_span_free(&tape, &heap.allocator, nullptr);
+
+            std::size_t payload_bytes = 0;
+            for (std::string const &part : expected) payload_bytes += part.size();
+            for_each_cacheline_offset_(text.size(), [&](sz_ptr_t data, std::size_t) {
+                std::memcpy(data, text.data(), text.size());
+                with_guarded_buffer_(payload_bytes, [&](sz_ptr_t payload, std::size_t) {
+                    with_guarded_buffer_(
+                        (expected.size() + 1) * sizeof(sz_u32_t), [&](sz_ptr_t offsets_bytes, std::size_t) {
+                            sz_u32_t *const offsets = reinterpret_cast<sz_u32_t *>(offsets_bytes);
+                            std::fill(offsets, offsets + expected.size(), 0u);
+                            offsets[expected.size()] = static_cast<sz_u32_t>(payload_bytes);
+                            sz_strings_span_t borrowed {};
+                            borrowed.layout = sz_strings_u32_tape_k, borrowed.count = expected.size();
+                            borrowed.data.u32_tape.data = payload, borrowed.data.u32_tape.offsets = offsets;
+                            if (split_outcome_(backend, verb, data, text.size(), nullptr, borrowed).strings != expected)
+                                fail_backend_(backend.name, fmt::format("{} of {} bytes into borrowed blocks differs",
+                                                                        split_verb_name_(verb), text.size())
+                                                                .c_str());
+                        });
+                });
+            });
+        }
+    }
+
+    // Every break, ending the text or followed by more of it, across the lanes of the first blocks.
+    for (char const *line_break : {"\n", "\r", "\r\n", "\x1e", "\xC2\x85", "\xE2\x80\xA8", "\xE2\x80\xA9"})
+        for (std::size_t position = 0; position != 140; ++position)
+            for (bool const ends : {true, false}) {
+                std::string text(position, 'x');
+                text += line_break;
+                if (!ends) text += std::string(150 - position, 'y');
+                std::vector<char> const exact(text.begin(), text.end());
+                for (split_verb_t const &verb : {split_verb_t {sz_kernel_strings_split_lines_k},
+                                                 split_verb_t {sz_kernel_strings_split_k, sz_split_runs_k, "\r\n"}}) {
+                    sized_heap_t heap;
+                    sz_strings_span_t tape {};
+                    if (split_outcome_(backend, verb, exact.data(), exact.size(), &heap.allocator, tape).strings !=
+                        split_oracle_(verb, text))
+                        fail_backend_(
+                            backend.name,
+                            fmt::format("{} misread a break at byte {}", split_verb_name_(verb), position).c_str());
+                    sz_strings_span_free(&tape, &heap.allocator, nullptr);
+                }
+            }
+
+    // Refusing the first growth, then the second and so on until none is, with or without
+    // `reallocate`, leaves a zeroed span, reused spans of fewer and of more parts, and the span
+    // holding the text, exactly as they were.
+    std::string const text = "Split  these,words;\r\nand\xC2\x85these lines\xE2\x80\xA9 too \xff";
+    std::vector<std::string> const shorter {"r"}, longer(100, "rr");
+    std::vector<std::string> const holding {text};
+    std::vector<std::string> const *const starts[] = {nullptr, &shorter, &longer, &holding};
+    for (split_verb_t const &verb : verbs) {
+        std::vector<std::string> const expected = split_oracle_(verb, text);
+        for (bool const reallocates : {true, false})
+            for (std::vector<std::string> const *start : starts)
+                for (std::size_t growths = 0;; ++growths) {
+                    verify(growths != 16 && "A split must succeed once the allocator grants it enough");
+                    sized_heap_t rationed;
+                    if (!reallocates) rationed.allocator.reallocate = nullptr;
+                    sz_strings_span_t tape {};
+                    if (start) tape = span_from_(*start, sz_strings_u32_tape_k, rationed.allocator);
+                    sz_cptr_t const source = start == &holding ? tape.data.u32_tape.data : text.data();
+                    rationed.growths_left = growths;
+                    strings_outcome_t const outcome = split_outcome_(backend, verb, source, text.size(),
+                                                                     &rationed.allocator, tape);
+                    sz_strings_span_free(&tape, &rationed.allocator, nullptr);
+                    if (rationed.mismatches != 0 || !rationed.blocks.empty())
+                        fail_backend_(backend.name, "a refused split left a span its blocks do not match");
+                    if (outcome.status == sz_bad_alloc_k) continue;
+                    verify(outcome.status == sz_success_k && outcome.strings == expected);
+                    break;
+                }
+    }
 }
 
 /** Holds one strings backend to known answers: every escape kind both ways, by the RFC 8259, 4180
@@ -693,6 +1132,7 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
     }
     verify(heap.mismatches == 0 && heap.blocks.empty());
+    if (backend.split) check_strings_split_unit_(backend);
 }
 
 /** Writes @p strings into rows of widths around a vector's through @p candidate and serial, from
@@ -911,6 +1351,26 @@ inline void check_strings_equivalence_(test_context_t &context, strings_backend_
                 check_strings_verb_equivalence_(candidate, {sz_kernel_strings_unescape_k, kind}, spoiled, order);
             }
         }
+
+    // Strings ending on and around the 64-byte blocks that kernels step through to escape a whole
+    // tape at once, escaped, then unescaped from what they escaped.
+    std::vector<std::string> edges;
+    for (std::size_t const length : {64, 0, 63, 1, 3968, 0, 4096, 1, 63})
+        edges.push_back(random_string(generator, length, escapes));
+    std::vector<sz_size_t> const edges_order = random_order(edges.size());
+    strings_layouts_t const edges_layouts(edges);
+    for (sz_escape_kind_t const kind : escape_kinds_) {
+        check_strings_verb_equivalence_(candidate, {sz_kernel_strings_escape_k, kind}, edges, edges_order);
+        sized_heap_t heap;
+        sz_strings_span_t escaped {};
+        verify(strings_outcome_(candidate, {sz_kernel_strings_escape_k, kind}, edges_layouts.u32_tape(), nullptr,
+                                edges.size(), &heap.allocator, escaped)
+                   .status == sz_success_k);
+        check_strings_verb_equivalence_(candidate, {sz_kernel_strings_unescape_k, kind}, strings_in_(escaped),
+                                        edges_order);
+        sz_strings_span_free(&escaped, &heap.allocator, nullptr);
+    }
+    if (candidate.split) check_strings_split_equivalence_(context, candidate);
 }
 
 /** Feeds one strings backend empty collections, borrowed blocks flanked by canaries at every input
@@ -1101,7 +1561,8 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
         }
     }
 
-    // An escape cut short at the end of its string is malformed there, after a string that is not.
+    // An escape cut short at the end of its string is malformed there, after a string that is not,
+    // even when the next string starts with the digits it lacks.
     struct cut_short_t {
         sz_escape_kind_t kind;
         char const *text;
@@ -1125,15 +1586,17 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
         {sz_escape_csv_k, R"(")"},
         {sz_escape_csv_k, R"("open)"},
     };
-    for (cut_short_t const &malformed : span_over(cut_short)) {
-        strings_layouts_t const layouts({"", malformed.text, ""});
-        sz_strings_span_t tape {};
-        strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_unescape_k, malformed.kind},
-                                                           layouts.u32_tape(), nullptr, 3, &heap.allocator, tape);
-        verify(outcome.status == sz_invalid_utf8_k && outcome.malformed_index == 1);
-        sz_strings_span_free(&tape, &heap.allocator, nullptr);
-    }
+    for (cut_short_t const &malformed : span_over(cut_short))
+        for (char const *next : {"", "41"}) {
+            strings_layouts_t const layouts({"", malformed.text, next});
+            sz_strings_span_t tape {};
+            strings_outcome_t const outcome = strings_outcome_(backend, {sz_kernel_strings_unescape_k, malformed.kind},
+                                                               layouts.u32_tape(), nullptr, 3, &heap.allocator, tape);
+            verify(outcome.status == sz_invalid_utf8_k && outcome.malformed_index == 1);
+            sz_strings_span_free(&tape, &heap.allocator, nullptr);
+        }
     verify(heap.mismatches == 0 && heap.blocks.empty());
+    if (backend.split) check_strings_split_safety_(backend);
 }
 
 #pragma endregion Strings
@@ -1149,7 +1612,120 @@ struct find_backend_t {
     sz_kernel_find_byte_t rfind_byte = nullptr;
     sz_kernel_find_byteset_t find_byteset = nullptr;
     sz_kernel_find_byteset_t rfind_byteset = nullptr;
+    sz_kernel_find_strings_t find_strings = nullptr;
 };
+
+/** Each first offset of @p needle in `strings[order[i]]`, or in every string without an order,
+ *  found by @p find_strings over @p view. */
+inline std::vector<sz_size_t> found_in_strings_(sz_kernel_find_strings_t find_strings, sz_strings_view_t const &view,
+                                                std::vector<sz_size_t> const *order, std::string_view needle) {
+    sz_size_t const count = order ? order->size() : view.count;
+    std::vector<sz_size_t> positions(count, 42);
+    verify(find_strings(&view, order ? order->data() : nullptr, count, needle.data(), needle.size(), positions.data(),
+                        nullptr) == sz_success_k);
+    return positions;
+}
+
+/** The same offsets found one string at a time by the serial substring search, the oracle. */
+inline std::vector<sz_size_t> found_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
+                                           std::string_view needle) {
+    std::size_t const count = order ? order->size() : strings.size();
+    std::vector<sz_size_t> positions(count);
+    for (std::size_t position = 0; position != count; ++position) {
+        std::string const &string = strings[order ? order->at(position) : position];
+        sz_cptr_t const match = sz_find_serial_(string.data(), string.size(), needle.data(), needle.size());
+        positions[position] = match ? (sz_size_t)(match - string.data()) : STRINGZILLA_SIZE_MAX;
+    }
+    return positions;
+}
+
+/** Holds a column search to known answers: matches crossing into the next string, empty strings and
+ *  needles, and an order repeating strings. */
+inline void check_find_strings_unit_(sz_kernel_find_strings_t find_strings) {
+    sz_size_t const none = STRINGZILLA_SIZE_MAX;
+    auto const found = [&](std::vector<std::string> const &strings, std::string_view needle,
+                           std::vector<sz_size_t> const *order = nullptr) {
+        strings_layouts_t const layouts(strings);
+        return found_in_strings_(find_strings, layouts.u32_tape(), order, needle);
+    };
+    // A match crossing into the next string counts for neither, and an empty string holds none.
+    verify(found({"ab", "cd", "", "xabcd"}, "bc") == std::vector<sz_size_t>({none, none, none, 2}));
+    verify(found({"hello", "world", "ll"}, "ll") == std::vector<sz_size_t>({2, none, 0}));
+    verify(found({"a", "", "b"}, "") == std::vector<sz_size_t>({0, 0, 0}));
+    std::vector<sz_size_t> const order {1, 1, 0};
+    verify(found({"x", "needle", "y"}, "needle", &order) == std::vector<sz_size_t>({0, 0, none}));
+}
+
+/** Searches two strings whose payload ends where its allocation does, at every ladder length, for a
+ *  needle filling the last bytes of the second, and for one a byte longer, running past its end. */
+inline void check_find_strings_safety_(sz_kernel_find_strings_t find_strings) {
+    for (sz_size_t const length : span_over(backend_ladder_lengths_))
+        for (std::size_t const needle_length : {(std::size_t)1, (std::size_t)3, (std::size_t)16, (std::size_t)65}) {
+            std::size_t const second_start = length / 2;
+            if (needle_length > length - second_start) continue;
+            std::vector<char> payload(length, 'a');
+            std::memset(payload.data() + length - needle_length, 'z', needle_length);
+            std::string const needle(needle_length + 1, 'z');
+            sz_u32_t const offsets[3] = {0, static_cast<sz_u32_t>(second_start), static_cast<sz_u32_t>(length)};
+            sz_strings_view_t const view = strings_tape_over_(payload.data(), offsets);
+            sz_size_t positions[2] = {0, 0};
+            verify(find_strings(&view, nullptr, 2, needle.data(), needle_length, positions, nullptr) == sz_success_k);
+            verify(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == length - needle_length - second_start);
+            verify(find_strings(&view, nullptr, 2, needle.data(), needle.size(), positions, nullptr) == sz_success_k);
+            verify(positions[0] == STRINGZILLA_SIZE_MAX && positions[1] == STRINGZILLA_SIZE_MAX);
+        }
+}
+
+/** Holds a column search to its strings searched one at a time, over every layout, in order and
+ *  through repeating orders, with needles shorter and longer than a 64-byte block planted in no
+ *  string, some, or every one, inside it, across its end, or in the last bytes of the payload. */
+inline void check_find_strings_equivalence_(test_context_t &context, char const *name,
+                                            sz_kernel_find_strings_t find_strings) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> const characters = alphabet_characters("abc");
+    static constexpr std::size_t needle_lengths[] = {0, 1, 2, 3, 4, 16, 63, 64, 65, 200};
+    std::uniform_int_distribution<std::size_t> count_distribution(0, 150), empty_distribution(0, 7),
+        needle_distribution(0, std::size(needle_lengths) - 1), density_distribution(0, 2);
+    for (std::size_t iteration = 0; iteration != context.iterations(60); ++iteration) {
+        std::string const needle = random_string(generator, needle_lengths[needle_distribution(generator)], characters);
+        std::uniform_int_distribution<std::size_t> length_distribution(0, 2 * needle.size() + 24);
+        std::vector<std::size_t> starts {0};
+        for (std::size_t count = count_distribution(generator); count; --count)
+            starts.push_back(starts.back() + (empty_distribution(generator) ? length_distribution(generator) : 0));
+        std::string payload = random_string(generator, starts.back(), characters);
+        std::size_t const density = density_distribution(generator);
+        std::bernoulli_distribution plant_distribution(density / 2.0);
+        for (std::size_t index = 0; index + 1 < starts.size(); ++index) {
+            if (starts[index] == starts[index + 1] || !plant_distribution(generator)) continue;
+            std::size_t const at = std::uniform_int_distribution<std::size_t>(starts[index],
+                                                                              starts[index + 1] - 1)(generator);
+            std::size_t const planted = std::min(needle.size(), payload.size() - at);
+            payload.replace(at, planted, needle, 0, planted);
+        }
+        if (density && payload.size() >= needle.size())
+            payload.replace(payload.size() - needle.size(), needle.size(), needle);
+        std::vector<std::string> strings;
+        for (std::size_t index = 0; index + 1 < starts.size(); ++index)
+            strings.push_back(payload.substr(starts[index], starts[index + 1] - starts[index]));
+        std::vector<sz_size_t> order;
+        if (!strings.empty()) {
+            std::uniform_int_distribution<std::size_t> index_distribution(0, strings.size() - 1);
+            order.resize(strings.size() + 3);
+            for (sz_size_t &index : order) index = index_distribution(generator);
+        }
+        strings_layouts_t const layouts(strings);
+        std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
+        for (std::vector<sz_size_t> const *selection : selections) {
+            std::vector<sz_size_t> const expected = found_alone_(strings, selection, needle);
+            for (named_strings_t const &layout : layouts.all()) {
+                if (found_in_strings_(find_strings, layout.view, selection, needle) == expected) continue;
+                fmt::println(stderr, "{}: find_strings of {:?} in {} {} differs from a search per string", name, needle,
+                             layout.name, selection ? "reordered" : "in order");
+                fail_backend_(name, "a column search disagreed with searching each string");
+            }
+        }
+    }
+}
 
 /**
  *  @brief Drives one byte-scanner pair across the size ladder, with a match at either end or none.
@@ -1216,6 +1792,7 @@ inline void check_find_unit_(find_backend_t const &backend) {
         verify(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "wor", 3) == hello + 6);
         verify(kernel_result<sz_cptr_t>(backend.rfind, hello, hello_length, "xyz", 3) == STRINGZILLA_NULL_CHAR);
     }
+    if (backend.find_strings) check_find_strings_unit_(backend.find_strings);
     if (backend.find_byte && backend.rfind_byte) {
         verify(kernel_result<sz_cptr_t>(backend.find_byte, hello, hello_length, "l") == hello + 2);
         verify(kernel_result<sz_cptr_t>(backend.rfind_byte, hello, hello_length, "l") == hello + 9);
@@ -1360,6 +1937,7 @@ inline void check_find_equivalence_(test_context_t &context, find_backend_t cons
         check_byteset_equivalence_(context, candidate.name, sz_find_byteset_serial, candidate.find_byteset);
     if (candidate.rfind_byteset)
         check_byteset_equivalence_(context, candidate.name, sz_rfind_byteset_serial, candidate.rfind_byteset);
+    if (candidate.find_strings) check_find_strings_equivalence_(context, candidate.name, candidate.find_strings);
 }
 
 /**
@@ -1392,6 +1970,7 @@ inline void check_find_safety_(find_backend_t const &backend) {
         verify(kernel_result<sz_cptr_t>(backend.rfind, body, 0, "a", 1) == STRINGZILLA_NULL_CHAR);
         verify(kernel_result<sz_cptr_t>(backend.rfind, body, 3, body, body_length) == STRINGZILLA_NULL_CHAR);
     }
+    if (backend.find_strings) check_find_strings_safety_(backend.find_strings);
 
     // An empty byteset matches nothing; a full one matches the first and last byte.
     sz_byteset_t empty_set, full_set;
@@ -1466,6 +2045,7 @@ struct hash_backend_t {
     sz_kernel_hash_state_init_t init_kernel;
     sz_kernel_hash_state_update_t update_kernel;
     sz_kernel_hash_state_digest_t digest_kernel;
+    sz_kernel_hash_strings_t strings_kernel = nullptr;
 
     sz_u64_t operator()(sz_cptr_t text, sz_size_t length, sz_u64_t seed) const {
         return kernel_result<sz_u64_t>(hash_kernel, text, length, seed);
@@ -1645,6 +2225,95 @@ inline void check_bytesum_equivalence_(test_context_t &context, sz_kernel_bytesu
            "Byte sum backend disagreed with the reference on the oversized, past-a-megabyte input");
 }
 
+/** Each hash of `strings[order[i]]`, or of every string without an order, as @p hash_strings
+ *  computes it over @p view under @p seed. */
+inline std::vector<sz_u64_t> hashed_in_strings_(sz_kernel_hash_strings_t hash_strings, sz_strings_view_t const &view,
+                                                std::vector<sz_size_t> const *order, sz_u64_t seed) {
+    sz_size_t const count = order ? order->size() : view.count;
+    std::vector<sz_u64_t> hashes(count, 0);
+    verify(hash_strings(&view, order ? order->data() : nullptr, count, seed, hashes.data(), nullptr) == sz_success_k);
+    return hashes;
+}
+
+/** Each hash of the same strings as @c sz_hash_serial computes it for one string alone. */
+inline std::vector<sz_u64_t> hashed_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order,
+                                           sz_u64_t seed) {
+    std::size_t const count = order ? order->size() : strings.size();
+    std::vector<sz_u64_t> hashes(count);
+    for (std::size_t position = 0; position != count; ++position) {
+        std::string const &string = strings[order ? order->at(position) : position];
+        hashes[position] = sz_hash_serial_(string.data(), string.size(), seed);
+    }
+    return hashes;
+}
+
+/** The key lengths a column hash is held to: empty, around every 16-byte block, and past the 64
+ *  bytes a window of keys reads. */
+inline constexpr std::size_t hash_strings_key_lengths_[] = {0, 1, 15, 16, 17, 31, 32, 33, 47, 48, 49, 63, 64, 65, 200};
+
+/** Holds a column hash to @c sz_hash_serial key by key: over every layout, in order and through a
+ *  repeating order, at every count past the widest window a backend hashes at once, with keys
+ *  around every 16-byte block and past the 64 bytes a window reads. */
+inline void check_hash_strings_equivalence_(test_context_t &context, char const *name,
+                                            sz_kernel_hash_strings_t hash_strings) {
+    std::mt19937 &generator = context.generator;
+    for (std::size_t iteration = 0; iteration != context.iterations(40); ++iteration) {
+        // Odd iterations keep every key within 64 bytes, so whole columns hash in windows.
+        std::uniform_int_distribution<std::size_t> length_index_distribution(0, iteration % 2 ? 12 : 14);
+        std::vector<std::string> strings(iteration);
+        for (std::string &string : strings) {
+            string.resize(hash_strings_key_lengths_[length_index_distribution(generator)]);
+            randomize_string(generator, string);
+        }
+        std::vector<sz_size_t> order;
+        if (!strings.empty()) {
+            std::uniform_int_distribution<std::size_t> index_distribution(0, strings.size() - 1);
+            order.resize(strings.size() + 3);
+            for (sz_size_t &index : order) index = index_distribution(generator);
+        }
+        sz_u64_t const seed = generator();
+        strings_layouts_t const layouts(strings);
+        std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
+        for (std::vector<sz_size_t> const *selection : selections)
+            for (named_strings_t const &layout : layouts.all()) {
+                if (hashed_in_strings_(hash_strings, layout.view, selection, seed) ==
+                    hashed_alone_(strings, selection, seed))
+                    continue;
+                fmt::println(stderr, "{}: hash_strings over {} {} differs from hashing each string", name, layout.name,
+                             selection ? "reordered" : "in order");
+                fail_backend_(name, "a column hash disagreed with hashing each string");
+            }
+    }
+}
+
+/** Hashes keys of every boundary length filling payloads of every ladder length, each allocated to
+ *  its exact size, so a load past its end trips the address sanitizer, read in order and through an
+ *  order revisiting them. */
+inline void check_hash_strings_safety_(sz_kernel_hash_strings_t hash_strings) {
+    for (sz_size_t const length : span_over(backend_ladder_lengths_)) {
+        std::vector<std::string> keys;
+        std::vector<sz_u32_t> u32_offsets {0};
+        std::vector<sz_u64_t> u64_offsets {0};
+        std::string joined;
+        for (std::size_t row = 0; joined.size() != length; ++row) {
+            std::size_t const key_length = std::min(hash_strings_key_lengths_[row % 13], length - joined.size());
+            keys.emplace_back(key_length, static_cast<char>('a' + row % 26));
+            joined += keys.back();
+            u32_offsets.push_back(static_cast<sz_u32_t>(joined.size())), u64_offsets.push_back(joined.size());
+        }
+        std::vector<char> const payload(joined.begin(), joined.end());
+        std::vector<sz_size_t> order(keys.size() * 2);
+        for (std::size_t position = 0; position != order.size(); ++position)
+            order[position] = keys.size() - 1 - position % keys.size();
+        std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
+        for (sz_strings_view_t const &view :
+             {strings_tape_over_(payload.data(), u32_offsets), strings_tape_over_(payload.data(), u64_offsets)})
+            for (std::vector<sz_size_t> const *selection : selections)
+                verify(hashed_in_strings_(hash_strings, view, selection, 42) == hashed_alone_(keys, selection, 42) &&
+                       "A column hash disagreed with hashing each string at the end of its payload");
+    }
+}
+
 /**
  *  @brief Hashes strings through a candidate backend and serial, one-shot and streamed, expecting
  *      identical digests and identical states.
@@ -1719,6 +2388,9 @@ inline void check_hash_equivalence_(test_context_t &context, hash_backend_t cons
             for (auto seed : seeds) test_on_seed(text, seed);
         });
     }
+    if (!candidate.strings_kernel) return;
+    check_hash_strings_equivalence_(context, "hash_strings", candidate.strings_kernel);
+    check_hash_strings_safety_(candidate.strings_kernel);
 }
 
 /**
@@ -3642,7 +4314,175 @@ struct utf8_runes_backend_t {
     sz_kernel_utf8_count_t count;
     sz_kernel_utf8_seek_t seek;
     sz_kernel_utf8_decode_t decode;
+    sz_kernel_utf8_count_strings_t count_strings = nullptr;
 };
+
+/** What a column count reports: its status, the first ill-formed string and the runes before it. */
+struct counted_strings_t {
+    sz_status_t status;
+    sz_size_t malformed_index;
+    std::vector<sz_size_t> runes;
+    bool operator==(counted_strings_t const &) const = default;
+};
+
+/** Counts `strings[order[i]]`, or every string, through @p count_strings over @p view, checking
+ *  that validating alone, without runes, reports the same. */
+inline counted_strings_t counted_strings_(sz_kernel_utf8_count_strings_t count_strings, sz_strings_view_t const &view,
+                                          std::vector<sz_size_t> const *order) {
+    sz_size_t const count = order ? order->size() : view.count;
+    sz_size_t const *const indices = order ? order->data() : nullptr;
+    counted_strings_t counted {sz_success_k, 42, std::vector<sz_size_t>(count, 42)};
+    counted.status = count_strings(&view, indices, count, counted.runes.data(), &counted.malformed_index, nullptr);
+    if (counted.malformed_index < count) counted.runes.resize(counted.malformed_index);
+    sz_size_t malformed_alone = 42;
+    verify(count_strings(&view, indices, count, nullptr, &malformed_alone, nullptr) == counted.status);
+    verify(malformed_alone == counted.malformed_index);
+    return counted;
+}
+
+/** The same, one string at a time by the serial validator and counter, the oracle. */
+inline counted_strings_t counted_alone_(std::vector<std::string> const &strings, std::vector<sz_size_t> const *order) {
+    std::size_t const count = order ? order->size() : strings.size();
+    counted_strings_t counted {sz_success_k, count, {}};
+    for (std::size_t position = 0; position != count; ++position) {
+        std::string const &string = strings[order ? order->at(position) : position];
+        if (sz_utf8_find_malformed(string.data(), string.size()) != STRINGZILLA_NULL_CHAR) {
+            counted.status = sz_invalid_utf8_k, counted.malformed_index = position;
+            break;
+        }
+        counted.runes.push_back(sz_utf8_count_serial_(string.data(), string.size()));
+    }
+    return counted;
+}
+
+/** Holds a column count to known answers: every ill-formed class at the start, middle and end of a
+ *  string, runes cut between strings, empty strings, and positions reported through an order. */
+inline void check_utf8_count_strings_unit_(sz_kernel_utf8_count_strings_t count_strings) {
+    auto const expect = [&](std::vector<std::string> strings, counted_strings_t expected,
+                            std::vector<sz_size_t> const *order = nullptr) {
+        strings_layouts_t const layouts(strings);
+        verify(counted_strings_(count_strings, layouts.u32_tape(), order) == expected);
+        if (order) return;
+        // Again behind a block of ASCII, so a SIMD pass judges the bytes, not a short-input path.
+        strings.insert(strings.begin(), std::string(64, '.'));
+        expected.runes.insert(expected.runes.begin(), 64);
+        ++expected.malformed_index;
+        strings_layouts_t const padded(strings);
+        verify(counted_strings_(count_strings, padded.u32_tape(), nullptr) == expected);
+    };
+    // `a`, then U+00DF and U+4E2D, nothing, then U+1F600 and `x`.
+    expect({"a", "\xC3\x9F\xE4\xB8\xAD", "", "\xF0\x9F\x98\x80x"}, {sz_success_k, 4, {1, 2, 0, 2}});
+    expect({}, {sz_success_k, 0, {}});
+    expect({"", "", ""}, {sz_success_k, 3, {0, 0, 0}});
+    // The first and last scalar values of every sequence length and around the surrogates.
+    expect({"\x7F", "\xC2\x80", "\xDF\xBF", "\xE0\xA0\x80", "\xED\x9F\xBF", "\xEE\x80\x80", "\xEF\xBF\xBF",
+            "\xF0\x90\x80\x80", "\xF4\x8F\xBF\xBF"},
+           {sz_success_k, 9, std::vector<sz_size_t>(9, 1)});
+
+    char const *const ill_formed[] = {
+        "\xC0\x80",         // overlong 2-byte
+        "\xC1\xBF",         // overlong 2-byte
+        "\xE0\x9F\xBF",     // overlong 3-byte
+        "\xF0\x8F\xBF\xBF", // overlong 4-byte
+        "\xED\xA0\x80",     // high surrogate
+        "\xED\xBF\xBF",     // low surrogate
+        "\xF4\x90\x80\x80", // past U+10FFFF
+        "\xF5\x80\x80\x80", // lead past U+10FFFF
+        "\x80",             // stray continuation
+        "\xBF",             // stray continuation
+        "\xF8",             // never a lead
+        "\xFF",             // never a lead
+        "\xC2",             // truncated 2-byte
+        "\xE2\x82",         // truncated 3-byte
+        "\xF0\x9F\x98",     // truncated 4-byte
+    };
+    counted_strings_t const second_malformed {sz_invalid_utf8_k, 1, {2}};
+    for (std::string const ill : ill_formed) {
+        expect({"ok", ill + "tail", "fine"}, second_malformed);
+        expect({"ok", "head" + ill + "tail", "fine"}, second_malformed);
+        expect({"ok", "head" + ill, "fine"}, second_malformed);
+        expect({"ok", "head" + ill}, second_malformed);
+        // Ending a payload of whole 64-byte blocks and 4 KB chunks, where no padding follows it.
+        expect({"ok", std::string(62 - ill.size(), 'x') + ill}, second_malformed);
+        expect({"ok", std::string(4094 - ill.size(), 'x') + ill}, second_malformed);
+    }
+
+    // A rune cut between neighbours is ill-formed in the first, though the bytes together are not.
+    expect({"a\xE4\xB8", "\xAD" "b"}, {sz_invalid_utf8_k, 0, {}}); // "\xADb" is one escape
+    expect({"x", "\xF0\x9F", "", "\x98\x80"}, {sz_invalid_utf8_k, 1, {1}});
+
+    // An order reports the output position of the first ill-formed string, here the fourth.
+    std::vector<sz_size_t> const order {3, 0, 3, 1, 2};
+    expect({"ok", "\xC0\x80", "fine", "\xE6\x97\xA5\xE6\x9C\xAC"}, {sz_invalid_utf8_k, 3, {2, 2, 2}}, &order);
+}
+
+/** Holds a column count to each string checked alone, over every layout, in order and in repeating
+ *  orders, with ill-formed classes, runes cut between strings, and strings spanning chunks. */
+inline void check_utf8_count_strings_equivalence_(test_context_t &context, char const *name,
+                                                  sz_kernel_utf8_count_strings_t count_strings) {
+    std::mt19937 &generator = context.generator;
+    std::span<char const *const> const malformed = malformed_classes_();
+    std::uniform_int_distribution<std::size_t> count_distribution(0, 60), runes_distribution(0, 40), damage(0, 3),
+        malformed_distribution(0, malformed.size() - 1);
+    for (std::size_t iteration = 0; iteration != context.iterations(100); ++iteration) {
+        std::vector<std::string> strings(count_distribution(generator));
+        for (std::string &string : strings) string = random_valid_utf8_(runes_distribution(generator), generator);
+        std::vector<sz_size_t> order;
+        if (!strings.empty()) {
+            std::uniform_int_distribution<std::size_t> index_distribution(0, strings.size() - 1);
+            if (iteration % 4 == 0) strings[index_distribution(generator)] = random_valid_utf8_(2000, generator);
+            if (damage(generator) == 0) {
+                std::string &string = strings[index_distribution(generator)];
+                std::uniform_int_distribution<std::size_t> at_distribution(0, string.size());
+                string.insert(at_distribution(generator), malformed[malformed_distribution(generator)]);
+            }
+            if (strings.size() > 1 && damage(generator) == 0) {
+                std::size_t const second = 1 + index_distribution(generator) % (strings.size() - 1);
+                std::string rune;
+                while (rune.size() < 2) rune = random_valid_utf8_(1, generator);
+                std::uniform_int_distribution<std::size_t> cut_distribution(1, rune.size() - 1);
+                std::size_t const cut = cut_distribution(generator);
+                strings[second - 1] += rune.substr(0, cut);
+                strings[second].insert(0, rune.substr(cut));
+            }
+            order.resize(strings.size() + 3);
+            for (sz_size_t &index : order) index = index_distribution(generator);
+        }
+        strings_layouts_t const layouts(strings);
+        std::vector<sz_size_t> const *const selections[] = {nullptr, &order};
+        for (std::vector<sz_size_t> const *selection : selections) {
+            counted_strings_t const expected = counted_alone_(strings, selection);
+            for (named_strings_t const &layout : layouts.all()) {
+                if (counted_strings_(count_strings, layout.view, selection) == expected) continue;
+                fmt::println(stderr, "{}: utf8_count_strings over {} {} differs from each string alone", name,
+                             layout.name, selection ? "reordered" : "in order");
+                fail_backend_(name, "a column count disagreed with counting each string");
+            }
+        }
+    }
+}
+
+/** Counts three strings of mixed-width runes filling payloads of every ladder length, each ending
+ *  where its allocation does from several sub-cache-line offsets, so a load past the end trips the
+ *  address sanitizer; the strings cut runes wherever the lengths fall. */
+inline void check_utf8_count_strings_safety_(sz_kernel_utf8_count_strings_t count_strings) {
+    std::string const pattern =
+        "a\xC3\x9F" "b\xE4\xB8\xAD" "c\xF0\x9F\x98\x80"; // "\x9Fb" and "\xADc" are one escape each
+    for (sz_size_t const length : span_over(backend_ladder_lengths_))
+        for (std::size_t const offset : {(std::size_t)0, (std::size_t)1, (std::size_t)7, (std::size_t)15}) {
+            std::vector<char> storage(offset + length);
+            for (std::size_t index = 0; index != length; ++index)
+                storage[offset + index] = pattern[index % pattern.size()];
+            sz_u32_t const offsets[4] = {0, static_cast<sz_u32_t>(length / 3), static_cast<sz_u32_t>(length * 2 / 3),
+                                         static_cast<sz_u32_t>(length)};
+            std::vector<std::string> strings;
+            for (std::size_t row = 0; row != 3; ++row)
+                strings.emplace_back(storage.data() + offset + offsets[row], offsets[row + 1] - offsets[row]);
+            verify(counted_strings_(count_strings, strings_tape_over_(storage.data() + offset, offsets), nullptr) ==
+                       counted_alone_(strings, nullptr) &&
+                   "A column count ending at its allocation's end disagreed with counting each string");
+        }
+}
 
 /**
  *  @brief Holds one codepoint backend to the mixed-width anchor: its count, the byte offset of
@@ -3671,6 +4511,8 @@ inline void check_utf8_runes_unit_(utf8_runes_backend_t const &backend) {
     }
     verify(kernel_result<sz_cptr_t>(backend.seek, text, length, expected_count) ==
            STRINGZILLA_NULL_CHAR); // Beyond the last codepoint
+
+    if (backend.count_strings) check_utf8_count_strings_unit_(backend.count_strings);
 
     // `sz_utf8_decode_best`: streaming the decoder must reproduce exactly the expected runes at
     // every caller capacity, the tiny ones landing mid-rune-sequence on each resume.
@@ -3758,6 +4600,9 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
             check(buffer, (sz_size_t)text.size());
         });
     }
+
+    if (candidate.count_strings)
+        check_utf8_count_strings_equivalence_(context, candidate.name, candidate.count_strings);
 }
 
 /**
@@ -3770,6 +4615,7 @@ inline void check_utf8_runes_equivalence_(test_context_t &context, utf8_runes_ba
  */
 inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend_t const &backend) {
     std::size_t const random_inputs = context.iterations(4000);
+    if (backend.count_strings) check_utf8_count_strings_safety_(backend.count_strings);
 
     std::size_t const max_input_length = utf8_unit_capacity_k;
     std::vector<sz_rune_t> rune_destination;
@@ -3778,6 +4624,18 @@ inline void check_utf8_runes_safety_(test_context_t &context, utf8_runes_backend
         // Counting must survive any bytes and never report more runes than the input holds bytes.
         sz_size_t const counted = kernel_result<sz_size_t>(backend.count, input, (sz_size_t)input_length);
         verify(counted <= input_length && "Count reported more runes than the input holds bytes");
+
+        // The column count over the bytes cut in two must name the first of the halves that the
+        // serial validator rejects.
+        if (backend.count_strings) {
+            sz_u64_t const offsets[3] = {0, input_length / 2, input_length};
+            std::vector<std::string> const halves = {
+                std::string(input, input_length / 2),
+                std::string(input + input_length / 2, input_length - input_length / 2)};
+            verify(counted_strings_(backend.count_strings, strings_tape_over_(input, offsets), nullptr) ==
+                       counted_alone_(halves, nullptr) &&
+                   "A column count over ill-formed bytes disagreed with the serial validator");
+        }
 
         // Every emitted rune must be a valid Unicode scalar value (no surrogate, none beyond
         // U+10FFFF) - the precondition every binding relies on to convert runes without

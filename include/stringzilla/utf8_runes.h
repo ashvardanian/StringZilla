@@ -180,10 +180,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_serial( //
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_haswell(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                   sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_haswell(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                          sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
-                                                          sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_haswell(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                                  sz_stream_t stream);
@@ -232,10 +228,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_neon( //
 #if STRINGZILLA_TARGET_SVE2
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_sve2(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_sve2(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                       sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
-                                                       sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_sve2(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                               sz_stream_t stream);
@@ -249,10 +241,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_sve2( //
 #if STRINGZILLA_TARGET_RVV
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_rvv(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_rvv(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                      sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
-                                                      sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_rvv(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                              sz_stream_t stream);
@@ -266,10 +254,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_rvv( //
 #if STRINGZILLA_TARGET_V128
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_v128(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_v128(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                       sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
-                                                       sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_v128(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                               sz_stream_t stream);
@@ -284,10 +268,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_v128( //
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                       sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_v128relaxed(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                              sz_size_t count, sz_size_t *runes,
-                                                              sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                                      sz_stream_t stream);
@@ -297,10 +277,6 @@ STRINGZILLA_API sz_status_t sz_utf8_seek_v128relaxed(sz_cptr_t text, sz_size_t l
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                       sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_loongsonasx(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                              sz_size_t count, sz_size_t *runes,
-                                                              sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_loongsonasx(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                                      sz_stream_t stream);
@@ -315,10 +291,6 @@ STRINGZILLA_API sz_status_t sz_utf8_decode_loongsonasx( //
 /** @copydoc sz_utf8_count_best */
 STRINGZILLA_API sz_status_t sz_utf8_count_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                    sz_stream_t stream);
-/** @copydoc sz_utf8_count_strings_best */
-STRINGZILLA_API sz_status_t sz_utf8_count_strings_powervsx(sz_strings_view_t const *strings, sz_size_t const *order,
-                                                           sz_size_t count, sz_size_t *runes,
-                                                           sz_size_t *malformed_index, sz_stream_t stream);
 /** @copydoc sz_utf8_seek_best */
 STRINGZILLA_API sz_status_t sz_utf8_seek_powervsx(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                                   sz_stream_t stream);

@@ -1027,6 +1027,21 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_serial(sz_cp
     return sz_success_k;
 }
 
+STRINGZILLA_API sz_status_t sz_hash_strings_serial(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                   sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                   sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_serial_(views[row % 64].start, views[row % 64].length, seed);
+    }
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_hash_state_update_serial(sz_hash_state_t *packed, sz_cptr_t text, sz_size_t length,
                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);

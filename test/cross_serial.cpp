@@ -29,9 +29,14 @@ std::size_t test_cross_serial(environment_t const &env) {
                                                 sz_strings_escape_serial,
                                                 sz_strings_unescape_serial,
                                                 sz_strings_lookup_serial,
-                                                sz_strings_normalize_serial};
+                                                sz_strings_normalize_serial,
+                                                sz_strings_split_serial,
+                                                sz_strings_split_lines_serial,
+                                                sz_strings_join_serial};
     check("test_strings_unit_serial", [&] { check_strings_unit_(strings_serial); });
     check("test_strings_safety_serial", [&] { check_strings_safety_(strings_serial); });
+    check("test_strings_split_equivalence_serial",
+          [&](test_context_t &context) { check_strings_split_equivalence_(context, strings_serial); });
 
     constexpr find_backend_t find_serial {
         .name = "serial",
@@ -41,9 +46,12 @@ std::size_t test_cross_serial(environment_t const &env) {
         .rfind_byte = sz_rfind_byte_serial,
         .find_byteset = sz_find_byteset_serial,
         .rfind_byteset = sz_rfind_byteset_serial,
+        .find_strings = sz_find_strings_serial,
     };
     check("test_find_unit_serial", [&] { check_find_unit_(find_serial); });
     check("test_find_safety_serial", [&] { check_find_safety_(find_serial); });
+    check("test_find_strings_equivalence_serial",
+          [](test_context_t &context) { check_find_strings_equivalence_(context, "serial", sz_find_strings_serial); });
 
     check("test_hash_unit_serial", [] {
         check_sha256_unit_({
@@ -57,6 +65,10 @@ std::size_t test_cross_serial(environment_t const &env) {
         });
         check_bytesum_unit_(sz_bytesum_serial);
         check_hash_unit_(sz_hash_serial);
+    });
+    check("test_hash_strings_equivalence_serial", [](test_context_t &context) {
+        check_hash_strings_equivalence_(context, "serial", sz_hash_strings_serial);
+        check_hash_strings_safety_(sz_hash_strings_serial);
     });
     check("test_hash_multiseed_equivalence_serial", [](test_context_t &context) {
         check_hash_multiseed_equivalence_(context, {sz_hash_multiseed_serial, sz_hash_serial});
@@ -97,10 +109,13 @@ std::size_t test_cross_serial(environment_t const &env) {
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_serial); });
 
     constexpr utf8_runes_backend_t utf8_runes_serial {"serial", sz_utf8_count_serial, sz_utf8_seek_serial,
-                                                      sz_utf8_decode_serial};
+                                                      sz_utf8_decode_serial, sz_utf8_count_strings_serial};
     check("test_utf8_runes_unit_serial", [&] { check_utf8_runes_unit_(utf8_runes_serial); });
     check("test_utf8_runes_safety_serial",
           [&](test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_serial); });
+    check("test_utf8_count_strings_equivalence_serial", [](test_context_t &context) {
+        check_utf8_count_strings_equivalence_(context, "serial", sz_utf8_count_strings_serial);
+    });
 
     constexpr utf8_tokens_backend_t utf8_tokens_serial {"serial", sz_utf8_count_serial, sz_utf8_newlines_serial,
                                                         sz_utf8_whitespaces_serial};

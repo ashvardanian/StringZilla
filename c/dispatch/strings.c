@@ -3,9 +3,10 @@
  *  @author Ash Vardanian
  *  @date January 16, 2024
  *  @brief Collection dispatch points, @c sz_strings_to_tape_best, @c sz_strings_to_rows_best,
- *      @c sz_strings_escape_best, @c sz_strings_unescape_best, @c sz_strings_lookup_best and
- *      @c sz_strings_normalize_best, and their finder, then the allocators each capability group
- *      answers once, like @c sz_allocator_init_unified_best.
+ *      @c sz_strings_escape_best, @c sz_strings_unescape_best, @c sz_strings_lookup_best,
+ *      @c sz_strings_normalize_best, @c sz_strings_split_best, @c sz_strings_split_lines_best and
+ *      @c sz_strings_join_best, and their finder, then the allocators each capability group answers
+ *      once, like @c sz_allocator_init_unified_best.
  */
 #include "stringzilla/strings.h"
 
@@ -397,6 +398,62 @@ static sz_capability_kernels_t const *sz_strings_normalize_capabilities(void) {
     return lists;
 }
 
+static sz_capability_kernels_t const *sz_strings_split_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_strings_split_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_strings_split_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_strings_split_neon,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
+static sz_capability_kernels_t const *sz_strings_split_lines_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_strings_split_lines_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_strings_split_lines_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_strings_split_lines_neon,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
+static sz_capability_kernels_t const *sz_strings_join_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_strings_join_serial,
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k, cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
 STRINGZILLA_API sz_status_t sz_strings_to_tape_best(sz_strings_view_t const *strings, sz_size_t const *order,
                                                     sz_size_t count, sz_allocator_t *allocator, sz_strings_span_t *tape,
                                                     sz_capability_t capabilities, sz_stream_t stream) {
@@ -449,6 +506,32 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_best(sz_strings_view_t const *s
     return kernel ? kernel(strings, order, count, form, allocator, tape, stream) : sz_missing_kernel_k;
 }
 
+STRINGZILLA_API sz_status_t sz_strings_split_best(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                  sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                  sz_stream_t stream) {
+    sz_kernel_strings_split_t const kernel = (sz_kernel_strings_split_t)sz_kernel_pick_(
+        capabilities, sz_strings_split_capabilities());
+    return kernel ? kernel(text, length, delimiters, kind, allocator, tape, stream) : sz_missing_kernel_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_split_lines_best(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                        sz_strings_span_t *tape, sz_capability_t capabilities,
+                                                        sz_stream_t stream) {
+    sz_kernel_strings_split_lines_t const kernel = (sz_kernel_strings_split_lines_t)sz_kernel_pick_(
+        capabilities, sz_strings_split_lines_capabilities());
+    return kernel ? kernel(text, length, allocator, tape, stream) : sz_missing_kernel_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_join_best(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_capability_t capabilities, sz_stream_t stream) {
+    sz_kernel_strings_join_t const kernel = (sz_kernel_strings_join_t)sz_kernel_pick_(capabilities,
+                                                                                      sz_strings_join_capabilities());
+    return kernel ? kernel(columns, columns_count, rows, frames, between, output, length, stream) : sz_missing_kernel_k;
+}
+
 STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                    sz_kernel_punned_t *kernel, sz_capability_t *capability) {
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
@@ -459,6 +542,9 @@ STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_cap
     case sz_kernel_strings_unescape_k: lists = sz_strings_unescape_capabilities(); break;
     case sz_kernel_strings_lookup_k: lists = sz_strings_lookup_capabilities(); break;
     case sz_kernel_strings_normalize_k: lists = sz_strings_normalize_capabilities(); break;
+    case sz_kernel_strings_split_k: lists = sz_strings_split_capabilities(); break;
+    case sz_kernel_strings_split_lines_k: lists = sz_strings_split_lines_capabilities(); break;
+    case sz_kernel_strings_join_k: lists = sz_strings_join_capabilities(); break;
     default: break;
     }
     *kernel = lists ? sz_kernel_pick_(capabilities, lists) : (sz_kernel_punned_t)STRINGZILLA_NULL;

@@ -533,6 +533,141 @@ STRINGZILLA_INLINE __m256i sz_hash_multiseed_x4_finalize_icelake_(sz_hash_state_
         _mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), mixed_in_register_u8x64));
 }
 
+/**
+ *  @brief Hashes up to 4 strings of @p strings from row @p row on, @p keys of them, one per 128-bit
+ *      lane, all within the 128 bytes from @p window that @p low_u8x64 and @p high_u8x64 hold,
+ *      exactly as @c sz_hash_icelake_ does.
+ *
+ *  Every key absorbs @p blocks blocks from registers, and those past its end leave its lane as it
+ *  is. Every first block meets the same seeded state, so @p aes_u8x64 and @p sum_u8x64 hold that
+ *  state with its own rounds already applied, leaving one XOR and one addition.
+ */
+STRINGZILLA_INLINE __m256i sz_hash_window_keys_icelake_(sz_strings_view_t const *strings, sz_size_t row, sz_size_t keys,
+                                                        sz_size_t window, __m512i low_u8x64, __m512i high_u8x64,
+                                                        sz_size_t blocks, __m512i aes_u8x64, __m512i sum_u8x64,
+                                                        __m512i key_u64x8) {
+    static sz_u8_t const iota[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    sz_u64_t const spread = 0x0101010101010101ull;
+    sz_size_t starts[4], lengths[4];
+    for (sz_size_t lane = 0; lane != 4; ++lane) {
+        sz_size_t const start = lane < keys ? sz_strings_view_offset_(strings, row + lane) - window : 0;
+        starts[lane] = start,
+        lengths[lane] = lane < keys ? sz_strings_view_offset_(strings, row + lane + 1) - window - start : 0;
+    }
+    __m512i const order_u8x64 = _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_());
+    __m512i const iota_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)iota));
+    __m512i const starts_u8x64 = _mm512_set_epi64((long long)(starts[3] * spread), (long long)(starts[3] * spread),
+                                                  (long long)(starts[2] * spread), (long long)(starts[2] * spread),
+                                                  (long long)(starts[1] * spread), (long long)(starts[1] * spread),
+                                                  (long long)(starts[0] * spread), (long long)(starts[0] * spread));
+    __m512i const lengths_u8x64 = _mm512_set_epi64((long long)(lengths[3] * spread), (long long)(lengths[3] * spread),
+                                                   (long long)(lengths[2] * spread), (long long)(lengths[2] * spread),
+                                                   (long long)(lengths[1] * spread), (long long)(lengths[1] * spread),
+                                                   (long long)(lengths[0] * spread), (long long)(lengths[0] * spread));
+    __m512i const first_u8x64 = _mm512_maskz_permutex2var_epi8(_mm512_cmplt_epu8_mask(iota_u8x64, lengths_u8x64),
+                                                               low_u8x64, _mm512_add_epi8(iota_u8x64, starts_u8x64),
+                                                               high_u8x64);
+    __m512i aes_state_u8x64 = _mm512_xor_si512(aes_u8x64, first_u8x64);
+    __m512i sum_state_u8x64 = _mm512_add_epi64(sum_u8x64, first_u8x64);
+    for (sz_size_t block = 1; block != blocks; ++block) {
+        __m512i const offsets_u8x64 = _mm512_add_epi8(iota_u8x64, _mm512_set1_epi8((char)(block * 16)));
+        __m512i const data_u8x64 = _mm512_maskz_permutex2var_epi8(
+            _mm512_cmplt_epu8_mask(offsets_u8x64, lengths_u8x64), low_u8x64,
+            _mm512_add_epi8(offsets_u8x64, starts_u8x64), high_u8x64);
+        __mmask64 const live_m64 = _mm512_cmplt_epu8_mask(_mm512_set1_epi8((char)(block * 16)), lengths_u8x64);
+        __m512i const summed_u8x64 = _mm512_add_epi64(_mm512_shuffle_epi8(sum_state_u8x64, order_u8x64), data_u8x64);
+        aes_state_u8x64 = _mm512_mask_mov_epi8(aes_state_u8x64, live_m64,
+                                               _mm512_aesenc_epi128(aes_state_u8x64, data_u8x64));
+        sum_state_u8x64 = _mm512_mask_mov_epi8(sum_state_u8x64, live_m64, summed_u8x64);
+    }
+    __m512i const lengths_u64x8 = _mm512_set_epi64(0, (long long)lengths[3], 0, (long long)lengths[2], 0,
+                                                   (long long)lengths[1], 0, (long long)lengths[0]);
+    __m512i const mixed_u8x64 = _mm512_aesenc_epi128(sum_state_u8x64, aes_state_u8x64);
+    __m512i const final_u8x64 = _mm512_aesenc_epi128(
+        _mm512_aesenc_epi128(mixed_u8x64, _mm512_add_epi64(key_u64x8, lengths_u64x8)), mixed_u8x64);
+    return _mm512_castsi512_si256(_mm512_permutexvar_epi64(_mm512_set_epi64(0, 0, 0, 0, 6, 4, 2, 0), final_u8x64));
+}
+
+STRINGZILLA_API sz_status_t sz_hash_strings_icelake(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                    sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Orders and accessors hash string by string.
+    sz_bool_t const by_row = (sz_bool_t)(order || strings->layout == sz_strings_accessor_k);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; by_row && row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_icelake_(views[row % 64].start, views[row % 64].length, seed);
+    }
+    if (by_row || !count) return sz_success_k;
+
+    sz_u8_t const *const data = (sz_u8_t const *)sz_strings_view_data_(strings);
+    sz_size_t const first = sz_strings_view_offset_(strings, 0), end = sz_strings_view_offset_(strings, count);
+    // Windows within 128 bytes of the payload's end read a zero-padded copy.
+    sz_size_t const copied_from = end - first < 128 ? first : end - 128;
+    sz_u8_t tail[256] = {0};
+    if (end != copied_from) memcpy(tail, data + copied_from, end - copied_from);
+    // Every key's first block meets the same seeded state, whose own rounds are applied once here.
+    sz_hash_state_aligned_for_short_x4_t state;
+    sz_hash_state_short_x4_init_icelake_(&state, seed);
+    __m512i const aes_u8x64 = _mm512_aesenc_epi128(state.aes_vec.zmm, _mm512_setzero_si512());
+    __m512i const sum_u8x64 = _mm512_shuffle_epi8(state.sum_vec.zmm,
+                                                  _mm512_load_si512((__m512i const *)sz_hash_u8x16x4_shuffle_()));
+    // Each window starts at the first key not hashed yet and takes every key of up to 64 bytes that
+    // ends within its 128.
+    for (sz_size_t row = 0; row != count;) {
+        sz_size_t const window = sz_strings_view_offset_(strings, row);
+        sz_size_t keys = 0, longest = 0;
+        for (sz_size_t key_start = window, key_end;
+             row + keys != count && (key_end = sz_strings_view_offset_(strings, row + keys + 1)) - window <= 128 &&
+             key_end - key_start <= 64;
+             ++keys, key_start = key_end)
+            longest = sz_max_of_two(longest, key_end - key_start);
+        // A key longer than 64 bytes hashes alone.
+        if (!keys)
+            hashes[row] = sz_hash_icelake_((sz_cptr_t)data + window, sz_strings_view_offset_(strings, row + 1) - window,
+                                           seed);
+        sz_u8_t const *const source = window < copied_from ? data + window : tail + (window - copied_from);
+        __m512i const low_u8x64 = _mm512_loadu_si512(source), high_u8x64 = _mm512_loadu_si512(source + 64);
+        // The window's longest key sets the blocks every key in it absorbs, 4 keys at a time.
+        switch (sz_max_of_two(sz_size_divide_round_up(longest, 16), (sz_size_t)1)) {
+        case 1:
+            for (sz_size_t key = row; key < row + keys; key += 4)
+                _mm256_mask_storeu_epi64(
+                    hashes + key, sz_u8_mask_until_(sz_min_of_two(row + keys - key, (sz_size_t)4)),
+                    sz_hash_window_keys_icelake_(strings, key, row + keys - key, window, low_u8x64, high_u8x64, 1,
+                                                 aes_u8x64, sum_u8x64, state.key_vec.zmm));
+            break;
+        case 2:
+            for (sz_size_t key = row; key < row + keys; key += 4)
+                _mm256_mask_storeu_epi64(
+                    hashes + key, sz_u8_mask_until_(sz_min_of_two(row + keys - key, (sz_size_t)4)),
+                    sz_hash_window_keys_icelake_(strings, key, row + keys - key, window, low_u8x64, high_u8x64, 2,
+                                                 aes_u8x64, sum_u8x64, state.key_vec.zmm));
+            break;
+        case 3:
+            for (sz_size_t key = row; key < row + keys; key += 4)
+                _mm256_mask_storeu_epi64(
+                    hashes + key, sz_u8_mask_until_(sz_min_of_two(row + keys - key, (sz_size_t)4)),
+                    sz_hash_window_keys_icelake_(strings, key, row + keys - key, window, low_u8x64, high_u8x64, 3,
+                                                 aes_u8x64, sum_u8x64, state.key_vec.zmm));
+            break;
+        default:
+            for (sz_size_t key = row; key < row + keys; key += 4)
+                _mm256_mask_storeu_epi64(
+                    hashes + key, sz_u8_mask_until_(sz_min_of_two(row + keys - key, (sz_size_t)4)),
+                    sz_hash_window_keys_icelake_(strings, key, row + keys - key, window, low_u8x64, high_u8x64, 4,
+                                                 aes_u8x64, sum_u8x64, state.key_vec.zmm));
+            break;
+        }
+        row += keys + !keys;
+    }
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_hash_multiseed_icelake(sz_cptr_t text, sz_size_t length,             //
                                                       sz_u64_t const *seeds, sz_size_t seeds_count, //
                                                       sz_u64_t *hashes, sz_stream_t stream) {

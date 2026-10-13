@@ -160,6 +160,27 @@ static sz_capability_kernels_t const *sz_find_capabilities(void) {
     return lists;
 }
 
+static sz_capability_kernels_t const *sz_find_strings_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_find_strings_serial,
+#if STRINGZILLA_TARGET_SKYLAKE
+        (sz_kernel_punned_t)&sz_find_strings_skylake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_find_strings_neon,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_skylake_k * STRINGZILLA_TARGET_SKYLAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
 static sz_capability_kernels_t const *sz_rfind_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -345,11 +366,21 @@ STRINGZILLA_API sz_status_t sz_rfind_byteset_best(sz_cptr_t haystack, sz_size_t 
     return kernel ? kernel(haystack, haystack_length, set, match, stream) : sz_missing_kernel_k;
 }
 
+STRINGZILLA_API sz_status_t sz_find_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_capability_t capabilities,
+                                                 sz_stream_t stream) {
+    sz_kernel_find_strings_t const kernel = (sz_kernel_find_strings_t)sz_kernel_pick_(capabilities,
+                                                                                      sz_find_strings_capabilities());
+    return kernel ? kernel(strings, order, count, needle, needle_length, positions, stream) : sz_missing_kernel_k;
+}
+
 STRINGZILLA_API sz_status_t sz_find_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,
                                                 sz_kernel_punned_t *kernel, sz_capability_t *capability) {
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
     case sz_kernel_find_k: lists = sz_find_capabilities(); break;
+    case sz_kernel_find_strings_k: lists = sz_find_strings_capabilities(); break;
     case sz_kernel_rfind_k: lists = sz_rfind_capabilities(); break;
     case sz_kernel_find_byte_k: lists = sz_find_byte_capabilities(); break;
     case sz_kernel_rfind_byte_k: lists = sz_rfind_byte_capabilities(); break;

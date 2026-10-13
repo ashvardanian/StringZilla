@@ -140,7 +140,7 @@ struct levenshtein_simt_corpus_t {
     std::vector<char> host_tape;
 
     /** The candidates in corpus order, in length descending order, and as skewed spans. */
-    tape_t shuffled_tape, sorted_tape, skewed_tape;
+    unified_strings_t shuffled_tape, sorted_tape, skewed_tape;
 
     /** Dataset views the CPU arms read, corpus order. */
     std::vector<sz_string_view_t> host_views;
@@ -151,10 +151,7 @@ struct levenshtein_simt_corpus_t {
     /** The skewed spans of the host's tape. */
     std::vector<sz_string_view_t> host_skewed_views;
 
-    levenshtein_simt_corpus_t(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus)
-        : shuffled_tape(unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)),
-          sorted_tape(unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)),
-          skewed_tape(unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)) {
+    levenshtein_simt_corpus_t(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
         std::size_t const count = std::min<std::size_t>(corpus.tokens.size(),
                                                         resident_candidates_per_call(env, backend.runtime));
         std::size_t bytes = 0;
@@ -180,18 +177,9 @@ struct levenshtein_simt_corpus_t {
         double const mean_bytes = (double)bytes / (double)std::max<std::size_t>(count, 1);
         host_skewed_views = simt_skewed_views(host_tape.data(), bytes, count, mean_bytes, env.settings.seed.value);
 
-        if (sz::failed(shuffled_tape.assign(host_views)))
-            throw std::runtime_error("Unified memory could not hold the tape.");
-        if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-            throw std::runtime_error("The tape would not reach the device.");
-        if (sz::failed(sorted_tape.assign(host_sorted_views)))
-            throw std::runtime_error("Unified memory could not hold the tape.");
-        if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-            throw std::runtime_error("The tape would not reach the device.");
-        if (sz::failed(skewed_tape.assign(host_skewed_views)))
-            throw std::runtime_error("Unified memory could not hold the tape.");
-        if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-            throw std::runtime_error("The tape would not reach the device.");
+        shuffled_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::shuffled_k));
+        sorted_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::sorted_k));
+        skewed_tape = resident_strings(backend.runtime, host_candidates(levenshtein_simt_order_t::skewed_k));
     }
 
     /** Candidates one round scores, whichever order it walks them in. */
@@ -205,9 +193,9 @@ struct levenshtein_simt_corpus_t {
 
     /** The device tape of one ordering of the texts. */
     sz_strings_view_t device_candidates(levenshtein_simt_order_t order) const {
-        return order == levenshtein_simt_order_t::sorted_k   ? sorted_tape.strings()
-               : order == levenshtein_simt_order_t::skewed_k ? skewed_tape.strings()
-                                                             : shuffled_tape.strings();
+        return order == levenshtein_simt_order_t::sorted_k   ? sorted_tape.view().raw
+               : order == levenshtein_simt_order_t::skewed_k ? skewed_tape.view().raw
+                                                             : shuffled_tape.view().raw;
     }
 
     /** The host views of one ordering of the texts. */
@@ -409,7 +397,7 @@ inline void bench_overlap_scores(simt_backend_t const &backend, environment_t co
                                                       {device_name}, dispatched);
     print(bench_unary(env, corpus, device_name, validator,
                       scores_from_sz {backend.overlap_engine_init, backend.overlap_scores, query, width,
-                                      resident.candidates.strings(), resident.views, std::cref(backend.runtime)}),
+                                      resident.candidates.view().raw, resident.views, std::cref(backend.runtime)}),
           base);
 }
 
@@ -592,12 +580,8 @@ inline void bench_substrings_slice(simt_backend_t const &backend, environment_t 
         if (!substrings_fits_the_device(backend, sized.engine, emitted)) return;
     }
 
-    tape_t replacements_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-    if (sz::failed(replacements_tape.assign(dictionary.replacements())))
-        throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_strings_view_t const device_replacements = replacements_tape.strings();
-    if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-        throw std::runtime_error("The tape would not reach the device.");
+    unified_strings_t const replacements_tape = resident_strings(backend.runtime, dictionary.replacements());
+    sz_strings_view_t const device_replacements = replacements_tape.view().raw;
     for (sz_substrings_overlap_policy_t const policy : substrings_policies_k) {
         substrings_engine_t host(dictionary, policy, substrings_engine_init_cpu_, heap);
         substrings_engine_t device(dictionary, policy, backend.substrings_engine_init, allocator, matches_budget,
@@ -641,12 +625,8 @@ inline void bench_substrings_small_batch(simt_backend_t const &backend, environm
     substrings_dictionary_t const dictionary(substrings_sampled(env, corpus), sz_substrings_cased_k, allocator,
                                              backend.runtime.stream);
     if (dictionary.needles.empty()) return;
-    tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-    if (sz::failed(haystacks_tape.assign(resident.haystacks())))
-        throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_strings_view_t const device_haystacks = haystacks_tape.strings();
-    if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-        throw std::runtime_error("The tape would not reach the device.");
+    unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
+    sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
     for (sz_substrings_overlap_policy_t const policy :
          {sz_substrings_overlapping_k, sz_substrings_leftmost_longest_k}) {
         substrings_engine_t host(dictionary, policy, substrings_engine_init_cpu_, heap);
@@ -684,12 +664,8 @@ inline void bench_substrings_documents(simt_backend_t const &backend, environmen
         documents[index] = {first + begin, end - begin};
     }
     substrings_corpus_t const resident(documents);
-    tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-    if (sz::failed(haystacks_tape.assign(resident.haystacks())))
-        throw std::runtime_error("Unified memory could not hold the tape.");
-    sz_strings_view_t const device_haystacks = haystacks_tape.strings();
-    if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-        throw std::runtime_error("The tape would not reach the device.");
+    unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
+    sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
     substrings_engine_t host(dictionary, sz_substrings_overlapping_k, substrings_engine_init_cpu_, heap);
     substrings_engine_t device(dictionary, sz_substrings_overlapping_k, backend.substrings_engine_init, allocator,
                                matches_budget, resident.views.size(), backend.runtime.stream);
@@ -710,12 +686,8 @@ inline void bench_substrings_simt(simt_backend_t const &backend, environment_t c
             return substrings_selects(env, simt_arm(backend, ""), substrings_label(slice.first, slice.second));
         })) {
         substrings_corpus_t const resident(corpus);
-        tape_t haystacks_tape {unified_alloc<char>(backend.runtime.unified, backend.runtime.stream)};
-        if (sz::failed(haystacks_tape.assign(resident.haystacks())))
-            throw std::runtime_error("Unified memory could not hold the tape.");
-        sz_strings_view_t const device_haystacks = haystacks_tape.strings();
-        if (sz_stream_synchronize_best(backend.runtime.capabilities, backend.runtime.stream) != sz_success_k)
-            throw std::runtime_error("The tape would not reach the device.");
+        unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
+        sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
         fmt::println("Starting multi-pattern search benchmarks...");
         std::optional<substrings_ranking_t> ranking;
         for (auto const &[slice, sensitivity] : slices)
@@ -764,7 +736,7 @@ struct sha256_multistate_tape_from_sz_t {
     sz_kernel_sha256_multistate_update_t update;
     sz_kernel_sha256_multistate_digest_t digest;
     device_backend_t const &runtime;
-    tape_t texts;
+    unified_strings_t texts;
     std::size_t texts_bytes = 0;
     unified_vector<sz_sha256_state_t> states;
     unified_vector<sz_u8_t> digests;
@@ -772,7 +744,6 @@ struct sha256_multistate_tape_from_sz_t {
     sha256_multistate_tape_from_sz_t(corpus_t const &corpus, sz_kernel_sha256_multistate_update_t update,
                                      sz_kernel_sha256_multistate_digest_t digest, device_backend_t const &runtime)
         : corpus(corpus), update(update), digest(digest), runtime(runtime),
-          texts(unified_alloc<char>(runtime.unified, runtime.stream)),
           states(unified_alloc<sz_sha256_state_t>(runtime.unified, runtime.stream)),
           digests(unified_alloc<sz_u8_t>(runtime.unified, runtime.stream)) {}
 
@@ -784,14 +755,16 @@ struct sha256_multistate_tape_from_sz_t {
             views[index] = {corpus.tokens[index].data(), corpus.tokens[index].size()};
             texts_bytes += views[index].length;
         }
-        if (texts.assign(views) != status_t::success_k) throw std::runtime_error("The tape could not be staged.");
+        sz_strings_view_t strings {};
+        sz_strings_from_string_views(views.data(), views.size(), &strings);
+        texts = resident_strings(runtime, strings);
         states.resize(views.size());
         digests.resize(views.size() * STRINGZILLA_SHA256_DIGEST_LENGTH);
         for (sz_sha256_state_t &state : states) sz_sha256_state_init_serial(&state, nullptr);
     }
 
     call_result_t operator()(std::size_t) {
-        sz_strings_view_t const strings = texts.strings();
+        sz_strings_view_t const strings = texts.view().raw;
         if (update(states.data(), &strings, runtime.stream) != sz_success_k ||
             digest(states.data(), states.size(), digests.data(), runtime.stream) != sz_success_k ||
             sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)

@@ -81,7 +81,7 @@ int _get_qsort_order(void *arg, void const *a, void const *b) {
 #else
 int _get_qsort_order(void const *a, void const *b, void *arg) {
 #endif
-    strings_t const &strings = *(strings_t const *)arg;
+    tokens_t const &strings = *(tokens_t const *)arg;
     sz_size_t const index_a = *(sz_size_t const *)a;
     sz_size_t const index_b = *(sz_size_t const *)b;
     std::string_view const string_a = strings[index_a], string_b = strings[index_b];
@@ -97,10 +97,10 @@ int _get_qsort_order(void const *a, void const *b, void *arg) {
 #pragma region Sorting Benchmarks
 
 struct argsort_strings_via_std_t {
-    strings_t const &input;
+    tokens_t const &input;
     permute_t &output;
 
-    argsort_strings_via_std_t(strings_t const &input, permute_t &output) : input(input), output(output) {}
+    argsort_strings_via_std_t(tokens_t const &input, permute_t &output) : input(input), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
         std::sort(output.begin(), output.end(), [&](sz_size_t i, sz_size_t j) { return input[i] < input[j]; });
@@ -116,13 +116,13 @@ struct argsort_strings_via_std_t {
 #if STRINGZILLA_HAS_QSORT_R_ || STRINGZILLA_HAS_QSORT_S_
 
 struct argsort_strings_via_qsort_t {
-    strings_t const &input;
+    tokens_t const &input;
     permute_t &output;
 
-    argsort_strings_via_qsort_t(strings_t const &input, permute_t &output) : input(input), output(output) {}
+    argsort_strings_via_qsort_t(tokens_t const &input, permute_t &output) : input(input), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
-        void *const context = const_cast<strings_t *>(&input);
+        void *const context = const_cast<tokens_t *>(&input);
 #if STRINGZILLA_HAS_QSORT_R_
         qsort_r(output.data(), input.size(), sizeof(sz_size_t), _get_qsort_order, context);
 #elif STRINGZILLA_HAS_QSORT_S_
@@ -162,11 +162,11 @@ void bench_sort_strings(environment_t const &env, corpus_t const &corpus) {
 }
 
 struct argsort_ci_strings_via_std_t {
-    strings_t const &input;
+    tokens_t const &input;
     std::vector<std::string> const &folded;
     permute_t &output;
 
-    argsort_ci_strings_via_std_t(strings_t const &input, std::vector<std::string> const &folded, permute_t &output)
+    argsort_ci_strings_via_std_t(tokens_t const &input, std::vector<std::string> const &folded, permute_t &output)
         : input(input), folded(folded), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
@@ -203,8 +203,8 @@ void bench_sort_strings_uncased(environment_t const &env, corpus_t const &corpus
 
 /** Uses the STL's @c std::unordered_map to intersect two string collections. */
 struct intersect_strings_via_std_t {
-    strings_t const &input_a;
-    strings_t const &input_b;
+    tokens_t const &input_a;
+    tokens_t const &input_b;
     permute_t &output_a;
     permute_t &output_b;
 

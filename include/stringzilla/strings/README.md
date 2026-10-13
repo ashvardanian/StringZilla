@@ -1,22 +1,20 @@
-# Strings: Tapes, Rows, Escaping, Lookups, and Normalization
+# Strings: Tapes, Rows, Escaping, Lookups, Normalization, Splitting, and Joining
 
-This directory holds the collection kernels behind `sz_strings_to_tape_best`, `sz_strings_to_rows_best`, `sz_strings_escape_best`, `sz_strings_unescape_best`, `sz_strings_lookup_best` and `sz_strings_normalize_best`.
-Every one reads a `sz_strings_view_t` in any layout, optionally reordered through indices, and writes a tape or NUL-padded rows.
+This directory holds the collection kernels behind `sz_strings_to_tape_best`, `sz_strings_to_rows_best`, `sz_strings_escape_best`, `sz_strings_unescape_best`, `sz_strings_lookup_best`, `sz_strings_normalize_best`, `sz_strings_split_best`, `sz_strings_split_lines_best` and `sz_strings_join_best`.
+Every one reads a `sz_strings_view_t` in any layout, optionally reordered through indices, or one text, and writes a tape, NUL-padded rows, or one buffer.
 Every one that writes a tape is atomic: it succeeds and leaves the tape holding the whole result, or fails and leaves the tape, its blocks and their bytes exactly as they were.
 Calls measure first and finish every fallible step, like a refused allocation or a malformed string, before the first write into a block the tape holds, and the allocator's `reallocate` is an optional fast path.
 Each operation has a serial baseline plus per-ISA backends, like `haswell` and `icelake` on x86.
-The backends share one set of drivers and differ only in their byte-set search, which skips the bytes needing no escaping, their lookup-table kernel, and their normalization kernels.
+The backends share one set of drivers and differ only in their byte-set search, which skips the bytes needing no escaping, their lookup-table kernel, and their normalization kernels, while NEON and Ice Lake split a text in loops of their own.
 `sz_strings_lookup_best` and its siblings run the best kernel the capability mask they are passed names.
 For hot paths on short inputs, pick a capability's kernel, like `sz_strings_lookup_neon`, or resolve one once through `sz_find_kernel_punned`, rather than paying the pick on every call.
 
 ## Methodology
 
-Every table reports throughput in GB/s of input, where a GB is 2³⁰ bytes, measured with `bench/strings.cpp` for 5 seconds per row after a 1-second warm-up.
-Lookups, escaping and tapes run over the first 4 MiB of `leipzig1M_en.txt`, and normalization over the first 4 MiB of the multilingual XL-Sum corpus.
-Each call converts one batch of lines, as many as fill the first-level cache at the median line length: a few hundred English sentences, or a few XL-Sum articles.
-The Standard row is the platform's best stock equivalent, `std::transform` for lookups.
-The Loop rows convert one line at a time: a byte-by-byte escaping loop, or `sz_utf8_norm_best` into scratch sized for the worst case.
-A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` reuses the kernel from the tier above it, and a `…` cell is not measured yet.
+`bench/strings.cpp` reports GB/s of input over the lines of `leipzig1M_en.txt`, or of XL-Sum for normalization.
+Each call converts one batch of lines that fits the first-level cache, while splits take the text whole.
+Loop rows handle one line or part at a time, and Standard rows call the platform's stock equivalent, like `std::transform`.
+A `↑` cell reuses the tier above, and a `…` cell is not measured yet.
 
 ## Lookups
 
@@ -31,8 +29,6 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 | Serial @ 1× Apple M5 Pro   |                 4.1 GB/s |
 | NEON @ 1× Apple M5 Pro     |                 7.5 GB/s |
 | SVE @ 1× AWS Graviton3     |                        … |
-
-The Xeon6 rows predate the batches of lines and were measured over the corpus as one contiguous buffer.
 
 ## Escaping
 
@@ -53,16 +49,12 @@ The Xeon6 rows predate the batches of lines and were measured over the corpus as
 | Haswell @ 1× Intel Xeon6  |        … |        … |        … |         … |
 | Ice Lake @ 1× Intel Xeon6 |        … |        … |        … |         … |
 
-URL escaping and unescaping run at serial speed on NEON for now: an escape every few bytes keeps the drivers in their per-escape path, so the byte-set search barely runs.
-
 ## Tapes
 
 | Backend                  | `sz_strings_to_tape_best` |
 | :----------------------- | ------------------------: |
 | Serial @ 1× Apple M5 Pro |                 14.6 GB/s |
 | NEON @ 1× Apple M5 Pro   |                 14.8 GB/s |
-
-Gathering lines in order is one `memcpy` per batch, so every tier runs at the speed of `memcpy`.
 
 ## Normalization
 
@@ -72,4 +64,15 @@ Gathering lines in order is one `memcpy` per batch, so every tier runs at the sp
 | Serial @ 1× Apple M5 Pro |  0.8 GB/s |  0.7 GB/s |     0.34 GB/s |
 | NEON @ 1× Apple M5 Pro   |  1.7 GB/s |  1.6 GB/s |     0.61 GB/s |
 
-A whole collection normalizes as fast as the loop over its lines while writing one tape, and NFKC_Casefold folds clean runs through the case-folding kernels.
+## Splitting and Joining
+
+| Backend                   | `split` at `' '` | `split_lines` |     `join` |
+| :------------------------ | ---------------: | ------------: | ---------: |
+| Loop @ 1× Apple M5 Pro    |        0.41 GB/s |      1.5 GB/s |   6.4 GB/s |
+| Serial @ 1× Apple M5 Pro  |                … |             … |          … |
+| NEON @ 1× Apple M5 Pro    |                … |             … |          ↑ |
+| Haswell @ 1× Intel Xeon6  |                ↑ |             ↑ |          ↑ |
+| Ice Lake @ 1× Intel Xeon6 |                … |             … |          ↑ |
+
+The vector kernels classify each 64-byte block into the bytes they remove and the ones that end parts, then set the offset of every end from the bytes kept before it.
+NEON slides each kept segment down with overlapping 16-byte stores, and Ice Lake packs the whole block with one `vpcompressb`.

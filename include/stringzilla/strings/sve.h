@@ -132,8 +132,7 @@ STRINGZILLA_API sz_status_t sz_strings_escape_sve(sz_strings_view_t const *strin
                                                   sz_size_t count, sz_escape_kind_t kind, sz_allocator_t *allocator,
                                                   sz_strings_span_t *tape, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_strings_walks_t const walks = sz_strings_walks_sve_();
-    return sz_strings_escape_with_(strings, order, count, kind, allocator, tape, &walks);
+    return sz_strings_escape_neon_(strings, order, count, kind, allocator, tape);
 }
 
 STRINGZILLA_API sz_status_t sz_strings_unescape_sve(sz_strings_view_t const *strings, sz_size_t const *order,
@@ -141,8 +140,7 @@ STRINGZILLA_API sz_status_t sz_strings_unescape_sve(sz_strings_view_t const *str
                                                     sz_strings_span_t *tape, sz_size_t *malformed_index,
                                                     sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_strings_walks_t const walks = sz_strings_walks_sve_();
-    return sz_strings_unescape_with_(strings, order, count, kind, allocator, tape, malformed_index, &walks);
+    return sz_strings_unescape_neon_(strings, order, count, kind, allocator, tape, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_strings_lookup_sve(sz_strings_view_t const *strings, sz_size_t const *order,

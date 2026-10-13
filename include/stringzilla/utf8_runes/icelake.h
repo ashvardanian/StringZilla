@@ -540,6 +540,92 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_count_icelake_(sz_cptr_t text, sz_size_t le
     return char_count;
 }
 
+/** The Keiser-Lemire errors of the 64 bytes of @p text_u8x64 given the bytes 1, 2 and 3 before
+ *  each, nonzero where the bytes are ill-formed. */
+STRINGZILLA_INLINE __m512i sz_utf8_errors_icelake_(__m512i text_u8x64, __m512i one_back_u8x64, __m512i two_back_u8x64,
+                                                   __m512i three_back_u8x64) {
+    __m512i const nibble_u8x64 = _mm512_set1_epi8(15);
+    __m512i const by_high_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)sz_utf8_errors_));
+    __m512i const by_low_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_errors_ + 16)));
+    __m512i const by_next_u8x64 = _mm512_broadcast_i32x4(_mm_loadu_si128((__m128i const *)(sz_utf8_errors_ + 32)));
+    __m512i const special_u8x64 = _mm512_and_si512(
+        _mm512_and_si512(
+            _mm512_shuffle_epi8(by_high_u8x64, _mm512_and_si512(_mm512_srli_epi16(one_back_u8x64, 4), nibble_u8x64)),
+            _mm512_shuffle_epi8(by_low_u8x64, _mm512_and_si512(one_back_u8x64, nibble_u8x64))),
+        _mm512_shuffle_epi8(by_next_u8x64, _mm512_and_si512(_mm512_srli_epi16(text_u8x64, 4), nibble_u8x64)));
+    // Two continuations in a row are well-formed only 2 or 3 bytes into a 3- or 4-byte rune.
+    __mmask64 const deep_m64 = _kor_mask64(_mm512_cmpge_epu8_mask(two_back_u8x64, _mm512_set1_epi8((char)0xE0)),
+                                           _mm512_cmpge_epu8_mask(three_back_u8x64, _mm512_set1_epi8((char)0xF0)));
+    return _mm512_xor_si512(_mm512_maskz_mov_epi8(deep_m64, _mm512_set1_epi8((char)0x80)), special_u8x64);
+}
+
+/**
+ *  @brief Validates and counts the @p count strings of a tape, read in its own order as one run of
+ *      bytes, resolving each string at its end in one step.
+ *
+ *  The run must be well-formed as one stream and every string must end before a byte starting a
+ *  rune, so no rune crosses into the next string. A block holding an error, or a string ending
+ *  inside a rune, sends the strings still unresolved to the serial pass, which names the first
+ *  malformed of them.
+ */
+STRINGZILLA_INLINE sz_status_t sz_utf8_count_run_icelake_(sz_strings_view_t const *strings, sz_size_t count,
+                                                          sz_size_t *runes, sz_size_t *malformed_index) {
+    static sz_u8_t const iota[64] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, //
+                                     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, //
+                                     32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, //
+                                     48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63};
+    sz_size_t const start = sz_strings_view_offset_(strings, 0);
+    sz_size_t const length = sz_strings_view_offset_(strings, count) - start;
+    sz_u8_t const *const text = (sz_u8_t const *)sz_strings_view_data_(strings) + start;
+    // Index `63 + i` picks byte `i - 1` of the block and the bytes before of the block before it.
+    __m512i const iota_u8x64 = _mm512_loadu_si512(iota);
+    __m512i const one_back_indices_u8x64 = _mm512_add_epi8(iota_u8x64, _mm512_set1_epi8(63));
+    __m512i const two_back_indices_u8x64 = _mm512_add_epi8(iota_u8x64, _mm512_set1_epi8(62));
+    __m512i const three_back_indices_u8x64 = _mm512_add_epi8(iota_u8x64, _mm512_set1_epi8(61));
+    // The last block loads zeros past the run's end, and a zero after a lead is an error.
+    sz_size_t const loaded_until = length & ~(sz_size_t)63;
+    __m512i previous_u8x64 = _mm512_setzero_si512();
+    sz_size_t total = 0, counted = 0, row = 0;
+    for (sz_size_t block = 0; block < length; block += 64) {
+        __m512i const text_u8x64 = block < loaded_until
+                                       ? _mm512_loadu_si512(text + block)
+                                       : _mm512_maskz_loadu_epi8(sz_u64_mask_until_(length - block), text + block);
+        __m512i const errors_u8x64 = sz_utf8_errors_icelake_(
+            text_u8x64, _mm512_permutex2var_epi8(previous_u8x64, one_back_indices_u8x64, text_u8x64),
+            _mm512_permutex2var_epi8(previous_u8x64, two_back_indices_u8x64, text_u8x64),
+            _mm512_permutex2var_epi8(previous_u8x64, three_back_indices_u8x64, text_u8x64));
+        if (_cvtmask64_u64(_mm512_test_epi8_mask(errors_u8x64, errors_u8x64)))
+            return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+        sz_u64_t const leads = _cvtmask64_u64(_mm512_cmpge_epi8_mask(text_u8x64, _mm512_set1_epi8(-64)));
+        for (sz_size_t end; row != count && (end = sz_strings_view_offset_(strings, row + 1) - start) < block + 64;
+             ++row) {
+            sz_size_t const lane = end - block;
+            // A string followed by a continuation byte ends inside a rune.
+            if (end != length && !(leads >> lane & 1))
+                return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+            sz_size_t const prefix = total +
+                                     (sz_size_t)_mm_popcnt_u64(leads & _cvtmask64_u64(sz_u64_mask_until_(lane)));
+            if (runes) runes[row] = prefix - counted;
+            counted = prefix;
+        }
+        total += (sz_size_t)_mm_popcnt_u64(leads), previous_u8x64 = text_u8x64;
+    }
+    // Zeros after the run make a rune it leaves open an error.
+    __m512i const zeros_u8x64 = _mm512_setzero_si512();
+    __m512i const closing_u8x64 = sz_utf8_errors_icelake_(
+        zeros_u8x64, _mm512_permutex2var_epi8(previous_u8x64, one_back_indices_u8x64, zeros_u8x64),
+        _mm512_permutex2var_epi8(previous_u8x64, two_back_indices_u8x64, zeros_u8x64),
+        _mm512_permutex2var_epi8(previous_u8x64, three_back_indices_u8x64, zeros_u8x64));
+    if (_cvtmask64_u64(_mm512_test_epi8_mask(closing_u8x64, closing_u8x64)))
+        return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+    for (; row != count; ++row) {
+        if (runes) runes[row] = total - counted;
+        counted = total;
+    }
+    *malformed_index = count;
+    return sz_success_k;
+}
+
 STRINGZILLA_API sz_status_t sz_utf8_count_icelake(sz_cptr_t text, sz_size_t length, sz_size_t *count,
                                                   sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -576,6 +662,30 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_seek_icelake_(sz_cptr_t text, sz_size_t len
 
     // Process remaining bytes with serial
     return sz_utf8_seek_serial_((sz_cptr_t)text_u8, length, n);
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_icelake(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                          sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                          sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!order && strings->layout != sz_strings_accessor_k)
+        return sz_utf8_count_run_icelake_(strings, count, runes, malformed_index);
+    // Orders and accessors check string by string, each a tape of one, fetching 64 views at a time.
+    sz_string_view_t views[64];
+    sz_size_t row = 0, malformed = 0;
+    for (; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        sz_u64_t const offsets[2] = {0, views[row % 64].length};
+        sz_strings_view_t single;
+        single.layout = sz_strings_u64_tape_k, single.count = 1;
+        single.data.u64_tape.data = views[row % 64].start, single.data.u64_tape.offsets = offsets;
+        if (sz_utf8_count_run_icelake_(&single, 1, runes ? runes + row : STRINGZILLA_NULL, &malformed) != sz_success_k)
+            break;
+    }
+    *malformed_index = row;
+    return row == count ? sz_success_k : sz_invalid_utf8_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_icelake(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,

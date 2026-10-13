@@ -2,13 +2,13 @@
  *  @file bench/strings.cpp
  *  @author Ash Vardanian
  *  @date September 28, 2024
- *  @brief Benchmarks random fills and the conversions of string collections: lookups, escaping and
- *      Unicode normalization.
+ *  @brief Benchmarks random fills and the conversions of string collections: lookups, escaping,
+ *      Unicode normalization, splitting and joining.
  *
  *  Times the dispatch points over the English lines against their STL analogs and plain loops, a
  *  fill per line and a conversion per batch of lines, to mimic real-world scenarios dealing with
- *  strings of different lengths. Every capability's kernels are timed against the serial ones by
- *  the `cross_<arch>.cpp` files.
+ *  strings of different lengths, while splits take the whole corpus as one text and joins all of
+ *  its lines. The `cross_<arch>.cpp` files time every capability's kernels against the serial ones.
  *
  *  Memory-bound: the fill, lookup and escape kernels stream bytes, so it reads the whole file by
  *  default and a larger buffer measures throughput truer.
@@ -124,6 +124,20 @@ void escape_json_by_loop(std::string &output, std::string_view text) {
     }
 }
 
+/** Percent-encodes @p text for URLs one byte at a time, as a hand-written encoder would, matching
+ *  @c sz_escape_url_k byte for byte. */
+void escape_url_by_loop(std::string &output, std::string_view text) {
+    char const *const digits = "0123456789ABCDEF";
+    for (char const character : text) {
+        unsigned char const byte = static_cast<unsigned char>(character);
+        bool const unreserved = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
+                                (byte >= '0' && byte <= '9') || byte == '-' || byte == '.' || byte == '_' ||
+                                byte == '~';
+        if (unreserved) output += character;
+        else output += '%', output += digits[byte >> 4], output += digits[byte & 15];
+    }
+}
+
 /** Quotes @p text as an RFC 4180 field when it holds a comma, a quote, CR or LF, doubling quotes,
  *  matching @c sz_escape_csv_k byte for byte. */
 void escape_csv_by_loop(std::string &output, std::string_view text) {
@@ -163,7 +177,7 @@ void bench_strings_lookup(environment_t const &env, corpus_t const &corpus, std:
           baseline_of(base));
 }
 
-/** Benchmarks escaping batches of lines for JSON and CSV against a loop that escapes each line. */
+/** Benchmarks escaping line batches for JSON, CSV and URLs against a loop escaping each line. */
 void bench_strings_escape(environment_t const &env, corpus_t const &corpus, std::size_t batch) {
     strings_input_t lines(corpus);
     auto const bench_kind = [&](char const *name, sz_escape_kind_t kind,
@@ -178,6 +192,7 @@ void bench_strings_escape(environment_t const &env, corpus_t const &corpus, std:
     };
     bench_kind("json", sz_escape_json_k, escape_json_by_loop);
     bench_kind("csv", sz_escape_csv_k, escape_csv_by_loop);
+    bench_kind("url", sz_escape_url_k, escape_url_by_loop);
 }
 
 /** Benchmarks normalizing batches of lines to NFC and NFKC_Casefold against a loop that normalizes
@@ -206,6 +221,115 @@ void bench_strings_normalize(environment_t const &env, corpus_t const &corpus, s
     bench_form("nfkc_casefold", sz_normal_form_nfkc_casefold_k);
 }
 
+/** The bytes of the parts a loop wrote and their count, the check of @c split_output_t::result. */
+inline call_result_t split_by_loop_result(sz_kernel_bytesum_t checksum, std::string_view text,
+                                          std::string const &payload, std::size_t parts) {
+    return {text.size(), strings_check_value(checksum, payload.data(), payload.size()) * 31 + parts, parts};
+}
+
+/** Splits the whole corpus one part at a time with @c std::string_view::find, appending each part
+ *  to a payload it reuses, as `bytes.split` with one separator does. */
+struct split_by_loop_t {
+    corpus_t const &corpus;
+    char separator;
+    std::string payload {};
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    call_result_t operator()() {
+        std::string_view const text = corpus.dataset;
+        std::size_t parts = 0, start = 0;
+        payload.clear();
+        for (std::size_t hit; (hit = text.find(separator, start)) != std::string_view::npos; start = hit + 1)
+            payload.append(text.data() + start, hit - start), ++parts;
+        payload.append(text.data() + start, text.size() - start);
+        return split_by_loop_result(checksum, text, payload, parts + 1);
+    }
+};
+
+/** Bytes in the line break @c str.splitlines finds at @p index of @p text, or zero. */
+inline std::size_t line_break_width(std::string_view text, std::size_t index) {
+    auto const byte_at = [&](std::size_t at) { return at < text.size() ? (unsigned char)text[at] : 0u; };
+    unsigned const byte = byte_at(index), next = byte_at(index + 1), after = byte_at(index + 2);
+    if (byte == '\r') return next == '\n' ? 2 : 1;
+    if (byte == 0xC2) return next == 0x85 ? 2 : 0;
+    if (byte == 0xE2) return next == 0x80 && (after == 0xA8 || after == 0xA9) ? 3 : 0;
+    return 1;
+}
+
+/** Splits the whole corpus at every line break, as `str.splitlines` does, searching for the breaks'
+ *  first bytes with @c std::string_view::find_first_of and checking the rest. */
+struct split_lines_by_loop_t {
+    corpus_t const &corpus;
+    std::string payload {};
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    call_result_t operator()() {
+        std::string_view const text = corpus.dataset;
+        std::string_view const first_bytes("\n\v\f\r\x1c\x1d\x1e\xc2\xe2", 9);
+        std::size_t parts = 0, start = 0, cursor = 0;
+        payload.clear();
+        for (std::size_t hit; (hit = text.find_first_of(first_bytes, cursor)) != std::string_view::npos;) {
+            std::size_t const width = line_break_width(text, hit);
+            cursor = hit + sz_max_of_two(width, (std::size_t)1);
+            if (!width) continue;
+            payload.append(text.data() + start, hit - start), ++parts, start = cursor;
+        }
+        payload.append(text.data() + start, text.size() - start);
+        return split_by_loop_result(checksum, text, payload, parts + (start != text.size()));
+    }
+};
+
+/** Joins every line of the corpus into the same JSON array with one append per piece. */
+struct join_by_loop_t {
+    corpus_t const &corpus;
+    std::string output {};
+    std::size_t lines_bytes = 0;
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    void preprocess() {
+        lines_bytes = 0;
+        for (token_view_t const line : corpus.tokens) lines_bytes += line.size();
+    }
+
+    call_result_t operator()() {
+        output.assign(1, '[');
+        for (std::size_t index = 0; index != corpus.tokens.size(); ++index) {
+            if (index) output += ',';
+            output += '"', output += corpus.tokens[index], output += '"';
+        }
+        output += ']';
+        return {lines_bytes, strings_check_value(checksum, output.data(), output.size()), corpus.tokens.size()};
+    }
+};
+
+/** Benchmarks splitting the corpus at spaces, as `bytes.split(b" ")` does, and into lines, as
+ *  `str.splitlines` does, then joining its lines into a JSON array, each against a loop that
+ *  handles one part at a time. */
+void bench_strings_split_join(environment_t const &env, corpus_t const &corpus) {
+    sz_byteset_t spaces;
+    sz_byteset_init(&spaces);
+    sz_byteset_add(&spaces, ' ');
+    using split_best_t = strings_split_from_sz<cpu_best<sz_strings_split_best>>;
+    std::optional<row_t> const split = bench_nullary(env, corpus, "sz_strings_split_best",
+                                                     split_best_t {corpus, spaces, sz_split_each_k});
+    print(split);
+    print(bench_nullary(env, corpus, "split<loop>", split_best_t {corpus, spaces, sz_split_each_k},
+                        split_by_loop_t {corpus, ' '}),
+          baseline_of(split));
+
+    using split_lines_best_t = strings_split_lines_from_sz<cpu_best<sz_strings_split_lines_best>>;
+    std::optional<row_t> const lines = bench_nullary(env, corpus, "sz_strings_split_lines_best",
+                                                     split_lines_best_t {corpus});
+    print(lines);
+    print(bench_nullary(env, corpus, "split_lines<loop>", split_lines_best_t {corpus}, split_lines_by_loop_t {corpus}),
+          baseline_of(lines));
+
+    using join_best_t = strings_join_from_sz<cpu_best<sz_strings_join_best>>;
+    std::optional<row_t> const joined = bench_nullary(env, corpus, "sz_strings_join_best", join_best_t {corpus});
+    print(joined);
+    print(bench_nullary(env, corpus, "join<loop>", join_best_t {corpus}, join_by_loop_t {corpus}), baseline_of(joined));
+}
+
 #pragma endregion Strings
 
 void bench_strings(environment_t &env) {
@@ -216,6 +340,7 @@ void bench_strings(environment_t &env) {
     bench_strings_lookup(env, corpus, batch);
     bench_strings_escape(env, corpus, batch);
     bench_strings_normalize(env, corpus, batch);
+    bench_strings_split_join(env, corpus);
 }
 
 } // namespace ashvardanian::stringzilla::bench

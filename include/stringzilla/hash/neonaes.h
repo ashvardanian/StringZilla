@@ -519,6 +519,49 @@ STRINGZILLA_INLINE void sz_fill_random_neonaes_(sz_ptr_t text, sz_size_t length,
     }
 }
 
+/** The 16 bytes of the 64 @p window_u8x16x4 holds from @p start on, zeros from @p end on. */
+STRINGZILLA_INLINE uint8x16_t sz_hash_window_block_neon_(uint8x16x4_t window_u8x16x4, sz_size_t start, sz_size_t end) {
+    static sz_u8_t const iota[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    uint8x16_t const index_u8x16 = vaddq_u8(vld1q_u8(iota), vdupq_n_u8((sz_u8_t)start));
+    // Indices from 64 on read zeros, and those from the key's end on are pushed there.
+    return vqtbl4q_u8(window_u8x16x4, vorrq_u8(index_u8x16, vcgeq_u8(index_u8x16, vdupq_n_u8((sz_u8_t)end))));
+}
+
+/**
+ *  @brief Hashes string @p row of @p strings, which lies within the 64 bytes from @p window that
+ *      @p window_u8x16x4 holds, exactly as @c sz_hash_neonaes_ does.
+ *
+ *  Every key absorbs @p blocks blocks from registers, and those past its end leave its state as it
+ *  is. Every first block meets the same seeded state, so @p aes_u8x16 and @p sum_u64x2 hold that
+ *  state with its own rounds already applied, leaving one XOR and one addition.
+ */
+STRINGZILLA_INLINE sz_u64_t sz_hash_window_key_neon_(sz_strings_view_t const *strings, sz_size_t row, sz_size_t window,
+                                                     uint8x16x4_t window_u8x16x4, sz_size_t blocks,
+                                                     uint8x16_t aes_u8x16, uint64x2_t sum_u64x2, uint64x2_t key_u64x2) {
+    uint8x16_t const order_u8x16 = vld1q_u8(sz_hash_u8x16x4_shuffle_());
+    sz_size_t const start = sz_strings_view_offset_(strings, row) - window;
+    sz_size_t const end = sz_strings_view_offset_(strings, row + 1) - window, length = end - start;
+    uint8x16_t const first_u8x16 = sz_hash_window_block_neon_(window_u8x16x4, start, end);
+    uint8x16_t aes_state_u8x16 = veorq_u8(aes_u8x16, first_u8x16);
+    uint64x2_t sum_state_u64x2 = vaddq_u64(sum_u64x2, vreinterpretq_u64_u8(first_u8x16));
+    for (sz_size_t block = 1; block != blocks; ++block) {
+        uint8x16_t const data_u8x16 = sz_hash_window_block_neon_(window_u8x16x4, start + block * 16, end);
+        uint8x16_t const live_u8x16 = vdupq_n_u8(block * 16 < length ? 0xFF : 0);
+        uint8x16_t const shuffled_u8x16 = vqtbl1q_u8(vreinterpretq_u8_u64(sum_state_u64x2), order_u8x16);
+        uint64x2_t const summed_u64x2 = vaddq_u64(vreinterpretq_u64_u8(shuffled_u8x16),
+                                                  vreinterpretq_u64_u8(data_u8x16));
+        aes_state_u8x16 = vbslq_u8(live_u8x16, sz_emulate_aesenc_u8x16_neon_(aes_state_u8x16, data_u8x16),
+                                   aes_state_u8x16);
+        sum_state_u64x2 = vbslq_u64(vreinterpretq_u64_u8(live_u8x16), summed_u64x2, sum_state_u64x2);
+    }
+    uint64x2_t const key_with_length_u64x2 = vaddq_u64(key_u64x2, vsetq_lane_u64(length, vdupq_n_u64(0), 0));
+    uint8x16_t const mixed_u8x16 = sz_emulate_aesenc_u8x16_neon_(vreinterpretq_u8_u64(sum_state_u64x2),
+                                                                 aes_state_u8x16);
+    uint8x16_t const final_u8x16 = sz_emulate_aesenc_u8x16_neon_(
+        sz_emulate_aesenc_u8x16_neon_(mixed_u8x16, vreinterpretq_u8_u64(key_with_length_u64x2)), mixed_u8x16);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(final_u8x16), 0);
+}
+
 #if STRINGZILLA_TARGET_NEONAES
 
 STRINGZILLA_API sz_status_t sz_hash_state_init_neonaes(sz_hash_state_t *state, sz_u64_t seed, sz_stream_t stream) {
@@ -546,6 +589,76 @@ STRINGZILLA_API STRINGZILLA_NO_STACK_PROTECTOR_ sz_status_t sz_hash_neonaes(sz_c
                                                                             sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *hash = sz_hash_neonaes_(text, length, seed);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_hash_strings_neonaes(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                    sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                    sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    // Orders and accessors hash string by string.
+    sz_bool_t const by_row = (sz_bool_t)(order || strings->layout == sz_strings_accessor_k);
+    // Views arrive 64 at a time, as an accessor costs one indirect call per batch.
+    sz_string_view_t views[64];
+    for (sz_size_t row = 0; by_row && row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        hashes[row] = sz_hash_neonaes_(views[row % 64].start, views[row % 64].length, seed);
+    }
+    if (by_row || !count) return sz_success_k;
+
+    sz_u8_t const *const data = (sz_u8_t const *)sz_strings_view_data_(strings);
+    sz_size_t const first = sz_strings_view_offset_(strings, 0), end = sz_strings_view_offset_(strings, count);
+    // Windows within 64 bytes of the payload's end read a zero-padded copy.
+    sz_size_t const copied_from = end - first < 64 ? first : end - 64;
+    sz_u8_t tail[128] = {0};
+    if (end != copied_from) memcpy(tail, data + copied_from, end - copied_from);
+    // Every key's first block meets the same seeded state, whose own rounds are applied once here.
+    sz_align_(16) sz_hash_state_aligned_for_short_t state;
+    sz_hash_state_short_init_neon_(&state, seed);
+    uint8x16_t const aes_u8x16 = sz_emulate_aesenc_u8x16_neon_(state.aes.u8x16, vdupq_n_u8(0));
+    uint64x2_t const sum_u64x2 = vreinterpretq_u64_u8(
+        vqtbl1q_u8(state.sum.u8x16, vld1q_u8(sz_hash_u8x16x4_shuffle_())));
+    // Each window starts at the first unhashed key and takes every key ending in its 64 bytes.
+    for (sz_size_t row = 0; row != count;) {
+        sz_size_t const window = sz_strings_view_offset_(strings, row);
+        sz_size_t keys = 0, longest = 0;
+        for (sz_size_t key_start = window, key_end;
+             row + keys != count && (key_end = sz_strings_view_offset_(strings, row + keys + 1)) - window <= 64;
+             ++keys, key_start = key_end)
+            longest = sz_max_of_two(longest, key_end - key_start);
+        // A key longer than the window hashes alone.
+        if (!keys)
+            hashes[row] = sz_hash_neonaes_((sz_cptr_t)data + window, sz_strings_view_offset_(strings, row + 1) - window,
+                                           seed);
+        uint8x16x4_t const window_u8x16x4 = vld1q_u8_x4(window < copied_from ? data + window
+                                                                             : tail + (window - copied_from));
+        // The window's longest key sets the blocks every key in it absorbs.
+        switch (sz_max_of_two(sz_size_divide_round_up(longest, 16), (sz_size_t)1)) {
+        case 1:
+            for (sz_size_t key = row; key != row + keys; ++key)
+                hashes[key] = sz_hash_window_key_neon_(strings, key, window, window_u8x16x4, 1, aes_u8x16, sum_u64x2,
+                                                       state.key.u64x2);
+            break;
+        case 2:
+            for (sz_size_t key = row; key != row + keys; ++key)
+                hashes[key] = sz_hash_window_key_neon_(strings, key, window, window_u8x16x4, 2, aes_u8x16, sum_u64x2,
+                                                       state.key.u64x2);
+            break;
+        case 3:
+            for (sz_size_t key = row; key != row + keys; ++key)
+                hashes[key] = sz_hash_window_key_neon_(strings, key, window, window_u8x16x4, 3, aes_u8x16, sum_u64x2,
+                                                       state.key.u64x2);
+            break;
+        default:
+            for (sz_size_t key = row; key != row + keys; ++key)
+                hashes[key] = sz_hash_window_key_neon_(strings, key, window, window_u8x16x4, 4, aes_u8x16, sum_u64x2,
+                                                       state.key.u64x2);
+            break;
+        }
+        row += keys + !keys;
+    }
     return sz_success_k;
 }
 

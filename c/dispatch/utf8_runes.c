@@ -55,6 +55,27 @@ static sz_capability_kernels_t const *sz_utf8_count_capabilities(void) {
     return lists;
 }
 
+static sz_capability_kernels_t const *sz_utf8_count_strings_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_utf8_count_strings_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_utf8_count_strings_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_utf8_count_strings_neon,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
 static sz_capability_kernels_t const *sz_utf8_seek_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -151,6 +172,14 @@ STRINGZILLA_API sz_status_t sz_utf8_count_best(sz_cptr_t text, sz_size_t length,
     return kernel ? kernel(text, length, count, stream) : sz_missing_kernel_k;
 }
 
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                       sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                       sz_capability_t capabilities, sz_stream_t stream) {
+    sz_kernel_utf8_count_strings_t const kernel = (sz_kernel_utf8_count_strings_t)sz_kernel_pick_(
+        capabilities, sz_utf8_count_strings_capabilities());
+    return kernel ? kernel(strings, order, count, runes, malformed_index, stream) : sz_missing_kernel_k;
+}
+
 STRINGZILLA_API sz_status_t sz_utf8_seek_best(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,
                                               sz_capability_t capabilities, sz_stream_t stream) {
     sz_kernel_utf8_seek_t const kernel = (sz_kernel_utf8_seek_t)sz_kernel_pick_(capabilities,
@@ -174,6 +203,7 @@ STRINGZILLA_API sz_status_t sz_utf8_runes_find_kernel(sz_kernel_kind_t kind, sz_
     sz_capability_kernels_t const *lists = STRINGZILLA_NULL;
     switch (kind) {
     case sz_kernel_utf8_count_k: lists = sz_utf8_count_capabilities(); break;
+    case sz_kernel_utf8_count_strings_k: lists = sz_utf8_count_strings_capabilities(); break;
     case sz_kernel_utf8_seek_k: lists = sz_utf8_seek_capabilities(); break;
     case sz_kernel_utf8_decode_k: lists = sz_utf8_decode_capabilities(); break;
     default: break;

@@ -2838,6 +2838,20 @@ check_bit_scans_per_isa() {
         "            _mm_popcnt_u32, SVE2 calls __clz or __builtin_popcount, NEON calls sz_u32_ctz_neon_ and kin:"
 }
 
+# Rejects a bit mask built by hand, as in `((sz_u64_t)1 << count) - 1` or `~(sz_u64_t)0 >> (63 - last)`,
+# because each spelling needs its own guard at 64, which the helpers already hold. Skylake and Ice Lake
+# tiers also call the BMI2 helpers rather than the portable one, as their bit scans call intrinsics.
+check_bit_masks_use_helpers() {
+    local masks pattern='\(\(sz_u(32|64)_t\)1 << [^()]+\) - 1|~\(sz_u(32|64)_t\)0 *(<<|>>)|~0ull *(<<|>>)|>> \(6[34] - '
+    case "${staged_path##*/}" in
+    skylake.h | icelake.h) pattern="$pattern|sz_u64_mask_until_serial_\(" ;;
+    esac
+    masks=$(added_code_text | grep -E "$pattern" || true)
+    [ -z "$masks" ] || reject_with_reason "$masks" \
+        "$staged_path builds a bit mask by hand; call sz_u64_mask_until_serial_, or in Skylake and Ice Lake" \
+        "            tiers sz_u64_mask_until_ and sz_u64_clamp_mask_until_:"
+}
+
 # Rejects a SIMD register variable whose name omits its element type and width, because the name is the
 # only type annotation a kernel reader sees. Raw fixed-width registers end in `_<dtype>x<lanes>`, SVE in
 # `_<dtype>x`, RVV in `_<dtype>m<lmul>`, x86 masks in `_m<bits>`, predicates in `_b<bits>`; the
@@ -3255,6 +3269,9 @@ run_project_checks() {
     include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.h | include/stringzilla/*/*.cuh)
         check_libc_absent_from_library
         ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*/*.h) check_bit_masks_use_helpers ;;
     esac
     case "$staged_path" in
     include/stringzilla/*/serial.h | include/stringzilla/*/tables.h) ;;

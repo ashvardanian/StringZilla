@@ -191,6 +191,35 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_neon_(sz_cptr_t haystack, sz_size_t haystac
     return sz_find_serial_(haystack, haystack_length, needle, needle_length);
 }
 
+/** The bits of four 0x00/0xFF masks of 16 lanes, lane @c i of the 64 in bit @c i. */
+STRINGZILLA_INLINE sz_u64_t sz_find_bits_neon_(uint8x16x4_t masks_u8x16x4) {
+    static sz_u8_t const weights[16] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    uint8x16_t const weights_u8x16 = vld1q_u8(weights);
+    uint8x16_t const first_u8x16 = vpaddq_u8(vandq_u8(masks_u8x16x4.val[0], weights_u8x16),
+                                             vandq_u8(masks_u8x16x4.val[1], weights_u8x16));
+    uint8x16_t const second_u8x16 = vpaddq_u8(vandq_u8(masks_u8x16x4.val[2], weights_u8x16),
+                                              vandq_u8(masks_u8x16x4.val[3], weights_u8x16));
+    uint8x16_t const quarters_u8x16 = vpaddq_u8(first_u8x16, second_u8x16);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(vpaddq_u8(quarters_u8x16, quarters_u8x16)), 0);
+}
+
+/** Bit @c i set where @p bytes match at `text + i + offsets[k]` for every @c k, for the 64 starts
+ *  from @p text, gathering the bits only when one narrowing finds a match at all. */
+STRINGZILLA_INLINE sz_u64_t sz_find_candidates_neon_(sz_u8_t const *text, sz_size_t const offsets[3],
+                                                     sz_u8_t const bytes[3]) {
+    uint8x16x4_t const first_u8x16x4 = vld1q_u8_x4(text + offsets[0]);
+    uint8x16x4_t const second_u8x16x4 = vld1q_u8_x4(text + offsets[1]);
+    uint8x16x4_t const third_u8x16x4 = vld1q_u8_x4(text + offsets[2]);
+    uint8x16x4_t matches_u8x16x4;
+    for (int chunk = 0; chunk != 4; ++chunk)
+        matches_u8x16x4.val[chunk] = vandq_u8(vandq_u8(vceqq_u8(first_u8x16x4.val[chunk], vdupq_n_u8(bytes[0])),
+                                                       vceqq_u8(second_u8x16x4.val[chunk], vdupq_n_u8(bytes[1]))),
+                                              vceqq_u8(third_u8x16x4.val[chunk], vdupq_n_u8(bytes[2])));
+    uint8x16_t const any_u8x16 = vorrq_u8(vorrq_u8(matches_u8x16x4.val[0], matches_u8x16x4.val[1]),
+                                          vorrq_u8(matches_u8x16x4.val[2], matches_u8x16x4.val[3]));
+    return sz_find_vreinterpretq_u8_u4_(any_u8x16) ? sz_find_bits_neon_(matches_u8x16x4) : 0;
+}
+
 STRINGZILLA_INLINE sz_cptr_t sz_rfind_neon_(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle,
                                             sz_size_t needle_length) {
 
@@ -288,6 +317,57 @@ STRINGZILLA_API sz_status_t sz_find_neon(sz_cptr_t haystack, sz_size_t haystack_
                                          sz_size_t needle_length, sz_cptr_t *match, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *match = sz_find_neon_(haystack, haystack_length, needle, needle_length);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_find_strings_neon(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_cptr_t needle, sz_size_t needle_length,
+                                                 sz_size_t *positions, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    for (sz_size_t row = 0; !needle_length && row != count; ++row) positions[row] = 0;
+    if (!needle_length) return sz_success_k;
+    // Orders and accessors search string by string, their views fetched 64 at a time.
+    sz_string_view_t views[64];
+    sz_bool_t const by_row = (sz_bool_t)(order || strings->layout == sz_strings_accessor_k);
+    for (sz_size_t row = 0; by_row && row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        sz_string_view_t const view = views[row % 64];
+        sz_cptr_t const match = sz_find_neon_(view.start, view.length, needle, needle_length);
+        positions[row] = match ? (sz_size_t)(match - view.start) : STRINGZILLA_SIZE_MAX;
+    }
+    if (by_row || !count) return sz_success_k;
+
+    sz_u8_t const *const data = (sz_u8_t const *)sz_strings_view_data_(strings);
+    sz_size_t offsets[3];
+    sz_locate_needle_anomalies_(needle, needle_length, &offsets[0], &offsets[1], &offsets[2]);
+    sz_u8_t const bytes[3] = {(sz_u8_t)needle[offsets[0]], (sz_u8_t)needle[offsets[1]], (sz_u8_t)needle[offsets[2]]};
+    sz_size_t const end = sz_strings_view_offset_(strings, count);
+    sz_size_t row = 0, row_start = sz_strings_view_offset_(strings, 0), row_end = sz_strings_view_offset_(strings, 1);
+    // A block of 64 starts begins at the first unsettled string, or right after the last block.
+    for (sz_size_t block = row_start; row != count; block = sz_max_of_two(block + 64, row_start)) {
+        sz_size_t const starts = end > block + offsets[2] ? sz_min_of_two(end - block - offsets[2], (sz_size_t)64) : 0;
+        sz_u64_t candidates = starts == 64 ? sz_find_candidates_neon_(data + block, offsets, bytes)
+                                           : sz_find_candidates_serial_(data + block, starts, offsets, bytes);
+        // Each step settles a string or drops one of its candidates, until one outruns the block.
+        while (row != count && row_start < block + 64) {
+            // The lanes of the string's starts in the block, none when the needle outgrows it.
+            sz_size_t const first_lane = row_start > block ? row_start - block : 0;
+            sz_size_t const end_lane = row_end - row_start < needle_length ? first_lane
+                                                                           : row_end - needle_length + 1 - block;
+            sz_u64_t const own = candidates & sz_u64_mask_until_serial_(end_lane) &
+                                 ~sz_u64_mask_until_serial_(first_lane);
+            if (!own && end_lane > 64) break;
+            sz_size_t const lane = own ? (sz_size_t)sz_u64_ctz_neon_(own) : 64;
+            candidates &= ~(own & (0 - own));
+            if (own && needle_length > 3 && !sz_equal_neon_((sz_cptr_t)data + block + lane, needle, needle_length))
+                continue;
+            positions[row] = own ? block + lane - row_start : STRINGZILLA_SIZE_MAX;
+            row_start = row_end, ++row;
+            row_end = sz_strings_view_offset_(strings, sz_min_of_two(row + 1, count));
+        }
+    }
     return sz_success_k;
 }
 

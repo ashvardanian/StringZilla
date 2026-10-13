@@ -1485,7 +1485,7 @@ typedef enum sz_strings_layout_t {
 /**
  *  @brief A read-only, ordered collection of borrowed strings, in one of three layouts.
  *
- *  Tapes are what Apache Arrow, the Python @c Strs class and GPU kernels read directly. The
+ *  Tapes are what Apache Arrow, the Python @c Strings class and GPU kernels read directly. The
  *  accessor covers every other shape, from arrays of views to the nodes of a parsed tree, at one
  *  indirect call per block of strings. A slice of a tape keeps its parent's offsets, so its first
  *  offset may be above zero.
@@ -1628,7 +1628,7 @@ STRINGZILLA_INLINE void sz_strings_from_null_terminated_strings(sz_cptr_t const 
                                                                 sz_strings_view_t *strings);
 
 /**
- *  @brief Describes an array of pointer-length pairs, like Python's fragmented @c Strs.
+ *  @brief Describes an array of pointer-length pairs, like a list of borrowed string views.
  *  @param[in] views The array of views, which must outlive @p strings.
  *  @param[in] count Number of views in the array.
  *  @param[out] strings The accessor-backed collection to initialize.
@@ -2012,6 +2012,13 @@ STRINGZILLA_CONSTEXPR sz_i32_t sz_i32_min_of_two(sz_i32_t x, sz_i32_t y) { retur
 
 /** Branchless maximum function for two signed 32-bit integers. */
 STRINGZILLA_CONSTEXPR sz_i32_t sz_i32_max_of_two(sz_i32_t x, sz_i32_t y) { return x - ((x - y) & (x - y) >> 31); }
+
+/** Low @p count bits set (`[0, count)`), 0 for `count==0`, all-ones for `count>=64`. Portable,
+ *  branch-light replacement for the BMI2 @c sz_u64_mask_until_ so the shared boundary algebra
+ *  compiles on every backend. */
+STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_mask_until_serial_(sz_size_t count) {
+    return count >= 64 ? (sz_u64_t) ~(sz_u64_t)0 : (((sz_u64_t)1 << count) - 1);
+}
 
 /*  In AVX-512 we actively use masked operations and the "K mask registers". Producing a mask for
  *  the first N elements of a sequence can be done using the `1 << N - 1` idiom. It, however,
@@ -2438,6 +2445,17 @@ STRINGZILLA_INLINE sz_size_t sz_strings_get_block_(sz_strings_view_t const *stri
     for (sz_size_t position = 0; position != count; ++position) indices[position] = start + position;
     sz_strings_get_(strings, indices, count, views);
     return count;
+}
+
+/** Offset @p index of the tape @p strings views, which is never an accessor. */
+STRINGZILLA_INLINE sz_size_t sz_strings_view_offset_(sz_strings_view_t const *strings, sz_size_t index) {
+    return strings->layout == sz_strings_u64_tape_k ? (sz_size_t)strings->data.u64_tape.offsets[index]
+                                                    : (sz_size_t)strings->data.u32_tape.offsets[index];
+}
+
+/** The payload of the tape @p strings views, which is never an accessor. */
+STRINGZILLA_INLINE sz_cptr_t sz_strings_view_data_(sz_strings_view_t const *strings) {
+    return strings->layout == sz_strings_u64_tape_k ? strings->data.u64_tape.data : strings->data.u32_tape.data;
 }
 
 STRINGZILLA_INLINE void sz_strings_from_null_terminated_strings_get_(void const *handle, sz_size_t const *indices,

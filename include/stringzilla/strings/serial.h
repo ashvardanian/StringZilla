@@ -329,6 +329,32 @@ STRINGZILLA_INLINE sz_size_t sz_strings_write_utf16_(sz_rune_t rune, char *seque
     return units_count * 6;
 }
 
+/** The escape of @p byte, one that @p kind escapes alone, as up to 8 little-endian bytes, adding
+ *  the bytes it outgrows @p byte by to @p extra: JSON, HTML or URL escapes. */
+STRINGZILLA_INLINE sz_u64_t sz_strings_escape_sequence_(sz_escape_kind_t kind, sz_u8_t byte, sz_size_t *extra) {
+    static sz_u8_t const upper[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+    static sz_u8_t const lower[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    // The letter after the backslash for each control, `u` for `\u00XX`
+    static sz_u8_t const letters[32] = {'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'b', 't', 'n', 'u', 'f', 'r', 'u', 'u',
+                                        'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u', 'u'};
+    // The entities of `>`, `"`, `<`, `'` and `&` at `((byte >> 2) ^ byte) & 7`
+    static char const entities[8][8] = {"", "&gt;", "&quot;", "&lt;", "", "", "&#39;", "&amp;"};
+    if (kind == sz_escape_url_k) {
+        *extra += 2;
+        return '%' | (sz_u64_t)upper[byte >> 4] << 8 | (sz_u64_t)upper[byte & 15] << 16;
+    }
+    if (kind == sz_escape_html_k) {
+        sz_size_t const hash = ((byte >> 2) ^ byte) & 7;
+        // A nibble per hash holds the bytes its entity adds.
+        *extra += 0x44003530u >> (hash * 4) & 15;
+        return sz_u64_load(entities[hash]).u64;
+    }
+    sz_u8_t const letter = byte < 32 ? letters[byte] : byte;
+    *extra += letter == 'u' ? 5 : 1;
+    return '\\' | (sz_u64_t)letter << 8 | 0x30300000ull | (sz_u64_t)lower[byte >> 4] << 32 |
+           (sz_u64_t)lower[byte & 15] << 40;
+}
+
 /** Escapes one string for JSON into @p target, or measures it for a null @p target; @p ascii also
  *  writes DEL and every non-ASCII codepoint as `\uXXXX`, and every ill-formed byte as U+FFFD. */
 STRINGZILLA_INLINE sz_size_t sz_strings_escape_json_(sz_cptr_t source, sz_size_t length, sz_ptr_t target,
@@ -665,6 +691,29 @@ STRINGZILLA_INLINE sz_size_t sz_strings_unescape_one_(sz_escape_kind_t kind, sz_
 
 #pragma endregion Escaping
 
+#pragma region Splitting
+
+/** Bytes in the line break at @p index of @p text, or zero: LF, VT, FF, CR, FS, GS, RS, CR LF, NEL,
+ *  LS or PS. */
+STRINGZILLA_INLINE sz_size_t sz_strings_line_break_(sz_u8_t const *text, sz_size_t length, sz_size_t index) {
+    sz_u8_t const byte = text[index];
+    sz_size_t const left = length - index;
+    if ((sz_u8_t)(byte - 0x0A) < 4 || (sz_u8_t)(byte - 0x1C) < 3)
+        return 1 + (byte == '\r' && left > 1 && text[index + 1] == '\n');
+    if (byte == 0xC2) return left > 1 && text[index + 1] == 0x85 ? 2 : 0;
+    if (byte == 0xE2) return left > 2 && text[index + 1] == 0x80 && (text[index + 2] | 1) == 0xA9 ? 3 : 0;
+    return 0;
+}
+
+/** Whether the 8 bytes at @p text are all printable ASCII, so none can be a byte of a line break:
+ *  a byte below 0x20 borrows into its top bit, and a byte from 0x80 already has it set. */
+STRINGZILLA_INLINE sz_bool_t sz_strings_line_clean_(sz_cptr_t text) {
+    sz_u64_t const word = sz_u64_load(text).u64;
+    return (sz_bool_t) !(((word - 0x2020202020202020ull) | word) & 0x8080808080808080ull);
+}
+
+#pragma endregion Splitting
+
 #pragma region Drivers
 
 /** Gathers strings into a tape, leaving a whole tape gathered onto itself where it lies. */
@@ -710,20 +759,43 @@ STRINGZILLA_INLINE sz_status_t sz_strings_lookup_with_(sz_strings_view_t const *
     return sz_success_k;
 }
 
-/** Escapes the whole of @p tape where it lies, into @p payload bytes, no fewer than its block
- *  holds: the block grows first, so nothing can fail once writing starts, then its bytes move to
- *  the end and escape front to back, the writer never overtaking bytes it has yet to read. */
-STRINGZILLA_INLINE sz_status_t sz_strings_escape_in_place_(sz_strings_span_t *tape, sz_escape_kind_t kind,
-                                                           sz_size_t payload, sz_allocator_t *allocator,
-                                                           sz_strings_walks_t const *walks) {
-    sz_size_t const count = tape->count, first = sz_strings_offset_(tape, 0), end = sz_strings_offset_(tape, count);
+/** Whether escaping the @p count strings of @p strings into @p payload bytes grows the tape
+ *  @p tape holds where it lies: they must be that whole tape, keeping its offsets width, and the
+ *  tape must not shrink. */
+STRINGZILLA_INLINE sz_bool_t sz_strings_escapes_in_place_(sz_strings_view_t const *strings,
+                                                          sz_strings_span_t const *tape, sz_size_t count,
+                                                          sz_size_t payload) {
+    return (sz_bool_t)(sz_strings_aliases_(strings, tape) && count == tape->count &&
+                       sz_strings_layout_for_(payload) == tape->layout && payload >= sz_strings_offset_(tape, count));
+}
+
+/** Grows the payload block of @p tape to @p payload bytes, no fewer than it holds, and moves its
+ *  bytes to the end, where @p reader then points, so escaping them front to back never overtakes
+ *  a byte yet to be read. Points @p output at the grown tape, or leaves @p tape as it was. */
+STRINGZILLA_INLINE sz_status_t sz_strings_escape_grow_(sz_strings_span_t *tape, sz_size_t payload,
+                                                       sz_allocator_t *allocator, sz_strings_span_t *output,
+                                                       sz_cptr_t *reader) {
+    sz_size_t const first = sz_strings_offset_(tape, 0), end = sz_strings_offset_(tape, tape->count);
     void *data = sz_strings_payload_(tape);
     if (!sz_strings_resize_(data, end, payload, allocator, STRINGZILLA_NULL, &data)) return sz_bad_alloc_k;
     sz_strings_point_(tape, data, sz_strings_offsets_block_(tape));
     sz_ptr_t const bytes = (sz_ptr_t)data;
     if (end != first) memmove(bytes + payload - (end - first), bytes + first, end - first);
-    sz_cptr_t reader = bytes + payload - (end - first);
-    sz_size_t offset = 0, old_start = first;
+    *reader = bytes + payload - (end - first), *output = *tape;
+    return sz_success_k;
+}
+
+/** Escapes the whole of @p tape where it lies, into @p payload bytes: the block grows first, so
+ *  nothing can fail once writing starts. */
+STRINGZILLA_INLINE sz_status_t sz_strings_escape_in_place_(sz_strings_span_t *tape, sz_escape_kind_t kind,
+                                                           sz_size_t payload, sz_allocator_t *allocator,
+                                                           sz_strings_walks_t const *walks) {
+    sz_strings_span_t grown;
+    sz_cptr_t reader;
+    if (sz_strings_escape_grow_(tape, payload, allocator, &grown, &reader) != sz_success_k) return sz_bad_alloc_k;
+    sz_size_t const count = tape->count;
+    sz_ptr_t const bytes = sz_strings_payload_(tape);
+    sz_size_t offset = 0, old_start = sz_strings_offset_(tape, 0);
     for (sz_size_t index = 0; index != count; ++index) {
         sz_size_t const old_end = sz_strings_offset_(tape, index + 1);
         offset += sz_strings_escape_one_(kind, reader, old_end - old_start, bytes + offset, walks);
@@ -750,9 +822,7 @@ STRINGZILLA_INLINE sz_status_t sz_strings_escape_with_(sz_strings_view_t const *
             payload += escaped;
         }
     }
-    // Only a whole tape that keeps its offsets width and never shrinks escapes where it lies.
-    if (!order && sz_strings_aliases_(strings, tape) && count == tape->count &&
-        sz_strings_layout_for_(payload) == tape->layout && payload >= sz_strings_offset_(tape, count))
+    if (!order && sz_strings_escapes_in_place_(strings, tape, count, payload))
         return sz_strings_escape_in_place_(tape, kind, payload, allocator, walks);
 
     sz_strings_span_t output;
@@ -957,6 +1027,38 @@ STRINGZILLA_INLINE sz_status_t sz_strings_normalize_with_(sz_strings_view_t cons
     return sz_success_k;
 }
 
+/** Whether the @p length bytes at @p text overlap either block @p tape holds. */
+STRINGZILLA_INLINE sz_bool_t sz_strings_holds_(sz_strings_span_t const *tape, sz_cptr_t text, sz_size_t length) {
+    void const *const offsets = sz_strings_offsets_block_(tape);
+    if (!offsets || !length) return sz_false_k;
+    sz_size_t const start = (sz_size_t)text, end = start + length;
+    sz_size_t const payload = (sz_size_t)sz_strings_payload_(tape), offsets_start = (sz_size_t)offsets;
+    sz_size_t const payload_end = payload + sz_strings_offset_(tape, tape->count);
+    sz_size_t const offsets_end = offsets_start + sz_strings_offsets_bytes_(tape->layout, tape->count);
+    return (sz_bool_t)((start < payload_end && payload < end) || (start < offsets_end && offsets_start < end));
+}
+
+/** Points @p output at blocks for @p parts over @p payload bytes: those @p tape holds when they fit
+ *  and @p text lies outside them, or else fresh ones, so writing never overwrites what it reads. */
+STRINGZILLA_INLINE sz_status_t sz_strings_split_acquire_(sz_cptr_t text, sz_size_t length,
+                                                         sz_strings_span_t const *tape, sz_size_t parts,
+                                                         sz_size_t payload, sz_allocator_t *allocator,
+                                                         sz_strings_span_t *output) {
+    sz_strings_span_t none;
+    sz_strings_view_t unread;
+    memset(&none, 0, sizeof(none)), memset(&unread, 0, sizeof(unread));
+    unread.layout = sz_strings_accessor_k;
+    return sz_strings_acquire_(&unread, sz_strings_holds_(tape, text, length) ? &none : tape, parts, payload, allocator,
+                               output, STRINGZILLA_NULL);
+}
+
+/** Sets the first and the last offsets of a written split @p output and hands it to @p tape. */
+STRINGZILLA_INLINE void sz_strings_split_commit_(sz_strings_span_t *tape, sz_strings_span_t *output, sz_size_t payload,
+                                                 sz_allocator_t *allocator) {
+    sz_strings_offset_set_(output, 0, 0), sz_strings_offset_set_(output, output->count, payload);
+    sz_strings_commit_(tape, output, allocator, STRINGZILLA_NULL);
+}
+
 #pragma endregion Drivers
 
 #if STRINGZILLA_TARGET_SERIAL
@@ -1007,6 +1109,91 @@ STRINGZILLA_API sz_status_t sz_strings_normalize_serial(sz_strings_view_t const 
                                                         sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     return sz_strings_normalize_with_(strings, order, count, form, allocator, tape, &sz_utf8_norm_serial);
+}
+
+STRINGZILLA_API sz_status_t sz_strings_split_serial(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
+                                                    sz_split_kind_t kind, sz_allocator_t *allocator,
+                                                    sz_strings_span_t *tape, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_u8_t const *const bytes = (sz_u8_t const *)text;
+    sz_size_t const each = kind != sz_split_runs_k;
+    sz_size_t removed_count = 0, ends_count = 0, previous_removed = 1;
+    for (sz_size_t index = 0; index != length; ++index) {
+        sz_size_t const removed = sz_byteset_contains_u8(delimiters, bytes[index]);
+        removed_count += removed, ends_count += removed & (previous_removed ^ 1), previous_removed = removed;
+    }
+    sz_size_t const payload = length - removed_count;
+    sz_size_t const parts = each ? removed_count + 1 : ends_count + (previous_removed ^ 1);
+
+    sz_strings_span_t output;
+    sz_status_t const status = sz_strings_split_acquire_(text, length, tape, parts, payload, allocator, &output);
+    if (status != sz_success_k) return status;
+    sz_u8_t *const data = (sz_u8_t *)sz_strings_payload_(&output);
+    sz_size_t written = 0, ended = 0;
+    previous_removed = 1;
+    // A delimiter ending no part directly follows one that does, so rewriting its slot is harmless.
+    for (sz_size_t index = 0; index != length; ++index) {
+        sz_size_t const removed = sz_byteset_contains_u8(delimiters, bytes[index]);
+        ended += removed & ((previous_removed ^ 1) | each), previous_removed = removed;
+        if (removed) sz_strings_offset_set_(&output, ended, written);
+        else data[written++] = bytes[index];
+    }
+    sz_strings_split_commit_(tape, &output, payload, allocator);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_split_lines_serial(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
+                                                          sz_strings_span_t *tape, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_u8_t const *const bytes = (sz_u8_t const *)text;
+    sz_size_t removed_count = 0, ends_count = 0, trailing = 0;
+    for (sz_size_t index = 0; index < length;) {
+        sz_size_t const clean = length - index >= 8 && sz_strings_line_clean_(text + index) ? 8 : 0;
+        sz_size_t const broken = clean ? 0 : sz_strings_line_break_(bytes, length, index);
+        removed_count += broken, ends_count += broken != 0, trailing = broken == 0;
+        index += clean + broken + (!clean && !broken);
+    }
+    sz_size_t const payload = length - removed_count, parts = ends_count + trailing;
+
+    sz_strings_span_t output;
+    sz_status_t const status = sz_strings_split_acquire_(text, length, tape, parts, payload, allocator, &output);
+    if (status != sz_success_k) return status;
+    sz_u8_t *const data = (sz_u8_t *)sz_strings_payload_(&output);
+    sz_size_t written = 0, ended = 0;
+    for (sz_size_t index = 0; index < length;) {
+        sz_size_t const clean = length - index >= 8 && sz_strings_line_clean_(text + index) ? 8 : 0;
+        sz_size_t const broken = clean ? 0 : sz_strings_line_break_(bytes, length, index);
+        if (clean) memcpy(data + written, bytes + index, 8), written += 8;
+        else if (broken) sz_strings_offset_set_(&output, ++ended, written);
+        else data[written++] = bytes[index];
+        index += clean + broken + (!clean && !broken);
+    }
+    sz_strings_split_commit_(tape, &output, payload, allocator);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_join_serial(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                   sz_size_t rows, sz_string_view_t const *frames,
+                                                   sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                   sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_size_t written = 0;
+    for (sz_size_t row = 0; row != rows; ++row) {
+        // Every cell follows its frame, and the last frame and the row separator follow the last.
+        for (sz_size_t column = 0; column <= columns_count; ++column) {
+            sz_string_view_t cell = {between.start, row + 1 != rows ? between.length : 0};
+            if (column != columns_count) sz_strings_get_(columns + column, &row, 1, &cell);
+            if (frames[column].length > STRINGZILLA_SIZE_MAX - written) return sz_bad_alloc_k;
+            if (output && frames[column].length) memcpy(output + written, frames[column].start, frames[column].length);
+            written += frames[column].length;
+            if (cell.length > STRINGZILLA_SIZE_MAX - written) return sz_bad_alloc_k;
+            if (output && cell.length) memcpy(output + written, cell.start, cell.length);
+            written += cell.length;
+        }
+    }
+    sz_assert_(!output || written == *length);
+    if (!output) *length = written;
+    return sz_success_k;
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator) {

@@ -940,14 +940,6 @@ STRINGZILLA_API sz_status_t sz_strings_split_serial(sz_cptr_t text, sz_size_t le
                                                     sz_split_kind_t kind, sz_allocator_t *allocator,
                                                     sz_strings_span_t *tape, sz_stream_t stream);
 
-#if STRINGZILLA_TARGET_HASWELL
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_haswell(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
-                                                     sz_split_kind_t kind, sz_allocator_t *allocator,
-                                                     sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
 #if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_strings_split_best */
@@ -962,56 +954,6 @@ STRINGZILLA_API sz_status_t sz_strings_split_icelake(sz_cptr_t text, sz_size_t l
 STRINGZILLA_API sz_status_t sz_strings_split_neon(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
                                                   sz_split_kind_t kind, sz_allocator_t *allocator,
                                                   sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_SVE
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_sve(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
-                                                 sz_split_kind_t kind, sz_allocator_t *allocator,
-                                                 sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_RVV
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_rvv(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
-                                                 sz_split_kind_t kind, sz_allocator_t *allocator,
-                                                 sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_v128(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
-                                                  sz_split_kind_t kind, sz_allocator_t *allocator,
-                                                  sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128RELAXED
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_v128relaxed(sz_cptr_t text, sz_size_t length,
-                                                         sz_byteset_t const *delimiters, sz_split_kind_t kind,
-                                                         sz_allocator_t *allocator, sz_strings_span_t *tape,
-                                                         sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_LOONGSONASX
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_loongsonasx(sz_cptr_t text, sz_size_t length,
-                                                         sz_byteset_t const *delimiters, sz_split_kind_t kind,
-                                                         sz_allocator_t *allocator, sz_strings_span_t *tape,
-                                                         sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_POWERVSX
-
-/** @copydoc sz_strings_split_best */
-STRINGZILLA_API sz_status_t sz_strings_split_powervsx(sz_cptr_t text, sz_size_t length, sz_byteset_t const *delimiters,
-                                                      sz_split_kind_t kind, sz_allocator_t *allocator,
-                                                      sz_strings_span_t *tape, sz_stream_t stream);
 #endif
 
 /**
@@ -1038,13 +980,6 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_best(sz_cptr_t text, sz_size_
 STRINGZILLA_API sz_status_t sz_strings_split_lines_serial(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
                                                           sz_strings_span_t *tape, sz_stream_t stream);
 
-#if STRINGZILLA_TARGET_HASWELL
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_haswell(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
-                                                           sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
 #if STRINGZILLA_TARGET_ICELAKE
 
 /** @copydoc sz_strings_split_lines_best */
@@ -1057,50 +992,6 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_icelake(sz_cptr_t text, sz_si
 /** @copydoc sz_strings_split_lines_best */
 STRINGZILLA_API sz_status_t sz_strings_split_lines_neon(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
                                                         sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_SVE
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_sve(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
-                                                       sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_RVV
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_rvv(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
-                                                       sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_v128(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
-                                                        sz_strings_span_t *tape, sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128RELAXED
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_v128relaxed(sz_cptr_t text, sz_size_t length,
-                                                               sz_allocator_t *allocator, sz_strings_span_t *tape,
-                                                               sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_LOONGSONASX
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_loongsonasx(sz_cptr_t text, sz_size_t length,
-                                                               sz_allocator_t *allocator, sz_strings_span_t *tape,
-                                                               sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_POWERVSX
-
-/** @copydoc sz_strings_split_lines_best */
-STRINGZILLA_API sz_status_t sz_strings_split_lines_powervsx(sz_cptr_t text, sz_size_t length, sz_allocator_t *allocator,
-                                                            sz_strings_span_t *tape, sz_stream_t stream);
 #endif
 
 /**
@@ -1132,87 +1023,6 @@ STRINGZILLA_API sz_status_t sz_strings_join_serial(sz_strings_view_t const *colu
                                                    sz_size_t rows, sz_string_view_t const *frames,
                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
                                                    sz_stream_t stream);
-
-#if STRINGZILLA_TARGET_HASWELL
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_haswell(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                    sz_size_t rows, sz_string_view_t const *frames,
-                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                    sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_ICELAKE
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_icelake(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                    sz_size_t rows, sz_string_view_t const *frames,
-                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                    sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_NEON
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_neon(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                 sz_size_t rows, sz_string_view_t const *frames,
-                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                 sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_SVE
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_sve(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                sz_size_t rows, sz_string_view_t const *frames,
-                                                sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_RVV
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_rvv(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                sz_size_t rows, sz_string_view_t const *frames,
-                                                sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_v128(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                 sz_size_t rows, sz_string_view_t const *frames,
-                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                 sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_V128RELAXED
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_v128relaxed(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                        sz_size_t rows, sz_string_view_t const *frames,
-                                                        sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                        sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_LOONGSONASX
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_loongsonasx(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                        sz_size_t rows, sz_string_view_t const *frames,
-                                                        sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                        sz_stream_t stream);
-#endif
-
-#if STRINGZILLA_TARGET_POWERVSX
-
-/** @copydoc sz_strings_join_best */
-STRINGZILLA_API sz_status_t sz_strings_join_powervsx(sz_strings_view_t const *columns, sz_size_t columns_count,
-                                                     sz_size_t rows, sz_string_view_t const *frames,
-                                                     sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
-                                                     sz_stream_t stream);
-#endif
 /**
  *  @brief Finds the strings kernel of @p kind, from the best of @p capabilities.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.

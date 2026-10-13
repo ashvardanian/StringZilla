@@ -2432,8 +2432,8 @@ assert_accepts "reference-to-array parameter" test/probe.cpp <<'FIXTURE'
 char probe(char const (&letters)[4]) { return letters[0]; }
 FIXTURE
 
-assert_rejects "LibC in the library" "calls LibC" include/stringzilla/probe.h <<'FIXTURE'
-static void probe(char *target, sz_size_t length) { memset(target, 0, length); }
+assert_rejects "LibC in the library" "calls a LibC string function" include/stringzilla/probe.h <<'FIXTURE'
+static int probe(char const *first, char const *second, sz_size_t length) { return memcmp(first, second, length); }
 FIXTURE
 
 assert_accepts "project wrapper, and prose naming memset" include/stringzilla/probe.h <<'FIXTURE'
@@ -2455,6 +2455,23 @@ FIXTURE
 
 assert_accepts "named intrinsic on x86" include/stringzilla/probe/haswell.h <<'FIXTURE'
 static int probe(sz_u32_t mask_u32) { return _tzcnt_u32(mask_u32); }
+FIXTURE
+
+assert_rejects "hand-built bit mask" "builds a bit mask by hand" include/stringzilla/probe/serial.h <<'FIXTURE'
+static sz_u64_t probe(sz_size_t count) { return ((sz_u64_t)1 << count) - 1; }
+FIXTURE
+
+assert_rejects "portable mask helper on Ice Lake" "builds a bit mask by hand" include/stringzilla/probe/icelake.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_X8664_
+#if STRINGZILLA_TARGET_ICELAKE
+static sz_u64_t probe(sz_size_t count) { return sz_u64_mask_until_serial_(count); }
+#endif // STRINGZILLA_TARGET_ICELAKE
+#endif // STRINGZILLA_ARCH_X8664_
+FIXTURE
+
+assert_accepts "mask helpers, and prose naming the formula" include/stringzilla/probe/serial.h <<'FIXTURE'
+/** The low bits, which `((sz_u64_t)1 << count) - 1` would spell without the guard at 64. */
+static sz_u64_t probe(sz_size_t count) { return sz_u64_mask_until_serial_(count); }
 FIXTURE
 
 assert_rejects "register without dtype" "names a SIMD register without" include/stringzilla/probe/haswell.h <<'FIXTURE'

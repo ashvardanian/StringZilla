@@ -637,7 +637,6 @@ void bench_order_kernels(environment_t &env, std::string_view kit) {
 
 #pragma region Sequence
 
-using strings_t = std::vector<std::string_view>;
 using permute_t = std::vector<sz_size_t>;
 
 /** Helper function to distill a large @b permute_t object down to one comparable hash integer. */
@@ -648,19 +647,19 @@ bool is_sorting_permutation(entries_type_ const &entries, permute_t const &permu
 }
 
 /** Helper function to accumulate the total length of all strings in a collection. */
-inline std::size_t accumulate_lengths(strings_t const &strings) {
+inline std::size_t accumulate_lengths(tokens_t const &strings) {
     return std::accumulate(strings.begin(), strings.end(), (std::size_t)0,
                            [](std::size_t sum, std::string_view const &str) { return sum + str.size(); });
 }
 
 /** Borrows an accessor-backed collection of @p strings, reading a block of views per call. */
-inline sz_strings_view_t strings_view_of_(strings_t const &strings) {
+inline sz_strings_view_t strings_view_of_(tokens_t const &strings) {
     sz_strings_view_t view;
     view.layout = sz_strings_accessor_k, view.count = strings.size();
     view.data.accessor.handle = &strings;
     view.data.accessor.get = [](void const *handle, sz_size_t const *indices, sz_size_t count,
                                 sz_string_view_t *views) {
-        strings_t const &array = *reinterpret_cast<strings_t const *>(handle);
+        tokens_t const &array = *reinterpret_cast<tokens_t const *>(handle);
         for (sz_size_t position = 0; position != count; ++position) {
             std::string_view const string = array[indices[position]];
             views[position].start = string.data(), views[position].length = string.size();
@@ -671,10 +670,10 @@ inline sz_strings_view_t strings_view_of_(strings_t const &strings) {
 
 template <sz_kernel_sort_order_t func_>
 struct argsort_strings_via_sz {
-    strings_t const &input;
+    tokens_t const &input;
     permute_t &output;
 
-    argsort_strings_via_sz(strings_t const &input, permute_t &output) : input(input), output(output) {}
+    argsort_strings_via_sz(tokens_t const &input, permute_t &output) : input(input), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
 
@@ -695,7 +694,7 @@ struct argsort_strings_via_sz {
 
 /** Case-fold every token once, so the uncased checksum can validate in folded-byte order without
  *  re-folding on every benchmarked call, which would dominate the measured throughput. */
-inline std::vector<std::string> fold_tokens(strings_t const &tokens) {
+inline std::vector<std::string> fold_tokens(tokens_t const &tokens) {
     std::vector<std::string> folded(tokens.size());
     std::vector<char> scratch;
     for (std::size_t token_index = 0; token_index != tokens.size(); ++token_index) {
@@ -718,11 +717,11 @@ inline bool is_uncased_sorting_permutation(std::vector<std::string> const &folde
 
 template <sz_kernel_sort_order_t func_>
 struct argsort_ci_strings_via_sz {
-    strings_t const &input;
+    tokens_t const &input;
     std::vector<std::string> const &folded;
     permute_t &output;
 
-    argsort_ci_strings_via_sz(strings_t const &input, std::vector<std::string> const &folded, permute_t &output)
+    argsort_ci_strings_via_sz(tokens_t const &input, std::vector<std::string> const &folded, permute_t &output)
         : input(input), folded(folded), output(output) {}
     call_result_t operator()() const {
         std::iota(output.begin(), output.end(), 0);
@@ -743,7 +742,7 @@ struct argsort_ci_strings_via_sz {
 
 /** Two sets to intersect: every distinct token, and a seeded sample of half as many tokens. */
 struct intersect_inputs_t {
-    strings_t tokens_a, tokens_b;
+    tokens_t tokens_a, tokens_b;
     permute_t permute_a, permute_b;
 
     intersect_inputs_t(corpus_t const &corpus, std::uint32_t seed) {
@@ -759,8 +758,8 @@ struct intersect_inputs_t {
 
 template <sz_kernel_intersect_t func_>
 struct intersect_strings_via_sz {
-    strings_t const &input_a;
-    strings_t const &input_b;
+    tokens_t const &input_a;
+    tokens_t const &input_b;
     permute_t &output_a;
     permute_t &output_b;
 
@@ -1057,6 +1056,216 @@ void bench_strings_kernels(environment_t &env, std::string_view kit) {
 }
 
 #pragma endregion Strings
+
+#pragma region Columns
+
+/** Folds a column's outputs into one check value, each weighted by its position, so the timed loop
+ *  waits on no chain of multiplies. */
+template <typename value_type_>
+inline check_value_t column_check_value(std::vector<value_type_> const &values) noexcept {
+    check_value_t check = 0;
+    for (std::size_t position = 0; position != values.size(); ++position)
+        check += static_cast<check_value_t>(values[position]) * (position + 1);
+    return check;
+}
+
+/** Searches the batch of lines from a token index for one corpus word per call, as a filter over a
+ *  column does, through @p find_strings_ over the batch's tape. */
+template <sz_kernel_find_strings_t find_strings_>
+struct find_strings_from_sz {
+    strings_input_t &lines;
+    corpus_t const &words;
+    std::size_t batch;
+    std::vector<sz_size_t> positions {};
+
+    void preprocess() { lines.preprocess(); }
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, lines.tape.count - token_index);
+        std::string_view const needle = words.tokens[token_index % words.tokens.size()];
+        sz_strings_view_t const strings = lines.slice(token_index, count);
+        positions.resize(count);
+        if (find_strings_(&strings, nullptr, count, needle.data(), needle.size(), positions.data(), nullptr) !=
+            sz_success_k)
+            throw std::runtime_error("The column search failed.");
+        return {lines.offset(token_index + count) - lines.offset(token_index), column_check_value(positions)};
+    }
+};
+
+/** Hashes the batch of tokens from a token index under one seed, as a group-by does, through
+ *  @p hash_strings_ over the batch's tape. */
+template <sz_kernel_hash_strings_t hash_strings_>
+struct hash_strings_from_sz {
+    strings_input_t &tokens;
+    std::size_t batch;
+    std::vector<sz_u64_t> hashes {};
+
+    void preprocess() { tokens.preprocess(); }
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, tokens.tape.count - token_index);
+        sz_strings_view_t const strings = tokens.slice(token_index, count);
+        hashes.resize(count);
+        if (hash_strings_(&strings, nullptr, count, 42, hashes.data(), nullptr) != sz_success_k)
+            throw std::runtime_error("The column hash failed.");
+        return {tokens.offset(token_index + count) - tokens.offset(token_index), column_check_value(hashes)};
+    }
+};
+
+/** Validates and counts the batch of lines from a token index through @p count_strings_ over the
+ *  batch's tape. */
+template <sz_kernel_utf8_count_strings_t count_strings_>
+struct utf8_count_strings_from_sz {
+    strings_input_t &lines;
+    std::size_t batch;
+    std::vector<sz_size_t> runes {};
+
+    void preprocess() { lines.preprocess(); }
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, lines.tape.count - token_index);
+        sz_strings_view_t const strings = lines.slice(token_index, count);
+        runes.resize(count);
+        sz_size_t malformed_index = 0;
+        if (count_strings_(&strings, nullptr, count, runes.data(), &malformed_index, nullptr) != sz_success_k)
+            throw std::runtime_error("The lines are not well-formed UTF-8.");
+        return {lines.offset(token_index + count) - lines.offset(token_index), column_check_value(runes)};
+    }
+};
+
+/** The tape a split writes into, reused across calls, and the check value of what it holds. */
+struct split_output_t {
+    sz_allocator_t heap {};
+    sz_strings_span_t tape {};
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    split_output_t() {
+        if (sz_allocator_init_heap(&heap) != sz_success_k)
+            throw std::runtime_error("The heap allocator could not be initialized.");
+    }
+    ~split_output_t() noexcept { sz_strings_span_free(&tape, &heap, nullptr); }
+    split_output_t(split_output_t const &) = delete;
+    split_output_t &operator=(split_output_t const &) = delete;
+
+    /** The bytes of the parts and their count, so a dropped or extra byte or part shows. */
+    call_result_t result(std::size_t input_bytes) const {
+        bool const narrow = tape.layout == sz_strings_u32_tape_k;
+        sz_cptr_t const payload = narrow ? tape.data.u32_tape.data : tape.data.u64_tape.data;
+        std::size_t const payload_bytes = narrow ? tape.data.u32_tape.offsets[tape.count]
+                                                 : tape.data.u64_tape.offsets[tape.count];
+        return {input_bytes, strings_check_value(checksum, payload, payload_bytes) * 31 + tape.count, tape.count};
+    }
+};
+
+/** Splits the whole corpus at @p delimiters with @p split_, as `bytes.split` does. */
+template <sz_kernel_strings_split_t split_>
+struct strings_split_from_sz {
+    corpus_t const &corpus;
+    sz_byteset_t delimiters;
+    sz_split_kind_t kind;
+    split_output_t output {};
+
+    call_result_t operator()() {
+        if (split_(corpus.dataset.data(), corpus.dataset.size(), &delimiters, kind, &output.heap, &output.tape,
+                   nullptr) != sz_success_k)
+            throw std::runtime_error("The split failed.");
+        return output.result(corpus.dataset.size());
+    }
+};
+
+/** Splits the whole corpus at its line breaks with @p split_lines_, as `str.splitlines` does. */
+template <sz_kernel_strings_split_lines_t split_lines_>
+struct strings_split_lines_from_sz {
+    corpus_t const &corpus;
+    split_output_t output {};
+
+    call_result_t operator()() {
+        if (split_lines_(corpus.dataset.data(), corpus.dataset.size(), &output.heap, &output.tape, nullptr) !=
+            sz_success_k)
+            throw std::runtime_error("The line split failed.");
+        return output.result(corpus.dataset.size());
+    }
+};
+
+/** Joins every line of the corpus with @p join_ into one JSON array of unescaped strings: quotes as
+ *  the frames, commas between rows, and brackets around, measuring first. */
+template <sz_kernel_strings_join_t join_>
+struct strings_join_from_sz {
+    corpus_t const &corpus;
+    std::vector<sz_string_view_t> lines {};
+    std::string output {};
+    std::size_t lines_bytes = 0;
+    sz_kernel_bytesum_t checksum = output_checksum_kernel();
+
+    void preprocess() {
+        if (!lines.empty()) return;
+        for (token_view_t const line : corpus.tokens)
+            lines.push_back({line.data(), line.size()}), lines_bytes += line.size();
+    }
+
+    call_result_t operator()() {
+        sz_strings_view_t column;
+        sz_strings_from_string_views(lines.data(), lines.size(), &column);
+        sz_string_view_t const frames[2] = {{"\"", 1}, {"\"", 1}};
+        sz_string_view_t const between {",", 1};
+        sz_size_t length = 0;
+        if (join_(&column, 1, lines.size(), frames, between, nullptr, &length, nullptr) != sz_success_k)
+            throw std::runtime_error("The join could not be measured.");
+        output.resize(length + 2);
+        output.front() = '[', output.back() = ']';
+        if (join_(&column, 1, lines.size(), frames, between, output.data() + 1, &length, nullptr) != sz_success_k)
+            throw std::runtime_error("The join failed.");
+        return {lines_bytes, strings_check_value(checksum, output.data(), output.size()), lines.size()};
+    }
+};
+
+/** Times one capability's column search over batches of lines, a corpus word per call. */
+template <sz_kernel_find_strings_t find_strings_>
+void bench_find_strings_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    corpus_t const &words = env.corpora.words();
+    std::size_t const batch = candidates_per_call(env, corpus);
+    strings_input_t lines(corpus);
+    bench_kernel_unary(env, corpus, fmt::format("sz_find_strings_{}", kit), "sz_find_strings_serial",
+                       find_strings_from_sz<sz_find_strings_serial> {lines, words, batch},
+                       find_strings_from_sz<find_strings_> {lines, words, batch});
+}
+
+/** Times one capability's column hash over batches of lines under one seed. */
+template <sz_kernel_hash_strings_t hash_strings_>
+void bench_hash_strings_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    std::size_t const batch = candidates_per_call(env, corpus);
+    strings_input_t lines(corpus);
+    bench_kernel_unary(env, corpus, fmt::format("sz_hash_strings_{}", kit), "sz_hash_strings_serial",
+                       hash_strings_from_sz<sz_hash_strings_serial> {lines, batch},
+                       hash_strings_from_sz<hash_strings_> {lines, batch});
+}
+
+/** Times one capability's column validation and count over batches of the multilingual slice. */
+template <sz_kernel_utf8_count_strings_t count_strings_>
+void bench_utf8_count_strings_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    std::size_t const batch = candidates_per_call(env, corpus);
+    strings_input_t lines(corpus);
+    bench_kernel_unary(env, corpus, fmt::format("sz_utf8_count_strings_{}", kit), "sz_utf8_count_strings_serial",
+                       utf8_count_strings_from_sz<sz_utf8_count_strings_serial> {lines, batch},
+                       utf8_count_strings_from_sz<count_strings_> {lines, batch});
+}
+
+/** Times one capability's splits of the whole corpus, at spaces and at line breaks. */
+template <sz_kernel_strings_split_t split_, sz_kernel_strings_split_lines_t split_lines_>
+void bench_strings_split_kernels(environment_t &env, std::string_view kit) {
+    corpus_t const &corpus = env.corpora.lines();
+    sz_byteset_t spaces;
+    sz_byteset_init(&spaces);
+    sz_byteset_add(&spaces, ' ');
+    bench_kernel_nullary(env, corpus, fmt::format("sz_strings_split_{}", kit), "sz_strings_split_serial",
+                         strings_split_from_sz<sz_strings_split_serial> {corpus, spaces, sz_split_each_k},
+                         strings_split_from_sz<split_> {corpus, spaces, sz_split_each_k});
+    bench_kernel_nullary(env, corpus, fmt::format("sz_strings_split_lines_{}", kit), "sz_strings_split_lines_serial",
+                         strings_split_lines_from_sz<sz_strings_split_lines_serial> {corpus},
+                         strings_split_lines_from_sz<split_lines_> {corpus});
+}
+
+#pragma endregion Columns
 
 #pragma region Cipher
 
@@ -1547,22 +1756,20 @@ struct overlap_query_t {
 
 struct overlap_corpus_t {
     std::vector<sz_string_view_t> views;
-    tape_t candidates;
+    unified_strings_t candidates;
 
     overlap_corpus_t(std::span<sz_string_view_t const> views, device_backend_t const &runtime)
-        : views(views.begin(), views.end()), candidates(unified_alloc<char>(runtime.unified, runtime.stream)) {
-        sz_strings_view_t source {};
-        sz_strings_from_string_views(this->views.data(), this->views.size(), &source);
-        if (sz::failed(candidates.assign(source))) throw std::runtime_error("Unified memory could not hold the tape.");
-        if (sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
-            throw std::runtime_error("The tape would not reach the device.");
-    }
+        : views(views.begin(), views.end()), candidates(resident_strings(runtime, host_candidates())) {}
     sz_strings_view_t host_candidates() const noexcept {
         sz_strings_view_t result {};
         sz_strings_from_string_views(views.data(), views.size(), &result);
         return result;
     }
-    std::size_t bytes() const noexcept { return candidates.view().tape_total_bytes(); }
+    std::size_t bytes() const noexcept {
+        std::size_t total = 0;
+        for (sz_string_view_t const &view : views) total += view.length;
+        return total;
+    }
 };
 
 inline check_value_t overlap_check_value_bits_(std::span<sz_f32_t const> scores) {

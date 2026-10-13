@@ -1076,12 +1076,127 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_neon_( //
 
 #pragma endregion Drains
 
+/** The Keiser-Lemire errors of the 16 bytes of @p text_u8x16 given the bytes 1, 2 and 3 before
+ *  each, nonzero where the bytes are ill-formed. */
+STRINGZILLA_INLINE uint8x16_t sz_utf8_errors_neon_(uint8x16_t text_u8x16, uint8x16_t one_back_u8x16,
+                                                   uint8x16_t two_back_u8x16, uint8x16_t three_back_u8x16) {
+    uint8x16_t const special_u8x16 = vandq_u8(
+        vandq_u8(vqtbl1q_u8(vld1q_u8(sz_utf8_errors_), vshrq_n_u8(one_back_u8x16, 4)),
+                 vqtbl1q_u8(vld1q_u8(sz_utf8_errors_ + 16), vandq_u8(one_back_u8x16, vdupq_n_u8(15)))),
+        vqtbl1q_u8(vld1q_u8(sz_utf8_errors_ + 32), vshrq_n_u8(text_u8x16, 4)));
+    // Two continuations in a row are well-formed only 2 or 3 bytes into a 3- or 4-byte rune.
+    uint8x16_t const deep_u8x16 = vorrq_u8(vcgeq_u8(two_back_u8x16, vdupq_n_u8(0xE0)),
+                                           vcgeq_u8(three_back_u8x16, vdupq_n_u8(0xF0)));
+    return veorq_u8(vandq_u8(deep_u8x16, vdupq_n_u8(0x80)), special_u8x16);
+}
+
+/** The Keiser-Lemire errors of the 64 bytes @p text_u8x16x4 holds as @c vld4q_u8 de-interleaves
+ *  them, after the block @p previous_u8x16x4: a byte 4 back sits one lane back in the same vector,
+ *  so three lane shifts give every vector of earlier bytes. */
+STRINGZILLA_INLINE uint8x16_t sz_utf8_block_errors_neon_(uint8x16x4_t text_u8x16x4, uint8x16x4_t previous_u8x16x4) {
+    uint8x16_t const first_u8x16 = text_u8x16x4.val[0], second_u8x16 = text_u8x16x4.val[1];
+    uint8x16_t const third_u8x16 = text_u8x16x4.val[2], fourth_u8x16 = text_u8x16x4.val[3];
+    uint8x16_t const second_back_u8x16 = vextq_u8(previous_u8x16x4.val[1], second_u8x16, 15);
+    uint8x16_t const third_back_u8x16 = vextq_u8(previous_u8x16x4.val[2], third_u8x16, 15);
+    uint8x16_t const fourth_back_u8x16 = vextq_u8(previous_u8x16x4.val[3], fourth_u8x16, 15);
+    return vorrq_u8(vorrq_u8(sz_utf8_errors_neon_(first_u8x16, fourth_back_u8x16, third_back_u8x16, second_back_u8x16),
+                             sz_utf8_errors_neon_(second_u8x16, first_u8x16, fourth_back_u8x16, third_back_u8x16)),
+                    vorrq_u8(sz_utf8_errors_neon_(third_u8x16, second_u8x16, first_u8x16, fourth_back_u8x16),
+                             sz_utf8_errors_neon_(fourth_u8x16, third_u8x16, second_u8x16, first_u8x16)));
+}
+
+/** The bits of four 0x00/0xFF masks that @c vld4q_u8 de-interleaved, bit @c i for byte @c i. */
+STRINGZILLA_INLINE sz_u64_t sz_utf8_bits_neon_(uint8x16x4_t masks_u8x16x4) {
+    uint8x16_t const low_u8x16 = vsriq_n_u8(masks_u8x16x4.val[1], masks_u8x16x4.val[0], 1);
+    uint8x16_t const high_u8x16 = vsriq_n_u8(masks_u8x16x4.val[3], masks_u8x16x4.val[2], 1);
+    uint8x16_t const quads_u8x16 = vsriq_n_u8(high_u8x16, low_u8x16, 2);
+    uint8x16_t const nibbles_u8x16 = vsriq_n_u8(quads_u8x16, quads_u8x16, 4);
+    return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(nibbles_u8x16), 4)), 0);
+}
+
+/**
+ *  @brief Validates and counts the @p count strings of a tape, read in its own order as one run of
+ *      bytes, resolving each string at its end in one step.
+ *
+ *  The run must be well-formed as one stream and every string must end before a byte starting a
+ *  rune, so no rune crosses into the next string. A block holding an error, or a string ending
+ *  inside a rune, sends the strings still unresolved to the serial pass, which names the first
+ *  malformed of them.
+ */
+STRINGZILLA_INLINE sz_status_t sz_utf8_count_run_neon_(sz_strings_view_t const *strings, sz_size_t count,
+                                                       sz_size_t *runes, sz_size_t *malformed_index) {
+    sz_size_t const start = sz_strings_view_offset_(strings, 0);
+    sz_size_t const length = sz_strings_view_offset_(strings, count) - start;
+    sz_u8_t const *const text = (sz_u8_t const *)sz_strings_view_data_(strings) + start;
+    // The last block reads a zero-padded copy, and a zero after a lead is an error.
+    sz_size_t const copied_from = length & ~(sz_size_t)63;
+    sz_u8_t tail[64] = {0};
+    if (length != copied_from) memcpy(tail, text + copied_from, length - copied_from);
+    uint8x16x4_t zeros_u8x16x4;
+    for (int chunk = 0; chunk != 4; ++chunk) zeros_u8x16x4.val[chunk] = vdupq_n_u8(0);
+    uint8x16x4_t previous_u8x16x4 = zeros_u8x16x4;
+    sz_size_t total = 0, counted = 0, row = 0;
+    for (sz_size_t block = 0; block < length; block += 64) {
+        uint8x16x4_t const text_u8x16x4 = vld4q_u8(block < copied_from ? text + block : tail);
+        if (vmaxvq_u8(sz_utf8_block_errors_neon_(text_u8x16x4, previous_u8x16x4)))
+            return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+        uint8x16x4_t leads_u8x16x4;
+        for (int chunk = 0; chunk != 4; ++chunk)
+            leads_u8x16x4.val[chunk] = vcgeq_s8(vreinterpretq_s8_u8(text_u8x16x4.val[chunk]), vdupq_n_s8(-64));
+        sz_u64_t const leads = sz_utf8_bits_neon_(leads_u8x16x4);
+        for (sz_size_t end; row != count && (end = sz_strings_view_offset_(strings, row + 1) - start) < block + 64;
+             ++row) {
+            sz_size_t const lane = end - block;
+            // A string followed by a continuation byte ends inside a rune.
+            if (end != length && !(leads >> lane & 1))
+                return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+            sz_size_t const prefix = total + (sz_size_t)sz_u64_popcount_neon_(leads & sz_u64_mask_until_serial_(lane));
+            if (runes) runes[row] = prefix - counted;
+            counted = prefix;
+        }
+        total += (sz_size_t)sz_u64_popcount_neon_(leads), previous_u8x16x4 = text_u8x16x4;
+    }
+    // Zeros after the run make a rune it leaves open an error.
+    if (vmaxvq_u8(sz_utf8_block_errors_neon_(zeros_u8x16x4, previous_u8x16x4)))
+        return sz_utf8_count_rows_serial_(strings, row, count, runes, malformed_index);
+    for (; row != count; ++row) {
+        if (runes) runes[row] = total - counted;
+        counted = total;
+    }
+    *malformed_index = count;
+    return sz_success_k;
+}
+
 #if STRINGZILLA_TARGET_NEON
 
 STRINGZILLA_API sz_status_t sz_utf8_count_neon(sz_cptr_t text, sz_size_t length, sz_size_t *count, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_count_neon_(text, length);
     return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_neon(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                       sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                       sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!order && strings->layout != sz_strings_accessor_k)
+        return sz_utf8_count_run_neon_(strings, count, runes, malformed_index);
+    // Orders and accessors check string by string, each a tape of one, fetching 64 views at a time.
+    sz_string_view_t views[64];
+    sz_size_t row = 0, malformed = 0;
+    for (; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        sz_u64_t const offsets[2] = {0, views[row % 64].length};
+        sz_strings_view_t single;
+        single.layout = sz_strings_u64_tape_k, single.count = 1;
+        single.data.u64_tape.data = views[row % 64].start, single.data.u64_tape.offsets = offsets;
+        if (sz_utf8_count_run_neon_(&single, 1, runes ? runes + row : STRINGZILLA_NULL, &malformed) != sz_success_k)
+            break;
+    }
+    *malformed_index = row;
+    return row == count ? sz_success_k : sz_invalid_utf8_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_neon(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,

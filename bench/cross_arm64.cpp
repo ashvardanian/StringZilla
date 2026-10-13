@@ -12,9 +12,11 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_NEON
     if (section(env, "Cross NEON", sz_cap_neon_k)) {
         bench_find_kernels<sz_find_neon, sz_rfind_neon>(env, "neon");
+        bench_find_strings_kernels<sz_find_strings_neon>(env, "neon");
         bench_find_byte_kernels<sz_find_byte_neon, sz_rfind_byte_neon>(env, "neon");
         bench_find_byteset_kernels<sz_find_byteset_neon, sz_rfind_byteset_neon>(env, "neon");
         bench_utf8_count_kernels<sz_utf8_count_neon>(env, "neon");
+        bench_utf8_count_strings_kernels<sz_utf8_count_strings_neon>(env, "neon");
         bench_utf8_seek_kernels<sz_utf8_seek_neon>(env, "neon");
         bench_utf8_decode_kernels<sz_utf8_decode_neon>(env, "neon");
         bench_utf8_newlines_kernels<sz_utf8_newlines_neon>(env, "neon");
@@ -34,6 +36,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_order_kernels<sz_order_neon>(env, "neon");
         bench_strings_kernels<sz_strings_to_tape_neon, sz_strings_escape_neon, sz_strings_unescape_neon,
                               sz_strings_lookup_neon, sz_strings_normalize_neon>(env, "neon");
+        bench_strings_split_kernels<sz_strings_split_neon, sz_strings_split_lines_neon>(env, "neon");
         bench_map_kernels<sz_order_neon>(env, "neon");
         bench_sort_order_kernels<sz_sort_order_neon, sz_sort_uncased_order_neon>(env, "neon");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_neon, sz_levenshtein_distances_neon>(
@@ -48,6 +51,7 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_NEONAES
     if (section(env, "Cross NEON AES", sz_cap_neonaes_k)) {
         bench_hash_kernels<sz_hash_neonaes>(env, "neonaes");
+        bench_hash_strings_kernels<sz_hash_strings_neonaes>(env, "neonaes");
         bench_hash_multiseed_kernels<sz_hash_multiseed_neonaes>(env, "neonaes");
         bench_hash_stream_kernels<sz_hash_state_init_neonaes, sz_hash_state_update_neonaes,
                                   sz_hash_state_digest_neonaes>(env, "neonaes");

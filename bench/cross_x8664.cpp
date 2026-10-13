@@ -83,6 +83,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
 #if STRINGZILLA_TARGET_SKYLAKE
     if (section(env, "Cross Skylake", sz_cap_skylake_k)) {
         bench_find_kernels<sz_find_skylake, sz_rfind_skylake>(env, "skylake");
+        bench_find_strings_kernels<sz_find_strings_skylake>(env, "skylake");
         bench_find_byte_kernels<sz_find_byte_skylake, sz_rfind_byte_skylake>(env, "skylake");
         bench_utf8_norm_kernels<sz_utf8_norm_skylake>(env, "skylake");
         bench_utf8_find_denormalized_kernels<sz_utf8_find_denormalized_skylake>(env, "skylake");
@@ -109,6 +110,7 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
     if (section(env, "Cross Ice Lake", sz_cap_icelake_k)) {
         bench_find_byteset_kernels<sz_find_byteset_icelake, sz_rfind_byteset_icelake>(env, "icelake");
         bench_utf8_count_kernels<sz_utf8_count_icelake>(env, "icelake");
+        bench_utf8_count_strings_kernels<sz_utf8_count_strings_icelake>(env, "icelake");
         bench_utf8_seek_kernels<sz_utf8_seek_icelake>(env, "icelake");
         bench_utf8_decode_kernels<sz_utf8_decode_icelake>(env, "icelake");
         bench_utf8_newlines_kernels<sz_utf8_newlines_icelake>(env, "icelake");
@@ -125,12 +127,14 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_icelake>(env, "icelake");
         bench_bytesum_kernels<sz_bytesum_icelake>(env, "icelake");
         bench_hash_kernels<sz_hash_icelake>(env, "icelake");
+        bench_hash_strings_kernels<sz_hash_strings_icelake>(env, "icelake");
         bench_hash_multiseed_kernels<sz_hash_multiseed_icelake>(env, "icelake");
         bench_hash_stream_kernels<sz_hash_state_init_icelake, sz_hash_state_update_icelake,
                                   sz_hash_state_digest_icelake>(env, "icelake");
         bench_fill_random_kernels<sz_fill_random_icelake>(env, "icelake");
         bench_strings_kernels<sz_strings_to_tape_icelake, sz_strings_escape_icelake, sz_strings_unescape_icelake,
                               sz_strings_lookup_icelake, sz_strings_normalize_icelake>(env, "icelake");
+        bench_strings_split_kernels<sz_strings_split_icelake, sz_strings_split_lines_icelake>(env, "icelake");
         bench_aes256_ctr_kernels<sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake>(env, "icelake");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake>(env, "icelake");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encryptor_init_icelake,

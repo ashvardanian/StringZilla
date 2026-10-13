@@ -121,6 +121,38 @@ void bench_hashing(environment_t const &env, corpus_t const &corpus) {
     print(bench_unary(env, corpus, "std::hash", hash_from_std_t {corpus}), baseline_of(base));
 }
 
+/** The same hashes one token at a time through @c sz_hash_best, as a loop over a column does. */
+struct hash_strings_by_loop_t {
+    corpus_t const &corpus;
+    std::size_t batch;
+    std::vector<sz_u64_t> hashes {};
+
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, corpus.tokens.size() - token_index);
+        std::size_t bytes = 0;
+        hashes.resize(count);
+        for (std::size_t position = 0; position != count; ++position) {
+            std::string_view const token = corpus.tokens[token_index + position];
+            cpu_best<sz_hash_best>(token.data(), token.size(), 42, &hashes[position], nullptr);
+            bytes += token.size();
+        }
+        return {bytes, column_check_value(hashes)};
+    }
+};
+
+/** Times hashing batches of tokens as one column against hashing them one call at a time. */
+void bench_hashing_strings(environment_t const &env, corpus_t const &corpus) {
+    std::size_t const batch = candidates_per_call(env, corpus);
+    strings_input_t tokens(corpus);
+    using hash_strings_best_t = hash_strings_from_sz<cpu_best<sz_hash_strings_best>>;
+    std::optional<row_t> const base = bench_unary(env, corpus, "sz_hash_strings_best",
+                                                  hash_strings_best_t {tokens, batch});
+    print(base);
+    print(bench_unary(env, corpus, "hash_strings<loop>", hash_strings_best_t {tokens, batch},
+                      hash_strings_by_loop_t {corpus, batch}),
+          baseline_of(base));
+}
+
 void bench_hashing_multiseed(environment_t const &env, corpus_t const &corpus) {
 
     // Baseline is the status quo: K dispatched single-shot `sz_hash_best` calls per token, so the
@@ -287,6 +319,7 @@ void bench_token(environment_t &env) {
     // Unary operations
     bench_checksums(env, corpus);
     bench_hashing(env, corpus);
+    bench_hashing_strings(env, corpus);
     bench_hashing_multiseed(env, corpus);
     bench_stream_hashing(env, corpus);
     bench_sha256(env, corpus);

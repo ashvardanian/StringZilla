@@ -55,7 +55,7 @@ static void bench_overlap_scores(environment_t const &env, corpus_t const &corpu
                                                       {metal_name}, dispatched);
     print(bench_unary(env, corpus, metal_name, validator,
                       scores_from_sz {sz_overlap_engine_init_metal, sz_overlap_scores_metal, query, width,
-                                      resident.candidates.strings(), resident.views, std::cref(runtime)}),
+                                      resident.candidates.view().raw, resident.views, std::cref(runtime)}),
           base);
 }
 

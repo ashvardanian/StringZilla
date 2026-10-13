@@ -114,6 +114,28 @@ static sz_capability_kernels_t const *sz_hash_capabilities(void) {
     return lists;
 }
 
+static sz_capability_kernels_t const *sz_hash_strings_capabilities(void) {
+    static sz_kernel_punned_t const cpu[] = {
+        STRINGZILLA_NULL,
+        (sz_kernel_punned_t)&sz_hash_strings_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_hash_strings_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEONAES
+        (sz_kernel_punned_t)&sz_hash_strings_neonaes,
+#endif
+    };
+    static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
+        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE |
+             sz_cap_neonaes_k * STRINGZILLA_TARGET_NEONAES,
+         cpu},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+        {0, sz_no_kernels_},
+    };
+    return lists;
+}
+
 static sz_capability_kernels_t const *sz_hash_multiseed_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
@@ -585,6 +607,14 @@ STRINGZILLA_API sz_status_t sz_hash_best(sz_cptr_t text, sz_size_t length, sz_u6
     return kernel ? kernel(text, length, seed, hash, stream) : sz_missing_kernel_k;
 }
 
+STRINGZILLA_API sz_status_t sz_hash_strings_best(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                 sz_size_t count, sz_u64_t seed, sz_u64_t *hashes,
+                                                 sz_capability_t capabilities, sz_stream_t stream) {
+    sz_kernel_hash_strings_t const kernel = (sz_kernel_hash_strings_t)sz_kernel_pick_(capabilities,
+                                                                                      sz_hash_strings_capabilities());
+    return kernel ? kernel(strings, order, count, seed, hashes, stream) : sz_missing_kernel_k;
+}
+
 STRINGZILLA_API sz_status_t sz_hash_multiseed_best( //
     sz_cptr_t text, sz_size_t length,               //
     sz_u64_t const *seeds, sz_size_t seeds_count,   //
@@ -666,6 +696,7 @@ STRINGZILLA_API sz_status_t sz_hash_find_kernel(sz_kernel_kind_t kind, sz_capabi
     case sz_kernel_bytesum_k: lists = sz_bytesum_capabilities(); break;
     case sz_kernel_hash_k: lists = sz_hash_capabilities(); break;
     case sz_kernel_hash_multiseed_k: lists = sz_hash_multiseed_capabilities(); break;
+    case sz_kernel_hash_strings_k: lists = sz_hash_strings_capabilities(); break;
     case sz_kernel_fill_random_k: lists = sz_fill_random_capabilities(); break;
     case sz_kernel_hash_state_init_k: lists = sz_hash_state_init_capabilities(); break;
     case sz_kernel_hash_state_update_k: lists = sz_hash_state_update_capabilities(); break;

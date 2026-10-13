@@ -731,6 +731,22 @@ inline sz_strings_view_t strings_from_(std::vector<std::string> const &texts) {
     return strings;
 }
 
+/** Views the 32-bit tape over @p data that @p offsets describes, one more of them than strings. */
+inline sz_strings_view_t strings_tape_over_(sz_cptr_t data, std::span<sz_u32_t const> offsets) {
+    sz_strings_view_t strings;
+    strings.layout = sz_strings_u32_tape_k, strings.count = (sz_size_t)offsets.size() - 1;
+    strings.data.u32_tape.data = data, strings.data.u32_tape.offsets = offsets.data();
+    return strings;
+}
+
+/** Views the 64-bit tape over @p data that @p offsets describes, one more of them than strings. */
+inline sz_strings_view_t strings_tape_over_(sz_cptr_t data, std::span<sz_u64_t const> offsets) {
+    sz_strings_view_t strings;
+    strings.layout = sz_strings_u64_tape_k, strings.count = (sz_size_t)offsets.size() - 1;
+    strings.data.u64_tape.data = data, strings.data.u64_tape.offsets = offsets.data();
+    return strings;
+}
+
 /** Packs @p texts into a 32-bit tape over @p payload and @p offsets, which must outlive it. */
 inline sz_strings_view_t strings_tape_from_(std::vector<std::string> const &texts, std::string &payload,
                                             std::vector<sz_u32_t> &offsets) {

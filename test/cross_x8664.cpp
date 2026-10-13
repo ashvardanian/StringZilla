@@ -235,6 +235,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         .rfind = sz_rfind_skylake,
         .find_byte = sz_find_byte_skylake,
         .rfind_byte = sz_rfind_byte_skylake,
+        .find_strings = sz_find_strings_skylake,
     };
     check("test_find_unit_skylake", [&] { check_find_unit_(find_skylake); });
     check("test_find_equivalence_skylake",
@@ -293,7 +294,10 @@ std::size_t test_cross_x8664(environment_t const &env) {
                                                  sz_strings_escape_icelake,
                                                  sz_strings_unescape_icelake,
                                                  sz_strings_lookup_icelake,
-                                                 sz_strings_normalize_icelake};
+                                                 sz_strings_normalize_icelake,
+                                                 sz_strings_split_icelake,
+                                                 sz_strings_split_lines_icelake,
+                                                 sz_strings_join_serial};
     check("test_strings_unit_icelake", [&] { check_strings_unit_(strings_icelake); });
     check("test_strings_equivalence_icelake",
           [&](test_context_t &context) { check_strings_equivalence_(context, strings_icelake); });
@@ -314,6 +318,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
         .init_kernel = sz_hash_state_init_icelake,
         .update_kernel = sz_hash_state_update_icelake,
         .digest_kernel = sz_hash_state_digest_icelake,
+        .strings_kernel = sz_hash_strings_icelake,
     };
     check("test_hash_unit_icelake", [] { check_bytesum_unit_(sz_bytesum_icelake); });
     check("test_hash_equivalence_icelake", [&](test_context_t &context) {
@@ -365,7 +370,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_icelake); });
 
     constexpr utf8_runes_backend_t utf8_runes_icelake {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake,
-                                                       sz_utf8_decode_icelake};
+                                                       sz_utf8_decode_icelake, sz_utf8_count_strings_icelake};
     check("test_utf8_runes_unit_icelake", [&] { check_utf8_runes_unit_(utf8_runes_icelake); });
     check("test_utf8_runes_safety_icelake",
           [&](test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_icelake); });

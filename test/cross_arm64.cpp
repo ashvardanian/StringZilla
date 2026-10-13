@@ -22,7 +22,10 @@ std::size_t test_cross_arm64(environment_t const &env) {
                                               sz_strings_escape_neon,
                                               sz_strings_unescape_neon,
                                               sz_strings_lookup_neon,
-                                              sz_strings_normalize_neon};
+                                              sz_strings_normalize_neon,
+                                              sz_strings_split_neon,
+                                              sz_strings_split_lines_neon,
+                                              sz_strings_join_serial};
     check("test_strings_unit_neon", [&] { check_strings_unit_(strings_neon); });
     check("test_strings_equivalence_neon",
           [&](test_context_t &context) { check_strings_equivalence_(context, strings_neon); });
@@ -36,6 +39,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
         .rfind_byte = sz_rfind_byte_neon,
         .find_byteset = sz_find_byteset_neon,
         .rfind_byteset = sz_rfind_byteset_neon,
+        .find_strings = sz_find_strings_neon,
     };
     check("test_find_unit_neon", [&] { check_find_unit_(find_neon); });
     check("test_find_equivalence_neon", [&](test_context_t &context) { check_find_equivalence_(context, find_neon); });
@@ -150,6 +154,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
         .init_kernel = sz_hash_state_init_neonaes,
         .update_kernel = sz_hash_state_update_neonaes,
         .digest_kernel = sz_hash_state_digest_neonaes,
+        .strings_kernel = sz_hash_strings_neonaes,
     };
     check("test_hash_equivalence_neonaes", [&](test_context_t &context) {
         check_hash_equivalence_(context, hash_neonaes);

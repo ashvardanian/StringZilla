@@ -377,13 +377,6 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_segmented_parity_(sz_u64_t seed, sz_u64_t 
     return parity;
 }
 
-/** Low @p count bits set (`[0, count)`), 0 for `count==0`, all-ones for `count>=64`. Portable,
- *  branch-light replacement for the BMI2 @c sz_u64_mask_until_ so the shared boundary algebra
- *  compiles on every backend. */
-STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_mask_until_serial_(sz_size_t count) {
-    return count >= 64 ? (sz_u64_t) ~(sz_u64_t)0 : (((sz_u64_t)1 << count) - 1);
-}
-
 #pragma endregion Shared bitmask boundary algebra
 
 /** Ascending set-bit positions of every 8-bit sub-mask, eight bytes per row, keyed by the sub-mask.
@@ -647,6 +640,53 @@ sz_align_(64) static sz_u8_t const sz_utf8_leftpack8_[256 * 8] = {
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 0xFF
 };
 
+/** The error classes of the UTF-8 validation of Keiser and Lemire, "Validating UTF-8 In Less Than
+ *  One Instruction Per Byte", 2021: 3 tables of 16, by the high and the low nibble of a byte and by
+ *  the high nibble of the byte after it, sharing a bit where the pair is ill-formed. The bits are
+ *  0x01 too short, 0x02 too long, 0x04 overlong of 3 bytes, 0x08 too large, 0x10 a surrogate, 0x20
+ *  overlong of 2 bytes, 0x40 overlong of 4 bytes or too large, and 0x80 two continuations, which a
+ *  lead 2 or 3 bytes back must explain. */
+static sz_u8_t const sz_utf8_errors_[48] = {
+    0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x80, 0x80, 0x80, 0x80, 0x21, 0x01, 0x15, 0x49, //
+    0xE7, 0xA3, 0x83, 0x83, 0x8B, 0xCB, 0xCB, 0xCB, 0xCB, 0xCB, 0xCB, 0xCB, 0xCB, 0xDB, 0xCB, 0xCB, //
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0xE6, 0xAE, 0xBA, 0xBA, 0x01, 0x01, 0x01, 0x01, //
+};
+
+/** Validates the @p length bytes at @p text as UTF-8, counting their runes into @p runes, a word of
+ *  8 ASCII bytes at a time. */
+STRINGZILLA_INLINE sz_bool_t sz_utf8_count_valid_serial_(sz_cptr_t text, sz_size_t length, sz_size_t *runes) {
+    sz_size_t counted = 0;
+    for (sz_size_t index = 0; index < length;) {
+        if (length - index >= 8 && !(sz_u64_load(text + index).u64 & 0x8080808080808080ull)) {
+            index += 8, counted += 8;
+            continue;
+        }
+        sz_rune_t rune;
+        sz_rune_length_t const rune_length = sz_rune_decode(text + index, text + length, &rune);
+        if (rune_length == sz_rune_invalid_k) return sz_false_k;
+        index += (sz_size_t)rune_length, ++counted;
+    }
+    *runes = counted;
+    return sz_true_k;
+}
+
+/** Validates and counts strings @p row to @p count of the tape @p strings one at a time, setting
+ *  @p malformed_index to the first malformed of them, or to @p count. */
+STRINGZILLA_INLINE sz_status_t sz_utf8_count_rows_serial_(sz_strings_view_t const *strings, sz_size_t row,
+                                                          sz_size_t count, sz_size_t *runes,
+                                                          sz_size_t *malformed_index) {
+    sz_cptr_t const data = sz_strings_view_data_(strings);
+    sz_size_t counted = 0;
+    for (; row != count; ++row) {
+        sz_size_t const row_start = sz_strings_view_offset_(strings, row);
+        sz_size_t const row_length = sz_strings_view_offset_(strings, row + 1) - row_start;
+        if (!sz_utf8_count_valid_serial_(data + row_start, row_length, &counted)) break;
+        if (runes) runes[row] = counted;
+    }
+    *malformed_index = row;
+    return row == count ? sz_success_k : sz_invalid_utf8_k;
+}
+
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t length, sz_size_t *count,
@@ -654,6 +694,26 @@ STRINGZILLA_API sz_status_t sz_utf8_count_serial(sz_cptr_t text, sz_size_t lengt
     sz_assert_(stream == STRINGZILLA_NULL);
     *count = sz_utf8_count_serial_(text, length);
     return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_utf8_count_strings_serial(sz_strings_view_t const *strings, sz_size_t const *order,
+                                                         sz_size_t count, sz_size_t *runes, sz_size_t *malformed_index,
+                                                         sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!order && strings->layout != sz_strings_accessor_k)
+        return sz_utf8_count_rows_serial_(strings, 0, count, runes, malformed_index);
+    // Orders and accessors check string by string, their views fetched 64 at a time.
+    sz_string_view_t views[64];
+    sz_size_t row = 0, counted = 0;
+    for (; row != count; ++row) {
+        if (row % 64 == 0 && order)
+            sz_strings_get_(strings, order + row, sz_min_of_two(count - row, (sz_size_t)64), views);
+        if (row % 64 == 0 && !order) sz_strings_get_block_(strings, row, views);
+        if (!sz_utf8_count_valid_serial_(views[row % 64].start, views[row % 64].length, &counted)) break;
+        if (runes) runes[row] = counted;
+    }
+    *malformed_index = row;
+    return row == count ? sz_success_k : sz_invalid_utf8_k;
 }
 
 STRINGZILLA_API sz_status_t sz_utf8_seek_serial(sz_cptr_t text, sz_size_t length, sz_size_t n, sz_cptr_t *position,

@@ -376,12 +376,54 @@ void bench_byteset_search(environment_t const &env, corpus_t const &corpus) {
 
 #pragma endregion Byteset Search
 
+#pragma region Column Search
+
+/** The same search one line at a time through @c sz_find_best, as a loop over a column does. */
+struct find_strings_by_loop_t {
+    corpus_t const &lines;
+    corpus_t const &words;
+    std::size_t batch;
+    std::vector<sz_size_t> positions {};
+
+    call_result_t operator()(std::size_t token_index) {
+        std::size_t const count = std::min(batch, lines.tokens.size() - token_index);
+        std::string_view const needle = words.tokens[token_index % words.tokens.size()];
+        std::size_t bytes = 0;
+        positions.resize(count);
+        for (std::size_t position = 0; position != count; ++position) {
+            std::string_view const line = lines.tokens[token_index + position];
+            sz_cptr_t match = nullptr;
+            cpu_best<sz_find_best>(line.data(), line.size(), needle.data(), needle.size(), &match, nullptr);
+            positions[position] = match ? (sz_size_t)(match - line.data()) : STRINGZILLA_SIZE_MAX;
+            bytes += line.size();
+        }
+        return {bytes, column_check_value(positions)};
+    }
+};
+
+/** Times the column search over batches of lines against the loop over its lines. */
+void bench_column_search(environment_t &env, corpus_t const &words) {
+    corpus_t const &lines_corpus = env.corpora.lines();
+    std::size_t const batch = candidates_per_call(env, lines_corpus);
+    strings_input_t lines(lines_corpus);
+    using find_strings_best_t = find_strings_from_sz<cpu_best<sz_find_strings_best>>;
+    std::optional<row_t> const base = bench_unary(env, lines_corpus, "sz_find_strings_best",
+                                                  find_strings_best_t {lines, words, batch});
+    print(base);
+    print(bench_unary(env, lines_corpus, "find_strings<loop>", find_strings_best_t {lines, words, batch},
+                      find_strings_by_loop_t {lines_corpus, words, batch}),
+          baseline_of(base));
+}
+
+#pragma endregion Column Search
+
 void bench_find(environment_t &env) {
     corpus_t const &corpus = env.corpora.words();
     fmt::println("Starting search benchmarks...");
     bench_substring_search(env, corpus);
     bench_byte_search(env, corpus);
     bench_byteset_search(env, corpus);
+    bench_column_search(env, corpus);
 }
 
 } // namespace ashvardanian::stringzilla::bench

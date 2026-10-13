@@ -11,9 +11,11 @@ namespace ashvardanian::stringzilla::bench {
 void bench_cross_serial(environment_t &env) {
     section(env, "Cross Serial", sz_cap_serial_k);
     bench_find_kernels<sz_find_serial, sz_rfind_serial>(env, "serial");
+    bench_find_strings_kernels<sz_find_strings_serial>(env, "serial");
     bench_find_byte_kernels<sz_find_byte_serial, sz_rfind_byte_serial>(env, "serial");
     bench_find_byteset_kernels<sz_find_byteset_serial, sz_rfind_byteset_serial>(env, "serial");
     bench_utf8_count_kernels<sz_utf8_count_serial>(env, "serial");
+    bench_utf8_count_strings_kernels<sz_utf8_count_strings_serial>(env, "serial");
     bench_utf8_seek_kernels<sz_utf8_seek_serial>(env, "serial");
     bench_utf8_decode_kernels<sz_utf8_decode_serial>(env, "serial");
     bench_utf8_newlines_kernels<sz_utf8_newlines_serial>(env, "serial");
@@ -30,6 +32,7 @@ void bench_cross_serial(environment_t &env) {
     bench_utf8_uncased_order_kernels<sz_utf8_uncased_order_serial>(env, "serial");
     bench_bytesum_kernels<sz_bytesum_serial>(env, "serial");
     bench_hash_kernels<sz_hash_serial>(env, "serial");
+    bench_hash_strings_kernels<sz_hash_strings_serial>(env, "serial");
     bench_hash_multiseed_kernels<sz_hash_multiseed_serial>(env, "serial");
     bench_hash_stream_kernels<sz_hash_state_init_serial, sz_hash_state_update_serial, sz_hash_state_digest_serial>(
         env, "serial");
@@ -42,6 +45,7 @@ void bench_cross_serial(environment_t &env) {
     bench_fill_random_kernels<sz_fill_random_serial>(env, "serial");
     bench_strings_kernels<sz_strings_to_tape_serial, sz_strings_escape_serial, sz_strings_unescape_serial,
                           sz_strings_lookup_serial, sz_strings_normalize_serial>(env, "serial");
+    bench_strings_split_kernels<sz_strings_split_serial, sz_strings_split_lines_serial>(env, "serial");
     bench_aes256_ctr_kernels<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial>(env, "serial");
     bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial>(env, "serial");
     bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,

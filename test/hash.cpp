@@ -35,7 +35,8 @@ namespace ashvardanian::stringzilla::test {
 
 /** The dispatched one-shot and streaming hashes, in the shape of their capability kernels. */
 static hash_backend_t const hash_dispatched {cpu_best<sz_hash_best>, cpu_best<sz_hash_state_init_best>,
-                                             cpu_best<sz_hash_state_update_best>, cpu_best<sz_hash_state_digest_best>};
+                                             cpu_best<sz_hash_state_update_best>, cpu_best<sz_hash_state_digest_best>,
+                                             cpu_best<sz_hash_strings_best>};
 
 /** The dispatched SHA256 init, update and digest. */
 static sha256_backend_t const sha256_dispatched {

@@ -271,9 +271,19 @@ struct stream_t {
     ~stream_t() noexcept { release(handle); }
 };
 
-using tape_t = tape<char, sz_u64_t, unified_alloc<char>, tape_termination_t::packed_k>;
+using unified_strings_t = strings<unified_alloc<char>>;
 template <typename value_type_>
 using unified_vector = std::vector<value_type_, unified_alloc<value_type_>>;
+
+/** Gathers @p strings into unified memory and waits until the @p runtime device can read them. */
+inline unified_strings_t resident_strings(device_backend_t const &runtime, sz_strings_view_t strings) {
+    unified_alloc<char> const allocator(runtime.unified, runtime.stream);
+    auto [gathered, gather_status] = strings_view_t(strings).gather(allocator);
+    if (failed(gather_status)) throw std::runtime_error("Unified memory could not hold the tape.");
+    if (sz_stream_synchronize_best(runtime.capabilities, runtime.stream) != sz_success_k)
+        throw std::runtime_error("The tape would not reach the device.");
+    return std::move(gathered);
+}
 
 /**
  *  @brief Allocator over plain @b device memory, which no host code may dereference.

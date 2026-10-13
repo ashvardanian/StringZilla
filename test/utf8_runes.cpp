@@ -41,7 +41,8 @@ using sz::literals::operator""_sv; // for `sz::string_view_t`
 
 /** The dispatch points in the shape of a codepoint backend. */
 static utf8_runes_backend_t const utf8_runes_dispatched = {"dispatched", cpu_best<sz_utf8_count_best>,
-                                                           cpu_best<sz_utf8_seek_best>, cpu_best<sz_utf8_decode_best>};
+                                                           cpu_best<sz_utf8_seek_best>, cpu_best<sz_utf8_decode_best>,
+                                                           cpu_best<sz_utf8_count_strings_best>};
 
 #pragma region Unit
 

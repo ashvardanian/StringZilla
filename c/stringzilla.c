@@ -31,16 +31,21 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_strings_escape_k:
     case sz_kernel_strings_unescape_k:
     case sz_kernel_strings_lookup_k:
-    case sz_kernel_strings_normalize_k: return sz_strings_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_strings_normalize_k:
+    case sz_kernel_strings_split_k:
+    case sz_kernel_strings_split_lines_k:
+    case sz_kernel_strings_join_k: return sz_strings_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_find_k:
     case sz_kernel_rfind_k:
     case sz_kernel_find_byte_k:
     case sz_kernel_rfind_byte_k:
     case sz_kernel_find_byteset_k:
-    case sz_kernel_rfind_byteset_k: return sz_find_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_rfind_byteset_k:
+    case sz_kernel_find_strings_k: return sz_find_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_bytesum_k:
     case sz_kernel_hash_k:
     case sz_kernel_hash_multiseed_k:
+    case sz_kernel_hash_strings_k:
     case sz_kernel_fill_random_k:
     case sz_kernel_hash_state_init_k:
     case sz_kernel_hash_state_update_k:
@@ -67,6 +72,7 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_sort_uncased_order_k: return sz_sort_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_intersect_k: return sz_intersect_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_utf8_count_k:
+    case sz_kernel_utf8_count_strings_k:
     case sz_kernel_utf8_seek_k:
     case sz_kernel_utf8_decode_k: return sz_utf8_runes_find_kernel(kind, capabilities, kernel, capability);
     case sz_kernel_utf8_newlines_k:

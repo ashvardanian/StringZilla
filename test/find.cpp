@@ -57,6 +57,7 @@ static find_backend_t const find_dispatched {
     .rfind_byte = cpu_best<sz_rfind_byte_best>,
     .find_byteset = cpu_best<sz_find_byteset_best>,
     .rfind_byteset = cpu_best<sz_rfind_byteset_best>,
+    .find_strings = cpu_best<sz_find_strings_best>,
 };
 
 /** The comparison dispatch points, in the shape of their kernels. */
