@@ -65,6 +65,8 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", build.join("Release").display());
     println!("cargo:rustc-link-lib=static=stringzilla_static");
     println!("cargo:include={}", manifest.join("include").display());
+    // The whole tree, so a dependent's CMake adds the checkout Cargo resolved as a subdirectory.
+    println!("cargo:source={}", manifest.display());
 
     if enabled("CUDA") || enabled("ROCM") {
         // The runtimes come from wherever CMake found the toolkits it compiled the units with, and

@@ -29,7 +29,7 @@ publish = true
 repository = "https://github.com/ashvardanian/StringZilla"
 # `UnifiedAllocator` implements the standard `Allocator`, stable since 1.100.
 rust-version = "1.100"
-version = "5.1.2"
+version = "6.0.0-rc.1"
 
 [lib]
 name = "stringzilla"

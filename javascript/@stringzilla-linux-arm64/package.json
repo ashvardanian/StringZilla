@@ -1,6 +1,6 @@
 {
   "name": "@stringzilla/linux-arm64",
-  "version": "5.1.2",
+  "version": "6.0.0-rc.1",
   "description": "Linux arm64 native binary for StringZilla",
   "repository": { "type": "git", "url": "git+https://github.com/ashvardanian/StringZilla.git" },
   "homepage": "https://ashvardanian.com/posts/stringzilla/",

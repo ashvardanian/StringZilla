@@ -32,6 +32,8 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # Every binding reads its version from `VERSION`, which the release bumps.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STRINGZILLA_VERSION_ LIMIT_COUNT 1)
+# CMake versions are numeric, so the pre-release suffix of `VERSION` stays out of `PROJECT_VERSION`.
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_ "${STRINGZILLA_VERSION_}")
 project(
     stringzilla
     VERSION ${STRINGZILLA_VERSION_}
