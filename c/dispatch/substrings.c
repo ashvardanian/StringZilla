@@ -332,7 +332,7 @@ static sz_capability_kernels_t const *sz_substrings_bm25_scores_capabilities(voi
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init(sz_substrings_engine_t *engine, sz_strings_view_t const *needles,
-                                                      sz_substrings_case_sensitivity_t case_sensitivity,
+                                                      sz_case_sensitivity_t case_sensitivity,
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_capability_t capabilities,
@@ -356,7 +356,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts(sz_substrings_engine_t *engine,
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_find(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
-                                               sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                               sz_match_t *matches, sz_size_t matches_capacity,
                                                sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_kernel_substrings_find_t const kernel = (sz_kernel_substrings_find_t)sz_kernel_pick_(
         engine->capability, sz_substrings_find_capabilities());

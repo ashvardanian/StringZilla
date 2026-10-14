@@ -2432,6 +2432,10 @@ assert_accepts "reference-to-array parameter" test/probe.cpp <<'FIXTURE'
 char probe(char const (&letters)[4]) { return letters[0]; }
 FIXTURE
 
+assert_accepts "an XPath predicate inside a string literal" test/probe.cpp <<'FIXTURE'
+char const *probe() { return "/store/text()[5]"; }
+FIXTURE
+
 assert_rejects "LibC in the library" "calls a LibC string function" include/stringzilla/probe.h <<'FIXTURE'
 static int probe(char const *first, char const *second, sz_size_t length) { return memcmp(first, second, length); }
 FIXTURE

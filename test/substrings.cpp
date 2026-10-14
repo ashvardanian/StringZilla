@@ -37,7 +37,7 @@ namespace ashvardanian::stringzilla::test {
 /** The dispatched engine builder over the CPU capabilities, in the shape of its capability kernels,
  *  whose mask sits before the allocator. */
 static sz_status_t substrings_engine_init_dispatched_(sz_substrings_engine_t *engine, sz_strings_view_t const *needles,
-                                                      sz_substrings_case_sensitivity_t case_sensitivity,
+                                                      sz_case_sensitivity_t case_sensitivity,
                                                       sz_substrings_overlap_policy_t overlap_policy,
                                                       sz_size_t hot_states, sz_size_t matches_budget,
                                                       sz_size_t haystacks_budget, sz_allocator_t *allocator,
@@ -52,7 +52,7 @@ static substrings_tier_t const substrings_dispatched {substrings_engine_init_dis
                                                       sz_substrings_bm25_scores};
 
 /** Compiles @p needles, so a refusal can be asserted on without naming a collection of its own. */
-static sz_status_t build_over_(std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
+static sz_status_t build_over_(std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity,
                                sz_allocator_t *allocator, sz_substrings_engine_t *engine) {
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const needle_strings = strings_over_(needles, views);
@@ -94,8 +94,7 @@ struct rationed_allocator_t {
 
 /** Refuses the build's allocations one later each round, so every error path proves it frees
  *  what it took. */
-static void check_build_refusals_(std::vector<std::string> const &needles,
-                                  sz_substrings_case_sensitivity_t sensitivity) {
+static void check_build_refusals_(std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity) {
     for (std::size_t granted = 0;; ++granted) {
         rationed_allocator_t rationed(granted);
         sz_substrings_engine_t engine {};
@@ -128,21 +127,20 @@ void test_substrings_safety(test_context_t &context) {
     // every later needle's reported index.
     {
         std::vector<std::string> const empty_needle {"ab", "", "cd"};
-        verify(build_over_(empty_needle, sz_substrings_cased_k, &heap.allocator, &engine) ==
-               sz_unexpected_dimensions_k);
+        verify(build_over_(empty_needle, sz_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
     }
 
     // An empty vocabulary has no automaton to build.
     {
         std::vector<std::string> const no_needles;
-        verify(build_over_(no_needles, sz_substrings_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
+        verify(build_over_(no_needles, sz_cased_k, &heap.allocator, &engine) == sz_unexpected_dimensions_k);
     }
 
     // A folded vocabulary needs well-formed UTF-8, since the walk resets on a malformed haystack byte and a
     // needle carrying one could never match.
     {
         std::vector<std::string> const malformed {std::string("ab\xFF", 3)};
-        verify(build_over_(malformed, sz_substrings_uncased_k, &heap.allocator, &engine) == sz_invalid_utf8_k);
+        verify(build_over_(malformed, sz_uncased_k, &heap.allocator, &engine) == sz_invalid_utf8_k);
     }
 
     std::vector<std::string> const needles {"ab", "cd"};
@@ -152,7 +150,7 @@ void test_substrings_safety(test_context_t &context) {
     sz_strings_view_t const needle_strings = strings_over_(needles, views);
     sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
     sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
-    verify(sz_substrings_engine_init(&engine, &needle_strings, sz_substrings_cased_k, sz_substrings_overlapping_k,
+    verify(sz_substrings_engine_init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k,
                                      STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
                                      &heap.allocator, nullptr) == sz_success_k);
 
@@ -212,9 +210,9 @@ void test_substrings_safety(test_context_t &context) {
         sz_strings_view_t const one_strings = strings_over_(one_replacement, one_views);
         std::vector<sz_size_t> offsets(haystacks.size() + 1, 0);
         sz_substrings_engine_t covering;
-        verify(sz_substrings_engine_init(&covering, &needle_strings, sz_substrings_cased_k,
-                                         sz_substrings_leftmost_first_k, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0,
-                                         sz::default_capabilities(), &heap.allocator, nullptr) == sz_success_k);
+        verify(sz_substrings_engine_init(&covering, &needle_strings, sz_cased_k, sz_substrings_leftmost_first_k,
+                                         STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, sz::default_capabilities(),
+                                         &heap.allocator, nullptr) == sz_success_k);
         verify(sz_substrings_replace(&covering, &haystack_strings, &one_strings, nullptr, 0, offsets.data(), nullptr) ==
                sz_unexpected_dimensions_k);
         sz_substrings_engine_free(&covering, nullptr);
@@ -225,7 +223,7 @@ void test_substrings_safety(test_context_t &context) {
     {
         sz_allocator_t refusing = refusing_allocator_();
         sz_substrings_engine_t refused {};
-        verify(build_over_(needles, sz_substrings_cased_k, &refusing, &refused) == sz_bad_alloc_k);
+        verify(build_over_(needles, sz_cased_k, &refusing, &refused) == sz_bad_alloc_k);
         verify(refused.memory == nullptr);
     }
 
@@ -236,8 +234,8 @@ void test_substrings_safety(test_context_t &context) {
             wide.push_back(random_string(context.generator, 3 + index % 6, "abcdefghijklmnopqrstuvwxyz"));
         std::sort(wide.begin(), wide.end());
         wide.erase(std::unique(wide.begin(), wide.end()), wide.end());
-        check_build_refusals_(wide, sz_substrings_cased_k);
-        check_build_refusals_(wide, sz_substrings_uncased_k);
+        check_build_refusals_(wide, sz_cased_k);
+        check_build_refusals_(wide, sz_uncased_k);
     }
 }
 

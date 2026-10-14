@@ -92,15 +92,25 @@ enum {
 
 /** Every kernel of `metal.metal`, built at init so no round compiles one. */
 static char const *const sz_substrings_kernels_metal_[] = {
-    "sz_substrings_clear_metal_kernel_",        "sz_substrings_scan_reduce_metal_kernel_",
-    "sz_substrings_scan_carry_metal_kernel_",   "sz_substrings_scan_apply_metal_kernel_",
-    "sz_substrings_chunk_bytes_metal_kernel_",  "sz_substrings_chunk_counts_metal_kernel_",
-    "sz_substrings_walk_metal_kernel_",         "sz_substrings_sized_metal_kernel_",
-    "sz_substrings_cover_metal_kernel_",        "sz_substrings_compact_metal_kernel_",
-    "sz_substrings_covered_metal_kernel_",      "sz_substrings_haystack_offsets_metal_kernel_",
-    "sz_substrings_counts_metal_kernel_",       "sz_substrings_store_matches_metal_kernel_",
-    "sz_substrings_stored_metal_kernel_",       "sz_substrings_rewrite_offsets_metal_kernel_",
-    "sz_substrings_rewrite_copy_metal_kernel_", "sz_substrings_target_metal_kernel_",
+    "sz_substrings_clear_metal_kernel_",
+    "sz_substrings_scan_reduce_metal_kernel_",
+    "sz_substrings_scan_carry_metal_kernel_",
+    "sz_substrings_scan_apply_metal_kernel_",
+    "sz_substrings_chunk_bytes_metal_kernel_",
+    "sz_substrings_chunk_counts_metal_kernel_",
+    "sz_substrings_walk_metal_kernel_",
+    "sz_substrings_sized_metal_kernel_",
+    "sz_substrings_link_metal_kernel_",
+    "sz_substrings_double_metal_kernel_",
+    "sz_substrings_compact_metal_kernel_",
+    "sz_substrings_covered_metal_kernel_",
+    "sz_substrings_haystack_offsets_metal_kernel_",
+    "sz_substrings_counts_metal_kernel_",
+    "sz_substrings_store_matches_metal_kernel_",
+    "sz_substrings_stored_metal_kernel_",
+    "sz_substrings_rewrite_offsets_metal_kernel_",
+    "sz_substrings_rewrite_copy_metal_kernel_",
+    "sz_substrings_target_metal_kernel_",
     "sz_substrings_bm25_metal_kernel_",
 };
 
@@ -110,7 +120,7 @@ typedef struct {
     sz_u64_t hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
     sz_u64_t hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
     sz_u64_t report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
-    sz_u64_t emitted, reported, keep_offsets, gap_offsets, overflow_rows;
+    sz_u64_t emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows;
     sz_u64_t slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
     sz_u64_t haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
     sz_u64_t document_lengths, scores_stride, tally_hashed;
@@ -121,14 +131,14 @@ typedef struct {
 /** Byte offsets of the round block every round runs out of, as the CUDA tier lays it out. */
 typedef struct sz_substrings_arena_metal_t {
     sz_size_t report, chunk_bytes, chunk_offsets, haystack_offsets, chunk_slots, tile_sums;
-    sz_size_t emitted, reported, keep_offsets, gap_offsets, overflow_rows, slots_count, total;
+    sz_size_t emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows, slots_count, total;
 } sz_substrings_arena_metal_t;
 
 /** Lays the round block out for one round over @p haystacks_count texts. */
 STRINGZILLA_INLINE sz_substrings_arena_metal_t sz_substrings_arena_metal_(sz_substrings_engine_t const *engine,
                                                                           sz_size_t haystacks_count) {
     sz_size_t const boundaries = haystacks_count + 1, matches = engine->matches_budget;
-    sz_size_t const match_bytes = matches * sizeof(sz_substrings_match_t);
+    sz_size_t const match_bytes = matches * sizeof(sz_match_t);
     sz_bool_t const covering = (sz_bool_t)(engine->overlap_policy != sz_substrings_overlapping_k);
     sz_size_t const overflow_bytes = engine->needles_count > sz_substrings_tally_slots_metal_k
                                          ? sz_substrings_bm25_groups_metal_k * engine->needles_count * sizeof(sz_u32_t)
@@ -147,7 +157,9 @@ STRINGZILLA_INLINE sz_substrings_arena_metal_t sz_substrings_arena_metal_(sz_sub
     arena.reported = arena.emitted + match_bytes;
     arena.keep_offsets = arena.reported + (covering ? match_bytes : 0);
     arena.gap_offsets = arena.keep_offsets + (covering ? (matches + 1) * sizeof(sz_size_t) : 0);
-    arena.overflow_rows = arena.gap_offsets + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.jumps = arena.gap_offsets + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.doubled = arena.jumps + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.overflow_rows = arena.doubled + (covering ? matches * sizeof(sz_size_t) : 0);
     arena.total = arena.overflow_rows + overflow_bytes;
     return arena;
 }
@@ -285,14 +297,17 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
     arguments->reported = (sz_u64_t)(block + (covering ? arena.reported : arena.emitted));
     arguments->keep_offsets = covering ? (sz_u64_t)(block + arena.keep_offsets) : 0;
     arguments->gap_offsets = covering ? (sz_u64_t)(block + arena.gap_offsets) : 0;
+    arguments->jumps = covering ? (sz_u64_t)(block + arena.jumps) : 0;
+    arguments->doubled = covering ? (sz_u64_t)(block + arena.doubled) : 0;
     arguments->overflow_rows = (sz_u64_t)(block + arena.overflow_rows);
     arguments->slots_count = arena.slots_count, arguments->chunk_budget = engine->chunk_budget;
     arguments->chunk_floor = sz_max_of_two(4 * (sz_size_t)engine->max_source_match_bytes, (sz_size_t)1);
     arguments->matches_budget = engine->matches_budget;
     arguments->emitting = covering || emitting;
 
-    // The head of the round block, and under a cover every keep flag: the cover writes only those
-    // below the emitted count, and its scan reads them all.
+    // The head of the round block, and under a cover every keep flag: the link marks only each
+    // haystack's first kept match, the doubling only what the chain reaches, and the scan
+    // reads them all.
     status = sz_substrings_clear_metal_(call, buffers, arguments, block + arena.report, arena.tile_sums - arena.report);
     if (status == sz_success_k && covering)
         status = sz_substrings_clear_metal_(call, buffers, arguments, block + arena.keep_offsets,
@@ -327,8 +342,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
         status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_walk_metal_kernel_", arguments,
                                              sz_substrings_groups_metal_(arena.slots_count));
     if (status == sz_success_k && covering) {
-        status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_cover_metal_kernel_", arguments,
+        status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_link_metal_kernel_", arguments,
                                              sz_substrings_groups_metal_(engine->matches_budget));
+        // A chain holds at most the budget's matches; each round doubles how far a mark reaches.
+        for (sz_size_t reach = 1; status == sz_success_k && reach < engine->matches_budget; reach *= 2) {
+            sz_u64_t const jumps = arguments->jumps;
+            status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_double_metal_kernel_", arguments,
+                                                 sz_substrings_groups_metal_(engine->matches_budget));
+            arguments->jumps = arguments->doubled, arguments->doubled = jumps;
+        }
         if (status == sz_success_k)
             status = sz_substrings_scan_metal_(call, buffers, arguments, block + arena.keep_offsets,
                                                engine->matches_budget + 1);
@@ -345,7 +367,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
-    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_allocator_t unified;
@@ -410,7 +432,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_metal(sz_substrings_engine_t *e
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
-                                                     sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                     sz_match_t *matches, sz_size_t matches_capacity,
                                                      sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arguments_metal_t arguments;
@@ -423,7 +445,7 @@ STRINGZILLA_API sz_status_t sz_substrings_find_metal(sz_substrings_engine_t *eng
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     if (!sz_metal_resolve_call_(&call, matches_offsets, (haystacks->count + 1) * sizeof(sz_size_t), &bound))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
-    if (matches_capacity && !sz_metal_resolve_call_(&call, matches, matches_capacity * sizeof(sz_substrings_match_t),
+    if (matches_capacity && !sz_metal_resolve_call_(&call, matches, matches_capacity * sizeof(sz_match_t),
                                                     buffers + sz_substrings_matches_buffer_metal_k))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     if (haystacks->count > engine->haystacks_budget) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);

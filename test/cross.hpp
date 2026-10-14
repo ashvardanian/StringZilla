@@ -3838,11 +3838,11 @@ inline folded_origins_t folded_origins_(std::string const &text) {
 /** Every match of every needle at every offset, which is what the automaton must agree with. */
 inline std::vector<substrings_case_t> oracle_overlapping_(std::vector<std::string> const &haystacks,
                                                           std::vector<std::string> const &needles,
-                                                          sz_substrings_case_sensitivity_t sensitivity) {
+                                                          sz_case_sensitivity_t sensitivity) {
     std::vector<substrings_case_t> found;
     for (std::size_t haystack_index = 0; haystack_index != haystacks.size(); ++haystack_index) {
         std::string const &haystack = haystacks[haystack_index];
-        if (sensitivity == sz_substrings_cased_k) {
+        if (sensitivity == sz_cased_k) {
             for (std::size_t needle_index = 0; needle_index != needles.size(); ++needle_index) {
                 std::string const &needle = needles[needle_index];
                 if (needle.empty() || needle.size() > haystack.size()) continue;
@@ -3993,7 +3993,7 @@ inline std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tie
     verify(offsets[haystacks->count] == total);
     verify(engine->report->shortfall == total);
 
-    std::vector<sz_substrings_match_t> matches(total);
+    std::vector<sz_match_t> matches(total);
     verify(tier.find(engine, haystacks, matches.data(), matches.size(), offsets.data(), nullptr) == sz_success_k);
     verify(engine->report->matches_stored == total && engine->report->shortfall == 0);
 
@@ -4008,7 +4008,7 @@ inline std::vector<substrings_case_t> backend_find_(substrings_tier_t const &tie
 /** One vocabulary against one corpus under one policy, built and walked by @p tier, and compared
  *  with the oracle on every verb. */
 inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string> const &haystacks,
-                          std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
+                          std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity,
                           sz_substrings_overlap_policy_t policy,
                           std::size_t hot_states = STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO) {
     handle_checked_heap_t heap;
@@ -4075,7 +4075,7 @@ inline void check_corpus_(substrings_tier_t const &tier, std::vector<std::string
 
 /** The same corpus under every policy, so one call covers a vocabulary's whole behaviour. */
 inline void check_policies_(substrings_tier_t const &tier, std::vector<std::string> const &haystacks,
-                            std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
+                            std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity,
                             std::size_t hot_states = STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO) {
     check_corpus_(tier, haystacks, needles, sensitivity, sz_substrings_overlapping_k, hot_states);
     check_corpus_(tier, haystacks, needles, sensitivity, sz_substrings_leftmost_longest_k, hot_states);
@@ -4090,7 +4090,7 @@ inline void check_policies_(substrings_tier_t const &tier, std::vector<std::stri
  *  split walks the same answers through the dense rows, a mixed automaton, and an all-cold one.
  */
 inline void check_tier_splits_(substrings_tier_t const &tier, std::vector<std::string> const &haystacks,
-                               std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity) {
+                               std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity) {
     for (std::size_t hot_states : {(std::size_t)0, (std::size_t)1, (std::size_t)2, (std::size_t)4, (std::size_t)8,
                                    (std::size_t)32, STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO})
         check_policies_(tier, haystacks, needles, sensitivity, hot_states);
@@ -4099,36 +4099,36 @@ inline void check_tier_splits_(substrings_tier_t const &tier, std::vector<std::s
 /** The textbook cases, where a wrong failure link or a missed output run shows up by name. */
 inline void check_substrings_unit_(substrings_tier_t const &tier) {
     // The canonical Aho-Corasick vocabulary: nested suffixes, so every state inherits a run.
-    check_policies_(tier, {"ushers"}, {"he", "she", "his", "hers"}, sz_substrings_cased_k);
+    check_policies_(tier, {"ushers"}, {"he", "she", "his", "hers"}, sz_cased_k);
 
     // A needle that is a suffix of another, over text that spells both at once.
-    check_policies_(tier, {"abcd", "abcde", "zzz"}, {"bc", "abcd", "cd", "d"}, sz_substrings_cased_k);
+    check_policies_(tier, {"abcd", "abcde", "zzz"}, {"bc", "abcd", "cd", "d"}, sz_cased_k);
 
     // One needle repeated, which is what exercises the leftmost cursor rather than the ranking.
-    check_policies_(tier, {"aaaaaaaa"}, {"aa", "aaa"}, sz_substrings_cased_k);
+    check_policies_(tier, {"aaaaaaaa"}, {"aa", "aaa"}, sz_cased_k);
 
     // A vocabulary no haystack hits, so the cover drains nothing and the ring stays zero.
-    check_policies_(tier, {"the quick brown fox", ""}, {"zebra", "quetzal"}, sz_substrings_cased_k);
+    check_policies_(tier, {"the quick brown fox", ""}, {"zebra", "quetzal"}, sz_cased_k);
 
     // Bytes outside ASCII, byte-exact, with a lead byte a folded walk would have resynchronized on.
     check_policies_(tier, {std::string("\xC3\xA9\xE2\x82\xAC\xFF\xFE", 7)}, {std::string("\xFF\xFE", 2), "\xC3\xA9"},
-                    sz_substrings_cased_k);
+                    sz_cased_k);
 
     // Case folding, where the needle and the haystack agree only after both are folded.
-    check_policies_(tier, {"Hello World", "HELLO", "hello"}, {"hello", "WORLD"}, sz_substrings_uncased_k);
+    check_policies_(tier, {"Hello World", "HELLO", "hello"}, {"hello", "WORLD"}, sz_uncased_k);
 
     // The sharp S folds to two runes, so one source codepoint spans two folded bytes and a match
     // can end at either of them - the repeat the walk collapses.
-    check_policies_(tier, {"Straße", "STRASSE", "strasse"}, {"strasse", "sse", "s"}, sz_substrings_uncased_k);
+    check_policies_(tier, {"Straße", "STRASSE", "strasse"}, {"strasse", "sse", "s"}, sz_uncased_k);
 
     // The Kelvin sign folds to one ASCII byte, contracting three source bytes into one folded one.
-    check_policies_(tier, {"\xE2\x84\xAA elvin", "kelvin"}, {"k", "kelvin"}, sz_substrings_uncased_k);
+    check_policies_(tier, {"\xE2\x84\xAA elvin", "kelvin"}, {"k", "kelvin"}, sz_uncased_k);
 
     // Malformed UTF-8 in the haystack, which an uncased walk resynchronizes past byte by byte.
     check_policies_(tier,
                     {std::string("ab\xFF" "cd", 5), // "\xFFc" is one escape
                      "abcd"},
-                    {"ab", "cd"}, sz_substrings_uncased_k);
+                    {"ab", "cd"}, sz_uncased_k);
 
     // A chain trie split one state into the hot tier, walked over a byte no needle spells. A cold
     // state's own slot sits inside its children's addressing window, so a slot recorded as its own
@@ -4137,24 +4137,24 @@ inline void check_substrings_unit_(substrings_tier_t const &tier) {
     check_tier_splits_(tier,
                        {std::string("aaaa\x01" "aaaa", 9), // "\x01a" is one escape
                         "aaaaaaaa"},
-                       {"a", "aa", "aaa", "aaaa"}, sz_substrings_cased_k);
+                       {"a", "aa", "aaa", "aaaa"}, sz_cased_k);
 
     // Every tier split over the canonical vocabulary: a cold state's probe can land on a slot a hot
     // state's child owns, so a mixed automaton is its own case, not a shade of the two extremes.
-    check_tier_splits_(tier, {"ushers", "she sells seashells"}, {"he", "she", "his", "hers"}, sz_substrings_cased_k);
-    check_tier_splits_(tier, {"abcabcabc", "aaaa"}, {"a", "ab", "abc", "bc", "c"}, sz_substrings_cased_k);
-    check_tier_splits_(tier, {"Straße", "STRASSE"}, {"strasse", "sse", "s"}, sz_substrings_uncased_k);
+    check_tier_splits_(tier, {"ushers", "she sells seashells"}, {"he", "she", "his", "hers"}, sz_cased_k);
+    check_tier_splits_(tier, {"abcabcabc", "aaaa"}, {"a", "ab", "abc", "bc", "c"}, sz_cased_k);
+    check_tier_splits_(tier, {"Straße", "STRASSE"}, {"strasse", "sse", "s"}, sz_uncased_k);
 
     // Uppercase needles in a byte-exact vocabulary, which the folded vocabularies' column aliasing
     // must not touch.
-    check_policies_(tier, {"AbabAB aBAb", "ABAB"}, {"Ab", "ab", "AB", "bA"}, sz_substrings_cased_k);
+    check_policies_(tier, {"AbabAB aBAb", "ABAB"}, {"Ab", "ab", "AB", "bA"}, sz_cased_k);
 
     // A single-byte vocabulary, whose leftmost ring is narrower than one bitmap word.
-    check_policies_(tier, {"aabbaab", "b"}, {"a", "b"}, sz_substrings_cased_k);
+    check_policies_(tier, {"aabbaab", "b"}, {"a", "b"}, sz_cased_k);
 
     // A folded needle past 21 bytes: its source span triples, and its ring spans several words.
     check_policies_(tier, {"The Quick Brown Fox Jumps Over The Lazy Dog, the quick brown fox jumps over the lazy dog"},
-                    {"quick brown fox jumps over", "the lazy dog", "fox"}, sz_substrings_uncased_k);
+                    {"quick brown fox jumps over", "the lazy dog", "fox"}, sz_uncased_k);
 
     // An all-cold automaton, so every step probes the double array and chases failure links.
     handle_checked_heap_t heap;
@@ -4162,8 +4162,8 @@ inline void check_substrings_unit_(substrings_tier_t const &tier) {
     std::vector<sz_string_view_t> views;
     sz_strings_view_t const needle_strings = strings_over_(needles, views);
     sz_substrings_engine_t engine;
-    verify(tier.init(&engine, &needle_strings, sz_substrings_cased_k, sz_substrings_overlapping_k, 0, 0, 0,
-                     &heap.allocator, nullptr) == sz_success_k);
+    verify(tier.init(&engine, &needle_strings, sz_cased_k, sz_substrings_overlapping_k, 0, 0, 0, &heap.allocator,
+                     nullptr) == sz_success_k);
     verify(engine.hot_count == 0);
     sz_substrings_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -4192,8 +4192,8 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
         for (std::size_t index = 0; index != haystacks_count; ++index)
             haystacks.push_back(random_string(generator, (index * 11 + round * 3) % 200, alphabet));
 
-        check_policies_(tier, haystacks, needles, sz_substrings_cased_k);
-        check_policies_(tier, haystacks, needles, sz_substrings_uncased_k);
+        check_policies_(tier, haystacks, needles, sz_cased_k);
+        check_policies_(tier, haystacks, needles, sz_uncased_k);
     }
 
     // Haystacks spanning several ordered rounds, so leftmost covers stitch windows and rounds
@@ -4213,8 +4213,8 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
         std::string uppercased = haystacks.front();
         for (char &character : uppercased) character = (char)std::toupper((unsigned char)character);
         haystacks.push_back(uppercased);
-        check_policies_(tier, haystacks, needles, sz_substrings_cased_k);
-        check_policies_(tier, haystacks, needles, sz_substrings_uncased_k);
+        check_policies_(tier, haystacks, needles, sz_cased_k);
+        check_policies_(tier, haystacks, needles, sz_uncased_k);
     }
 
     // Needles opening on letters the text rarely holds, so fewer than one byte in eight leaves the
@@ -4231,8 +4231,8 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
         }
         haystacks.push_back("");
         haystacks.push_back("zzzz");
-        check_policies_(tier, haystacks, needles, sz_substrings_cased_k);
-        check_policies_(tier, haystacks, needles, sz_substrings_uncased_k);
+        check_policies_(tier, haystacks, needles, sz_cased_k);
+        check_policies_(tier, haystacks, needles, sz_uncased_k);
     }
 
     // Small alphabets, where hot rows are only a few classes wide: nucleotides with bytes no needle
@@ -4255,9 +4255,9 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
             binary_haystacks.push_back(random_string(generator, 2000 + index * 333, std::string_view("\x00\x01", 2)));
         }
         haystacks.push_back("ACGTNNACGT\nACG");
-        check_policies_(tier, haystacks, nucleotides, sz_substrings_cased_k);
-        check_policies_(tier, binary_haystacks, bits, sz_substrings_cased_k);
-        if (round == 0) check_tier_splits_(tier, haystacks, nucleotides, sz_substrings_cased_k);
+        check_policies_(tier, haystacks, nucleotides, sz_cased_k);
+        check_policies_(tier, binary_haystacks, bits, sz_cased_k);
+        if (round == 0) check_tier_splits_(tier, haystacks, nucleotides, sz_cased_k);
     }
 
     // Every byte value starts some needle, so no class is shared and a hot row spans 256 columns.
@@ -4273,7 +4273,7 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
                 haystack[offset] = (char)((offset * 31 + index * 17 + (offset * offset) % 13) & 0xFF);
             haystacks.push_back(haystack);
         }
-        check_policies_(tier, haystacks, needles, sz_substrings_cased_k);
+        check_policies_(tier, haystacks, needles, sz_cased_k);
     }
 
     // A vocabulary wide enough to push the double array past its first growth, and deep enough that
@@ -4286,11 +4286,513 @@ inline void check_substrings_equivalence_(test_context_t &context, substrings_ti
         needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
         for (std::size_t index = 0; index != 8; ++index)
             haystacks.push_back(random_string(generator, 500 + index * 37, "abcdefghijklmnopqrstuvwxyz"));
-        check_policies_(tier, haystacks, needles, sz_substrings_cased_k);
+        check_policies_(tier, haystacks, needles, sz_cased_k);
     }
 }
 
 #pragma endregion Substrings
+
+#pragma region Regex
+
+/** A tier's engine builder and the verbs it answers, so each compiled tier meets the serial one. */
+struct regex_tier_t {
+    sz_kernel_regex_engine_init_t init;
+    sz_kernel_regex_counts_t counts;
+    sz_kernel_regex_find_t find;
+};
+
+/** A tier's rewriting verbs, which the checks that take them skip when null. */
+struct regex_rewriting_t {
+    sz_kernel_regex_replace_t replace;
+    sz_kernel_regex_extract_t extract;
+};
+
+/** The serial tier and its rewriting verbs, which every other tier is held to. */
+inline regex_tier_t const regex_serial_ {sz_regex_engine_init_serial, sz_regex_counts_serial, sz_regex_find_serial};
+inline regex_rewriting_t const regex_serial_rewriting_ {sz_regex_replace_serial, sz_regex_extract_serial};
+
+/** Compiles @p patterns past any tier's init, so zero budgets can force the bit-parallel
+ *  start pass and the PikeVM. */
+inline sz_status_t regex_compile_(std::vector<std::string> const &patterns, sz_case_sensitivity_t sensitivity,
+                                  sz_size_t reverse_budget, sz_size_t forward_budget, sz_allocator_t *allocator,
+                                  sz_regex_engine_t *engine) {
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(patterns, views);
+    return sz_regex_engine_compile_(engine, &strings, sensitivity, nullptr, sz_cap_serial_k, allocator, reverse_budget,
+                                    forward_budget, nullptr);
+}
+
+/** Every match @p tier finds, sized by one call and written by a second,
+ *  its counts checked against them. */
+inline std::vector<substrings_case_t> regex_matches_(regex_tier_t const &tier, sz_regex_engine_t *engine,
+                                                     std::vector<std::string> const &haystacks) {
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(haystacks, views);
+    std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX);
+    verify(tier.find(engine, &strings, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
+    std::vector<sz_match_t> matches(offsets.back());
+    verify(tier.find(engine, &strings, matches.data(), matches.size(), offsets.data(), nullptr) == sz_success_k);
+    verify(offsets.back() == matches.size());
+
+    // A stride of two must leave every other entry alone.
+    std::vector<sz_size_t> counts(haystacks.size() * 2, STRINGZILLA_SIZE_MAX);
+    verify(tier.counts(engine, &strings, counts.data(), 2, nullptr) == sz_success_k);
+    for (std::size_t index = 0; index != haystacks.size(); ++index) {
+        verify(counts[index * 2] == offsets[index + 1] - offsets[index]);
+        verify(counts[index * 2 + 1] == STRINGZILLA_SIZE_MAX);
+    }
+
+    std::vector<substrings_case_t> found(matches.size());
+    for (std::size_t index = 0; index != matches.size(); ++index)
+        found[index] = {matches[index].haystack_index, matches[index].needle_index, matches[index].byte_offset,
+                        matches[index].byte_length};
+    return found;
+}
+
+/** Every haystack @p replace rewrites, sized by one call and written by a second; a target one byte
+ *  short must still report the true offsets. */
+inline std::vector<std::string> regex_replaced_(sz_kernel_regex_replace_t replace, sz_regex_engine_t *engine,
+                                                std::vector<std::string> const &haystacks,
+                                                std::vector<std::string> const &replacements) {
+    std::vector<sz_string_view_t> haystack_views, replacement_views;
+    sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
+    sz_strings_view_t const replacement_strings = strings_over_(replacements, replacement_views);
+    std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX), short_offsets = offsets;
+    verify(replace(engine, &haystack_strings, &replacement_strings, nullptr, 0, offsets.data(), nullptr) ==
+           sz_success_k);
+    sz_size_t const total = offsets.back();
+    std::string target(total + 1, '\0');
+    verify(replace(engine, &haystack_strings, &replacement_strings, &target[0], total ? total - 1 : 0,
+                   short_offsets.data(), nullptr) == sz_success_k);
+    verify(short_offsets == offsets);
+    verify(replace(engine, &haystack_strings, &replacement_strings, &target[0], total, offsets.data(), nullptr) ==
+           sz_success_k);
+    std::vector<std::string> rewritten(haystacks.size());
+    for (std::size_t index = 0; index != haystacks.size(); ++index)
+        rewritten[index] = target.substr(offsets[index], offsets[index + 1] - offsets[index]);
+    return rewritten;
+}
+
+/** One vocabulary, the haystacks it searches, and every match it must report there. */
+struct regex_known_t {
+    std::vector<std::string> patterns;
+    std::vector<std::string> haystacks;
+    std::vector<substrings_case_t> expected;
+};
+
+/** Checks @p known through @p tier's own init, then with the bit-parallel
+ *  start pass and with the PikeVM forced. */
+inline void check_regex_known_(regex_tier_t const &tier, regex_known_t const &known,
+                               sz_case_sensitivity_t sensitivity = sz_cased_k) {
+    handle_checked_heap_t heap;
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const patterns = strings_over_(known.patterns, views);
+    sz_regex_engine_t engine;
+    verify(tier.init(&engine, &patterns, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
+    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(regex_compile_(known.patterns, sensitivity, 0, sz_regex_forward_budget_k, &heap.allocator, &engine) ==
+           sz_success_k);
+    verify(engine.positions_words != 0);
+    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(regex_compile_(known.patterns, sensitivity, sz_regex_reverse_budget_k, 0, &heap.allocator, &engine) ==
+           sz_success_k);
+    verify(engine.forward_rows == nullptr);
+    verify(regex_matches_(tier, &engine, known.haystacks) == known.expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(heap.live_allocations == 0);
+}
+
+/** Checks the rewrite of @p haystacks through @p tier's own init and with the PikeVM forced. */
+inline void check_regex_replace_(regex_tier_t const &tier, sz_kernel_regex_replace_t replace,
+                                 std::vector<std::string> const &patterns, std::vector<std::string> const &replacements,
+                                 std::vector<std::string> const &haystacks, std::vector<std::string> const &expected,
+                                 sz_case_sensitivity_t sensitivity = sz_cased_k) {
+    handle_checked_heap_t heap;
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(patterns, views);
+    sz_regex_engine_t engine;
+    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
+    verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine) == sz_success_k);
+    verify(regex_replaced_(replace, &engine, haystacks, replacements) == expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(heap.live_allocations == 0);
+}
+
+/** Every row @p extract locates for @p pattern, sized by one call and written by a second; a
+ *  capacity one row short must still report the true offsets and write nothing past it. */
+inline std::vector<substrings_case_t> regex_extracted_(sz_kernel_regex_extract_t extract, sz_regex_engine_t *engine,
+                                                       std::size_t pattern, std::vector<std::string> const &haystacks) {
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(haystacks, views);
+    std::vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX), short_offsets = offsets;
+    verify(extract(engine, &strings, pattern, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
+    sz_size_t const total = offsets.back(), short_capacity = total ? total - 1 : 0;
+    std::vector<sz_match_t> rows(total + 1);
+    rows[short_capacity].haystack_index = 12345;
+    verify(extract(engine, &strings, pattern, rows.data(), short_capacity, short_offsets.data(), nullptr) ==
+           sz_success_k);
+    verify(short_offsets == offsets && rows[short_capacity].haystack_index == 12345);
+    verify(extract(engine, &strings, pattern, rows.data(), total, offsets.data(), nullptr) == sz_success_k);
+    verify(offsets == short_offsets);
+    std::vector<substrings_case_t> found(total);
+    for (std::size_t index = 0; index != total; ++index) {
+        found[index] = {rows[index].haystack_index, rows[index].needle_index, rows[index].byte_offset,
+                        rows[index].byte_length};
+        verify(offsets[found[index].haystack_index] <= index && index < offsets[found[index].haystack_index + 1]);
+    }
+    return found;
+}
+
+/** Checks the rows of @p pattern's first match per haystack through @p tier's own init
+ *  and with the PikeVM forced. */
+inline void check_regex_extract_(regex_tier_t const &tier, sz_kernel_regex_extract_t extract,
+                                 std::vector<std::string> const &patterns, std::size_t pattern,
+                                 std::vector<std::string> const &haystacks,
+                                 std::vector<substrings_case_t> const &expected,
+                                 sz_case_sensitivity_t sensitivity = sz_cased_k) {
+    handle_checked_heap_t heap;
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(patterns, views);
+    sz_regex_engine_t engine;
+    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
+    verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(regex_compile_(patterns, sensitivity, 0, 0, &heap.allocator, &engine) == sz_success_k);
+    verify(regex_extracted_(extract, &engine, pattern, haystacks) == expected);
+    sz_regex_engine_free(&engine, nullptr);
+    verify(heap.live_allocations == 0);
+}
+
+/** The same vocabulary through @p tier and through the serial tier compiled with the given budgets,
+ *  whose rewrites and the groups of the first pattern must agree too. */
+inline void check_regex_against_serial_(regex_tier_t const &tier, regex_rewriting_t const &rewriting,
+                                        std::vector<std::string> const &patterns,
+                                        std::vector<std::string> const &haystacks, sz_case_sensitivity_t sensitivity,
+                                        sz_size_t reverse_budget, sz_size_t forward_budget) {
+    handle_checked_heap_t heap;
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const strings = strings_over_(patterns, views);
+    sz_regex_engine_t engine, reference;
+    verify(tier.init(&engine, &strings, sensitivity, nullptr, &heap.allocator, nullptr) == sz_success_k);
+    verify(regex_compile_(patterns, sensitivity, reverse_budget, forward_budget, &heap.allocator, &reference) ==
+           sz_success_k);
+    verify(regex_matches_(tier, &engine, haystacks) == regex_matches_(regex_serial_, &reference, haystacks));
+    if (rewriting.replace) {
+        std::vector<std::string> const replacements(patterns.size(), "<$1|$0>");
+        verify(regex_replaced_(rewriting.replace, &engine, haystacks, replacements) ==
+               regex_replaced_(regex_serial_rewriting_.replace, &reference, haystacks, replacements));
+    }
+    if (rewriting.extract)
+        verify(regex_extracted_(rewriting.extract, &engine, 0, haystacks) ==
+               regex_extracted_(regex_serial_rewriting_.extract, &reference, 0, haystacks));
+    sz_regex_engine_free(&engine, nullptr);
+    sz_regex_engine_free(&reference, nullptr);
+    verify(heap.live_allocations == 0);
+}
+
+/** Known answers on leftmost-first priority, greed, anchors, boundaries, UTF-8, empty matches, case
+ *  folding, refusals, capacities, rewriting and groups. */
+inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const &rewriting = {}) {
+    using cases_t = std::vector<substrings_case_t>;
+    sz_case_sensitivity_t const uncased = sz_uncased_k;
+
+    // Priority across patterns: at one start the lower index wins, whatever the length.
+    check_regex_known_(tier, {{"abc", "ab"}, {"abcab"}, cases_t {{0, 0, 0, 3}, {0, 1, 3, 2}}});
+    check_regex_known_(tier, {{"ab", "abc"}, {"abc"}, cases_t {{0, 0, 0, 2}}});
+    check_regex_known_(tier, {{"b", "ab"}, {"ab"}, cases_t {{0, 1, 0, 2}}});
+
+    // Lazy against greedy, and `(?U)` swapping them.
+    check_regex_known_(tier, {{"a+?"}, {"aaa"}, cases_t {{0, 0, 0, 1}, {0, 0, 1, 1}, {0, 0, 2, 1}}});
+    check_regex_known_(tier, {{"a{2,3}"}, {"aaaaa"}, cases_t {{0, 0, 0, 3}, {0, 0, 3, 2}}});
+    check_regex_known_(tier, {{"(?U)a+"}, {"aa"}, cases_t {{0, 0, 0, 1}, {0, 0, 1, 1}}});
+    check_regex_known_(tier, {{"<.*?>"}, {"<a><b>"}, cases_t {{0, 0, 0, 3}, {0, 0, 3, 3}}});
+
+    // Alternation order inside one pattern.
+    check_regex_known_(tier, {{"a|ab"}, {"ab"}, cases_t {{0, 0, 0, 1}}});
+    check_regex_known_(tier, {{"ab|a"}, {"ab"}, cases_t {{0, 0, 0, 2}}});
+
+    // Anchors with and without `(?m)`.
+    check_regex_known_(tier, {{"^a"}, {"a\na"}, cases_t {{0, 0, 0, 1}}});
+    check_regex_known_(tier, {{"(?m)^a"}, {"a\na"}, cases_t {{0, 0, 0, 1}, {0, 0, 2, 1}}});
+    check_regex_known_(tier, {{"(?m)a$"}, {"a\na"}, cases_t {{0, 0, 0, 1}, {0, 0, 2, 1}}});
+    check_regex_known_(tier, {{"\\Aa|a\\z"}, {"aba"}, cases_t {{0, 0, 0, 1}, {0, 0, 2, 1}}});
+    check_regex_known_(tier, {{"(?m)^$"}, {"\n\n"}, cases_t {{0, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 2, 0}}});
+
+    // ASCII word boundaries, where a non-ASCII codepoint is no word byte.
+    check_regex_known_(tier, {{"\\bab\\b"}, {"ab ab_ abc ab"}, cases_t {{0, 0, 0, 2}, {0, 0, 11, 2}}});
+    check_regex_known_(tier, {{"\\b"}, {"ab"}, cases_t {{0, 0, 0, 0}, {0, 0, 2, 0}}});
+    check_regex_known_(tier, {{"\\b\xC3\xA9"}, {"a\xC3\xA9 \xC3\xA9"}, cases_t {{0, 0, 1, 2}}});
+
+    // Classes and the dot consume whole codepoints.
+    check_regex_known_(tier, {{"[\xD0\xB0-\xD1\x8F]+"},
+                              {"abc \xD0\xBF\xD1\x80\xD0\xB8\xD0\xB2\xD0\xB5\xD1\x82 \xD0\xBC\xD0\xB8\xD1\x80"},
+                              cases_t {{0, 0, 4, 12}, {0, 0, 17, 6}}});
+    check_regex_known_(tier, {{"."}, {"\xC3\xA9\n\xE2\x82\xAC"}, cases_t {{0, 0, 0, 2}, {0, 0, 3, 3}}});
+    check_regex_known_(
+        tier, {{"\\x{1F600}"}, {"a\xF0\x9F\x98\x80" "b"}, cases_t {{0, 0, 1, 4}}}); // "\x80b" would be one escape
+    check_regex_known_(tier, {{"\\W"}, {"a\xE2\x82\xAC_"}, cases_t {{0, 0, 1, 3}}});
+
+    // Empty matches: never where the previous match ended, nor before a continuation byte.
+    check_regex_known_(tier, {{""}, {"ab"}, cases_t {{0, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 2, 0}}});
+    check_regex_known_(tier, {{"a*"}, {"baaa"}, cases_t {{0, 0, 0, 0}, {0, 0, 1, 3}}});
+    check_regex_known_(tier, {{"a*"}, {"\xC3\xA9"}, cases_t {{0, 0, 0, 0}, {0, 0, 2, 0}}});
+    check_regex_known_(tier, {{"a*"}, {"a\x80"}, cases_t {{0, 0, 0, 1}, {0, 0, 2, 0}}});
+    check_regex_known_(tier, {{"ab|a|"}, {"ab\x80"}, cases_t {{0, 0, 0, 2}, {0, 0, 3, 0}}});
+    check_regex_known_(tier,
+                       {{"a+"}, {"a\x80" "a"}, cases_t {{0, 0, 0, 1}, {0, 0, 2, 1}}}); // "\x80a" would be one escape
+    check_regex_known_(tier, {{"."}, {"\xFF" "a"}, cases_t {{0, 0, 1, 1}}});           // "\xFFa" would be one escape
+
+    // Several haystacks, the empty one among them.
+    check_regex_known_(tier, {{"b"}, {"", "b", "abba"}, cases_t {{1, 0, 0, 1}, {2, 0, 1, 1}, {2, 0, 2, 1}}});
+
+    // A proximity vocabulary, whose start-finding automaton explodes with the gap.
+    check_regex_known_(tier, {{"\\b(?:error|warning)\\b.{0,8}\\b(?:disk|memory)\\b"},
+                              {"error: disk full; warning about memory; fatal disk"},
+                              cases_t {{0, 0, 0, 11}, {0, 0, 18, 20}}});
+
+    // A gap under an unbounded repetition explodes the end-finding DFA, so walks run the PikeVM.
+    {
+        handle_checked_heap_t heap;
+        std::vector<std::string> const exploding {"(?:[a-c ]{1,14}.{0,13}\\s)*a"};
+        std::vector<sz_string_view_t> views;
+        sz_strings_view_t const patterns = strings_over_(exploding, views);
+        sz_regex_engine_t engine;
+        verify(tier.init(&engine, &patterns, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
+        verify(engine.forward_rows == nullptr);
+        verify(regex_matches_(tier, &engine, {"abc abc ab\na", "b c a", "    a\n", "xyz"}) ==
+               cases_t({{0, 0, 0, 12}, {1, 0, 0, 5}, {2, 0, 0, 5}}));
+        sz_regex_engine_free(&engine, nullptr);
+        verify(heap.live_allocations == 0);
+    }
+
+    // Case folding: `ß` folds to `ss`, the Kelvin sign to `k`, and a match inside one codepoint's
+    // folds snaps outward to the whole codepoint, the search resuming past it.
+    check_regex_known_(tier,
+                       {{"\xC3\x9F"},
+                        {"ss", "SS", "\xC3\x9F", "\xE1\xBA\x9E", "STRASSE"},
+                        cases_t {{0, 0, 0, 2}, {1, 0, 0, 2}, {2, 0, 0, 2}, {3, 0, 0, 3}, {4, 0, 4, 2}}},
+                       uncased);
+    check_regex_known_(tier, {{"s"}, {"\xC3\x9Fs"}, cases_t {{0, 0, 0, 2}, {0, 0, 2, 1}}}, uncased);
+    check_regex_known_(tier, {{"sx"}, {"\xC3\x9Fx"}, cases_t {{0, 0, 0, 3}}}, uncased);
+    check_regex_known_(
+        tier, {{"\xE2\x84\xAA"}, {"k", "K", "\xE2\x84\xAA"}, cases_t {{0, 0, 0, 1}, {1, 0, 0, 1}, {2, 0, 0, 3}}},
+        uncased);
+    check_regex_known_(tier,
+                       {{"[a-z]+"}, {"\xE2\x84\xAA" "elvin"}, cases_t {{0, 0, 0, 8}}}, // "\xAAe" would be one escape
+                       uncased);
+    check_regex_known_(tier, {{"Hello"}, {"hELLO world HeLLo"}, cases_t {{0, 0, 0, 5}, {0, 0, 12, 5}}}, uncased);
+
+    // A class matches the multi-codepoint folds of its members,
+    // a negated class the single-codepoint ones only.
+    check_regex_known_(tier, {{"[\xC3\x9F]"}, {"ss", "s", "\xC3\x9F"}, cases_t {{0, 0, 0, 2}, {2, 0, 0, 2}}}, uncased);
+    check_regex_known_(tier, {{"[^\xC3\x9F]"}, {"\xC3\x9F", "a"}, cases_t {{0, 0, 0, 2}, {1, 0, 0, 1}}}, uncased);
+
+    // Boundaries are judged on folded bytes, and no empty match falls inside one codepoint's folds.
+    check_regex_known_(tier, {{"\\b"}, {"\xC3\x9F"}, cases_t {{0, 0, 0, 0}, {0, 0, 2, 0}}}, uncased);
+    check_regex_known_(tier, {{"a\\b"}, {"a\xC3\x9F", "a\xC3\xA9"}, cases_t {{1, 0, 0, 1}}}, uncased);
+    check_regex_known_(tier, {{""}, {"\xC3\x9F"}, cases_t {{0, 0, 0, 0}, {0, 0, 2, 0}}}, uncased);
+
+    // Lookarounds: an excluding line filter, a price after a dollar, whitespace not followed by a
+    // word as GPT tokenizers split it, chained password rules, a nested pair, a negative lookbehind
+    // at the haystack's start, lookarounds beside `\b`, and folded text.
+    check_regex_known_(tier,
+                       {{"(?m)^(?!.*foo).*$"}, {"bar\nfoo bar\nbaz\nfood"}, cases_t {{0, 0, 0, 3}, {0, 0, 12, 3}}});
+    check_regex_known_(tier, {{"(?<=\\$)\\d+"}, {"cost $42 and 7 or $8"}, cases_t {{0, 0, 6, 2}, {0, 0, 19, 1}}});
+    check_regex_known_(tier, {{"\\s+(?!\\S)"}, {"a  b   \nc "}, cases_t {{0, 0, 1, 1}, {0, 0, 4, 3}, {0, 0, 9, 1}}});
+    check_regex_known_(tier, {{"^(?=.*\\d)(?=.*[a-z])(?=.*[A-Z]).{8,}\\z"},
+                              {"Passw0rdX", "password1", "Sh0rt", "NODIGITS"},
+                              cases_t {{0, 0, 0, 9}}});
+    check_regex_known_(tier, {{"a(?=b(?!c))"}, {"abc abd ab"}, cases_t {{0, 0, 4, 1}, {0, 0, 8, 1}}});
+    check_regex_known_(tier, {{"(?<!a)b"}, {"bab", "ab"}, cases_t {{0, 0, 0, 1}}});
+    check_regex_known_(tier, {{"\\b(?=\\d)\\w+\\b(?!-)"}, {"12-34 56 a7"}, cases_t {{0, 0, 3, 2}, {0, 0, 6, 2}}});
+    check_regex_known_(tier,
+                       {{"stra\xC3\x9F" "e(?=\\d)"},              // "\x9Fe" would be one escape
+                        {"STRASSE1 strasse 2 Stra\xC3\x9F" "e3"}, // "\x9Fe" would be one escape
+                        cases_t {{0, 0, 0, 7}, {0, 0, 19, 7}}},
+                       uncased);
+
+    // Refusals name the first malformed pattern, and an empty vocabulary is refused at zero;
+    // a lookaround holds no capturing group, and a vocabulary no more lookarounds than look
+    // bits are left.
+    {
+        struct refusal_t {
+            std::vector<std::string> patterns;
+            sz_size_t index;
+        };
+        handle_checked_heap_t heap;
+        std::string many_lookaheads;
+        for (std::size_t index = 0; index <= sz_regex_lookarounds_limit_k; ++index) many_lookaheads += "(?=a)";
+        for (refusal_t const &refusal : std::vector<refusal_t> {{{}, 0},
+                                                                {{"a", "(b"}, 1},
+                                                                {{"a", "b", "(?i)a"}, 2},
+                                                                {{"(a)\\1"}, 0},
+                                                                {{"(?=(a))"}, 0},
+                                                                {{"a", many_lookaheads}, 1},
+                                                                {{"\\pL"}, 0},
+                                                                {{"a**"}, 0},
+                                                                {{"\xFF"}, 0},
+                                                                {{"[a&&b]"}, 0},
+                                                                {{"(?P<n>a)(?P<n>b)"}, 0},
+                                                                {{"(?:a{100}){100}"}, 0}}) {
+            std::vector<sz_string_view_t> views;
+            sz_strings_view_t const patterns = strings_over_(refusal.patterns, views);
+            sz_regex_engine_t engine;
+            sz_size_t malformed = STRINGZILLA_SIZE_MAX;
+            verify(tier.init(&engine, &patterns, sz_cased_k, &malformed, &heap.allocator, nullptr) ==
+                   sz_invalid_syntax_k);
+            verify(malformed == refusal.index);
+        }
+        verify(heap.live_allocations == 0);
+    }
+
+    // Capacities: offsets stay true whatever fits, and nothing is written past the capacity.
+    {
+        handle_checked_heap_t heap;
+        std::vector<std::string> const patterns {"a", "b+"};
+        std::vector<std::string> const haystacks {std::string(50, 'a'), "", "xbbbx", std::string(30, 'a') + "b"};
+        std::vector<sz_string_view_t> pattern_views, haystack_views;
+        sz_strings_view_t const pattern_strings = strings_over_(patterns, pattern_views);
+        sz_strings_view_t const haystack_strings = strings_over_(haystacks, haystack_views);
+        sz_regex_engine_t engine;
+        verify(tier.init(&engine, &pattern_strings, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
+        std::vector<substrings_case_t> const all = regex_matches_(tier, &engine, haystacks);
+        verify(all.size() == 82);
+        for (std::size_t capacity : {std::size_t(0), std::size_t(1), std::size_t(3), std::size_t(16), std::size_t(63),
+                                     std::size_t(65), all.size() + 64}) {
+            std::vector<sz_match_t> output(capacity + 1);
+            for (sz_match_t &match : output) match.haystack_index = 12345;
+            std::vector<sz_size_t> offsets(haystacks.size() + 1, 777);
+            verify(tier.find(&engine, &haystack_strings, capacity ? output.data() : nullptr, capacity, offsets.data(),
+                             nullptr) == sz_success_k);
+            verify(offsets == std::vector<sz_size_t>({0, 50, 50, 51, 82}));
+            for (std::size_t index = 0; index != std::min(capacity, all.size()); ++index)
+                verify(output[index].byte_offset == all[index].byte_offset &&
+                       output[index].haystack_index == all[index].haystack_index);
+            for (std::size_t index = std::min(capacity, all.size()); index <= capacity; ++index)
+                verify(output[index].haystack_index == 12345);
+        }
+        sz_regex_engine_free(&engine, nullptr);
+        verify(heap.live_allocations == 0);
+    }
+
+    if (rewriting.replace) {
+        // Replacements name groups by number or name, `$$` is one dollar, a missing group is empty.
+        check_regex_replace_(tier, rewriting.replace, {"(\\w+)@(\\w+)", "\\d+"}, {"$2 at $1", "#"},
+                             {"mail bob@host and 42", ""}, {"mail host at bob and #", ""});
+        check_regex_replace_(tier, rewriting.replace, {"(?P<user>\\w+)@(?P<host>\\w+)"}, {"${host}/${user}"},
+                             {"bob@host!"}, {"host/bob!"});
+        check_regex_replace_(tier, rewriting.replace, {"(a)(b)"}, {"[$$|$0|$9|${missing}|$x|$1a|${2}]"}, {"ab"},
+                             {"[$|ab|||$x|aa|b]"});
+
+        // A group that took no part is empty, and a repeated group keeps its last iteration.
+        check_regex_replace_(tier, rewriting.replace, {"(a)|(b)"}, {"[$1|$2]"}, {"ab"}, {"[a|][|b]"});
+        check_regex_replace_(tier, rewriting.replace, {"(a)*"}, {"<$1>"}, {"aaab"}, {"<a>b<>"});
+
+        // Groups read across a lookaround, whose bits the group walk reads as the search did.
+        check_regex_replace_(tier, rewriting.replace, {"(?<=\\$)(\\d+)"}, {"<$1>"}, {"$12 and 34"}, {"$<12> and 34"});
+
+        // Uncased groups snap outward to whole codepoints, as matches do.
+        check_regex_replace_(tier, rewriting.replace, {"(s)(t)"}, {"$2$1"}, {"\xC3\x9FT"}, {"T\xC3\x9F"}, uncased);
+    }
+
+    if (rewriting.extract) {
+        // The first match of the pattern in each haystack, whatever the other patterns match: a row
+        // for the whole match, then one per group that took part, so a group left out differs from
+        // an empty one.
+        check_regex_extract_(tier, rewriting.extract, {"(\\d+)-(\\d+)", "x(y)?"}, 0,
+                             {"a 12-34 b 5-6", "none", "x", "xy"}, cases_t {{0, 0, 2, 5}, {0, 1, 2, 2}, {0, 2, 5, 2}});
+        check_regex_extract_(tier, rewriting.extract, {"(\\d+)-(\\d+)", "x(y)?"}, 1,
+                             {"a 12-34 b 5-6", "none", "x", "xy"}, cases_t {{2, 0, 0, 1}, {3, 0, 0, 2}, {3, 1, 1, 1}});
+        check_regex_extract_(tier, rewriting.extract, {"x(y*)"}, 0, {"x"}, cases_t {{0, 0, 0, 1}, {0, 1, 1, 0}});
+
+        // A match another pattern wins at the same start is not one.
+        check_regex_extract_(tier, rewriting.extract, {"ab", "(a)b"}, 1, {"ab", "b"}, cases_t {});
+        check_regex_extract_(
+            tier, rewriting.extract, {"(?P<k>K)(\\w)"}, 0,
+            {"\xE2\x84\xAA" "a", "ka", "x"}, // "\xAAa" would be one escape
+            cases_t {{0, 0, 0, 4}, {0, 1, 0, 3}, {0, 2, 3, 1}, {1, 0, 0, 2}, {1, 1, 0, 1}, {1, 2, 1, 1}}, uncased);
+    }
+}
+
+/**
+ *  @brief A random pattern of literals, classes, anchors, groups and quantifiers, in the syntax
+ *      RE2 and `regex-syntax` read alike, over @c check_regex_equivalence_'s haystack characters.
+ *
+ *  Groups take only unbounded quantifiers, since counted repetitions of groups grow automata
+ *  exponentially, which tests their size rather than their meaning.
+ */
+inline std::string random_regex_(std::mt19937 &generator, std::size_t depth) {
+    static char const *const atoms[] = {"a",
+                                        "b",
+                                        "c",
+                                        "0",
+                                        "_",
+                                        " ",
+                                        "ab",
+                                        "\\n",
+                                        ".",
+                                        "(?s:.)",
+                                        "\\w",
+                                        "\\W",
+                                        "\\d",
+                                        "\\s",
+                                        "[a-c]",
+                                        "[^a]",
+                                        "[ab0_]",
+                                        "\xC3\xA9",
+                                        "[^a\xC3\xA9]",
+                                        "\\x{1F600}",
+                                        "[\\x{80}-\\x{10FFFF}]",
+                                        "S",
+                                        "\xC3\x9F",
+                                        "[s\xC3\x9F]"};
+    static char const *const quantifiers[] = {"*", "+", "?", "{2}", "{0,2}", "{1,3}", "*?", "+?", "??", "{1,2}?"};
+    static char const *const anchors[] = {"^", "$", "\\b", "\\B", "\\A", "\\z", "(?m:^)", "(?m:$)"};
+    std::uniform_int_distribution<std::size_t> roll(0, 99);
+    std::string pattern;
+    for (std::size_t piece = 0, pieces = 1 + roll(generator) % 4; piece != pieces; ++piece) {
+        std::size_t const kind = roll(generator);
+        if (kind < 10) pattern += anchors[kind % 8];
+        else if (kind < 22 && depth < 2)
+            pattern += "(" + random_regex_(generator, depth + 1) + ")" + (kind % 2 ? quantifiers[kind % 3] : "");
+        else {
+            pattern += atoms[kind % 24];
+            if (kind % 3 == 0) pattern += quantifiers[kind / 3 % 10];
+        }
+    }
+    if (depth < 2 && roll(generator) < 20) pattern += "|" + random_regex_(generator, depth + 1);
+    return pattern;
+}
+
+/** Random vocabularies over random haystacks, with stray continuation bytes, truncated codepoints
+ *  and folding letters, through @p tier against the serial tier, whose start pass is forced
+ *  bit-parallel every other round and whose end walks run the PikeVM every other pair; every third
+ *  vocabulary is uncased. Rewrites are compared too where @p rewriting has them. */
+inline void check_regex_equivalence_(test_context_t &context, regex_tier_t const &tier,
+                                     regex_rewriting_t const &rewriting = {}) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> const characters {
+        "a",    "b",    "c", "0",        "_",           "\x20", "\n", "\xC3\xA9", "\xE2\x82\xAC", "\xF0\x9F\x98\x80",
+        "\x80", "\xC3", "S", "\xC3\x9F", "\xE2\x84\xAA"};
+    for (std::size_t round = 0; round != context.iterations(24); ++round) {
+        std::vector<std::string> patterns, haystacks;
+        for (std::size_t index = 0; index != 1 + round % 4; ++index) patterns.push_back(random_regex_(generator, 0));
+        for (std::size_t index = 0; index != 1 + (round * 5) % 9; ++index)
+            haystacks.push_back(random_string(generator, (index * 11 + round * 3) % 200, characters));
+        // Haystacks past a batch of windows prime every window's edge
+        // and walk their start passes in lockstep.
+        if (round % 8 == 7) haystacks.push_back(random_string(generator, 40000 + round * 7919 % 300000, characters));
+        check_regex_against_serial_(tier, rewriting, patterns, haystacks, round % 3 == 2 ? sz_uncased_k : sz_cased_k,
+                                    round % 2 ? sz_size_t(0) : sz_size_t(sz_regex_reverse_budget_k),
+                                    round % 4 >= 2 ? sz_size_t(0) : sz_size_t(sz_regex_forward_budget_k));
+    }
+}
+
+#pragma endregion Regex
 
 #pragma region UTF8 Runes
 

@@ -41,6 +41,10 @@ struct device_kernels {
     sz_kernel_substrings_find_t substrings_find;
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
+    sz_kernel_regex_counts_t regex_counts;
+    sz_kernel_regex_find_t regex_find;
+    sz_kernel_regex_replace_t regex_replace;
+    sz_kernel_regex_extract_t regex_extract;
     fold_type_ utf8_uncased_fold;
     norm_type_ utf8_norm;
 
@@ -892,7 +896,7 @@ inline void check_overlap_device_streams_(std::mt19937 &generator, auto const &b
  *  Unified storage is readable from the host, so the serial reference runs against these very bytes
  *  and the device verbs accept them without anything being staged.
  */
-struct substrings_device_corpus_t {
+struct device_corpus_t {
 
     /** Every haystack's bytes, back to back. */
     unified_vector<char> arena;
@@ -903,7 +907,7 @@ struct substrings_device_corpus_t {
     /** The haystacks copied into one tape, which every device verb reads. */
     unified_strings_t device_tape;
 
-    substrings_device_corpus_t(device_backend_t const &runtime, std::vector<std::string> const &haystacks)
+    device_corpus_t(device_backend_t const &runtime, std::vector<std::string> const &haystacks)
         : arena(unified_alloc<char>(runtime.unified, runtime.stream)), views(haystacks.size()),
           device_tape(unified_alloc<char>(runtime.unified, runtime.stream)) {
         for (std::size_t index = 0; index != haystacks.size(); ++index) {
@@ -920,22 +924,22 @@ struct substrings_device_corpus_t {
     }
 };
 
-/** A vocabulary both sides address, in memory a kernel can read. */
-struct substrings_device_vocabulary_t {
+/** A vocabulary of needles, patterns or paths both sides address, in memory a kernel can read. */
+struct device_vocabulary_t {
 
-    /** Every needle's bytes, back to back. */
+    /** Every string's bytes, back to back. */
     unified_vector<char> arena;
 
-    /** One view per needle. */
+    /** One view per string. */
     std::vector<sz_string_view_t> views;
 
     /** Hands back memory both the host and the device address. */
     sz_allocator_t unified {};
 
     /** Host accessors, which is all the builder needs. */
-    sz_strings_view_t needles() const { return strings_from_(views); }
+    sz_strings_view_t view() const { return strings_from_(views); }
 
-    substrings_device_vocabulary_t(device_backend_t const &runtime, std::vector<std::string> const &strings)
+    device_vocabulary_t(device_backend_t const &runtime, std::vector<std::string> const &strings)
         : arena(unified_alloc<char>(runtime.unified, runtime.stream)), views(strings.size()), unified(runtime.unified) {
         for (std::size_t index = 0; index != strings.size(); ++index) {
             views[index].length = strings[index].size();
@@ -944,8 +948,8 @@ struct substrings_device_vocabulary_t {
         std::size_t written = 0;
         for (sz_string_view_t &view : views) view.start = arena.data() + written, written += view.length;
     }
-    substrings_device_vocabulary_t(substrings_device_vocabulary_t const &) = delete;
-    substrings_device_vocabulary_t &operator=(substrings_device_vocabulary_t const &) = delete;
+    device_vocabulary_t(device_vocabulary_t const &) = delete;
+    device_vocabulary_t &operator=(device_vocabulary_t const &) = delete;
 };
 
 /**
@@ -966,11 +970,10 @@ struct substrings_device_engines_t {
     sz_substrings_engine_t device {};
     sz_stream_t stream;
 
-    substrings_device_engines_t(substrings_device_vocabulary_t &vocabulary,
-                                sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
-                                auto const &backend)
+    substrings_device_engines_t(device_vocabulary_t &vocabulary, sz_case_sensitivity_t sensitivity,
+                                sz_substrings_overlap_policy_t policy, auto const &backend)
         : stream(backend.runtime.stream) {
-        sz_strings_view_t const needles = vocabulary.needles();
+        sz_strings_view_t const needles = vocabulary.view();
         try {
             verify(sz_substrings_engine_init_serial(&host, &needles, sensitivity, policy,
                                                     STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 0, &heap.allocator,
@@ -1021,7 +1024,7 @@ struct substrings_device_case_t {
 };
 
 /** Sorts one verb's match array into the shape two backends compare position by position. */
-inline std::vector<substrings_device_case_t> substrings_device_matches_sorted_(sz_substrings_match_t const *matches,
+inline std::vector<substrings_device_case_t> substrings_device_matches_sorted_(sz_match_t const *matches,
                                                                                sz_size_t count) {
     std::vector<substrings_device_case_t> reported(count);
     for (std::size_t index = 0; index != count; ++index)
@@ -1036,7 +1039,7 @@ inline std::vector<substrings_device_case_t> substrings_device_matches_serial_(s
                                                                                sz_strings_view_t const *haystacks) {
     std::vector<sz_size_t> offsets(haystacks->count + 1, 0);
     verify(sz_substrings_find_serial(engine, haystacks, nullptr, 0, offsets.data(), nullptr) == sz_success_k);
-    std::vector<sz_substrings_match_t> matches(engine->report->matches_emitted);
+    std::vector<sz_match_t> matches(engine->report->matches_emitted);
     verify(sz_substrings_find_serial(engine, haystacks, matches.data(), matches.size(), offsets.data(), nullptr) ==
            sz_success_k);
     verify(engine->report->shortfall == 0);
@@ -1056,8 +1059,8 @@ inline std::vector<substrings_device_case_t> device_matches_(auto const &backend
     sz_size_t const total = offsets[haystacks->count];
     verify(engine->report->matches_stored + engine->report->shortfall == total);
 
-    unified_vector<sz_substrings_match_t> matches(
-        total, unified_alloc<sz_substrings_match_t>(backend.runtime.unified, backend.runtime.stream));
+    unified_vector<sz_match_t> matches(total,
+                                       unified_alloc<sz_match_t>(backend.runtime.unified, backend.runtime.stream));
     verify(backend.substrings_find(engine, haystacks, matches.data(), matches.size(), offsets.data(),
                                    backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
@@ -1065,50 +1068,10 @@ inline std::vector<substrings_device_case_t> device_matches_(auto const &backend
     return substrings_device_matches_sorted_(matches.data(), total);
 }
 
-/** That every reported match is real, and that no two of them share a byte of one haystack. */
-inline void verify_is_a_cover_(std::vector<substrings_device_case_t> const &reported,
-                               std::vector<substrings_device_case_t> const &every_match) {
-    // Both lists arrive sorted, so the subset test is one merge rather than a scan
-    // per reported match.
-    std::size_t candidate = 0;
-    for (substrings_device_case_t const &match : reported) {
-        while (candidate != every_match.size() && every_match[candidate] < match) ++candidate;
-        verify(candidate != every_match.size() && every_match[candidate] == match &&
-               "A cover reports only matches the overlapping walk found");
-    }
-    for (std::size_t index = 1; index < reported.size(); ++index) {
-        substrings_device_case_t const &previous = reported[index - 1], &current = reported[index];
-        if (previous.haystack_index != current.haystack_index) continue;
-        verify(current.byte_offset >= previous.byte_offset + previous.byte_length &&
-               "A cover's matches share no bytes");
-    }
-    // A cover leaves a match out only for overlapping a kept one, which an empty or thinned
-    // report would not.
-    std::size_t kept = 0;
-    for (substrings_device_case_t const &match : every_match) {
-        while (kept != reported.size() &&
-               (reported[kept].haystack_index < match.haystack_index ||
-                (reported[kept].haystack_index == match.haystack_index &&
-                 reported[kept].byte_offset + reported[kept].byte_length <= match.byte_offset)))
-            ++kept;
-        verify(kept != reported.size() && reported[kept].haystack_index == match.haystack_index &&
-               reported[kept].byte_offset < match.byte_offset + match.byte_length &&
-               "A cover leaves out only matches it overlaps");
-    }
-}
-
-/**
- *  @brief The device's matches, counts and rewrite against serial's, over one corpus and policy.
- *  @param[in] fidelity Whether the device's cover must equal the serial one or just be valid.
- *
- *  A dense vocabulary leaves no gap between matches, so one run of mutually-reaching matches spans
- *  a whole haystack and the device falls back to emitted order rather than running a quadratic
- *  greedy over it.
- */
-inline void check_against_serial_(auto const &backend, substrings_device_corpus_t &corpus,
-                                  substrings_device_vocabulary_t &vocabulary, std::vector<std::string> const &haystacks,
-                                  sz_substrings_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
-                                  sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
+/** The device's matches, counts and rewrite against serial's, over one corpus and policy. */
+inline void check_against_serial_(auto const &backend, device_corpus_t &corpus, device_vocabulary_t &vocabulary,
+                                  std::vector<std::string> const &haystacks, sz_case_sensitivity_t sensitivity,
+                                  sz_substrings_overlap_policy_t policy) {
     substrings_device_engines_t engines(vocabulary, sensitivity, policy, backend);
     sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
     std::vector<substrings_device_case_t> const expected = substrings_device_matches_serial_(
@@ -1116,17 +1079,8 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     std::vector<substrings_device_case_t> const reported = device_matches_(backend, &engines.device,
                                                                            &corpus_device_tape_strings);
     sz_size_t const device_total = reported.size();
-    if (fidelity == sz_substrings_cover_exact_k) {
-        verify(reported.size() == expected.size());
-        for (std::size_t index = 0; index != expected.size(); ++index) verify(reported[index] == expected[index]);
-    }
-    else {
-        // Every match the overlapping walk found, which is what a cover may draw from.
-        substrings_device_engines_t overlapping(vocabulary, sensitivity, sz_substrings_overlapping_k, backend);
-        verify_is_a_cover_(reported, substrings_device_matches_serial_(&overlapping.host, &corpus_device_tape_strings));
-        overlapping.reset();
-        verify(overlapping.heap.live_allocations == 0);
-    }
+    verify(reported.size() == expected.size());
+    for (std::size_t index = 0; index != expected.size(); ++index) verify(reported[index] == expected[index]);
 
     // The counts come from the boundaries rather than from the match list, so they can
     // disagree with it.
@@ -1139,7 +1093,7 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
                                      backend.runtime.stream) == sz_success_k);
     join_(backend.runtime, backend.runtime.stream);
     for (std::size_t index = 0; index != haystacks.size(); ++index)
-        if (fidelity == sz_substrings_cover_exact_k) verify(device_counts[index] == serial_counts[index]);
+        verify(device_counts[index] == serial_counts[index]);
 
     // The dispatched verb picks the same kernel by the engine's recorded capability, so both agree.
     unified_vector<sz_size_t> dispatched_counts(
@@ -1156,14 +1110,13 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
     }
 
     if (policy == sz_substrings_overlapping_k) return;
-    if (fidelity != sz_substrings_cover_exact_k) return;
 
     // The rewrite, whose device path owns a block scan and a tiled copy the serial one has
     // no analogue for.
     std::vector<std::string> replacements;
     for (std::size_t index = 0; index != vocabulary.views.size(); ++index)
         replacements.push_back(index % 3 == 0 ? std::string() : "<" + std::to_string(index) + ">");
-    substrings_device_corpus_t replacement_corpus(backend.runtime, replacements);
+    device_corpus_t replacement_corpus(backend.runtime, replacements);
 
     unified_vector<sz_size_t> device_offsets(haystacks.size() + 1, 0,
                                              unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
@@ -1203,10 +1156,8 @@ inline void check_against_serial_(auto const &backend, substrings_device_corpus_
  *  The device sums in fixed point and the host in ascending needle order, so the two agree to
  *  rounding rather than bit for bit.
  */
-inline void check_bm25_against_serial_(auto const &backend, substrings_device_corpus_t &corpus,
-                                       substrings_device_vocabulary_t &vocabulary,
-                                       std::vector<std::string> const &haystacks,
-                                       sz_substrings_case_sensitivity_t sensitivity) {
+inline void check_bm25_against_serial_(auto const &backend, device_corpus_t &corpus, device_vocabulary_t &vocabulary,
+                                       std::vector<std::string> const &haystacks, sz_case_sensitivity_t sensitivity) {
     substrings_device_engines_t engines(vocabulary, sensitivity, sz_substrings_overlapping_k, backend);
     std::size_t const needles_count = engines.host.needles_count;
     unified_vector<sz_f32_t> weights(needles_count,
@@ -1243,17 +1194,12 @@ inline void check_bm25_against_serial_(auto const &backend, substrings_device_co
 
 /** One vocabulary against one corpus under every policy. */
 inline void check_policies_(auto const &backend, std::vector<std::string> const &haystacks,
-                            std::vector<std::string> const &needles, sz_substrings_case_sensitivity_t sensitivity,
-                            sz_substrings_cover_fidelity_t fidelity = sz_substrings_cover_exact_k) {
-    substrings_device_corpus_t corpus(backend.runtime, haystacks);
-    substrings_device_vocabulary_t vocabulary(backend.runtime, needles);
-    // An overlapping walk reports every match whatever the density, so it is
-    // always compared exactly.
+                            std::vector<std::string> const &needles, sz_case_sensitivity_t sensitivity) {
+    device_corpus_t corpus(backend.runtime, haystacks);
+    device_vocabulary_t vocabulary(backend.runtime, needles);
     check_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity, sz_substrings_overlapping_k);
-    check_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity, sz_substrings_leftmost_longest_k,
-                          fidelity);
-    check_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity, sz_substrings_leftmost_first_k,
-                          fidelity);
+    check_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity, sz_substrings_leftmost_longest_k);
+    check_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity, sz_substrings_leftmost_first_k);
     check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sensitivity);
 }
 
@@ -1265,17 +1211,17 @@ inline void check_policies_(auto const &backend, std::vector<std::string> const 
 inline void test_substrings_device_unit(auto const &backend) {
     // The device walk is chunked and the host walk is not, so a match spanning a chunk boundary is
     // the one thing this can get wrong that the CPU suite cannot see.
-    check_policies_(backend, {"ushers"}, {"he", "she", "his", "hers"}, sz_substrings_cased_k);
-    check_policies_(backend, {"Straße", "STRASSE"}, {"strasse", "sse", "s"}, sz_substrings_uncased_k);
+    check_policies_(backend, {"ushers"}, {"he", "she", "his", "hers"}, sz_cased_k);
+    check_policies_(backend, {"Straße", "STRASSE"}, {"strasse", "sse", "s"}, sz_uncased_k);
 
     // The Kelvin sign folds to one ASCII byte, contracting three source bytes into one folded one.
-    check_policies_(backend, {"\xE2\x84\xAA elvin", "kelvin"}, {"k", "kelvin"}, sz_substrings_uncased_k);
+    check_policies_(backend, {"\xE2\x84\xAA elvin", "kelvin"}, {"k", "kelvin"}, sz_uncased_k);
 
     // Malformed UTF-8 in the haystack, which an uncased walk resynchronizes past byte by byte.
     check_policies_(backend,
                     {std::string("ab\xFF" "cd", 5), // "\xFFc" is one escape
                      "abcd"},
-                    {"ab", "cd"}, sz_substrings_uncased_k);
+                    {"ab", "cd"}, sz_uncased_k);
 }
 
 /** Random corpora wide enough that the planner cuts several chunks per haystack. */
@@ -1285,7 +1231,7 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
     std::string const folded_tile = std::string(63, 'x') + "ßſKﬃStraße .";
     for (unsigned repeat = 0; repeat != 128; ++repeat) folded_edges += folded_tile;
     check_policies_(backend, {"sßſKﬃStraße", std::string("s\xc0\x80SS", 5), folded_edges},
-                    {"s", "ss", "k", "ffi", "strasse"}, sz_substrings_uncased_k, sz_substrings_cover_exact_k);
+                    {"s", "ss", "k", "ffi", "strasse"}, sz_uncased_k);
 
     char const *const alphabets[] = {"ab", "abcdefgh", "abcdefghijklmnopqrstuvwxyz"};
     std::size_t const rounds = context.iterations(8);
@@ -1308,8 +1254,8 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
         std::string uppercased = haystacks.front();
         for (char &character : uppercased) character = (char)std::toupper((unsigned char)character);
         haystacks.push_back(uppercased);
-        check_policies_(backend, haystacks, needles, sz_substrings_cased_k, sz_substrings_cover_approximate_k);
-        check_policies_(backend, haystacks, needles, sz_substrings_uncased_k, sz_substrings_cover_approximate_k);
+        check_policies_(backend, haystacks, needles, sz_cased_k);
+        check_policies_(backend, haystacks, needles, sz_uncased_k);
     }
 
     // A vocabulary wider than a block's tally, so needles hash into shared slots and
@@ -1332,10 +1278,10 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
         for (std::string const &needle : needles) every_needle += needle + "#";
         haystacks[0] = every_needle;
         haystacks.insert(haystacks.begin() + 64, every_needle);
-        substrings_device_corpus_t corpus(backend.runtime, haystacks);
-        substrings_device_vocabulary_t vocabulary(backend.runtime, needles);
+        device_corpus_t corpus(backend.runtime, haystacks);
+        device_vocabulary_t vocabulary(backend.runtime, needles);
         verify(vocabulary.views.size() > 4096);
-        check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_substrings_cased_k);
+        check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_cased_k);
     }
 
     // Documents long enough for a cluster of blocks to walk each of them together, among short ones
@@ -1345,15 +1291,15 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
         for (std::size_t index = 0; index != 20; ++index)
             haystacks.push_back(random_string(generator, index % 7 == 3 ? (std::size_t)3 << 20 : 512 + index * 31,
                                               "abcdefghijklmnopqrstuvwxyz"));
-        substrings_device_corpus_t corpus(backend.runtime, haystacks);
+        device_corpus_t corpus(backend.runtime, haystacks);
         for (std::size_t const needles_count : {(std::size_t)300, (std::size_t)6000}) {
             std::vector<std::string> needles;
             for (std::size_t index = 0; index != needles_count; ++index)
                 needles.push_back(random_string(generator, 2 + index % 4, "abcdefghijklmnopqrstuvwxyz"));
             std::sort(needles.begin(), needles.end());
             needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
-            substrings_device_vocabulary_t vocabulary(backend.runtime, needles);
-            check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_substrings_cased_k);
+            device_vocabulary_t vocabulary(backend.runtime, needles);
+            check_bm25_against_serial_(backend, corpus, vocabulary, haystacks, sz_cased_k);
         }
     }
 
@@ -1369,7 +1315,7 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
             for (std::size_t offset = 61; offset < haystack.size(); offset += 997) haystack[offset] = 'N';
             haystacks.push_back(haystack);
         }
-        check_policies_(backend, haystacks, needles, sz_substrings_cased_k, sz_substrings_cover_approximate_k);
+        check_policies_(backend, haystacks, needles, sz_cased_k);
     }
 
     // One haystack far wider than a chunk, so the boundary case is hit many times over in
@@ -1377,9 +1323,8 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
     {
         std::vector<std::string> const needles {"the", "there", "here", "her", "he"};
         std::vector<std::string> haystacks {random_string(generator, 1 << 20, "the ")};
-        // No needle reaches across another's end, so the cover is exact and the rewrite
-        // spans many tiles.
-        check_policies_(backend, haystacks, needles, sz_substrings_cased_k);
+        // The rewrite spans many tiles.
+        check_policies_(backend, haystacks, needles, sz_cased_k);
     }
 }
 
@@ -1387,9 +1332,9 @@ inline void test_substrings_device_equivalence(test_context_t &context, auto con
 inline void test_substrings_device_safety(auto const &backend) {
     std::vector<std::string> const needles {"ab", "cd"};
     std::vector<std::string> const haystacks {"abcdabcd"};
-    substrings_device_corpus_t corpus(backend.runtime, haystacks);
-    substrings_device_vocabulary_t vocabulary(backend.runtime, needles);
-    substrings_device_engines_t engines(vocabulary, sz_substrings_cased_k, sz_substrings_overlapping_k, backend);
+    device_corpus_t corpus(backend.runtime, haystacks);
+    device_vocabulary_t vocabulary(backend.runtime, needles);
+    substrings_device_engines_t engines(vocabulary, sz_cased_k, sz_substrings_overlapping_k, backend);
 
     // A device verb refuses host memory rather than reading it from a kernel, whatever
     // else is resident.
@@ -1438,7 +1383,7 @@ inline void test_substrings_device_safety(auto const &backend) {
     // refused before anything is launched.
     {
         std::vector<std::string> const replacements {"x", "y"};
-        substrings_device_corpus_t replacement_corpus(backend.runtime, replacements);
+        device_corpus_t replacement_corpus(backend.runtime, replacements);
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, 0,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
         sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
@@ -1451,11 +1396,11 @@ inline void test_substrings_device_safety(auto const &backend) {
     // A vocabulary a round cannot emit within its budget leaves every later kernel retired, so the
     // outputs keep whatever they held and the report alone says the round did not fit.
     {
-        sz_strings_view_t const needles = vocabulary.needles();
+        sz_strings_view_t const needles = vocabulary.view();
         sz_substrings_engine_t tiny {};
         unified_vector<sz_size_t> offsets(haystacks.size() + 1, STRINGZILLA_SIZE_MAX,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        verify(sz_substrings_engine_init(&tiny, &needles, sz_substrings_cased_k, sz_substrings_leftmost_first_k,
+        verify(sz_substrings_engine_init(&tiny, &needles, sz_cased_k, sz_substrings_leftmost_first_k,
                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 1, 0, backend.runtime.capabilities,
                                          &vocabulary.unified, backend.runtime.stream) == sz_success_k);
         sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
@@ -1470,12 +1415,12 @@ inline void test_substrings_device_safety(auto const &backend) {
     // The arena is sized for a haystacks budget when the engine is built, so a round carrying more
     // is refused rather than grown under a stream that may still be reading it.
     {
-        substrings_device_corpus_t pair(backend.runtime, std::vector<std::string> {"abcd", "abcd"});
-        sz_strings_view_t const needles = vocabulary.needles();
+        device_corpus_t pair(backend.runtime, std::vector<std::string> {"abcd", "abcd"});
+        sz_strings_view_t const needles = vocabulary.view();
         sz_substrings_engine_t narrow {};
         unified_vector<sz_size_t> offsets(3, 0,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, backend.runtime.stream));
-        verify(sz_substrings_engine_init(&narrow, &needles, sz_substrings_cased_k, sz_substrings_overlapping_k,
+        verify(sz_substrings_engine_init(&narrow, &needles, sz_cased_k, sz_substrings_overlapping_k,
                                          STRINGZILLA_SUBSTRINGS_HOT_STATES_AUTO, 0, 1, backend.runtime.capabilities,
                                          &vocabulary.unified, backend.runtime.stream) == sz_success_k);
         sz_strings_view_t const pair_device_tape_strings = pair.device_tape.view().raw;
@@ -1488,6 +1433,357 @@ inline void test_substrings_device_safety(auto const &backend) {
 }
 
 #pragma endregion Substrings Checks
+
+#pragma region Regex Checks
+
+/** One vocabulary of patterns compiled twice under one case sensitivity:
+ *  for the host and for @c stream 's device. */
+struct regex_device_engines_t {
+
+    /** What the serial oracle's engine is built from. */
+    handle_checked_heap_t heap;
+
+    /** The serial oracle's engine, in plain host memory. */
+    sz_regex_engine_t host {};
+
+    /** The device's engine. */
+    sz_regex_engine_t device {};
+    sz_stream_t stream;
+
+    regex_device_engines_t(device_vocabulary_t &vocabulary, auto const &backend, sz_case_sensitivity_t sensitivity)
+        : stream(backend.runtime.stream) {
+        sz_strings_view_t const patterns = vocabulary.view();
+        try {
+            verify(sz_regex_engine_init_serial(&host, &patterns, sensitivity, nullptr, &heap.allocator, nullptr) ==
+                   sz_success_k);
+            verify(sz_regex_engine_init(&device, &patterns, sensitivity, nullptr, backend.runtime.capabilities,
+                                        &vocabulary.unified, backend.runtime.stream) == sz_success_k);
+        }
+        catch (...) {
+            reset();
+            throw;
+        }
+    }
+    regex_device_engines_t(regex_device_engines_t const &) = delete;
+    regex_device_engines_t &operator=(regex_device_engines_t const &) = delete;
+    ~regex_device_engines_t() noexcept { reset(); }
+    void reset() noexcept {
+        sz_regex_engine_free(&device, stream);
+        sz_regex_engine_free(&host, nullptr);
+    }
+};
+
+/** Whether two located matches, or two rows of groups, are one. */
+inline bool regex_same_match_(sz_match_t const &device, sz_match_t const &serial) {
+    return device.haystack_index == serial.haystack_index && device.needle_index == serial.needle_index &&
+           device.byte_offset == serial.byte_offset && device.byte_length == serial.byte_length;
+}
+
+/** The device's boundaries, matches, counts, rewrites and rows of groups against serial's, in
+ *  order, under capacities holding them all and fewer, which leave the rest unwritten. */
+inline void check_regex_against_serial_(auto const &backend, std::vector<std::string> const &haystacks,
+                                        std::vector<std::string> const &patterns,
+                                        sz_case_sensitivity_t sensitivity = sz_cased_k) {
+    device_corpus_t corpus(backend.runtime, haystacks);
+    device_vocabulary_t vocabulary(backend.runtime, patterns);
+    regex_device_engines_t engines(vocabulary, backend, sensitivity);
+    sz_strings_view_t const tape = corpus.device_tape.view().raw;
+    sz_stream_t const stream = backend.runtime.stream;
+    std::size_t const count = haystacks.size();
+
+    std::vector<sz_size_t> serial_offsets(count + 1, 0);
+    verify(sz_regex_find_serial(&engines.host, &tape, nullptr, 0, serial_offsets.data(), nullptr) == sz_success_k);
+    std::size_t const total = serial_offsets[count];
+    std::vector<sz_match_t> serial_matches(total);
+    verify(sz_regex_find_serial(&engines.host, &tape, serial_matches.data(), total, serial_offsets.data(), nullptr) ==
+           sz_success_k);
+
+    sz_match_t const untouched {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
+    for (std::size_t const capacity : {total, total / 2}) {
+        unified_vector<sz_size_t> offsets(count + 1, STRINGZILLA_SIZE_MAX,
+                                          unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+        unified_vector<sz_match_t> matches(total + 1, untouched,
+                                           unified_alloc<sz_match_t>(backend.runtime.unified, stream));
+        verify(backend.regex_find(&engines.device, &tape, matches.data(), capacity, offsets.data(), stream) ==
+               sz_success_k);
+        join_(backend.runtime, stream);
+        for (std::size_t index = 0; index <= count; ++index) verify(offsets[index] == serial_offsets[index]);
+        for (std::size_t index = 0; index != capacity; ++index)
+            verify(regex_same_match_(matches[index], serial_matches[index]));
+        for (std::size_t index = capacity; index <= total; ++index)
+            verify(matches[index].haystack_index == STRINGZILLA_SIZE_MAX);
+    }
+
+    // The dispatched verb runs the kernel of the capability the engine recorded, so both agree.
+    unified_vector<sz_size_t> device_counts(count, 0, unified_alloc<sz_size_t>(backend.runtime.unified, stream)),
+        dispatched_counts(count, 0, unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+    verify(backend.regex_counts(&engines.device, &tape, device_counts.data(), 1, stream) == sz_success_k);
+    verify(sz_regex_counts(&engines.device, &tape, dispatched_counts.data(), 1, stream) == sz_success_k);
+    join_(backend.runtime, stream);
+    for (std::size_t index = 0; index != count; ++index)
+        verify(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
+               dispatched_counts[index] == device_counts[index]);
+
+    // Every match rewritten, the groups a replacement names read from its own span, under a target
+    // holding the whole rewrite and one holding a third of it.
+    std::vector<std::string> templates;
+    for (std::size_t index = 0; index != patterns.size(); ++index)
+        templates.push_back(index % 3 == 0 ? "<$0|$1>" : index % 3 == 1 ? "${2}~$$" : "${rest}$1x");
+    device_corpus_t replacements(backend.runtime, templates);
+    sz_strings_view_t const replacements_tape = replacements.device_tape.view().raw;
+    std::vector<sz_size_t> serial_rewritten(count + 1, 0);
+    verify(sz_regex_replace_serial(&engines.host, &tape, &replacements_tape, nullptr, 0, serial_rewritten.data(),
+                                   nullptr) == sz_success_k);
+    std::size_t const bytes = serial_rewritten[count];
+    std::string serial_target(bytes, '\0');
+    verify(sz_regex_replace_serial(&engines.host, &tape, &replacements_tape, serial_target.data(), bytes,
+                                   serial_rewritten.data(), nullptr) == sz_success_k);
+    for (std::size_t const capacity : {bytes, bytes / 3}) {
+        unified_vector<sz_size_t> offsets(count + 1, STRINGZILLA_SIZE_MAX,
+                                          unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+        unified_vector<char> target(bytes + 1, '\x01', unified_alloc<char>(backend.runtime.unified, stream));
+        verify(backend.regex_replace(&engines.device, &tape, &replacements_tape, target.data(), capacity,
+                                     offsets.data(), stream) == sz_success_k);
+        join_(backend.runtime, stream);
+        for (std::size_t index = 0; index <= count; ++index) verify(offsets[index] == serial_rewritten[index]);
+        verify(std::equal(target.begin(), target.begin() + capacity, serial_target.begin()));
+        verify(std::all_of(target.begin() + capacity, target.end(), [](char byte) { return byte == '\x01'; }));
+    }
+
+    // Every pattern's groups in each haystack's first match of it,
+    // under capacities holding all rows and half.
+    for (std::size_t pattern = 0; pattern != patterns.size(); ++pattern) {
+        std::vector<sz_size_t> serial_rows_offsets(count + 1, 0);
+        verify(sz_regex_extract_serial(&engines.host, &tape, pattern, nullptr, 0, serial_rows_offsets.data(),
+                                       nullptr) == sz_success_k);
+        std::size_t const rows_count = serial_rows_offsets[count];
+        std::vector<sz_match_t> serial_rows(rows_count);
+        verify(sz_regex_extract_serial(&engines.host, &tape, pattern, serial_rows.data(), rows_count,
+                                       serial_rows_offsets.data(), nullptr) == sz_success_k);
+        for (std::size_t const capacity : {rows_count, rows_count / 2}) {
+            unified_vector<sz_size_t> offsets(count + 1, STRINGZILLA_SIZE_MAX,
+                                              unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+            unified_vector<sz_match_t> rows(rows_count + 1, untouched,
+                                            unified_alloc<sz_match_t>(backend.runtime.unified, stream));
+            verify(backend.regex_extract(&engines.device, &tape, pattern, rows.data(), capacity, offsets.data(),
+                                         stream) == sz_success_k);
+            join_(backend.runtime, stream);
+            for (std::size_t index = 0; index <= count; ++index) verify(offsets[index] == serial_rows_offsets[index]);
+            for (std::size_t index = 0; index != capacity; ++index)
+                verify(regex_same_match_(rows[index], serial_rows[index]));
+            for (std::size_t index = capacity; index <= rows_count; ++index)
+                verify(rows[index].haystack_index == STRINGZILLA_SIZE_MAX);
+        }
+    }
+    engines.reset();
+    verify(engines.heap.live_allocations == 0);
+}
+
+/** Priority across patterns, empty matches, anchors and word boundaries, walks wider than a chunk,
+ *  folded walks, the fallbacks of vocabularies past both state budgets, and lookarounds. */
+inline void test_regex_device_unit(auto const &backend) {
+    check_regex_against_serial_(backend, {"", "ab", "Hello World 42 \"quoted\" x", "line\nnext\n\n"},
+                                {"\\b[A-Z][a-z]+\\b", "[0-9]+", "\"[^\"]*\""});
+    check_regex_against_serial_(backend, {"Hello World", "x Zeta9 99", ""},
+                                {"(?<first>[A-Z])(?<rest>[a-z]+)", "([0-9])([0-9])?", "(?<rest>\\w)\\w"});
+
+    // A folded walk snaps a start or an end inside one codepoint's folds outward, so `ß` meets "ss"
+    // and the KELVIN SIGN meets "k", and rewrites and groups copy the source bytes.
+    std::vector<std::string> const folded {"Stra\xC3\x9F" "e STRASSE strasse",   // "\x9Fe" is one escape
+                                           "\xE2\x84\xAA" "elvin kelvin KELVIN", // "\xAAe" is one escape
+                                           "\xC3\x9F\xC3\x9F ss SS", "", "\xD0\x96\xD0\xB6 \xC3\x89\xC3\xA9 \x80"};
+    check_regex_against_serial_(backend, folded, {"stra(ss|\xC3\x9F)e", "\\bk([a-z]+)", "(s)+"}, sz_uncased_k);
+
+    // Vocabularies past both state budgets walk position sets for starts and a PikeVM for ends.
+    std::string const gaps = "ab cab a\nb ca " + std::string(300, 'c') + " a" + std::string(40, ' ') + "a";
+    for (sz_case_sensitivity_t const sensitivity : {sz_cased_k, sz_uncased_k})
+        check_regex_against_serial_(backend,
+                                    {"ab0cdefghijklmnopq7", "a b c a\nab  ca",
+                                     "Stra\xC3\x9F" "e x9", // "\x9Fe" is one escape
+                                     gaps},
+                                    {"[a-z].{16}[0-9]", "(?:[a-c ]{1,14}.{0,13}\\s)*(a)"}, sensitivity);
+
+    // Empty matches between bytes, never inside a codepoint, nor where the previous match ended.
+    check_regex_against_serial_(backend,
+                                {"", "a", "baaab", "\xD0\xB6" "a\xD0\xB6", "\xFF\x80"}, // "\xB6a" is one escape
+                                {"a*", "b|"});
+    check_regex_against_serial_(backend, {"one\ntwo\n", "x", "  word  "}, {"(?m)^\\w+$", "\\b", "\\z"});
+
+    // A quoted span much wider than a chunk leaves end walks reaching chunk edges, and a long line
+    // keeps the start-finding walk from collapsing within one.
+    std::string const quoted = "\"" + std::string(9000, 'x') + "\" tail \"" + std::string(70, 'y') + "\"";
+    std::string const line = std::string(5000, 'a') + " error " + std::string(5000, 'b') + "\n" + std::string(300, 'c');
+    check_regex_against_serial_(backend, {quoted, line}, {"\"[^\"]*\"", ".*error.*", "[a-c]{3}"});
+
+    // Lookarounds read the table their passes fill: nested, negated under line anchors, over folds,
+    // and with contexts open across many chunks, a lookbehind's after its quote and a lookahead's
+    // before its own.
+    check_regex_against_serial_(backend,
+                                {"cost $42 and $7.50 or 3", "key: value\nother:x", "abc xbc bc  c", "price:$5", ""},
+                                {"(?<=\\$)\\d+", "\\w+(?=:)", "(?<!x)bc", "\\s+(?!\\S)"});
+    check_regex_against_serial_(backend, {"abc bbc bc xc", "ab bc", "bbbc"}, {"(?<=(?<!a)b)c", "(?=b(?!c))b"});
+    check_regex_against_serial_(backend, {"one foo\ntwo\nthree food\n", "foo", ""}, {"(?m)^(?!.*foo).*$"});
+    check_regex_against_serial_(backend,
+                                {"Stra\xC3\x9F" "e STRASSE strasse", // "\x9Fe" is one escape
+                                 "\xE2\x84\xAA" "elvin kelvin",      // "\xAAe" is one escape
+                                 "\xC3\x9Fs SSs ss"},
+                                {"(?<=stra)(ss|\xC3\x9F)e", "k(?=elvin)", "(?<=\xC3\x9F)s"}, sz_uncased_k);
+    std::string const spans = "\"" + std::string(4000, 'x') + "q" + std::string(5000, 'y') + "\" q \"" +
+                              std::string(70, 'q') + "\" " + std::string(3000, 'q');
+    for (sz_case_sensitivity_t const sensitivity : {sz_cased_k, sz_uncased_k})
+        check_regex_against_serial_(backend, {spans, line, quoted},
+                                    {"(?<=\"[^\"]*)q+", "x(?=[^\"]*\")", "(?<=error.*)b{3}", "(?<!\"[^\"]*)y"},
+                                    sensitivity);
+}
+
+/** Random vocabularies over corpora of short haystacks among long ones, and a corpus past a segment
+ *  of every vendor, whose carry hands the next segment where a straddling haystack resumes. */
+inline void test_regex_device_equivalence(test_context_t &context, auto const &backend) {
+    std::mt19937 &generator = context.generator;
+    static char const *const pool[] = {
+        "a+",    "ab|ba",  "[abc]{2,4}", "\\bab\\b", "a*",   "(?:ab)+c?",          "[^a ]+", "\"[^\"]*\"",
+        "^.*a$", "(?m)^b", "a.{0,6}b",   "\\d+",     "c\\s", "\xD0\xB6+|\xC3\xA9", ".",      "(a|ab)(c|bcd)"};
+    std::vector<std::vector<std::string>> const alphabets {
+        {"a", "b"},
+        {"a", "b", "c", " ", "\n", "\""},                            // " " is one literal
+        {"a", "b", "0", " ", "\xD0\xB6", "\xC3\xA9", "\n", "\x80"}}; // " " is one literal
+    for (std::size_t round = 0; round != context.iterations(16); ++round) {
+        std::vector<std::string> patterns, haystacks;
+        for (std::size_t index = 0; index != 1 + round % 4; ++index)
+            patterns.push_back(pool[generator() % (sizeof(pool) / sizeof(pool[0]))]);
+        std::vector<std::string> const &alphabet = alphabets[round % alphabets.size()];
+        for (std::size_t index = 0; index != 1 + round % 40; ++index)
+            haystacks.push_back(random_string(generator, generator() % 64, alphabet));
+        for (std::size_t index = 0; index != round % 3; ++index)
+            haystacks.push_back(random_string(generator, 4096 + generator() % 60000, alphabet));
+        check_regex_against_serial_(backend, haystacks, patterns);
+    }
+
+    // Segments span a power of two of slots on every vendor, 2^22 on Metal and 2^24 on an H100, a
+    // slot per byte and one per haystack ahead of its bytes. At every power from 2^20 on, a quoted
+    // line alternately ends exactly at that edge or crosses it, so any vendor's first two edges
+    // see both, each followed by an empty match where it ends, which the carry from the segment
+    // before must refuse.
+    std::string const prefix(100, 'a');
+    std::string haystack = random_string(generator, ((std::size_t)1 << 26) + 4096, "abcdefgh ");
+    for (std::size_t offset = 997; offset < haystack.size(); offset += 10007) haystack[offset] = '7';
+    std::size_t const first_slot = prefix.size() + 1;
+    for (std::size_t power = 20; power <= 26; ++power) {
+        std::size_t const edge = ((std::size_t)1 << power) - first_slot;
+        if (power % 2) haystack[edge - 40] = '"', haystack[edge + 40] = '"', haystack[edge + 41] = '\n';
+        else haystack[edge - 50] = '"', haystack[edge - 2] = '"', haystack[edge - 1] = '\n';
+    }
+    check_regex_against_serial_(backend, {prefix, haystack, "\"x\""}, {"\"[^\"]*\"\n?", "(?m)^", "[0-9]+"});
+}
+
+/**
+ *  @brief One unbalanced batch per kind of engine: a haystack of a mebibyte per unit of
+ *      @c STRINGZILLA_SCALE between thousands of empty and few-byte ones.
+ *
+ *  Half of that haystack is one quoted span that the start-finding walk, the end walks and the
+ *  lookaround passes all carry across thousands of chunks. The kinds are a cased DFA, an
+ *  uncased one, position sets for the starts, a PikeVM for the ends, lookarounds ahead of the
+ *  span, inside it, and before digits as DFA columns, and five of them, more than the columns
+ *  hold, on positions and the PikeVM. The serial walks that check them cost most of the time,
+ *  so the haystack crosses a segment only from a scale of 8 on Metal and 32 on an H100. A last
+ *  batch holds a haystack of 9 MiB per unit of scale, whose end walks outlive the lookaround
+ *  table's window of two segments and slide past it: on Metal at the default scale, on an H100
+ *  from a scale of 4.
+ */
+inline void test_regex_device_unbalanced(test_context_t &context, auto const &backend) {
+    std::mt19937 &generator = context.generator;
+    std::vector<std::string> const words {"lorem",
+                                          "ipsum",
+                                          " ",
+                                          " ",
+                                          "\n",
+                                          "Hello",
+                                          "World",
+                                          "42",
+                                          "2026",
+                                          "x",
+                                          "q",
+                                          "abc",
+                                          "y_z",
+                                          "Strasse",
+                                          "stra\xC3\x9F" "e",      // "\x9Fe" is one escape
+                                          "\xE2\x84\xAA" "elvin"}; // "\xAAe" is one escape
+    std::size_t const length = context.iterations((std::size_t)1 << 20) + 4096;
+    std::string haystack;
+    while (haystack.size() < length) haystack += words[generator() % words.size()];
+    haystack[haystack.size() / 4] = '"', haystack[haystack.size() / 4 * 3] = '"';
+    std::vector<std::string> haystacks;
+    for (std::size_t index = 0; index != 4096; ++index) {
+        if (index == 2048) haystacks.push_back(haystack);
+        haystacks.push_back(random_string(generator, generator() % 8, "aq\"x1 "));
+    }
+    check_regex_against_serial_(backend, haystacks, {"\"[^\"]*\"", "[0-9]+", "\\b[A-Z][a-z]+\\b"});
+    check_regex_against_serial_(backend, haystacks, {"\"[^\"]*\"", "stra(ss|\xC3\x9F)e", "\\bk[a-z]+"}, sz_uncased_k);
+    check_regex_against_serial_(backend, haystacks, {"\"[^\"]*\"", "x.{16}[0-9]"});
+    check_regex_against_serial_(backend, haystacks, {"\"[^\"]*\"", "(?:[a-c ]{1,14}.{0,13}\\s)*a"});
+    check_regex_against_serial_(backend, haystacks, {"(?<=\"[^\"]*)q", "x(?=[^\"]*\")", "\\d+(?!\\d)"});
+    check_regex_against_serial_(backend, haystacks,
+                                {"(?<=\"[^\"]*)q", "x(?=[^\"]*\")", "\\d+(?!\\d)", "(?<!\\w)[A-Z]", "z(?=\\s)"});
+
+    // The first `q` opens a walk that no byte kills, matching up to digits spread through the
+    // haystack and one near its end, so it pauses at the window's end and resumes in the next one;
+    // whitespace runs test a lookahead too.
+    std::string sliding = random_string(generator, context.iterations((std::size_t)9 << 20) + 4096, "abcdefgh \n");
+    sliding[100] = 'q', sliding[sliding.size() - 7] = '9';
+    for (std::size_t offset = 1 << 16; offset < sliding.size(); offset += 1 << 16)
+        sliding[offset] = static_cast<char>('0' + offset % 7);
+    std::vector<std::string> sliding_batch;
+    for (std::size_t index = 0; index != 1024; ++index) {
+        if (index == 512) sliding_batch.push_back(sliding);
+        sliding_batch.push_back(random_string(generator, generator() % 8, "q1 \n"));
+    }
+    check_regex_against_serial_(backend, sliding_batch, {"(?s)q.*(?<=\\d)", "\\s+(?!\\S)"});
+}
+
+/** What the device verbs refuse: outputs a kernel cannot reach, a zero stride, replacements or a
+ *  pattern the vocabulary lacks, and groups of a match wider than the lookaround table's window. */
+inline void test_regex_device_safety(auto const &backend) {
+    sz_stream_t const stream = backend.runtime.stream;
+    device_corpus_t corpus(backend.runtime, {"abcdabcd"});
+    device_vocabulary_t vocabulary(backend.runtime, {"ab", "cd"});
+    regex_device_engines_t engines(vocabulary, backend, sz_cased_k);
+    sz_strings_view_t const tape = corpus.device_tape.view().raw;
+
+    std::vector<sz_size_t> host_counts(1, 0);
+    verify(backend.regex_counts(&engines.device, &tape, host_counts.data(), 1, stream) == sz_device_memory_mismatch_k);
+    unified_vector<sz_size_t> counts(1, STRINGZILLA_SIZE_MAX,
+                                     unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+    verify(backend.regex_counts(&engines.device, &tape, counts.data(), 0, stream) == sz_unexpected_dimensions_k);
+    verify(counts[0] == STRINGZILLA_SIZE_MAX);
+
+    // One replacement per pattern, and a vocabulary pattern to extract, or nothing is launched.
+    device_corpus_t replacements(backend.runtime, {"x"});
+    sz_strings_view_t const replacements_tape = replacements.device_tape.view().raw;
+    unified_vector<sz_size_t> offsets(2, STRINGZILLA_SIZE_MAX,
+                                      unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+    verify(backend.regex_replace(&engines.device, &tape, &replacements_tape, nullptr, 0, offsets.data(), stream) ==
+           sz_unexpected_dimensions_k);
+    verify(backend.regex_extract(&engines.device, &tape, 2, nullptr, 0, offsets.data(), stream) ==
+           sz_unexpected_dimensions_k);
+    verify(offsets[0] == STRINGZILLA_SIZE_MAX && offsets[1] == STRINGZILLA_SIZE_MAX);
+    engines.reset();
+    verify(engines.heap.live_allocations == 0);
+
+    // A group walk reads the table from the match's start to its end,
+    // past the window of every vendor's segments.
+    std::string spanning(((std::size_t)1 << 26) + 4096, 'a');
+    spanning[100] = 'q', spanning[spanning.size() - 10] = '7';
+    device_corpus_t spanning_corpus(backend.runtime, {spanning});
+    device_vocabulary_t spanning_vocabulary(backend.runtime, {"(?s)q(.*)(?<=\\d)"});
+    regex_device_engines_t spanning_engines(spanning_vocabulary, backend, sz_cased_k);
+    sz_strings_view_t const spanning_tape = spanning_corpus.device_tape.view().raw;
+    verify(backend.regex_extract(&spanning_engines.device, &spanning_tape, 0, nullptr, 0, offsets.data(), stream) ==
+           sz_unexpected_dimensions_k);
+    spanning_engines.reset();
+    verify(spanning_engines.heap.live_allocations == 0);
+}
+
+#pragma endregion Regex Checks
 
 #pragma region UTF8 Uncased Checks
 
@@ -1897,6 +2193,17 @@ inline void check_device_substrings_(cross_section_t &check, auto const &backend
     check("test_substrings_safety_" + suffix, [&] { test_substrings_device_safety(backend); });
 }
 
+/** Registers the regex checks of one vendor's kernels, or of the dispatch points, in @p check. */
+inline void check_device_regex_(cross_section_t &check, auto const &backend) {
+    std::string const suffix = backend.name;
+    check("test_regex_unit_" + suffix, [&] { test_regex_device_unit(backend); });
+    check("test_regex_equivalence_" + suffix,
+          [&](test_context_t &context) { test_regex_device_equivalence(context, backend); });
+    check("test_regex_unbalanced_" + suffix,
+          [&](test_context_t &context) { test_regex_device_unbalanced(context, backend); });
+    check("test_regex_safety_" + suffix, [&] { test_regex_device_safety(backend); });
+}
+
 /** Registers the strings checks of one vendor's kernels in @p check, which no tier narrows. */
 inline void check_device_strings_(cross_section_t &check, device_backend_t const &runtime,
                                   strings_backend_t const &kernels) {
@@ -1977,6 +2284,7 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
     check_device_levenshtein_(check, backend);
     check_device_overlap_(check, backend);
     check_device_substrings_(check, backend);
+    check_device_regex_(check, backend);
     check("test_utf8_uncased_equivalence_" + suffix,
           [&](test_context_t &context) { check_utf8_uncased_device_equivalence_(context, backend); });
     check("test_utf8_uncased_safety_" + suffix,
@@ -2006,6 +2314,10 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
                                      sz_substrings_find,
                                      sz_substrings_replace,
                                      sz_substrings_bm25_scores,
+                                     sz_regex_counts,
+                                     sz_regex_find,
+                                     sz_regex_replace,
+                                     sz_regex_extract,
                                      gpu_best<sz_utf8_uncased_fold_best>(capabilities),
                                      gpu_best<sz_utf8_norm_best>(capabilities),
                                      sha256_multistate_update,

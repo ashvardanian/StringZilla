@@ -48,6 +48,19 @@ inline uint sz_utf8_fold_next_metal_(device uchar const *text, device uchar cons
     return consumed;
 }
 
+/** Folds the codepoint ending right before @p end into @p image and returns the source bytes it
+ *  spans, as @c sz_utf8_folded_reverse_iter_prev_ steps back; a last byte ending no codepoint begun
+ *  at or after @p start folds to itself and ends no rune, as the forward step leaves it. */
+inline uint sz_utf8_fold_prev_metal_(device uchar const *start, device uchar const *end,
+                                     thread sz_utf8_folded_image_metal_t &image) {
+    device uchar const *lead = end - 1;
+    if (*lead < 0x80) return sz_utf8_fold_next_metal_(lead, end, image);
+    for (uint back = 0; back < 3 && lead > start && (*lead & 0xC0u) == 0x80u; ++back) --lead;
+    if (lead + sz_utf8_fold_next_metal_(lead, end, image) == end && image.rune_ends) return uint(end - lead);
+    image.bytes = end[-1], image.length = 1, image.rune_ends = 0;
+    return 1;
+}
+
 inline ulong sz_utf8_fold_cut_metal_(device uchar const *text, ulong length, ulong position) {
     for (uint step = 0; step != 3 && position && position < length && (text[position] & 0xC0u) == 0x80u; ++step)
         ++position;

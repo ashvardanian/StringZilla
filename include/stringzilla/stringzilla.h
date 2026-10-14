@@ -29,6 +29,7 @@
  *  - @c levenshtein.h - edit distances between batches of queries and candidates, on a CPU or GPU.
  *  - @c overlap.h - window overlap between batches of queries and candidates, on a CPU or GPU.
  *  - @c substrings.h - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
+ *  - @c regex.h - leftmost-first regular expression search over a compiled vocabulary of patterns.
  *  - @c small_string.h - "Small String Optimization" in C 99.
  *  - @c stringzilla.h - umbrella header for the core C API.
  *  - @c stringzilla.hpp - umbrella header for the core C++ API.
@@ -87,6 +88,7 @@
 #include "stringzilla/levenshtein.h" // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
 #include "stringzilla/overlap.h"     // `sz_overlap_engine_init`, `sz_overlap_scores`
 #include "stringzilla/substrings.h"  // `sz_substrings_engine_init`, `sz_substrings_find`
+#include "stringzilla/regex.h"       // `sz_regex_engine_init`, `sz_regex_find`
 
 #include "stringzilla/utf8_runes.h"        // `sz_utf8_count_best`, `sz_utf8_seek_best`, `sz_utf8_decode_best`
 #include "stringzilla/utf8_tokens.h"       // `sz_utf8_{newlines,whitespaces,delimiters}_best`

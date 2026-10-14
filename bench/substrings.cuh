@@ -40,11 +40,11 @@ enum class substrings_slice_t {
 };
 
 /** The suffix every row of one dictionary carries: its slice, then its case sensitivity. */
-static std::string substrings_label(substrings_slice_t slice, sz_substrings_case_sensitivity_t sensitivity) {
+static std::string substrings_label(substrings_slice_t slice, sz_case_sensitivity_t sensitivity) {
     char const *const name = slice == substrings_slice_t::frequent_k ? ":frequent"
                              : slice == substrings_slice_t::rare_k   ? ":rare"
                                                                      : ":sampled";
-    return std::string(name) + (sensitivity == sz_substrings_uncased_k ? ":uncased" : ":cased");
+    return std::string(name) + (sensitivity == sz_uncased_k ? ":uncased" : ":cased");
 }
 
 /** The suffix a row carries for the overlap policy it ran under. */
@@ -206,9 +206,9 @@ struct substrings_dictionary_t {
     /** One per needle, alternating with an empty deletion. */
     std::vector<sz_string_view_t> replacement_views;
 
-    sz_substrings_case_sensitivity_t sensitivity;
+    sz_case_sensitivity_t sensitivity;
 
-    substrings_dictionary_t(std::vector<std::string> words, sz_substrings_case_sensitivity_t sensitivity,
+    substrings_dictionary_t(std::vector<std::string> words, sz_case_sensitivity_t sensitivity,
                             sz_allocator_t const &memory, sz_stream_t stream = nullptr)
         : needles(std::move(words)), replacement_bytes(unified_alloc<char>(memory, stream)),
           replacement_views(needles.size()), sensitivity(sensitivity) {
@@ -388,14 +388,14 @@ struct substrings_find_from_sz {
     unified_vector<sz_size_t> offsets;
 
     /** Sized by a size query, so a round never grows it. */
-    unified_vector<sz_substrings_match_t> matches;
+    unified_vector<sz_match_t> matches;
     bool sized = false;
 
     substrings_find_from_sz(function_type_ kernel, substrings_engine_t &engine, substrings_corpus_t const &corpus,
                             sz_strings_view_t const &haystacks)
         : engine(engine), find_kernel(kernel), corpus(corpus), haystacks(haystacks),
           offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
-          matches(unified_alloc<sz_substrings_match_t>(engine.engine.allocator, engine.stream)) {}
+          matches(unified_alloc<sz_match_t>(engine.engine.allocator, engine.stream)) {}
 
     /** The size query, a whole walk, run once the filter keeps the row. */
     void preprocess() {

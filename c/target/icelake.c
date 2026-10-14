@@ -17,6 +17,7 @@
 #include "stringzilla/intersect/icelake.h"
 #include "stringzilla/levenshtein/icelake.h"
 #include "stringzilla/substrings/icelake.h"
+#include "stringzilla/regex/icelake.h"
 #include "stringzilla/utf8_runes/icelake.h"
 #include "stringzilla/utf8_tokens/icelake.h"
 #include "stringzilla/utf8_wordbreaks/icelake.h"

@@ -1914,10 +1914,10 @@ void bench_overlap_scores_kernels(environment_t &env, std::string_view kit) {
 
 /** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
 inline sz_status_t substrings_engine_init_cpu_(sz_substrings_engine_t *engine, sz_strings_view_t const *needles,
-                                               sz_substrings_case_sensitivity_t sensitivity,
-                                               sz_substrings_overlap_policy_t policy, sz_size_t hot_states,
-                                               sz_size_t matches_budget, sz_size_t haystacks_budget,
-                                               sz_allocator_t *allocator, sz_stream_t stream) {
+                                               sz_case_sensitivity_t sensitivity, sz_substrings_overlap_policy_t policy,
+                                               sz_size_t hot_states, sz_size_t matches_budget,
+                                               sz_size_t haystacks_budget, sz_allocator_t *allocator,
+                                               sz_stream_t stream) {
     return sz_substrings_engine_init(engine, needles, sensitivity, policy, hot_states, matches_budget, haystacks_budget,
                                      sz::default_capabilities(), allocator, stream);
 }
@@ -1927,8 +1927,8 @@ struct substrings_vocabulary_t {
     std::string label;
     substrings_dictionary_t dictionary;
 
-    substrings_vocabulary_t(std::string label, std::vector<std::string> needles,
-                            sz_substrings_case_sensitivity_t sensitivity, sz_allocator_t const &allocator)
+    substrings_vocabulary_t(std::string label, std::vector<std::string> needles, sz_case_sensitivity_t sensitivity,
+                            sz_allocator_t const &allocator)
         : label(std::move(label)), dictionary(std::move(needles), sensitivity, allocator) {}
 };
 
@@ -1942,11 +1942,11 @@ struct substrings_vocabulary_t {
 inline std::deque<substrings_vocabulary_t> substrings_vocabularies(environment_t const &env, corpus_t const &corpus,
                                                                    std::string_view kit) {
     std::deque<substrings_vocabulary_t> vocabularies;
-    std::pair<substrings_slice_t, sz_substrings_case_sensitivity_t> const slices[] = {
-        {substrings_slice_t::frequent_k, sz_substrings_cased_k},
-        {substrings_slice_t::rare_k, sz_substrings_cased_k},
-        {substrings_slice_t::frequent_k, sz_substrings_uncased_k},
-        {substrings_slice_t::sampled_k, sz_substrings_cased_k},
+    std::pair<substrings_slice_t, sz_case_sensitivity_t> const slices[] = {
+        {substrings_slice_t::frequent_k, sz_cased_k},
+        {substrings_slice_t::rare_k, sz_cased_k},
+        {substrings_slice_t::frequent_k, sz_uncased_k},
+        {substrings_slice_t::sampled_k, sz_cased_k},
     };
     sz_allocator_t allocator;
     if (sz_allocator_init_heap(&allocator) != sz_success_k)

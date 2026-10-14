@@ -551,7 +551,7 @@ inline void bench_substrings_bm25(simt_backend_t const &backend, environment_t c
 inline void bench_substrings_slice(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
                                    substrings_corpus_t const &resident, sz_strings_view_t const &device_haystacks,
                                    std::optional<substrings_ranking_t> &ranking, substrings_slice_t slice,
-                                   sz_substrings_case_sensitivity_t sensitivity) {
+                                   sz_case_sensitivity_t sensitivity) {
     std::string const suffix = substrings_label(slice, sensitivity);
     if (!substrings_selects(env, simt_arm(backend, ""), suffix)) return;
     sz_allocator_t const allocator = backend.runtime.unified;
@@ -619,10 +619,10 @@ inline void bench_substrings_small_batch(simt_backend_t const &backend, environm
     std::size_t matches_budget = 0;
     sz_allocator_t const allocator = backend.runtime.unified;
     substrings_corpus_t const resident(corpus, substrings_small_batch_haystacks_k);
-    std::string const suffix = substrings_label(substrings_slice_t::sampled_k, sz_substrings_cased_k) + ":h" +
+    std::string const suffix = substrings_label(substrings_slice_t::sampled_k, sz_cased_k) + ":h" +
                                std::to_string(resident.views.size());
     if (!substrings_selects(env, simt_arm(backend, ""), suffix)) return;
-    substrings_dictionary_t const dictionary(substrings_sampled(env, corpus), sz_substrings_cased_k, allocator,
+    substrings_dictionary_t const dictionary(substrings_sampled(env, corpus), sz_cased_k, allocator,
                                              backend.runtime.stream);
     if (dictionary.needles.empty()) return;
     unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
@@ -650,10 +650,10 @@ inline void bench_substrings_documents(simt_backend_t const &backend, environmen
         throw std::runtime_error("The heap allocator could not be initialized.");
     std::size_t matches_budget = 0;
     sz_allocator_t const allocator = backend.runtime.unified;
-    std::string const suffix = substrings_label(substrings_slice_t::sampled_k, sz_substrings_cased_k) + ":d" +
+    std::string const suffix = substrings_label(substrings_slice_t::sampled_k, sz_cased_k) + ":d" +
                                std::to_string((std::size_t)substrings_documents_k);
     if (!substrings_selects(env, simt_arm(backend, ""), suffix)) return;
-    substrings_dictionary_t const dictionary(substrings_sampled(env, corpus), sz_substrings_cased_k, allocator,
+    substrings_dictionary_t const dictionary(substrings_sampled(env, corpus), sz_cased_k, allocator,
                                              backend.runtime.stream);
     if (dictionary.needles.empty()) return;
     char const *const first = corpus.tokens.front().data();
@@ -675,11 +675,11 @@ inline void bench_substrings_documents(simt_backend_t const &backend, environmen
 /** Every substrings row over @p corpus: each vocabulary slice over the whole corpus kept resident,
  *  then the small batch and the few long documents. */
 inline void bench_substrings_simt(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
-    std::pair<substrings_slice_t, sz_substrings_case_sensitivity_t> const slices[] = {
-        {substrings_slice_t::frequent_k, sz_substrings_cased_k},
-        {substrings_slice_t::rare_k, sz_substrings_cased_k},
-        {substrings_slice_t::frequent_k, sz_substrings_uncased_k},
-        {substrings_slice_t::sampled_k, sz_substrings_cased_k},
+    std::pair<substrings_slice_t, sz_case_sensitivity_t> const slices[] = {
+        {substrings_slice_t::frequent_k, sz_cased_k},
+        {substrings_slice_t::rare_k, sz_cased_k},
+        {substrings_slice_t::frequent_k, sz_uncased_k},
+        {substrings_slice_t::sampled_k, sz_cased_k},
     };
     // The whole corpus crosses into a resident tape only for a slice the filter keeps.
     if (std::any_of(std::begin(slices), std::end(slices), [&](auto const &slice) {

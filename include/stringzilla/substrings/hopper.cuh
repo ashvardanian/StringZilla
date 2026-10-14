@@ -111,7 +111,7 @@ static __global__ void sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t 
 #pragma endregion Scoring Kernel
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_hopper(
-    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     return sz_substrings_engine_init_scoped_cuda_(engine, needles, case_sensitivity, overlap_policy, hot_states,
@@ -125,9 +125,9 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_hopper(sz_substrings_engine_t *
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_find_hopper(sz_substrings_engine_t *engine,
-                                                      sz_strings_view_t const *haystacks,
-                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                      sz_size_t *matches_offsets, sz_stream_t stream) {
+                                                      sz_strings_view_t const *haystacks, sz_match_t *matches,
+                                                      sz_size_t matches_capacity, sz_size_t *matches_offsets,
+                                                      sz_stream_t stream) {
     return sz_substrings_find_scoped_cuda_(engine, haystacks, matches, matches_capacity, matches_offsets, stream);
 }
 

@@ -51,27 +51,6 @@ typedef struct sz_substrings_output_t {
 } sz_substrings_output_t;
 
 /**
- *  @brief One reported match, locating it by haystack, by needle, and by byte span.
- *
- *  Under case folding a needle's own byte length is not the length of every match, so the span is
- *  carried per match rather than looked up from the needle.
- */
-typedef struct sz_substrings_match_t {
-
-    /** Which haystack of the collection this match was found in. */
-    sz_size_t haystack_index;
-
-    /** Which needle of the vocabulary matched. */
-    sz_size_t needle_index;
-
-    /** Where the match starts inside that haystack, in its own bytes. */
-    sz_size_t byte_offset;
-
-    /** Haystack bytes the match spans, which folding can make differ from the needle's length. */
-    sz_size_t byte_length;
-} sz_substrings_match_t;
-
-/**
  *  @brief One start position's incumbent match while a leftmost policy is still deciding it.
  *
  *  Separate from @ref sz_substrings_output_t because the units differ: an output carries the folded
@@ -193,7 +172,7 @@ typedef struct sz_substrings_engine_t {
     sz_u32_t max_outputs_per_state;
 
     /** Whether a walk folds the haystack as it consumes it, or steps it byte for byte. */
-    sz_substrings_case_sensitivity_t case_sensitivity;
+    sz_case_sensitivity_t case_sensitivity;
 
     /** Bytes that move a walk off the root, which a byte search can skip to while it sits there. */
     sz_byteset_t root_live;
@@ -264,28 +243,6 @@ enum {
     sz_substrings_gpu_matches_budget_default_k = 1u << 20,
     sz_substrings_gpu_haystacks_budget_default_k = 1u << 20,
 };
-
-/**
- *  @brief How faithfully a backend's leftmost cover reproduces the serial one.
- *
- *  A CPU backend settles a cover during the walk and always reports the leftmost one. A CUDA
- *  backend settles it afterwards, one run of mutually-reaching matches per thread, and a greedy
- *  over such a run is quadratic in it - so past a bound it accepts in the order the walk emitted
- *  instead. That is the same cover whenever match starts ascend with their ends, and a coarser one
- *  when they do not, which happens when a vocabulary is so dense that no gap ever separates any two
- *  of its matches.
- *
- *  Both answers are covers: every match is real and no two share a byte. Only the choice among
- *  rivals differs, so a caller that needs the leftmost cover exactly asks a CPU backend for it.
- */
-typedef enum sz_substrings_cover_fidelity_t {
-
-    /** The leftmost cover itself, which every CPU backend reports. */
-    sz_substrings_cover_exact_k = 0,
-
-    /** A valid cover that may differ among rivals, as CUDA reports on dense vocabularies. */
-    sz_substrings_cover_approximate_k = 1,
-} sz_substrings_cover_fidelity_t;
 
 /** BM25's continuous parameters. */
 typedef struct sz_substrings_bm25_t {
@@ -833,7 +790,7 @@ typedef struct sz_substrings_builder_t {
     sz_u32_t max_outputs_per_state;
 
     /** Whether this vocabulary matches byte-exact or case-folded. */
-    sz_substrings_case_sensitivity_t case_sensitivity;
+    sz_case_sensitivity_t case_sensitivity;
 
     /** Each byte's hot-row column, derived from the edge labels once the trie is complete. */
     sz_u8_t byte_to_class[STRINGZILLA_U8_MAX + 1];
@@ -972,12 +929,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_builder_follow_(sz_substrings_build
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_builder_add_output_(sz_substrings_builder_t *builder, sz_u32_t state,
                                                                  sz_u32_t needle_index, sz_size_t folded_match_bytes) {
-    sz_size_t const contraction = builder->case_sensitivity == sz_substrings_uncased_k
-                                      ? (sz_size_t)sz_utf8_fold_max_contraction_k
-                                      : 1;
-    sz_size_t const expansion = builder->case_sensitivity == sz_substrings_uncased_k
-                                    ? (sz_size_t)sz_utf8_fold_max_expansion_k
-                                    : 1;
+    sz_size_t const contraction = builder->case_sensitivity == sz_uncased_k ? (sz_size_t)sz_utf8_fold_max_contraction_k
+                                                                            : 1;
+    sz_size_t const expansion = builder->case_sensitivity == sz_uncased_k ? (sz_size_t)sz_utf8_fold_max_expansion_k : 1;
     sz_size_t const source_ceiling = folded_match_bytes * contraction;
     sz_size_t const source_floor = sz_size_divide_round_up(folded_match_bytes, expansion);
     if (folded_match_bytes > (sz_size_t)sz_substrings_no_state_k) return sz_overflow_risk_k;
@@ -1590,7 +1544,7 @@ STRINGZILLA_INLINE void sz_substrings_engine_free_(sz_substrings_engine_t *engin
  *  vocabulary around twice.
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_strings_view_t const *needles,
-                                                             sz_substrings_case_sensitivity_t case_sensitivity,
+                                                             sz_case_sensitivity_t case_sensitivity,
                                                              sz_substrings_overlap_policy_t overlap_policy,
                                                              sz_size_t hot_states, sz_size_t matches_budget,
                                                              sz_capability_t capability,
@@ -1639,7 +1593,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_strings_view_t c
     }
     // One source byte folds to at most `sz_utf8_fold_max_expansion_k` bytes, which is what bounds the image
     // of the longest needle; a cased vocabulary folds to itself and needs none of it.
-    if (case_sensitivity == sz_substrings_uncased_k) {
+    if (case_sensitivity == sz_uncased_k) {
         builder.fold_scratch_bytes = longest_needle * (sz_size_t)sz_utf8_fold_max_expansion_k;
         builder.fold_scratch = (sz_u8_t *)allocator->allocate(builder.fold_scratch_bytes, allocator->handle, stream);
         if (!builder.fold_scratch) {
@@ -1656,7 +1610,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_compile_(sz_strings_view_t c
         sz_size_t const length = views[needle_index % 64].length;
         builder.needle_next[needle_index] = sz_substrings_no_state_k;
         builder.needle_folded_bytes[needle_index] = 0;
-        status = case_sensitivity == sz_substrings_uncased_k
+        status = case_sensitivity == sz_uncased_k
                      ? sz_substrings_builder_insert_uncased_(&builder, start, length, (sz_u32_t)needle_index)
                      : sz_substrings_builder_insert_cased_(&builder, (sz_u8_t const *)start, length,
                                                            (sz_u32_t)needle_index);
@@ -2110,7 +2064,7 @@ STRINGZILLA_INLINE sz_substrings_walks_t sz_substrings_walks_serial_(void) {
 /** Whether this vocabulary's haystacks are walked byte for byte, rather than folded as
  *  they are walked. */
 STRINGZILLA_INLINE sz_bool_t sz_substrings_walks_bytes_(sz_substrings_engine_t const *engine) {
-    return (sz_bool_t)(engine->case_sensitivity == sz_substrings_cased_k);
+    return (sz_bool_t)(engine->case_sensitivity == sz_cased_k);
 }
 
 /**
@@ -2365,7 +2319,7 @@ STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_tally_report_(void *con
 typedef struct sz_substrings_collector_t {
 
     /** Where the matches land, or @c STRINGZILLA_NULL for a pure size query. */
-    sz_substrings_match_t *matches;
+    sz_match_t *matches;
 
     /** Entries @c matches holds. */
     sz_size_t capacity;
@@ -2381,7 +2335,7 @@ STRINGZILLA_OUTLINED_ sz_substrings_walk_t sz_substrings_collect_report_(void *c
                                                                          sz_size_t byte_offset, sz_size_t byte_length) {
     sz_substrings_collector_t *const collector = (sz_substrings_collector_t *)context;
     if (collector->count < collector->capacity) {
-        sz_substrings_match_t *const match = collector->matches + collector->count;
+        sz_match_t *const match = collector->matches + collector->count;
         match->haystack_index = collector->haystack_index;
         match->needle_index = needle_index;
         match->byte_offset = byte_offset;
@@ -2554,7 +2508,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_arena_host_(sz_substrings_en
  *  Split from the compilation only so a device tier can reuse it without the host arena.
  */
 STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_cpu_(
-    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_capability_t capability, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
@@ -2612,9 +2566,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_counts_with_(sz_substrings_engine_t
 /** Every match through @p walks, which is every CPU tier's locating verb. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_find_with_(sz_substrings_engine_t *engine,
                                                         sz_substrings_walks_t const *walks,
-                                                        sz_strings_view_t const *haystacks,
-                                                        sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                        sz_size_t *matches_offsets) {
+                                                        sz_strings_view_t const *haystacks, sz_match_t *matches,
+                                                        sz_size_t matches_capacity, sz_size_t *matches_offsets) {
     sz_substrings_report_t *const report = sz_substrings_report_(engine);
     sz_substrings_collector_t collector;
     sz_substrings_ring_t ring;
@@ -2844,7 +2797,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_with_(
 #if STRINGZILLA_TARGET_SERIAL
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_serial(
-    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_unused_(haystacks_budget);
@@ -2861,9 +2814,9 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_serial(sz_substrings_engine_t *
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_find_serial(sz_substrings_engine_t *engine,
-                                                      sz_strings_view_t const *haystacks,
-                                                      sz_substrings_match_t *matches, sz_size_t matches_capacity,
-                                                      sz_size_t *matches_offsets, sz_stream_t stream) {
+                                                      sz_strings_view_t const *haystacks, sz_match_t *matches,
+                                                      sz_size_t matches_capacity, sz_size_t *matches_offsets,
+                                                      sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_serial_();
     return sz_substrings_find_with_(engine, &walks, haystacks, matches, matches_capacity, matches_offsets);

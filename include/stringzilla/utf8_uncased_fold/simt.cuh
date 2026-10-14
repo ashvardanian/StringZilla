@@ -118,6 +118,20 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_fold_next_simt_(sz_u8_t const *text, sz_u8_
     return rune_length;
 }
 
+/** Folds the codepoint ending right before @p end into @p image and returns the source bytes it
+ *  spans, as @c sz_utf8_folded_reverse_iter_prev_ steps back; a last byte ending no codepoint begun
+ *  at or after @p start folds to itself and ends no rune, as the forward step leaves it. */
+STRINGZILLA_DEVICE sz_size_t sz_utf8_fold_prev_simt_(sz_u8_t const *start, sz_u8_t const *end,
+                                                     sz_utf8_folded_image_t *image) {
+    sz_u8_t const *lead = end - 1;
+    sz_size_t back;
+    if (*lead < 0x80) return sz_utf8_fold_next_simt_(lead, end, image);
+    for (back = 0; back < 3 && lead > start && (*lead & 0xC0) == 0x80; ++back) --lead;
+    if (lead + sz_utf8_fold_next_simt_(lead, end, image) == end && image->rune_ends) return (sz_size_t)(end - lead);
+    image->bytes = end[-1], image->length = 1, image->rune_ends = 0;
+    return 1;
+}
+
 #pragma endregion Fold Tables
 
 #pragma region Fold Kernel

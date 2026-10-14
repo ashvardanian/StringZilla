@@ -1111,6 +1111,9 @@ void test_overlap_safety(test_context_t &context);
 void test_substrings_unit();
 void test_substrings_all(test_context_t &context);
 void test_substrings_safety(test_context_t &context);
+void test_regex_unit();
+void test_regex_all(test_context_t &context);
+void test_regex_safety(test_context_t &context);
 
 #pragma endregion Sequence Algorithms
 

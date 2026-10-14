@@ -9,6 +9,7 @@
 #include "stringzilla/levenshtein.h"
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
+#include "stringzilla/regex.h"
 #include "stringzilla/utf8_uncased_fold.h"
 #include "stringzilla/utf8_norm.h"
 
@@ -17,6 +18,7 @@
 #include "stringzilla/overlap/rocm.cuh"
 #include "stringzilla/strings/rocm.cuh"
 #include "stringzilla/substrings/rocm.cuh"
+#include "stringzilla/regex/rocm.cuh"
 #include "stringzilla/utf8_uncased_fold/rocm.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh"
 

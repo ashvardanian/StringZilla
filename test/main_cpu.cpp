@@ -195,12 +195,13 @@ void test_find_kernel_unit() {
         sz_levenshtein_find_kernel,
         sz_overlap_find_kernel,
         sz_substrings_find_kernel,
+        sz_regex_find_kernel,
     };
     sz_status_t const missing = STRINGZILLA_HEADER_ONLY ? sz_missing_library_k : sz_missing_kernel_k;
     sz_kernel_punned_t const poison = reinterpret_cast<sz_kernel_punned_t>(&test_find_kernel_unit);
     sz_capability_t enabled = 0;
     sz_capabilities_enabled_cpu(&enabled);
-    for (int kind = sz_kernel_unknown_k; kind <= sz_kernel_substrings_bm25_scores_k; ++kind) {
+    for (int kind = sz_kernel_unknown_k; kind <= sz_kernel_regex_extract_k; ++kind) {
         sz_kernel_punned_t expected_kernel = poison;
         sz_capability_t expected_capability = sz_cap_serial_k;
         sz_status_t const expected = sz_find_kernel_punned(static_cast<sz_kernel_kind_t>(kind), enabled,
@@ -295,6 +296,9 @@ int main(int, char const **argv) {
     failures += run_test(env.settings, "test_substrings_unit", test_substrings_unit);
     failures += run_test(env.settings, "test_substrings_all", test_substrings_all);
     failures += run_test(env.settings, "test_substrings_safety", test_substrings_safety);
+    failures += run_test(env.settings, "test_regex_unit", test_regex_unit);
+    failures += run_test(env.settings, "test_regex_all", test_regex_all);
+    failures += run_test(env.settings, "test_regex_safety", test_regex_safety);
 
     failures += run_test(env.settings, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
     failures += run_test(env.settings, "test_strings_unit", test_strings_unit);

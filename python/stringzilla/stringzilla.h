@@ -128,6 +128,7 @@ extern PyTypeObject Aes256GcmDecryptorType;
 extern PyTypeObject LevenshteinEngineType;
 extern PyTypeObject OverlapEngineType;
 extern PyTypeObject SubstringsEngineType;
+extern PyTypeObject RegexEngineType;
 
 extern struct PyModuleDef stringzilla_module;
 

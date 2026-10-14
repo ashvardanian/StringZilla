@@ -726,6 +726,7 @@ static struct {
     {"LevenshteinEngine", &LevenshteinEngineType},
     {"OverlapEngine", &OverlapEngineType},
     {"SubstringsEngine", &SubstringsEngineType},
+    {"RegexEngine", &RegexEngineType},
 };
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {

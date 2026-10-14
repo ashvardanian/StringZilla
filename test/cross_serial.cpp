@@ -13,7 +13,7 @@ std::size_t test_cross_serial(environment_t const &env) {
     check.section("Cross Serial", sz_cap_serial_k);
 
     check("test_kernel_names_unit", [] {
-        for (int kind = sz_kernel_unknown_k; kind <= sz_kernel_substrings_bm25_scores_k; ++kind) {
+        for (int kind = sz_kernel_unknown_k; kind <= sz_kernel_regex_extract_k; ++kind) {
             char const *name = sz_kernel_name(static_cast<sz_kernel_kind_t>(kind));
             verify(sz_kernel_named(name, std::strlen(name)) == static_cast<sz_kernel_kind_t>(kind));
         }

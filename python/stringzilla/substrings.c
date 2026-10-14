@@ -20,9 +20,9 @@ typedef struct {
 #pragma region Construction
 
 /** Reads whether both sides are folded before they meet, or compared byte for byte. */
-static int parse_case_sensitivity_(PyObject *sensitivity_obj, sz_substrings_case_sensitivity_t *result) {
+static int parse_case_sensitivity_(PyObject *sensitivity_obj, sz_case_sensitivity_t *result) {
     if (!sensitivity_obj || sensitivity_obj == Py_None) {
-        *result = sz_substrings_cased_k;
+        *result = sz_cased_k;
         return 0;
     }
     if (!PyUnicode_Check(sensitivity_obj)) {
@@ -30,11 +30,11 @@ static int parse_case_sensitivity_(PyObject *sensitivity_obj, sz_substrings_case
         return -1;
     }
     if (PyUnicode_CompareWithASCIIString(sensitivity_obj, "cased") == 0) {
-        *result = sz_substrings_cased_k;
+        *result = sz_cased_k;
         return 0;
     }
     if (PyUnicode_CompareWithASCIIString(sensitivity_obj, "uncased") == 0) {
-        *result = sz_substrings_uncased_k;
+        *result = sz_uncased_k;
         return 0;
     }
     PyErr_SetString(PyExc_ValueError, "Unknown case sensitivity, expected 'cased' or 'uncased'");
@@ -151,7 +151,7 @@ static int SubstringsEngine_init(SubstringsEngine *self, PyObject *args, PyObjec
     }
 
     sz_strings_view_t needles;
-    sz_substrings_case_sensitivity_t case_sensitivity;
+    sz_case_sensitivity_t case_sensitivity;
     sz_substrings_overlap_policy_t overlap_policy;
     sz_size_t hot_states = 0, matches_budget = 0, haystacks_budget = 0;
     sz_capability_t capabilities;
@@ -346,7 +346,7 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
     if (sz_py_export_strings(haystacks_obj, "haystacks", &haystacks) != 0) return NULL;
 
     // One match is four pointer-width fields back to back, so the rows have to be packed as well as the columns.
-    sz_substrings_match_t *matches = STRINGZILLA_NULL;
+    sz_match_t *matches = STRINGZILLA_NULL;
     sz_size_t matches_capacity = 0;
     Py_buffer matches_view;
     sz_bool_t have_matches = sz_false_k;
@@ -361,7 +361,7 @@ static PyObject *SubstringsEngine_find(SubstringsEngine *self, PyObject *const *
             PyBuffer_Release(&matches_view);
             return NULL;
         }
-        matches = (sz_substrings_match_t *)matches_view.buf;
+        matches = (sz_match_t *)matches_view.buf;
         matches_capacity = (sz_size_t)matches_view.shape[0];
         have_matches = sz_true_k;
     }

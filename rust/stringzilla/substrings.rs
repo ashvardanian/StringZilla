@@ -17,7 +17,7 @@ pub const SUBSTRINGS_MATCHES_BUDGET_AUTO: usize = 0;
 
 /// Whether a vocabulary matches needles byte-for-byte, or folds both sides to a shared case first.
 ///
-/// Corresponds to `sz_substrings_case_sensitivity_t` in the C API.
+/// Corresponds to `sz_case_sensitivity_t` in the C API.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaseSensitivity {
@@ -49,10 +49,10 @@ pub enum SubstringsOverlapPolicy {
 /// Under case folding a needle's own byte length is not the length of every match - needle `k`
 /// matches both the 1-byte `k` and the 3-byte Kelvin sign `U+212A` - so the span travels per match.
 ///
-/// Corresponds to `sz_substrings_match_t` in the C API.
+/// Corresponds to `sz_match_t` in the C API.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct SubstringsMatch {
+pub struct Match {
     /// Which haystack of the sequence this match was found in.
     pub haystack_index: usize,
     /// Which needle of the vocabulary matched.
@@ -299,7 +299,7 @@ impl SubstringsEngine {
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         haystacks: StringsView<'scope>,
-        matches: &'scope mut [SubstringsMatch],
+        matches: &'scope mut [Match],
         matches_offsets: &'scope mut [usize],
     ) -> Result<(), Status> {
         let stream = scope.stream_for(self.capability)?;
@@ -406,7 +406,7 @@ impl Drop for SubstringsEngine {
 }
 
 /// Refuses an output that cannot hold one entry per haystack at `stride` entries apart.
-fn strided_column_check(haystacks: usize, entries: usize, stride: usize) -> Result<(), Status> {
+pub(crate) fn strided_column_check(haystacks: usize, entries: usize, stride: usize) -> Result<(), Status> {
     if stride == 0 {
         return Err(Status::UnexpectedDimensions);
     }
@@ -425,7 +425,7 @@ fn strided_column_check(haystacks: usize, entries: usize, stride: usize) -> Resu
 
 /// The C verbs read a null output as a pure size query, which an empty slice's dangling
 /// pointer is not.
-fn optional_mut_ptr<Element>(buffer: &mut [Element]) -> *mut Element {
+pub(crate) fn optional_mut_ptr<Element>(buffer: &mut [Element]) -> *mut Element {
     if buffer.is_empty() {
         core::ptr::null_mut()
     } else {

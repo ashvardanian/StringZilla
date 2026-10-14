@@ -593,6 +593,52 @@ static PyObject *Strings_sample(Strings *self, PyObject *const *args, Py_ssize_t
     return result;
 }
 
+static PyObject *Strings_matched(Strings *self, PyObject *const *args, Py_ssize_t positional_args_count,
+                                 PyObject *args_names_tuple) {
+    if (positional_args_count != 1 || (args_names_tuple && PyTuple_GET_SIZE(args_names_tuple))) {
+        PyErr_SetString(PyExc_TypeError, "matched() takes exactly one positional argument");
+        return NULL;
+    }
+    Py_buffer matches_view;
+    if (sz_py_export_contiguous_buffer(args[0], "matches", PyBUF_CONTIG_RO, (Py_ssize_t)sizeof(sz_size_t), 0,
+                                       &matches_view) != 0)
+        return NULL;
+    if (matches_view.ndim != 2 || matches_view.shape[1] != 4) {
+        PyErr_SetString(PyExc_ValueError, "matched(): matches must be shaped (count, 4)");
+        PyBuffer_Release(&matches_view);
+        return NULL;
+    }
+
+    // A row past its haystack would read beyond the tape, so every row is checked first.
+    sz_match_t const *const matches = (sz_match_t const *)matches_view.buf;
+    sz_size_t const count = (sz_size_t)matches_view.shape[0];
+    for (sz_size_t index = 0; index != count; ++index) {
+        sz_match_t const match = matches[index];
+        sz_size_t const length = match.haystack_index < self->tape.count
+                                     ? sz_py_tape_string_(&self->tape, match.haystack_index).length
+                                     : 0;
+        if (match.haystack_index >= self->tape.count || match.byte_offset > length ||
+            match.byte_length > length - match.byte_offset) {
+            PyErr_Format(PyExc_IndexError, "matched(): match %zu falls outside its haystack", (size_t)index);
+            PyBuffer_Release(&matches_view);
+            return NULL;
+        }
+    }
+
+    sz_string_view_t *views = PyMem_New(sz_string_view_t, count);
+    if (!views) {
+        PyBuffer_Release(&matches_view);
+        return PyErr_NoMemory();
+    }
+    sz_strings_view_t haystacks, spans;
+    sz_strings_from_span(&self->tape, &haystacks);
+    sz_strings_from_matches(&haystacks, matches, count, views, &spans);
+    PyBuffer_Release(&matches_view);
+    PyObject *result = Strings_gather_(&spans, NULL, count, "matched()");
+    PyMem_Free(views);
+    return result;
+}
+
 /**
  *  @brief Exports a string to a UTF-8 buffer, escaping single quotes.
  *  @param[in] cstr The input string to export.
@@ -1122,6 +1168,28 @@ static char const doc_Strings_sample[] =                                        
     "  >>> list(map(bytes, sz.Strings(['a', 'a', 'a']).sample(2)))\n"                      //
     "  [b'a', b'a']";
 
+static char const doc_Strings_matched[] =                                                         //
+    "matched(matches) -> Strings\n"                                                               //
+    "\n"                                                                                          //
+    "Return a new Strings holding the bytes each match row spans, in row order, gathering what\n" //
+    "a `find` of `SubstringsEngine` or `SubdocumentsEngine` located in this collection.\n"        //
+    "\n"                                                                                          //
+    "Args:\n"                                                                                     //
+    "  matches (buffer): Contiguous 2-D buffer of pointer-width unsigned integers shaped\n"       //
+    "    `(count, 4)` - haystack index, needle index, byte offset, byte length.\n"                //
+    "Returns:\n"                                                                                  //
+    "  Strings: A new collection of the matched spans on a tape of its own.\n"                    //
+    "Raises:\n"                                                                                   //
+    "  IndexError: When a row reaches outside this collection.\n"                                 //
+    "Example:\n"                                                                                  //
+    "  >>> documents = sz.Strings(['{\"a\": [1, \"x\"]}'])\n"                                     //
+    "  >>> engine = sz.SubdocumentsEngine(sz.Strings(['$.a[*]']))\n"                              //
+    "  >>> matches = memoryview(bytearray(2 * 4 * 8)).cast('Q', (2, 4))\n"                        //
+    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                    //
+    "  >>> engine.find(documents, matches, offsets)\n"                                            //
+    "  >>> list(map(bytes, documents.matched(matches)))\n"                                        //
+    "  [b'1', b'\"x\"']";
+
 static PyMethodDef Strings_methods[] = {
     {"shuffled", Strings_shuffled, STRINGZILLA_METHOD_FLAGS, doc_Strings_shuffled}, //
     {"sorted", Strings_sorted, STRINGZILLA_METHOD_FLAGS, doc_sorted},               //
@@ -1130,6 +1198,7 @@ static PyMethodDef Strings_methods[] = {
     {"hashes", Strings_hashes, STRINGZILLA_METHOD_FLAGS, doc_Strings_hashes},
     {"utf8_count", Strings_utf8_count, STRINGZILLA_METHOD_FLAGS, doc_Strings_utf8_count},
     {"sample", Strings_sample, STRINGZILLA_METHOD_FLAGS, doc_Strings_sample},          //
+    {"matched", Strings_matched, STRINGZILLA_METHOD_FLAGS, doc_Strings_matched},       //
     {"intersect", Strings_intersect, STRINGZILLA_METHOD_FLAGS, doc_Strings_intersect}, //
     {"copy", Strings_copy, STRINGZILLA_METHOD_FLAGS, doc_Strings_copy},                //
     {"translate", Strings_translate, STRINGZILLA_METHOD_FLAGS, doc_Strings_translate}, //

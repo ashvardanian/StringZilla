@@ -81,6 +81,9 @@ pub enum Status {
     /// `sz_missing_library_k`: a dispatch point reached from a header-only build, which links no
     /// library.
     MissingLibrary = -21,
+    /// `sz_invalid_syntax_k`: a pattern, path or document that breaks its grammar, or needs a
+    /// construct no automaton runs.
+    InvalidSyntax = -22,
     /// `sz_status_unknown_k`: a failure the C core has no specific code for.
     Unknown = -1,
     /// A code outside this list, which only a library built from another header returns.
@@ -89,7 +92,7 @@ pub enum Status {
 
 impl Status {
     /// Every variant C defines, which a raw code is matched against.
-    const LISTED: [Status; 12] = [
+    const LISTED: [Status; 13] = [
         Status::BadAlloc,
         Status::InvalidUtf8,
         Status::ContainsDuplicates,
@@ -101,6 +104,7 @@ impl Status {
         Status::AuthenticationFailed,
         Status::MissingKernel,
         Status::MissingLibrary,
+        Status::InvalidSyntax,
         Status::Unknown,
     ];
 

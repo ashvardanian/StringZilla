@@ -878,11 +878,11 @@ struct sz_aes256_gcm_key_t;       // Forward declaration of an AES-256-GCM key, 
 struct sz_aes256_gcm_state_t;     // Forward declaration of the payload both streaming directions share
 struct sz_aes256_gcm_encryptor_t; // Forward declaration of an AES-256-GCM sealing state
 struct sz_aes256_gcm_decryptor_t; // Forward declaration of an AES-256-GCM opening state
-struct sz_substrings_match_t;     // Forward declaration of one located multi-pattern match
 struct sz_substrings_bm25_t;      // Forward declaration of BM25's continuous parameters
 struct sz_levenshtein_engine_t;   // Forward declaration of a batch of prepared Levenshtein queries
 struct sz_overlap_engine_t;       // Forward declaration of a forest of prepared overlap query trees
 struct sz_substrings_engine_t;    // Forward declaration of a compiled multi-pattern vocabulary
+struct sz_regex_engine_t;         // Forward declaration of a compiled vocabulary of regular expressions
 typedef sz_size_t sz_pgram_t;     // "Pointer-sized N-gram" of a string
 
 /**
@@ -976,14 +976,30 @@ typedef enum sz_levenshtein_symbol_t {
 } sz_levenshtein_symbol_t;
 
 /** Whether a vocabulary matches needles byte-for-byte, or folds both sides to one case first. */
-typedef enum sz_substrings_case_sensitivity_t {
+typedef enum sz_case_sensitivity_t {
 
     /** Byte-exact matching; needles may be arbitrary bytes, including malformed UTF-8. */
-    sz_substrings_cased_k = 0,
+    sz_cased_k = 0,
 
     /** Full Unicode case folding as `CaseFolding.txt` defines it; needles must be valid UTF-8. */
-    sz_substrings_uncased_k = 1,
-} sz_substrings_case_sensitivity_t;
+    sz_uncased_k = 1,
+} sz_case_sensitivity_t;
+
+/** One reported match, locating it by haystack, by needle, and by byte span. */
+typedef struct sz_match_t {
+
+    /** Which haystack of the collection this match was found in. */
+    sz_size_t haystack_index;
+
+    /** Which needle of the vocabulary matched: a substring, a pattern or a path. */
+    sz_size_t needle_index;
+
+    /** Where the match starts inside that haystack, in its own bytes. */
+    sz_size_t byte_offset;
+
+    /** Haystack bytes the match spans, which folding can make differ from the needle's length. */
+    sz_size_t byte_length;
+} sz_match_t;
 
 /** How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
 typedef enum sz_substrings_overlap_policy_t {
@@ -1038,6 +1054,9 @@ typedef enum sz_status_t {
     /** A dispatch point or finder called from a header-only build, which links no library. */
     sz_missing_library_k = -21,
 
+    /** A pattern, path or document breaking its grammar, or using a construct no automaton runs. */
+    sz_invalid_syntax_k = -22,
+
     /** A sink-hole status for unknown errors. */
     sz_status_unknown_k = -1,
 } sz_status_t;
@@ -1057,6 +1076,7 @@ STRINGZILLA_CONSTEXPR char const *sz_status_name_(sz_status_t status) {
     case sz_authentication_failed_k: return "authentication tag mismatch";
     case sz_missing_kernel_k: return "no kernel for these capabilities";
     case sz_missing_library_k: return "the StringZilla library is not linked; call a capability's kernel or link it";
+    case sz_invalid_syntax_k: return "pattern, path or document breaks its grammar";
     case sz_status_unknown_k: return "unknown failure";
     }
     return "an unrecognized status";
@@ -1691,6 +1711,17 @@ STRINGZILLA_INLINE void sz_strings_slice(sz_strings_view_t const *strings, sz_si
  */
 STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_size_t const *order, sz_size_t count,
                                            sz_string_view_t *views, sz_strings_view_t *permuted);
+
+/**
+ *  @brief Views the spans a substrings, regex or subdocuments search located, copying no bytes.
+ *  @param[in] haystacks The collection the matches were found in, which must outlive @p strings.
+ *  @param[in] matches The located matches, in any order.
+ *  @param[in] count Number of matches.
+ *  @param[out] views Receives the bytes of `matches[i]` inside its haystack for each match.
+ *  @param[out] strings Points its accessor at @p views.
+ */
+STRINGZILLA_INLINE void sz_strings_from_matches(sz_strings_view_t const *haystacks, sz_match_t const *matches,
+                                                sz_size_t count, sz_string_view_t *views, sz_strings_view_t *strings);
 
 /**
  *  @brief Views the tape of @p span, so the output of one conversion can feed the next.
@@ -2572,6 +2603,22 @@ STRINGZILLA_INLINE void sz_strings_permute(sz_strings_view_t const *strings, sz_
                                            sz_string_view_t *views, sz_strings_view_t *permuted) {
     sz_strings_get_(strings, order, count, views);
     sz_strings_from_string_views(views, count, permuted);
+}
+
+STRINGZILLA_INLINE void sz_strings_from_matches(sz_strings_view_t const *haystacks, sz_match_t const *matches,
+                                                sz_size_t count, sz_string_view_t *views, sz_strings_view_t *strings) {
+    sz_size_t indices[64];
+    for (sz_size_t block_start = 0; block_start < count; block_start += 64) {
+        sz_size_t const block_count = sz_min_of_two(count - block_start, (sz_size_t)64);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            indices[position] = matches[block_start + position].haystack_index;
+        sz_strings_get_(haystacks, indices, block_count, views + block_start);
+        for (sz_size_t position = 0; position != block_count; ++position) {
+            views[block_start + position].start += matches[block_start + position].byte_offset;
+            views[block_start + position].length = matches[block_start + position].byte_length;
+        }
+    }
+    sz_strings_from_string_views(views, count, strings);
 }
 
 STRINGZILLA_INLINE void sz_strings_from_span(sz_strings_span_t const *span, sz_strings_view_t *strings) {

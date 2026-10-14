@@ -153,6 +153,15 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_substrings_equivalence_haswell",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_haswell); });
 
+    constexpr regex_tier_t regex_haswell {
+        .init = sz_regex_engine_init_haswell,
+        .counts = sz_regex_counts_haswell,
+        .find = sz_regex_find_haswell,
+    };
+    check("test_regex_unit_haswell", [&] { check_regex_unit_(regex_haswell); });
+    check("test_regex_equivalence_haswell",
+          [&](test_context_t &context) { check_regex_equivalence_(context, regex_haswell); });
+
     constexpr utf8_runes_backend_t utf8_runes_haswell {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell,
                                                        sz_utf8_decode_haswell};
     check("test_utf8_runes_unit_haswell", [&] { check_utf8_runes_unit_(utf8_runes_haswell); });
@@ -368,6 +377,15 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_substrings_unit_icelake", [&] { check_substrings_unit_(substrings_icelake); });
     check("test_substrings_equivalence_icelake",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_icelake); });
+
+    constexpr regex_tier_t regex_icelake {
+        .init = sz_regex_engine_init_icelake,
+        .counts = sz_regex_counts_icelake,
+        .find = sz_regex_find_icelake,
+    };
+    check("test_regex_unit_icelake", [&] { check_regex_unit_(regex_icelake); });
+    check("test_regex_equivalence_icelake",
+          [&](test_context_t &context) { check_regex_equivalence_(context, regex_icelake); });
 
     constexpr utf8_runes_backend_t utf8_runes_icelake {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake,
                                                        sz_utf8_decode_icelake, sz_utf8_count_strings_icelake};

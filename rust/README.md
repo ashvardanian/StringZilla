@@ -779,7 +779,7 @@ fn new<N: AsRef<[u8]>>(needles: &[N], case_sensitivity: CaseSensitivity,
 fn counts<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     haystacks: StringsView<'scope>, counts: &'scope mut [usize], counts_stride: usize) -> Result<(), Status>;
 fn find<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    haystacks: StringsView<'scope>, matches: &'scope mut [SubstringsMatch],
+    haystacks: StringsView<'scope>, matches: &'scope mut [Match],
     matches_offsets: &'scope mut [usize]) -> Result<(), Status>;
 fn replace<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     haystacks: StringsView<'scope>, replacements: StringsView<'scope>,
@@ -795,7 +795,7 @@ fn report(&self) -> SubstringsReport;
 `matches_budget` bounds what one round may emit and `haystacks_budget` how many haystacks it may carry, and both are read by a device tier alone, so a host engine takes `SUBSTRINGS_MATCHES_BUDGET_AUTO` and zero and walks straight into the caller's output.
 
 `CaseSensitivity::Cased` matches bytes exactly and accepts arbitrary needles, while `CaseSensitivity::Uncased` folds both sides under full Unicode case folding and requires valid UTF-8.
-Folding is not a byte-length-preserving operation, so a 1-byte needle can match a 3-byte span — the Kelvin sign `U+212A` folds to `k` — which is why every `SubstringsMatch` carries its own `byte_length` rather than borrowing the needle's.
+Folding is not a byte-length-preserving operation, so a 1-byte needle can match a 3-byte span — the Kelvin sign `U+212A` folds to `k` — which is why every `Match` carries its own `byte_length` rather than borrowing the needle's.
 
 `SubstringsOverlapPolicy` decides what a walk reports, and it sizes the engine's arena, so it is fixed at construction and one engine runs exactly one of the three:
 
@@ -809,7 +809,7 @@ That is what lets one call with an empty output size the next one, with no walk 
 
 ```rust
 use stringzilla::sz::{
-    Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, SubstringsMatch, SubstringsOverlapPolicy,
+    Capabilities, CaseSensitivity, Stream, StringsView, SubstringsEngine, Match, SubstringsOverlapPolicy,
     SUBSTRINGS_HOT_STATES_AUTO, SUBSTRINGS_MATCHES_BUDGET_AUTO,
 };
 
@@ -831,7 +831,7 @@ cpu.scope(|scope| engine.counts(scope, documents, &mut counts, 1)).unwrap();
 assert_eq!(counts, [3, 0]); // "catalog", the "cat" inside it, and the "cat" of "cats"
 
 // `find` fills one boundary per haystack plus a final total, whether or not the matches fit.
-let mut matches = [SubstringsMatch::default(); 3];
+let mut matches = [Match::default(); 3];
 let mut offsets = [0usize; 3];
 cpu.scope(|scope| engine.find(scope, documents, &mut matches, &mut offsets)).unwrap();
 assert_eq!(offsets, [0, 3, 3]);

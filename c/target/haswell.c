@@ -14,6 +14,7 @@
 #include "stringzilla/levenshtein/haswell.h"
 #include "stringzilla/overlap/haswell.h"
 #include "stringzilla/substrings/haswell.h"
+#include "stringzilla/regex/haswell.h"
 #include "stringzilla/utf8_runes/haswell.h"
 #include "stringzilla/utf8_tokens/haswell.h"
 #include "stringzilla/utf8_wordbreaks/haswell.h"

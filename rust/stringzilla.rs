@@ -14,6 +14,7 @@ mod hash;
 mod intersect;
 mod levenshtein;
 mod overlap;
+mod regex;
 mod sort;
 mod strings;
 mod substrings;
@@ -37,6 +38,7 @@ pub use hash::*;
 pub use intersect::*;
 pub use levenshtein::*;
 pub use overlap::*;
+pub use regex::*;
 pub use sort::*;
 pub use strings::*;
 pub use substrings::*;
@@ -689,7 +691,7 @@ extern "C" {
     pub(crate) fn sz_substrings_find(
         engine: *mut SubstringsEngine,
         haystacks: *const sz_strings_view_t,
-        matches: *mut SubstringsMatch,
+        matches: *mut Match,
         matches_capacity: sz_size_t,
         matches_offsets: *mut sz_size_t,
         stream: sz_stream_t,

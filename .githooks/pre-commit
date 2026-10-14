@@ -2789,10 +2789,12 @@ check_pointer_not_cast_through_integer() {
 
 # Rejects indexing straight through a call or a cast, as in `owner.view()[index]`, because the owning
 # container has its own `operator[]` and anything else deserves a named local. A reference-to-array
-# parameter, `T const (&name)[count]`, is a declaration and passes.
+# parameter, `T const (&name)[count]`, is a declaration and passes, and so does a string literal like an
+# XPath `text()[5]` or a regex `(?<!\w)[A-Z]`, which indexes nothing.
 check_call_result_not_indexed() {
     local chains
-    chains=$(added_code_text | grep -E '\)\[' | grep -vE '\(&[A-Za-z_][A-Za-z0-9_]*\)\[' || true)
+    chains=$(added_code_text | sed -E 's/"(\\.|[^"\\])*"/""/g' | grep -E '\)\[' |
+        grep -vE '\(&[A-Za-z_][A-Za-z0-9_]*\)\[' || true)
     [ -z "$chains" ] || reject_with_reason "$chains" \
         "$staged_path indexes through a call or a cast; index the owning container, or bind a named local:"
 }

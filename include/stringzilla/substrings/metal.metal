@@ -24,9 +24,6 @@
 /** Threads every threadgroup here runs, as the CUDA tier's blocks. */
 constant uint sz_substrings_threads_metal_k = 256;
 
-/** Candidates one thread scans quadratically before a cover segment falls back to emitted order. */
-constant ulong sz_substrings_cover_segment_limit_metal_k = 4096;
-
 /** Output bytes one threadgroup of a rewrite's copy owns, as
  *  @c sz_substrings_gpu_rewrite_tile_bytes_k. */
 constant ulong sz_substrings_gpu_rewrite_tile_bytes_metal_k = 4096;
@@ -48,13 +45,20 @@ constant ulong sz_substrings_gpu_sizing_metal_k = 0, sz_substrings_gpu_writing_m
 /** Fraction bits of a BM25 sum, as @c sz_substrings_gpu_bm25_fraction_bits_k. */
 constant uint sz_substrings_gpu_bm25_fraction_bits_metal_k = 32;
 
+/** How matches that share bytes resolve, numbered as @c sz_substrings_overlap_policy_t. */
+enum sz_substrings_overlap_policy_metal_t : ulong {
+    sz_substrings_overlapping_metal_k = 0,
+    sz_substrings_leftmost_longest_metal_k = 1,
+    sz_substrings_leftmost_first_metal_k = 2,
+};
+
 /** One output of a state, laid out as @c sz_substrings_output_t. */
 struct sz_substrings_output_metal_t {
     uint needle_index, folded_match_bytes;
 };
 
-/** One match, laid out as @c sz_substrings_match_t. */
-struct sz_substrings_match_metal_t {
+/** One match, laid out as @c sz_match_t. */
+struct sz_match_metal_t {
     ulong haystack_index, needle_index, byte_offset, byte_length;
 };
 
@@ -70,7 +74,7 @@ struct sz_substrings_arguments_metal_t {
     ulong hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
     ulong hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
     ulong report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
-    ulong emitted, reported, keep_offsets, gap_offsets, overflow_rows;
+    ulong emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows;
     ulong slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
     ulong haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
     ulong document_lengths, scores_stride, tally_hashed;
@@ -201,7 +205,7 @@ inline ulong sz_substrings_resolve_match_metal_(device uchar const *haystack, ul
 inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automaton_metal_t const &automaton,
                                                      device uchar const *haystack, ulong length, ulong chunk_begin,
                                                      ulong chunk_end, ulong haystack_index, ulong pass,
-                                                     device sz_substrings_match_metal_t *matches_at_chunk,
+                                                     device sz_match_metal_t *matches_at_chunk,
                                                      thread sz_substrings_tally_metal_t const *tally) {
     ulong const warm_up = automaton.max_source_match_bytes ? automaton.max_source_match_bytes - 1 : 0;
     ulong walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
@@ -266,7 +270,7 @@ inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automa
 inline ulong sz_substrings_walk_chunk_metal_(thread sz_substrings_automaton_metal_t const &automaton,
                                              device uchar const *haystack, ulong chunk_begin, ulong chunk_end,
                                              ulong haystack_index, ulong pass,
-                                             device sz_substrings_match_metal_t *matches_at_chunk,
+                                             device sz_match_metal_t *matches_at_chunk,
                                              thread sz_substrings_tally_metal_t const *tally) {
     ulong const warm_up = automaton.max_source_match_bytes > 0 ? automaton.max_source_match_bytes - 1 : 0;
     ulong const walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
@@ -463,8 +467,7 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
     sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     device ulong const *chunk_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_offsets);
     device ulong *chunk_slots = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_slots);
-    device sz_substrings_match_metal_t *emitted = sz_reach_metal_<sz_substrings_match_metal_t>(scratch, scratch_host,
-                                                                                               arguments.emitted);
+    device sz_match_metal_t *emitted = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host, arguments.emitted);
     ulong const chunk_count = chunk_offsets[arguments.haystacks_count];
     ulong const chunk_bytes = *sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_bytes);
 
@@ -474,9 +477,9 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
         ulong const length = sz_strings_length_metal_(tape, haystack_index);
         ulong const chunk_begin = (chunk_index - chunk_offsets[haystack_index]) * chunk_bytes;
         ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
-        device sz_substrings_match_metal_t *matches_at_chunk = arguments.pass == sz_substrings_gpu_writing_metal_k
-                                                                   ? emitted + chunk_slots[chunk_index]
-                                                                   : nullptr;
+        device sz_match_metal_t *matches_at_chunk = arguments.pass == sz_substrings_gpu_writing_metal_k
+                                                        ? emitted + chunk_slots[chunk_index]
+                                                        : nullptr;
         device uchar const *haystack = sz_strings_start_metal_(tape, haystack_index);
         ulong const found = chunk_begin >= chunk_end ? 0
                             : automaton.uncased
@@ -503,77 +506,79 @@ kernel void sz_substrings_sized_metal_kernel_(device uchar *scratch [[buffer(1)]
                                                                                  : 0;
 }
 
-/** Whether the boundary before @p index is real: nothing still to come starts before the maximum
- *  end already reached, and only matches ending within one match's length of it can. */
-inline bool sz_substrings_boundary_before_metal_(device sz_substrings_match_metal_t const *matches, ulong count,
-                                                 ulong longest, ulong index) {
-    if (index == 0 || matches[index - 1].haystack_index != matches[index].haystack_index) return true;
-    ulong const reached = matches[index - 1].byte_offset + matches[index - 1].byte_length;
-    for (ulong ahead = index; ahead < count; ++ahead) {
-        if (matches[ahead].haystack_index != matches[index - 1].haystack_index) break;
-        if (matches[ahead].byte_offset + matches[ahead].byte_length >= reached + longest) break;
-        if (matches[ahead].byte_offset < reached) return false;
-    }
-    return true;
+/** Whether @p candidate is the one a leftmost @p policy takes over @p incumbent, as
+ *  @c sz_substrings_precedes_simt_ decides. */
+inline bool sz_substrings_precedes_metal_(sz_match_metal_t candidate, sz_match_metal_t incumbent,
+                                          sz_substrings_overlap_policy_metal_t policy) {
+    if (candidate.byte_offset != incumbent.byte_offset) return candidate.byte_offset < incumbent.byte_offset;
+    if (policy == sz_substrings_leftmost_longest_metal_k && candidate.byte_length != incumbent.byte_length)
+        return candidate.byte_length > incumbent.byte_length;
+    return candidate.needle_index < incumbent.needle_index;
 }
 
-/** Decides which overlapping matches survive a leftmost cover, one segment per thread, as the CUDA
- *  tier's cover does, falling back to emitted order past
- *  @ref sz_substrings_cover_segment_limit_metal_k candidates. */
-kernel void sz_substrings_cover_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                              constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
-                                              uint position [[thread_position_in_grid]],
-                                              uint threads [[threads_per_grid]]) {
+/** The match a leftmost cover takes first at or past @p reached, scanning from @p from
+ *  in end order, or @p count. */
+inline ulong sz_substrings_successor_metal_(device sz_match_metal_t const *matches, ulong count, ulong longest,
+                                            sz_substrings_overlap_policy_metal_t policy, ulong from, ulong reached) {
+    ulong best = count;
+    for (ulong slot = from; slot < count && matches[slot].haystack_index == matches[from].haystack_index; ++slot) {
+        // Every later match ends no earlier, so it starts after the best one
+        // once it ends `longest` past it.
+        if (best != count &&
+            matches[slot].byte_offset + matches[slot].byte_length > matches[best].byte_offset + longest)
+            break;
+        if (matches[slot].byte_offset < reached) continue;
+        if (best == count || sz_substrings_precedes_metal_(matches[slot], matches[best], policy)) best = slot;
+    }
+    return best;
+}
+
+/** Links every match to its successor, and marks each haystack's first chosen match,
+ *  as the CUDA tier's link does. */
+kernel void sz_substrings_link_metal_kernel_(device uchar *scratch [[buffer(1)]],
+                                             constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
+                                             uint position [[thread_position_in_grid]],
+                                             uint threads [[threads_per_grid]]) {
+    ulong const scratch_host = arguments.scratch_host;
     device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
-        scratch, arguments.scratch_host, arguments.report);
+        scratch, scratch_host, arguments.report);
     if (report->shortfall) return;
-    device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
-        scratch, arguments.scratch_host, arguments.emitted);
-    device ulong *keep = sz_reach_metal_<ulong>(scratch, arguments.scratch_host, arguments.keep_offsets);
+    device sz_match_metal_t const *matches = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host,
+                                                                               arguments.emitted);
+    device ulong *jumps = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.jumps);
+    device ulong *keep = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.keep_offsets);
     ulong const count = report->matches_emitted, longest = arguments.max_source_match_bytes;
-    bool const longest_first = arguments.overlap_policy == 1; // `sz_substrings_leftmost_longest_k`
+    sz_substrings_overlap_policy_metal_t const policy = sz_substrings_overlap_policy_metal_t(arguments.overlap_policy);
     for (ulong index = position; index < count; index += threads) {
-        // Only a segment's first match works; the rest are decided by whoever owns their segment.
-        if (!sz_substrings_boundary_before_metal_(matches, count, longest, index)) continue;
-        ulong segment_end = index + 1;
-        while (segment_end < count && !sz_substrings_boundary_before_metal_(matches, count, longest, segment_end))
-            ++segment_end;
+        sz_match_metal_t const match = matches[index];
+        jumps[index] = index + 1 < count && matches[index + 1].haystack_index == match.haystack_index
+                           ? sz_substrings_successor_metal_(matches, count, longest, policy, index + 1,
+                                                            match.byte_offset + match.byte_length)
+                           : count;
+        if (index == 0 || matches[index - 1].haystack_index != match.haystack_index)
+            keep[sz_substrings_successor_metal_(matches, count, longest, policy, index, 0)] = 1;
+    }
+}
 
-        if (segment_end - index > sz_substrings_cover_segment_limit_metal_k) {
-            ulong reached = 0;
-            for (ulong slot = index; slot < segment_end; ++slot) {
-                bool const accepted = matches[slot].byte_offset >= reached;
-                keep[slot] = accepted;
-                if (accepted) reached = matches[slot].byte_offset + matches[slot].byte_length;
-            }
-            continue;
-        }
-
-        // The greedy cover: take the earliest start at or past the cursor, breaking ties by
-        // policy, and repeat.
-        for (ulong slot = index; slot < segment_end; ++slot) keep[slot] = 0;
-        for (ulong cursor = 0;;) {
-            ulong chosen = segment_end;
-            for (ulong slot = index; slot < segment_end; ++slot) {
-                if (matches[slot].byte_offset < cursor) continue;
-                if (chosen == segment_end) {
-                    chosen = slot;
-                    continue;
-                }
-                if (matches[slot].byte_offset != matches[chosen].byte_offset) {
-                    if (matches[slot].byte_offset < matches[chosen].byte_offset) chosen = slot;
-                    continue;
-                }
-                if (longest_first && matches[slot].byte_length != matches[chosen].byte_length) {
-                    if (matches[slot].byte_length > matches[chosen].byte_length) chosen = slot;
-                    continue;
-                }
-                if (matches[slot].needle_index < matches[chosen].needle_index) chosen = slot;
-            }
-            if (chosen == segment_end) break;
-            keep[chosen] = 1;
-            cursor = matches[chosen].byte_offset + matches[chosen].byte_length;
-        }
+/** One doubling round: every marked match marks the match its jump reaches,
+ *  and jumps twice as far next round. */
+kernel void sz_substrings_double_metal_kernel_(device uchar *scratch [[buffer(1)]],
+                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
+                                               uint position [[thread_position_in_grid]],
+                                               uint threads [[threads_per_grid]]) {
+    ulong const scratch_host = arguments.scratch_host;
+    device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
+        scratch, scratch_host, arguments.report);
+    if (report->shortfall) return;
+    device ulong const *jumps = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.jumps);
+    device ulong *doubled = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.doubled);
+    device ulong *keep = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.keep_offsets);
+    ulong const count = report->matches_emitted;
+    for (ulong index = position; index < count; index += threads) {
+        ulong const jump = jumps[index];
+        // A mark set in this round only reaches matches that are on the chain anyway.
+        if (keep[index] && jump != count) keep[jump] = 1;
+        doubled[index] = jump == count ? count : jumps[jump];
     }
 }
 
@@ -587,10 +592,9 @@ kernel void sz_substrings_compact_metal_kernel_(device uchar *scratch [[buffer(1
     device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, scratch_host, arguments.report);
     if (report->shortfall) return;
-    device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
-        scratch, scratch_host, arguments.emitted);
-    device sz_substrings_match_metal_t *survivors = sz_reach_metal_<sz_substrings_match_metal_t>(scratch, scratch_host,
-                                                                                                 arguments.reported);
+    device sz_match_metal_t const *matches = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host,
+                                                                               arguments.emitted);
+    device sz_match_metal_t *survivors = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host, arguments.reported);
     device ulong const *keep_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.keep_offsets);
     for (ulong index = position; index < report->matches_emitted; index += threads)
         if (keep_offsets[index + 1] > keep_offsets[index]) survivors[keep_offsets[index]] = matches[index];
@@ -636,7 +640,7 @@ kernel void sz_substrings_counts_metal_kernel_(device ulong const *haystack_offs
 
 /** Copies the surviving matches into the caller's array, clipped at a capacity only it knows. */
 kernel void sz_substrings_store_matches_metal_kernel_(device uchar *scratch [[buffer(1)]],
-                                                      device sz_substrings_match_metal_t *matches [[buffer(7)]],
+                                                      device sz_match_metal_t *matches [[buffer(7)]],
                                                       constant sz_substrings_arguments_metal_t &arguments
                                                       [[buffer(16)]],
                                                       uint position [[thread_position_in_grid]],
@@ -644,8 +648,8 @@ kernel void sz_substrings_store_matches_metal_kernel_(device uchar *scratch [[bu
     ulong const scratch_host = arguments.scratch_host;
     device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
         scratch, scratch_host, arguments.report);
-    device sz_substrings_match_metal_t const *reported = sz_reach_metal_<sz_substrings_match_metal_t>(
-        scratch, scratch_host, arguments.reported);
+    device sz_match_metal_t const *reported = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host,
+                                                                                arguments.reported);
     ulong const fitting = min(report->shortfall ? 0 : report->matches_stored, arguments.matches_capacity);
     for (ulong index = position; index < fitting; index += threads) matches[index] = reported[index];
 }
@@ -683,8 +687,8 @@ kernel void sz_substrings_rewrite_offsets_metal_kernel_(
     sz_strings_tape_metal_t const haystacks_tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     sz_strings_tape_metal_t const replacements_tape = {replacements, replacements_offsets,
                                                        arguments.replacements_layout};
-    device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
-        scratch, scratch_host, arguments.reported);
+    device sz_match_metal_t const *matches = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host,
+                                                                               arguments.reported);
     device ulong *gap_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.gap_offsets);
 
     for (ulong haystack_index = group; haystack_index < arguments.haystacks_count; haystack_index += groups) {
@@ -748,8 +752,8 @@ kernel void sz_substrings_rewrite_copy_metal_kernel_(
     sz_strings_tape_metal_t const haystacks_tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     sz_strings_tape_metal_t const replacements_tape = {replacements, replacements_offsets,
                                                        arguments.replacements_layout};
-    device sz_substrings_match_metal_t const *matches = sz_reach_metal_<sz_substrings_match_metal_t>(
-        scratch, scratch_host, arguments.reported);
+    device sz_match_metal_t const *matches = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host,
+                                                                               arguments.reported);
     device ulong const *gap_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.gap_offsets);
     ulong const count = arguments.haystacks_count, total = output_offsets[count];
     ulong const tiles = sz_size_divide_round_up_metal_<ulong>(total, sz_substrings_gpu_rewrite_tile_bytes_metal_k);

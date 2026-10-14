@@ -15,9 +15,11 @@
  *  start - clamped to its haystack, never earlier - so every match is found exactly once and no
  *  chunk reads a neighbour's text.
  *
- *  A cover is a property of the matches, not of the bytes, so it is resolved after the walk. Inside
- *  the walk it would cost every thread a ring wide enough for the longest match, and a second walk
- *  to find a safe place to start; both are gone.
+ *  A cover is a property of the matches, not of the bytes, so it is resolved after the walk: each
+ *  match links to its successor, the first match a leftmost search takes past its end, and pointer
+ *  doubling marks the chain from each haystack's first, exactly, in a logarithmic number of rounds.
+ *  Inside the walk it would cost every thread a ring wide enough for the longest match, and a
+ *  second walk to find a safe place to start; resolving it afterwards needs neither.
  *
  *  When a round outruns its match budget the writing walk, the cover, the compaction and the
  *  boundaries kernel each retire at their first instruction, so an output is left untouched rather
@@ -46,9 +48,6 @@ extern "C" {
  *  thread-bound, so a modest fixed block keeps the launch geometry simple and the block scan one
  *  power of two. */
 enum { sz_substrings_threads_per_block_simt_k = 256 };
-
-/** Candidates one thread scans quadratically before a cover segment falls back to emitted order. */
-enum { sz_substrings_cover_segment_limit_simt_k = 4096 };
 
 enum {
 
@@ -344,7 +343,7 @@ static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_eng
 STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t const *engine,
                                                       sz_substrings_staged_simt_t const *staged, sz_u32_t state,
                                                       sz_size_t walk_begin, sz_u32_t delta, sz_size_t haystack_index,
-                                                      sz_substrings_gpu_pass_t pass, sz_substrings_match_t *matches_out,
+                                                      sz_substrings_gpu_pass_t pass, sz_match_t *matches_out,
                                                       sz_substrings_tally_simt_t const *tally) {
     sz_size_t output_offset, found = 0, index;
     sz_u32_t output_count;
@@ -360,7 +359,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t con
         // the haystack are the same test.
         if (delta + 1 < output.folded_match_bytes) continue;
         if (pass == sz_substrings_gpu_writing_k) {
-            sz_substrings_match_t match;
+            sz_match_t match;
             match.haystack_index = haystack_index;
             match.needle_index = output.needle_index;
             match.byte_offset = walk_begin + delta + 1 - output.folded_match_bytes;
@@ -385,7 +384,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t con
 STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_cased_simt_(
     sz_substrings_engine_t const *engine, sz_substrings_staged_simt_t const *staged, sz_cptr_t haystack,
     sz_size_t length, sz_size_t chunk_begin, sz_size_t chunk_end, sz_size_t haystack_index,
-    sz_substrings_gpu_pass_t pass, sz_substrings_match_t *matches_at_chunk, sz_substrings_tally_simt_t const *tally) {
+    sz_substrings_gpu_pass_t pass, sz_match_t *matches_at_chunk, sz_substrings_tally_simt_t const *tally) {
     sz_size_t const warm_up = engine->max_source_match_bytes > 0 ? (sz_size_t)engine->max_source_match_bytes - 1 : 0;
     sz_size_t const walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
     sz_u8_t const *const walk_base = (sz_u8_t const *)haystack + walk_begin;
@@ -492,7 +491,7 @@ sz_substrings_folded_span_simt_(sz_cptr_t haystack, sz_substrings_folded_byte_t 
 STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(
     sz_substrings_engine_t const *engine, sz_substrings_staged_simt_t const *staged, sz_cptr_t haystack,
     sz_size_t length, sz_size_t chunk_begin, sz_size_t chunk_end, sz_size_t haystack_index,
-    sz_substrings_gpu_pass_t pass, sz_substrings_match_t *matches_at_chunk, sz_substrings_tally_simt_t const *tally) {
+    sz_substrings_gpu_pass_t pass, sz_match_t *matches_at_chunk, sz_substrings_tally_simt_t const *tally) {
     sz_size_t const warm_up = engine->max_source_match_bytes > 0 ? (sz_size_t)engine->max_source_match_bytes - 1 : 0;
     sz_size_t walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
     sz_u8_t const *const haystack_bytes = (sz_u8_t const *)haystack;
@@ -587,11 +586,10 @@ enum { sz_substrings_chunks_per_thread_simt_k = 8 };
  *  so a write needs no atomic.
  */
 STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t const *engine,
-                                                        sz_substrings_case_sensitivity_t case_sensitivity,
-                                                        sz_u32_t staged_count, sz_strings_view_t haystacks,
-                                                        sz_size_t const *chunk_offsets,
+                                                        sz_case_sensitivity_t case_sensitivity, sz_u32_t staged_count,
+                                                        sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
                                                         sz_substrings_report_t const *report, sz_size_t *chunk_slots,
-                                                        sz_substrings_match_t *matches, sz_substrings_gpu_pass_t pass) {
+                                                        sz_match_t *matches, sz_substrings_gpu_pass_t pass) {
     extern __shared__ sz_u32_t sz_substrings_staged_simt_[];
     __shared__ sz_u8_t staged_classes[STRINGZILLA_U8_MAX + 1];
     sz_size_t const chunk_count = chunk_offsets[haystacks.count];
@@ -612,12 +610,11 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
         sz_size_t const local_index = chunk_index - chunk_offsets[haystack_index];
         sz_size_t const chunk_begin = local_index * chunk_bytes;
         sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
-        sz_substrings_match_t *const matches_at_chunk = pass == sz_substrings_gpu_writing_k
-                                                            ? matches + chunk_slots[chunk_index]
-                                                            : matches;
+        sz_match_t *const matches_at_chunk = pass == sz_substrings_gpu_writing_k ? matches + chunk_slots[chunk_index]
+                                                                                 : matches;
         sz_size_t found;
         if (chunk_begin >= chunk_end && length != 0) found = 0;
-        else if (case_sensitivity == sz_substrings_uncased_k)
+        else if (case_sensitivity == sz_uncased_k)
             found = sz_substrings_walk_chunk_uncased_simt_(engine, &staged, haystack, length, chunk_begin, chunk_end,
                                                            haystack_index, pass, matches_at_chunk, STRINGZILLA_NULL);
         else
@@ -630,24 +627,18 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
 /*  A byte-exact and a folded walk are compiled apart, so the folding cursor's registers never cut
  *  the residency of a walk that does not fold. */
 
-static __global__ void sz_substrings_walk_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                             sz_strings_view_t haystacks,
-                                                             sz_size_t const *chunk_offsets,
-                                                             sz_substrings_report_t const *report,
-                                                             sz_size_t *chunk_slots, sz_substrings_match_t *matches,
-                                                             sz_substrings_gpu_pass_t pass) {
-    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_cased_k, staged_count, haystacks, chunk_offsets, report,
-                                    chunk_slots, matches, pass);
+static __global__ void sz_substrings_walk_cased_simt_kernel_(
+    sz_substrings_engine_t engine, sz_u32_t staged_count, sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+    sz_substrings_report_t const *report, sz_size_t *chunk_slots, sz_match_t *matches, sz_substrings_gpu_pass_t pass) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, staged_count, haystacks, chunk_offsets, report, chunk_slots,
+                                    matches, pass);
 }
 
-static __global__ void sz_substrings_walk_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                               sz_strings_view_t haystacks,
-                                                               sz_size_t const *chunk_offsets,
-                                                               sz_substrings_report_t const *report,
-                                                               sz_size_t *chunk_slots, sz_substrings_match_t *matches,
-                                                               sz_substrings_gpu_pass_t pass) {
-    sz_substrings_walk_chunks_simt_(&engine, sz_substrings_uncased_k, staged_count, haystacks, chunk_offsets, report,
-                                    chunk_slots, matches, pass);
+static __global__ void sz_substrings_walk_uncased_simt_kernel_(
+    sz_substrings_engine_t engine, sz_u32_t staged_count, sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+    sz_substrings_report_t const *report, sz_size_t *chunk_slots, sz_match_t *matches, sz_substrings_gpu_pass_t pass) {
+    sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, staged_count, haystacks, chunk_offsets, report, chunk_slots,
+                                    matches, pass);
 }
 
 #pragma endregion Walk Kernels
@@ -676,7 +667,7 @@ STRINGZILLA_DEVICE void sz_substrings_bm25_walk_simt_(sz_substrings_engine_t con
     sz_size_t const chunk_begin = thread * chunk_bytes;
     if (chunk_begin >= length) return;
     sz_size_t const chunk_end = sz_min_of_two(chunk_begin + chunk_bytes, length);
-    if (engine->case_sensitivity == sz_substrings_uncased_k)
+    if (engine->case_sensitivity == sz_uncased_k)
         sz_substrings_walk_chunk_uncased_simt_(engine, staged, haystack, length, chunk_begin, chunk_end, haystack_index,
                                                sz_substrings_gpu_tallying_k, STRINGZILLA_NULL, tally);
     else
@@ -818,91 +809,74 @@ static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t en
 
 #pragma region Cover Kernels
 
-/** Whether the boundary before @p index is real: nothing still to come starts before the
- *  maximum end already reached. Only matches ending within one match's length of it can, which
- *  bounds the look-ahead. */
-STRINGZILLA_DEVICE sz_bool_t sz_substrings_boundary_before_simt_(sz_substrings_match_t const *matches, sz_size_t count,
-                                                                 sz_size_t longest, sz_size_t index) {
-    sz_size_t reached, ahead;
-    if (index == 0) return sz_true_k;
-    if (matches[index - 1].haystack_index != matches[index].haystack_index) return sz_true_k;
-    reached = matches[index - 1].byte_offset + matches[index - 1].byte_length;
-    for (ahead = index; ahead < count; ++ahead) {
-        if (matches[ahead].haystack_index != matches[index - 1].haystack_index) break;
-        if (matches[ahead].byte_offset + matches[ahead].byte_length >= reached + longest) break;
-        if (matches[ahead].byte_offset < reached) return sz_false_k;
+/** Whether @p candidate is the one a leftmost @p policy takes over @p incumbent,
+ *  both at or past the cursor. */
+STRINGZILLA_DEVICE sz_bool_t sz_substrings_precedes_simt_(sz_match_t const *candidate, sz_match_t const *incumbent,
+                                                          sz_substrings_overlap_policy_t policy) {
+    if (candidate->byte_offset != incumbent->byte_offset)
+        return (sz_bool_t)(candidate->byte_offset < incumbent->byte_offset);
+    if (policy == sz_substrings_leftmost_longest_k && candidate->byte_length != incumbent->byte_length)
+        return (sz_bool_t)(candidate->byte_length > incumbent->byte_length);
+    return (sz_bool_t)(candidate->needle_index < incumbent->needle_index);
+}
+
+/** The match a leftmost cover takes first at or past @p reached, scanning from @p from
+ *  in end order, or @p count. */
+STRINGZILLA_DEVICE sz_size_t sz_substrings_successor_simt_(sz_match_t const *matches, sz_size_t count,
+                                                           sz_size_t longest, sz_substrings_overlap_policy_t policy,
+                                                           sz_size_t from, sz_size_t reached) {
+    sz_size_t best = count, slot;
+    for (slot = from; slot < count && matches[slot].haystack_index == matches[from].haystack_index; ++slot) {
+        // Every later match ends no earlier, so it starts after the best one
+        // once it ends `longest` past it.
+        if (best != count &&
+            matches[slot].byte_offset + matches[slot].byte_length > matches[best].byte_offset + longest)
+            break;
+        if (matches[slot].byte_offset < reached) continue;
+        if (best == count || sz_substrings_precedes_simt_(&matches[slot], &matches[best], policy)) best = slot;
     }
-    return sz_true_k;
+    return best;
 }
 
 /**
- *  @brief Decides which overlapping matches survive a leftmost cover, one segment per thread.
+ *  @brief Links every match to its successor and marks each haystack's first chosen one in @p keep.
  *
- *  Within a haystack the walk emits in non-decreasing end order, so the running maximum end is
- *  simply the previous match's end, and a boundary sits where nothing still to come reaches back
- *  across it. Nothing before such a boundary can reach past it, so each segment resolves against a
- *  cursor of zero, independently of every other.
- *
- *  Segments are short in real text - a needle set drawn from a vocabulary leaves a median of one
- *  match between boundaries - so one thread takes a whole one. That is a measurement rather than a
- *  guarantee: a needle and its own suffixes over repetitive text make one segment of the whole
- *  document, and the greedy below is quadratic in a segment, so past
- *  @ref sz_substrings_cover_segment_limit_simt_k candidates a segment falls back to accepting in
- *  emitted order - the same cover whenever starts ascend with ends, and a documented approximation
- *  when they do not. Without the cap one thread could hold the grid.
+ *  Within a haystack the walk emits matches in non-decreasing end order and each starts at most
+ *  @p longest bytes before its end, so a successor's search window is bounded by the vocabulary,
+ *  never by the text.
  */
-static __global__ void sz_substrings_cover_simt_kernel_(sz_substrings_match_t const *matches,
-                                                        sz_substrings_report_t const *report, sz_size_t longest,
-                                                        sz_substrings_overlap_policy_t policy, sz_size_t *keep) {
+static __global__ void sz_substrings_link_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t const *report,
+                                                       sz_size_t longest, sz_substrings_overlap_policy_t policy,
+                                                       sz_size_t *jumps, sz_size_t *keep) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     // Nothing was written, so there is nothing to cover; the report already names what did not fit.
     if (report->shortfall) return;
     for (; index < count; index += stride) {
-        sz_size_t segment_end, slot, cursor;
-        // Only a segment's first match works; the rest are decided by whoever owns their segment.
-        if (!sz_substrings_boundary_before_simt_(matches, count, longest, index)) continue;
-        for (segment_end = index + 1; segment_end < count; ++segment_end)
-            if (sz_substrings_boundary_before_simt_(matches, count, longest, segment_end)) break;
+        sz_match_t const *match = &matches[index];
+        jumps[index] = index + 1 < count && matches[index + 1].haystack_index == match->haystack_index
+                           ? sz_substrings_successor_simt_(matches, count, longest, policy, index + 1,
+                                                           match->byte_offset + match->byte_length)
+                           : count;
+        if (index == 0 || matches[index - 1].haystack_index != match->haystack_index)
+            keep[sz_substrings_successor_simt_(matches, count, longest, policy, index, 0)] = 1;
+    }
+}
 
-        if (segment_end - index > sz_substrings_cover_segment_limit_simt_k) {
-            sz_size_t reached = 0;
-            for (slot = index; slot < segment_end; ++slot) {
-                sz_bool_t const accepted = (sz_bool_t)(matches[slot].byte_offset >= reached);
-                keep[slot] = accepted;
-                if (accepted) reached = matches[slot].byte_offset + matches[slot].byte_length;
-            }
-            continue;
-        }
-
-        // The greedy cover: take the earliest start at or past the cursor, breaking ties by policy, and
-        // repeat. Quadratic in the segment, which is why the segment is one thread's worth and no more.
-        for (slot = index; slot < segment_end; ++slot) keep[slot] = 0;
-        cursor = 0;
-        for (;;) {
-            sz_size_t chosen = segment_end;
-            for (slot = index; slot < segment_end; ++slot) {
-                if (matches[slot].byte_offset < cursor) continue;
-                if (chosen == segment_end) {
-                    chosen = slot;
-                    continue;
-                }
-                if (matches[slot].byte_offset != matches[chosen].byte_offset) {
-                    if (matches[slot].byte_offset < matches[chosen].byte_offset) chosen = slot;
-                    continue;
-                }
-                if (policy == sz_substrings_leftmost_longest_k &&
-                    matches[slot].byte_length != matches[chosen].byte_length) {
-                    if (matches[slot].byte_length > matches[chosen].byte_length) chosen = slot;
-                    continue;
-                }
-                if (matches[slot].needle_index < matches[chosen].needle_index) chosen = slot;
-            }
-            if (chosen == segment_end) break;
-            keep[chosen] = 1;
-            cursor = matches[chosen].byte_offset + matches[chosen].byte_length;
-        }
+/** One doubling round: every marked match marks the match its jump reaches,
+ *  and jumps twice as far next round. */
+static __global__ void sz_substrings_double_simt_kernel_(sz_substrings_report_t const *report, sz_size_t const *jumps,
+                                                         sz_size_t *doubled, sz_size_t *keep) {
+    sz_size_t const count = report->matches_emitted;
+    sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (report->shortfall) return;
+    for (; index < count; index += stride) {
+        sz_size_t const jump = jumps[index];
+        // A mark set in this round only reaches matches that are on the chain anyway.
+        if (keep[index] && jump != count) keep[jump] = 1;
+        doubled[index] = jump == count ? count : jumps[jump];
     }
 }
 
@@ -915,9 +889,8 @@ static __global__ void sz_substrings_cover_simt_kernel_(sz_substrings_match_t co
  *  The scan overwrote the flags it summed, so survival is read back out of it: a match was kept
  *  exactly when the scan steps across it.
  */
-static __global__ void sz_substrings_compact_simt_kernel_(sz_substrings_match_t const *matches,
-                                                          sz_substrings_report_t *report, sz_size_t const *keep_offsets,
-                                                          sz_substrings_match_t *survivors) {
+static __global__ void sz_substrings_compact_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t *report,
+                                                          sz_size_t const *keep_offsets, sz_match_t *survivors) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -959,10 +932,9 @@ static __global__ void sz_substrings_counts_simt_kernel_(sz_size_t const *haysta
  *  clip; one grid-strided kernel can, and @ref sz_substrings_stored_simt_kernel_ publishes what it
  *  stored once no block is left reading the report.
  */
-static __global__ void sz_substrings_store_matches_simt_kernel_(sz_substrings_match_t const *reported,
+static __global__ void sz_substrings_store_matches_simt_kernel_(sz_match_t const *reported,
                                                                 sz_substrings_report_t const *report,
-                                                                sz_substrings_match_t *matches,
-                                                                sz_size_t matches_capacity) {
+                                                                sz_match_t *matches, sz_size_t matches_capacity) {
     sz_size_t const kept = report->shortfall ? 0 : report->matches_stored;
     sz_size_t const fitting = sz_min_of_two(kept, matches_capacity);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -996,12 +968,9 @@ static __global__ void sz_substrings_stored_simt_kernel_(sz_substrings_report_t 
  *  Offsets are relative to the haystack's own start, because the base is only known after the scan
  *  across haystacks that this kernel feeds.
  */
-static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(sz_strings_view_t haystacks,
-                                                                  sz_strings_view_t replacements,
-                                                                  sz_size_t const *haystack_offsets,
-                                                                  sz_substrings_match_t const *matches,
-                                                                  sz_substrings_report_t const *report,
-                                                                  sz_size_t *gap_offsets, sz_size_t *output_sizes) {
+static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(
+    sz_strings_view_t haystacks, sz_strings_view_t replacements, sz_size_t const *haystack_offsets,
+    sz_match_t const *matches, sz_substrings_report_t const *report, sz_size_t *gap_offsets, sz_size_t *output_sizes) {
     __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
     __shared__ sz_size_t drift_carry;
     sz_size_t haystack_index;
@@ -1061,10 +1030,12 @@ STRINGZILLA_DEVICE void sz_substrings_copy_clipped_simt_(sz_ptr_t output, sz_siz
  *  prose has stretches of tens of bytes and striding a whole block across one of them would
  *  leave most lanes idle.
  */
-static __global__ void sz_substrings_rewrite_copy_simt_kernel_(
-    sz_strings_view_t haystacks, sz_strings_view_t replacements, sz_size_t const *haystack_offsets,
-    sz_substrings_match_t const *matches, sz_size_t const *gap_offsets, sz_size_t const *output_offsets,
-    sz_substrings_report_t const *report, sz_ptr_t output) {
+static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_strings_view_t haystacks,
+                                                               sz_strings_view_t replacements,
+                                                               sz_size_t const *haystack_offsets,
+                                                               sz_match_t const *matches, sz_size_t const *gap_offsets,
+                                                               sz_size_t const *output_offsets,
+                                                               sz_substrings_report_t const *report, sz_ptr_t output) {
     sz_size_t const output_bytes_total = output_offsets[haystacks.count];
     sz_size_t const tile_count = sz_size_divide_round_up(output_bytes_total, sz_substrings_gpu_rewrite_tile_bytes_k);
     unsigned const warp_index = threadIdx.x / 32u, warps_per_block = blockDim.x / 32u, lane = threadIdx.x % 32u;

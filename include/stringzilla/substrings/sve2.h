@@ -73,7 +73,7 @@ STRINGZILLA_INLINE sz_substrings_walks_t sz_substrings_walks_sve2_(void) {
 #if STRINGZILLA_TARGET_SVE2
 
 STRINGZILLA_API sz_status_t sz_substrings_engine_init_sve2(
-    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_substrings_case_sensitivity_t case_sensitivity,
+    sz_substrings_engine_t *engine, sz_strings_view_t const *needles, sz_case_sensitivity_t case_sensitivity,
     sz_substrings_overlap_policy_t overlap_policy, sz_size_t hot_states, sz_size_t matches_budget,
     sz_size_t haystacks_budget, sz_allocator_t *allocator, sz_stream_t stream) {
     sz_unused_(haystacks_budget);
@@ -90,7 +90,7 @@ STRINGZILLA_API sz_status_t sz_substrings_counts_sve2(sz_substrings_engine_t *en
 }
 
 STRINGZILLA_API sz_status_t sz_substrings_find_sve2(sz_substrings_engine_t *engine, sz_strings_view_t const *haystacks,
-                                                    sz_substrings_match_t *matches, sz_size_t matches_capacity,
+                                                    sz_match_t *matches, sz_size_t matches_capacity,
                                                     sz_size_t *matches_offsets, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_substrings_walks_t const walks = sz_substrings_walks_sve2_();

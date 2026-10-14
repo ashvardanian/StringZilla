@@ -76,7 +76,17 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_substrings_equivalence_neon",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_neon); });
 
-    constexpr utf8_runes_backend_t utf8_runes_neon {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon};
+    constexpr regex_tier_t regex_neon {
+        .init = sz_regex_engine_init_neon,
+        .counts = sz_regex_counts_neon,
+        .find = sz_regex_find_neon,
+    };
+    check("test_regex_unit_neon", [&] { check_regex_unit_(regex_neon); });
+    check("test_regex_equivalence_neon",
+          [&](test_context_t &context) { check_regex_equivalence_(context, regex_neon); });
+
+    constexpr utf8_runes_backend_t utf8_runes_neon {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon,
+                                                    sz_utf8_count_strings_neon};
     check("test_utf8_runes_unit_neon", [&] { check_utf8_runes_unit_(utf8_runes_neon); });
     check("test_utf8_runes_safety_neon",
           [&](test_context_t &context) { check_utf8_runes_safety_(context, utf8_runes_neon); });
