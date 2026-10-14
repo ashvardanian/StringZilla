@@ -704,12 +704,10 @@ static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz
     }
 
     sz_bool_t has_tiled = sz_false_k;
-    if (engine->symbol == sz_levenshtein_bytes_k &&
-        sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k)
-        for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
-            if (candidate_buckets[bucket].length_max > sz_levenshtein_gpu_words_max_k * 64 &&
-                candidate_buckets[bucket].length_max <= 0xFFFFFF00u)
-                has_tiled = sz_true_k;
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
+        if (sz_levenshtein_long_tiled_simt_(engine->symbol, sz_levenshtein_engine_words_max_(engine) * 64,
+                                            candidate_buckets[bucket].length_max))
+            has_tiled = sz_true_k;
     sz_size_t const multiprocessors = sz_device_multiprocessors_rocm_();
     void const *const entry_point = has_tiled ? (void const *)sz_levenshtein_tiled_batch_rocm_kernel_
                                               : (void const *)sz_levenshtein_long_simt_kernel_;
@@ -748,21 +746,26 @@ static sz_status_t sz_levenshtein_long_rocm_(sz_levenshtein_engine_t *engine, sz
     return status;
 }
 
-/** Launches every short-query bucket's rung over @p candidates, the threaded rungs drawing them in
- *  @p candidate_order, or in the batch's own order where it is null. */
+/** Launches every short-query bucket's rung over @p candidates, one grid for the consecutive
+ *  buckets sharing an entry point, the threaded rungs drawing them in @p candidate_order, or in the
+ *  batch's own order where it is null. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_rocm_(sz_levenshtein_engine_t *engine,
                                                            sz_strings_view_t const *candidates, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_size_t const *candidate_order,
                                                            sz_levenshtein_entry_points_rocm_t const *entry_points,
                                                            sz_stream_t stream) {
     sz_levenshtein_head_rocm_t const *const head = (sz_levenshtein_head_rocm_t const *)engine->memory;
-    for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) {
-        sz_size_t const first = head->bucket_offsets[bucket], last = head->bucket_offsets[bucket + 1];
-        if (first == last) continue;
-
+    for (sz_size_t bucket = 0, next = 0; bucket != head->buckets; bucket = next) {
         sz_bool_t const narrow = sz_levenshtein_narrow_rocm_(engine, bucket, candidates->count);
         void const *entry_point = sz_levenshtein_entry_point_rocm_(entry_points, engine->symbol, bucket);
+        // Each row reads its own query's word count, so an entry point's buckets share one grid.
         sz_size_t per_block = head->per_block[bucket];
+        for (next = bucket + 1; !narrow && next != head->buckets &&
+                                sz_levenshtein_entry_point_rocm_(entry_points, engine->symbol, next) == entry_point;
+             ++next)
+            per_block = sz_max_of_two(per_block, head->per_block[next]);
+        sz_size_t const first = head->bucket_offsets[bucket], last = head->bucket_offsets[next];
+        if (first == last) continue;
         sz_size_t const rounds = sz_levenshtein_tile_rounds_rocm_k;
         sz_size_t candidates_per_block = per_block * rounds;
         if (narrow) {

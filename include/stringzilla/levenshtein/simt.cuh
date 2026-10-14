@@ -21,9 +21,10 @@
  *
  *  A block owns a tile of candidates rather than one each per thread, and a thread or warp done
  *  with one takes the next one of the tile, so lengths that differ by orders of magnitude cost a
- *  warp about their sum over its lanes rather than thirty-two times the longest. On Blackwell a
- *  block done with its tile takes over a block not yet started, the grid is as wide as the batch,
- *  and a tile holds one round; elsewhere it holds several. Neither keeps state on the device.
+ *  warp about their sum over its lanes rather than thirty-two times the longest. A threaded tile
+ *  holds several rounds and a warped one a single round, its grid as wide as the batch; on
+ *  Blackwell a warped block done with its tile takes over a block not yet started. Neither keeps
+ *  state on the device.
  *
  *  A batch is bucketed by rung key when each vendor's engine init runs, so one launch carries only
  *  queries that share an entry point, and the occupancy walk each of those entry points needs is
@@ -57,9 +58,8 @@ extern "C" {
  *
  *  A word count the compiler cannot see makes @c verticals a dynamically indexed array, and the
  *  only place it can live is local memory - a 256-byte stack frame and four local accesses per
- *  word-step, which caps the kernel near thirty percent of the device's integer issue rate. Reached
- *  from entry points that each pass a literal, the same body is worth 2.2x at a one-word query and
- *  3.3x at sixteen.
+ *  word-step, which caps the kernel far below the device's integer issue rate. Reached from entry
+ *  points that each pass a literal, the same body keeps the verticals in registers.
  *
  *  A thread draws candidates from its block's queue one after another, and the sweep is one flat
  *  loop of eight steps per turn, which is where a thread past its text draws the next one. Nested
@@ -142,7 +142,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(
 /*  One entry point per word count, each passing its own literal, so every query length gets its
  *  own register budget - thirty-eight registers at one word against ninety-six at sixteen, which
  *  one shared kernel would have to spend on every launch, and each vendor's launcher picks one. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 static __global__ void sz_levenshtein_distances_w1_simt_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
@@ -256,7 +256,7 @@ static __global__ void sz_levenshtein_distances_w16_simt_kernel_( //
                                sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Myers Threaded
 
@@ -495,9 +495,9 @@ STRINGZILLA_DEVICE void sz_levenshtein_lanes_sweep_simt_(sz_levenshtein_engine_t
     sz_size_t const tile_first = (sz_size_t)blockIdx.x * tile_size;
     sz_size_t const tile_end = sz_min_of_two(tile_first + tile_size, candidates.count);
 
-    // At these query lengths a class's whole mask fits one lane, so the class map and the mask rows collapse
-    // into one table the block builds once and every lane of every thread in it reads. Folding the two lookups
-    // into one is worth 1.22x on XLSum words and 1.73x where the candidates are long enough to be step bound.
+    // At these query lengths a class's whole mask fits one lane, so the class map and the mask rows
+    // collapse into one table the block builds once and every lane of every thread in it reads,
+    // which takes a dependent load off every step.
     __shared__ sz_u32_t byte_to_mask[sz_levenshtein_byte_classes_k];
     __shared__ sz_u32_t taken;
     for (sz_size_t entry = threadIdx.x; entry < sz_levenshtein_byte_classes_k; entry += blockDim.x)
@@ -665,7 +665,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(
 
 /*  One rune entry point per word count, each passing its own literal, for the reason the byte tier
  *  states: a word count the compiler cannot see spills the verticals to local memory. */
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 static __global__ void sz_levenshtein_distances_utf8_w1_simt_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
@@ -779,7 +779,7 @@ static __global__ void sz_levenshtein_distances_utf8_w16_simt_kernel_( //
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_BLACKWELL || STRINGZILLA_TARGET_ROCM
 
 #pragma endregion Myers UTF 8
 
@@ -1301,6 +1301,21 @@ STRINGZILLA_DEVICE void sz_levenshtein_tiled_simt_(sz_cptr_t shorter_text, sz_u3
 /** Scratch budget per scoring call; an oversized pair runs alone. */
 enum { sz_levenshtein_workspace_bytes_simt_k = 64 * 1024 * 1024 };
 
+/** Bytes past which a byte query beyond the register rungs marches the tiled wavefront against a
+ *  candidate, rather than sweeping it on one thread through verticals in global memory; a shorter
+ *  candidate is swept in fewer steps than a tile takes to set up. */
+enum { sz_levenshtein_tiled_candidate_bytes_min_simt_k = 32 };
+
+/** Whether byte queries of up to @p query_max bytes march the tiled wavefront against candidates of
+ *  up to @p candidate_max bytes. */
+STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_long_tiled_simt_(sz_levenshtein_symbol_t symbol, sz_size_t query_max,
+                                                                sz_size_t candidate_max) {
+    return symbol == sz_levenshtein_bytes_k && query_max > sz_levenshtein_gpu_words_max_k * 64 &&
+                   candidate_max > sz_levenshtein_tiled_candidate_bytes_min_simt_k && candidate_max <= 0xFFFFFF00u
+               ? sz_true_k
+               : sz_false_k;
+}
+
 /** Workspace and pair capacity for one cross-product of length buckets. */
 typedef struct sz_levenshtein_long_layout_simt_t {
     sz_size_t scratch_stride, frontier_cells, progress_cells, pairs;
@@ -1312,11 +1327,7 @@ static sz_levenshtein_long_layout_simt_t sz_levenshtein_long_layout_simt_(sz_lev
                                                                           sz_levenshtein_length_bucket_t candidates,
                                                                           sz_size_t resident) {
     sz_levenshtein_long_layout_simt_t layout = {0, 0, 0, 0, sz_false_k};
-    layout.tiled = symbol == sz_levenshtein_bytes_k && queries.length_max > sz_levenshtein_gpu_words_max_k * 64 &&
-                           candidates.length_max > sz_levenshtein_gpu_words_max_k * 64 &&
-                           candidates.length_max <= 0xFFFFFF00u
-                       ? sz_true_k
-                       : sz_false_k;
+    layout.tiled = sz_levenshtein_long_tiled_simt_(symbol, queries.length_max, candidates.length_max);
     if (layout.tiled) {
         sz_size_t const shorter = sz_min_of_two(queries.length_max, candidates.length_max);
         sz_size_t const longer = sz_max_of_two(queries.length_max, candidates.length_max);

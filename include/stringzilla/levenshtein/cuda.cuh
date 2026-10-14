@@ -12,8 +12,7 @@
  *  init being allowed to join where a round is not.
  *
  *  Everything but the CUDA tier's own entry points and exports serves the Blackwell tier too, whose
- *  blocks take over the tiles of blocks not yet started, so its tiles hold one round each where the
- *  CUDA tier's hold several.
+ *  warped blocks take over the tiles of blocks not yet started.
  *
  *  @sa include/stringzilla/levenshtein/simt.cuh
  *  @sa include/stringzilla/levenshtein/blackwell.cuh
@@ -42,10 +41,9 @@ enum { sz_levenshtein_candidates_per_block_cuda_k = 128 };
  *  what residency returns. */
 enum { sz_levenshtein_candidates_per_block_max_cuda_k = 256 };
 
-/** Rounds of candidates one block's tile holds where its blocks cannot take over unstarted ones,
- *  as in the CUDA tier and the narrow rungs of every tier. Measured on one wave of XLSum lines,
- *  four rounds at a quarter of the blocks beat one, two and eight, the balance being worth more
- *  than the residency it costs. */
+/** Rounds of candidates one block's tile holds on the rungs where every thread sweeps its own, so a
+ *  thread done early draws more instead of idling; a warped rung's tile holds one, its grid as wide
+ *  as the batch, as the device then balances whole warps across its multiprocessors. */
 enum { sz_levenshtein_tile_rounds_cuda_k = 4 };
 
 /** Query symbols one byte lane of a Myers word holds, which is the longest query the byte rung
@@ -260,9 +258,6 @@ typedef struct sz_levenshtein_entry_points_cuda_t {
 
     /** The warped rune rung, one entry point per words-per-lane. */
     void const *warped_utf8[sz_levenshtein_gpu_warp_words_per_lane_max_k];
-
-    /** Rounds of candidates a block's tile holds on the wide rungs. */
-    sz_size_t tile_rounds;
 
     /** The capability the tier's engines record. */
     sz_capability_t capability;
@@ -739,12 +734,10 @@ static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz
     }
 
     sz_bool_t has_tiled = sz_false_k;
-    if (engine->symbol == sz_levenshtein_bytes_k &&
-        sz_levenshtein_engine_words_max_(engine) > sz_levenshtein_gpu_words_max_k)
-        for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
-            if (candidate_buckets[bucket].length_max > sz_levenshtein_gpu_words_max_k * 64 &&
-                candidate_buckets[bucket].length_max <= 0xFFFFFF00u)
-                has_tiled = sz_true_k;
+    for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
+        if (sz_levenshtein_long_tiled_simt_(engine->symbol, sz_levenshtein_engine_words_max_(engine) * 64,
+                                            candidate_buckets[bucket].length_max))
+            has_tiled = sz_true_k;
     sz_size_t const multiprocessors = sz_device_multiprocessors_cuda_();
     void const *const entry_point = has_tiled ? (void const *)sz_levenshtein_tiled_batch_cuda_kernel_
                                               : (void const *)sz_levenshtein_long_simt_kernel_;
@@ -782,37 +775,39 @@ static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz
     return status;
 }
 
-/** Launches every short-query bucket's rung over @p candidates, the threaded rungs drawing them in
- *  @p candidate_order, or in the batch's own order where it is null. */
+/** Launches every short-query bucket's rung over @p candidates, one grid for the consecutive
+ *  buckets sharing an entry point, the threaded rungs drawing them in @p candidate_order, or in the
+ *  batch's own order where it is null. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_cuda_(sz_levenshtein_engine_t *engine,
                                                            sz_strings_view_t const *candidates, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_size_t const *candidate_order,
                                                            sz_levenshtein_entry_points_cuda_t const *entry_points,
                                                            sz_stream_t stream) {
     sz_levenshtein_head_cuda_t const *const head = (sz_levenshtein_head_cuda_t const *)engine->memory;
-    for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) {
-        sz_size_t const first = head->bucket_offsets[bucket], last = head->bucket_offsets[bucket + 1];
-        if (first == last) continue;
-
+    for (sz_size_t bucket = 0, next = 0; bucket != head->buckets; bucket = next) {
         sz_bool_t const narrow = sz_levenshtein_narrow_cuda_(engine, bucket, candidates->count);
         void const *entry_point = sz_levenshtein_entry_point_cuda_(entry_points, engine->symbol, bucket);
+        // Each row reads its own query's word count, so an entry point's buckets share one grid.
         sz_size_t per_block = head->per_block[bucket];
-        // A tier whose blocks take over unstarted ones needs no more than one round to a tile, and
-        // the grid is then as wide as the batch; elsewhere, and on the narrow rungs, which never
-        // take over, a tile holds several rounds for its block's threads to share.
-        sz_size_t const rounds = narrow ? sz_levenshtein_tile_rounds_cuda_k : entry_points->tile_rounds;
-        sz_size_t candidates_per_block = per_block * rounds;
+        for (next = bucket + 1; !narrow && next != head->buckets &&
+                                sz_levenshtein_entry_point_cuda_(entry_points, engine->symbol, next) == entry_point;
+             ++next)
+            per_block = sz_max_of_two(per_block, head->per_block[next]);
+        sz_size_t const first = head->bucket_offsets[bucket], last = head->bucket_offsets[next];
+        if (first == last) continue;
+
+        sz_size_t candidates_per_block = per_block * sz_levenshtein_tile_rounds_cuda_k;
         if (narrow) {
             entry_point = bucket == 0 ? (void const *)sz_levenshtein_distances_u8x4_simt_kernel_
                                       : (void const *)sz_levenshtein_distances_u16x2_simt_kernel_;
             per_block = head->narrow_per_block[bucket];
-            candidates_per_block = per_block * rounds *
+            candidates_per_block = per_block * sz_levenshtein_tile_rounds_cuda_k *
                                    sz_levenshtein_lanes_per_thread_cuda_(
                                        bucket == 0 ? sz_levenshtein_byte_lanes_symbols_max_cuda_k
                                                    : sz_levenshtein_short_lanes_symbols_max_cuda_k);
         }
         else if (sz_levenshtein_bucket_words_cuda_(bucket) >= sz_levenshtein_gpu_warp_words_min_k)
-            candidates_per_block = per_block / sz_levenshtein_gpu_warp_lanes_k * rounds;
+            candidates_per_block = per_block / sz_levenshtein_gpu_warp_lanes_k;
         sz_size_t const blocks = sz_size_divide_round_up(candidates->count, candidates_per_block);
 
         for (sz_size_t row = first; row < last; row += sz_levenshtein_gpu_grid_rows_max_k) {
@@ -947,7 +942,6 @@ static sz_levenshtein_entry_points_cuda_t const sz_levenshtein_entry_points_cuda
         (void const *)sz_levenshtein_distances_utf8_k7_cuda_kernel_,
         (void const *)sz_levenshtein_distances_utf8_k8_cuda_kernel_,
     },
-    sz_levenshtein_tile_rounds_cuda_k,
     sz_cap_cuda_k,
 };
 

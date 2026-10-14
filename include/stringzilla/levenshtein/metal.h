@@ -342,11 +342,15 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     arguments.candidates_count = candidates->count, arguments.distances_stride = distances_stride;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;
 
-    for (sz_size_t bucket = 0; bucket != head->buckets; ++bucket) {
-        sz_size_t const first = bucket_offsets[bucket], end = bucket_offsets[bucket + 1];
-        if (first == end) continue;
+    for (sz_size_t bucket = 0, next = 0; bucket != head->buckets; bucket = next) {
         char const *const kernel = sz_levenshtein_entry_metal_(engine->symbol, bucket + 1);
-        sz_size_t const threads = per_group[bucket];
+        // Each row reads its own query's word count, so buckets sharing a kernel share a grid.
+        sz_size_t threads = per_group[bucket];
+        for (next = bucket + 1;
+             next != head->buckets && sz_levenshtein_entry_metal_(engine->symbol, next + 1) == kernel; ++next)
+            threads = sz_max_of_two(threads, per_group[next]);
+        sz_size_t const first = bucket_offsets[bucket], end = bucket_offsets[next];
+        if (first == end) continue;
         sz_size_t const candidates_per_group = bucket + 1 < sz_levenshtein_gpu_warp_words_min_k
                                                    ? threads
                                                    : threads / sz_levenshtein_gpu_warp_lanes_k;
