@@ -27,10 +27,19 @@
 extern "C" {
 #endif
 
-/** Candidates one block's tile holds, and the threads it cuts their bytes across, when the device
- *  cannot be asked; measured flat from 32 to 512 and off a cliff at 1024, so this is the ceiling of
- *  the flat range rather than a tuned figure, and the widest tile the occupancy walk considers. */
-enum { sz_overlap_candidates_per_block_cuda_k = 512 };
+/** Candidates one block's tile holds, and the threads it cuts their bytes across, at most, which
+ *  each tier's kernel compiles to beside its blocks per multiprocessor. */
+enum { sz_overlap_candidates_per_block_cuda_k = 128 };
+
+/** Blocks one multiprocessor keeps resident, which caps the walk at 64 registers where it would
+ *  take 72. A register budget per multiprocessor, so it holds on any count of them and on MIG
+ *  slices alike; eight is what every code this tier compiles holds, Turing's 1,024 threads
+ *  included, and the Blackwell tier keeps twelve. */
+enum { sz_overlap_blocks_per_multiprocessor_cuda_k = 8 };
+
+/** Waves of resident blocks a grid carries before further queries fold into each block's own loop,
+ *  which lays a tile's chunks out once for all of them. */
+enum { sz_overlap_grid_waves_cuda_k = 8 };
 
 /** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid
  *  dimension is bounded. */
@@ -58,13 +67,17 @@ typedef struct sz_overlap_geometry_cuda_t {
 
     /** @c u32 entries a block stages, sized by the widest tree, or zero for none. */
     sz_size_t staged_nodes_count;
+
+    /** Blocks the device keeps resident at that geometry, or zero where it cannot be asked. */
+    sz_size_t resident_blocks;
 } sz_overlap_geometry_cuda_t;
 
 /** Dynamic shared memory one block of @p threads takes: the staged tree, rounded up to a vector,
- *  then a count per width and a first chunk per candidate of its tile, and the tile's total. */
+ *  then a count per width and a first chunk per candidate of its tile, the tile's total, and two
+ *  16-bit owners per thread. */
 STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_cuda_(sz_size_t staged_nodes_count, sz_size_t threads,
                                                            sz_size_t widths_count) {
-    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 1) + 1) * sizeof(sz_u32_t);
+    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 2) + 1) * sizeof(sz_u32_t);
 }
 
 /** Prepares the forest on the device the caller already made current, for the tier whose @p kernel
@@ -158,6 +171,11 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_cuda_(sz_overlap_engine_t 
         sz_overlap_shared_bytes_cuda_(geometry->staged_nodes_count, sz_overlap_candidates_per_block_cuda_k,
                                       engine->widths_count),
         sz_overlap_candidates_per_block_cuda_k, sz_overlap_candidates_per_block_cuda_k);
+    geometry->resident_blocks = sz_device_multiprocessors_cuda_() *
+                                sz_resident_blocks_cuda_(kernel, geometry->candidates_per_block,
+                                                         sz_overlap_shared_bytes_cuda_(geometry->staged_nodes_count,
+                                                                                       geometry->candidates_per_block,
+                                                                                       engine->widths_count));
 
     engine->capability = capability;
     return sz_success_k;
@@ -217,8 +235,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_cuda_(sz_overlap_engine_t *engi
         engine);
     sz_size_t const per_block = geometry->candidates_per_block;
     sz_size_t const blocks = sz_size_divide_round_up(candidates->count, per_block);
-    sz_size_t const rows = engine->count < sz_overlap_queries_per_grid_cuda_k ? engine->count
-                                                                              : sz_overlap_queries_per_grid_cuda_k;
+    sz_size_t rows = sz_min_of_two(engine->count, (sz_size_t)sz_overlap_queries_per_grid_cuda_k);
+    if (geometry->resident_blocks)
+        rows = sz_min_of_two(rows,
+                             sz_size_divide_round_up(sz_overlap_grid_waves_cuda_k * geometry->resident_blocks, blocks));
     sz_size_t staged_nodes_count = geometry->staged_nodes_count;
     sz_size_t const shared_bytes = sz_overlap_shared_bytes_cuda_(staged_nodes_count, per_block, engine->widths_count);
 
@@ -267,9 +287,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_cuda_(sz_overlap_engine_
 
 #if STRINGZILLA_TARGET_CUDA
 
-static __global__ void sz_overlap_scores_cuda_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
-                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
+static __global__ __launch_bounds__(sz_overlap_candidates_per_block_cuda_k,
+                                    sz_overlap_blocks_per_multiprocessor_cuda_k) void sz_overlap_scores_cuda_kernel_( //
+    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_f32_t *scores, sz_size_t scores_query_stride,
+    sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
     sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
                             staged_nodes_count, sz_shuffle_up_cuda_, sz_tile_queue_open_simt_,
                             sz_tile_queue_next_simt_);

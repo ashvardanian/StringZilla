@@ -25,9 +25,6 @@
  *  operations of chain, so sharing it would buy about a percent and cost a per-thread match counter
  *  per query, which no register file holds.
  *
- *  On Blackwell a block done with its tile takes over one whose block has not started, keeping its
- *  staged tree when the query is the same.
- *
  *  Nothing here crosses the bus during a round. The forest, the candidates and the scores are
  *  already where the device reaches them and the texts are read in place, so a round costs one
  *  launch rather than a round trip.
@@ -63,14 +60,20 @@ STRINGZILLA_DEVICE sz_u32_t sz_overlap_reduce_simt_(sz_u64_t value) {
     return (sz_u32_t)(remainder >= modulus ? remainder - modulus : remainder);
 }
 
+/** Entry @p index of a tree's nodes, read from shared memory where the block @p staged them and
+ *  through the read-only path otherwise, rather than by a generic load that serves both. */
+STRINGZILLA_DEVICE sz_u32_t sz_overlap_entry_simt_(sz_u32_t const *nodes, sz_size_t index, sz_bool_t staged) {
+    return staged ? nodes[index] : __ldg(nodes + index);
+}
+
 /** How many of a node's sixteen ascending entries sit below the flipped @p key, up to fifteen, by
  *  halving: four dependent loads where a scan takes sixteen, and only a sixteenth entry below the
  *  key goes uncounted. */
-STRINGZILLA_DEVICE sz_u32_t sz_overlap_rank_simt_(sz_u32_t const *node, sz_i32_t key) {
-    sz_u32_t rank = (sz_i32_t)node[7] < key ? 8u : 0u;
-    rank += (sz_i32_t)node[rank + 3] < key ? 4u : 0u;
-    rank += (sz_i32_t)node[rank + 1] < key ? 2u : 0u;
-    rank += (sz_i32_t)node[rank] < key ? 1u : 0u;
+STRINGZILLA_DEVICE sz_u32_t sz_overlap_rank_simt_(sz_u32_t const *node, sz_i32_t key, sz_bool_t staged) {
+    sz_u32_t rank = (sz_i32_t)sz_overlap_entry_simt_(node, 7, staged) < key ? 8u : 0u;
+    rank += (sz_i32_t)sz_overlap_entry_simt_(node, rank + 3, staged) < key ? 4u : 0u;
+    rank += (sz_i32_t)sz_overlap_entry_simt_(node, rank + 1, staged) < key ? 2u : 0u;
+    rank += (sz_i32_t)sz_overlap_entry_simt_(node, rank, staged) < key ? 1u : 0u;
     return rank;
 }
 
@@ -106,19 +109,21 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_level_bases_simt_(sz_overlap_engine_t co
 }
 
 /** Whether the prepared query holds one raw @p window_hash, halving one node per level. */
-STRINGZILLA_DEVICE sz_size_t sz_overlap_btree_probe_simt_(sz_overlap_btree_simt_t const *btree, sz_u32_t window_hash) {
+STRINGZILLA_DEVICE sz_size_t sz_overlap_btree_probe_simt_(sz_overlap_btree_simt_t const *btree, sz_u32_t window_hash,
+                                                          sz_bool_t staged) {
     sz_i32_t const key = (sz_i32_t)(window_hash ^ (sz_u32_t)sz_overlap_sign_flip_k);
     sz_u32_t const last = sz_overlap_keys_per_node_k - 1;
     sz_size_t node = 0;
     for (sz_size_t level = 0; level + 1 < btree->levels; ++level) {
         sz_u32_t const *const separators = btree->nodes +
                                            (btree->level_bases[level] + node) * sz_overlap_keys_per_node_k;
-        sz_u32_t const rank = sz_overlap_rank_simt_(separators, key);
-        node = node * sz_overlap_branches_per_node_k + rank + (rank == last && (sz_i32_t)separators[last] < key);
+        sz_u32_t const rank = sz_overlap_rank_simt_(separators, key, staged);
+        node = node * sz_overlap_branches_per_node_k + rank +
+               (rank == last && (sz_i32_t)sz_overlap_entry_simt_(separators, last, staged) < key);
     }
     // The leaves lead the arena, so the last level's base is zero.
     sz_u32_t const *const leaf = btree->nodes + node * sz_overlap_keys_per_node_k;
-    return leaf[sz_overlap_rank_simt_(leaf, key)] == (sz_u32_t)key;
+    return sz_overlap_entry_simt_(leaf, sz_overlap_rank_simt_(leaf, key, staged), staged) == (sz_u32_t)key;
 }
 
 /**
@@ -135,13 +140,12 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_btree_probe_simt_(sz_overlap_btree_simt_
 STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine, sz_overlap_btree_simt_t const *btree,
                                                sz_strings_view_t const *candidates, sz_size_t candidate,
                                                sz_size_t chunk_begin, sz_size_t chunk_bytes, sz_size_t warm_up,
-                                               sz_u32_t *counts) {
+                                               sz_u32_t *counts, sz_size_t widths_count, sz_bool_t staged) {
     sz_cptr_t const text = sz_strings_start_simt_(*candidates, candidate);
     sz_size_t const length = sz_strings_length_simt_(*candidates, candidate);
     sz_size_t const walk_begin = chunk_begin > warm_up ? chunk_begin - warm_up : 0;
     sz_size_t const walk_bytes = sz_min_of_two(chunk_begin + chunk_bytes, length) - walk_begin;
     sz_size_t const warm_bytes = chunk_begin - walk_begin;
-    sz_size_t const widths_count = engine->widths_count;
     sz_u8_t const *const walk = (sz_u8_t const *)text + walk_begin;
 
     // Unrolled to the ceiling and guarded, so the hashes and counters stay in registers.
@@ -162,7 +166,7 @@ STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine
                                     outgoing * engine->powers[index];
             hashes[index] = sz_overlap_reduce_simt_(rolled);
             if (ending <= warm_bytes || width > ending) continue;
-            matches[index] += (sz_u32_t)sz_overlap_btree_probe_simt_(btree, hashes[index]);
+            matches[index] += (sz_u32_t)sz_overlap_btree_probe_simt_(btree, hashes[index], staged);
         }
     }
 #pragma unroll
@@ -170,16 +174,20 @@ STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine
         if (index < widths_count && matches[index]) atomicAdd(counts + index, matches[index]);
 }
 
-/** Index of the last entry at or below @p value in an ascending array; zero when none is. */
-STRINGZILLA_DEVICE sz_size_t sz_overlap_last_not_above_simt_(sz_u32_t const *ascending, sz_size_t count,
-                                                             sz_size_t value) {
-    sz_size_t low = 0, high = count;
-    while (low + 1 < high) {
-        sz_size_t const middle = low + (high - low) / 2;
-        if (ascending[middle] <= value) low = middle;
-        else high = middle;
+/** Every chunk of a tile this thread takes against one query's tree, the counts landing per
+ *  candidate. The walk passes @p widths_count and @p staged as literals, so each copy unrolls one
+ *  width loop and loads from one memory space, rather than through a generic load serving both. */
+STRINGZILLA_DEVICE void sz_overlap_chunks_simt_(sz_overlap_engine_t const *engine, sz_overlap_btree_simt_t const *btree,
+                                                sz_strings_view_t const *candidates, sz_size_t tile_first,
+                                                sz_size_t chunks, sz_u32_t const *chunk_offsets,
+                                                sz_u16_t const *chunk_owners, sz_size_t chunk_bytes, sz_size_t warm_up,
+                                                sz_u32_t *counts, sz_size_t widths_count, sz_bool_t staged) {
+    for (sz_size_t chunk = threadIdx.x; chunk < chunks; chunk += blockDim.x) {
+        sz_size_t const candidate = chunk_owners[chunk];
+        sz_overlap_chunk_simt_(engine, btree, candidates, tile_first + candidate,
+                               (chunk - chunk_offsets[candidate]) * chunk_bytes, chunk_bytes, warm_up,
+                               counts + candidate * widths_count, widths_count, staged);
     }
-    return low;
 }
 
 /**
@@ -244,7 +252,8 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_tile_chunks_simt_(sz_strings_view_t cons
  *  counts zeroed before the chunks add to them, and the scores read off them after.
  *
  *  Dynamic shared memory holds the staged tree, then each candidate's count per width, then each
- *  candidate's first chunk.
+ *  candidate's first chunk, then each chunk's candidate as a 16-bit index: a tile cuts into at most
+ *  two chunks per thread, as a chunk takes at least the tile's bytes over the block's threads.
  *
  *  @param[in] shuffle_up The vendor's cross-lane step.
  *  @param[in] open, next The tile queue's steps, which differ per generation.
@@ -264,6 +273,7 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
     sz_u32_t *const staged_nodes = sz_overlap_shared_simt_;
     sz_u32_t *const counts = staged_nodes + sz_size_divide_round_up(staged_nodes_count, 4) * 4;
     sz_u32_t *const chunk_offsets = counts + (sz_size_t)blockDim.x * widths_count;
+    sz_u16_t *const chunk_owners = (sz_u16_t *)(chunk_offsets + blockDim.x + 1);
     sz_size_t warm_up = 0, staged_query = STRINGZILLA_SIZE_MAX, chunk_bytes = 0, slot, chunk, candidate;
     sz_u32_t tile_x = blockIdx.x, tile_y = blockIdx.y, laid_x = 0xFFFFFFFFu;
     for (slot = 0; slot != widths_count; ++slot) warm_up = sz_max_of_two(warm_up, (sz_size_t)engine.widths[slot]);
@@ -278,6 +288,12 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
         if (tile_x != laid_x) {
             chunk_bytes = sz_overlap_tile_chunks_simt_(&candidates, tile_first, tile_count, warm_up, &tile_bytes,
                                                        chunk_offsets, shuffle_up);
+            // Once per tile, not a binary search per chunk and query: a short candidate's chunk is
+            // about as many bytes as that search takes steps.
+            for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x)
+                for (chunk = chunk_offsets[candidate]; chunk != chunk_offsets[candidate + 1]; ++chunk)
+                    chunk_owners[chunk] = (sz_u16_t)candidate;
+            __syncthreads();
             laid_x = tile_x;
         }
         sz_size_t const chunks = chunk_offsets[tile_count];
@@ -285,7 +301,6 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
         for (sz_size_t query = tile_y; query < engine.count; query += gridDim.y) {
             sz_u32_t const *const query_nodes = engine.nodes + engine.nodes_offsets[query];
             sz_size_t const query_length = engine.lengths[query];
-            sz_overlap_btree_simt_t btree;
             if (threadIdx.x == 0) levels = sz_overlap_level_bases_simt_(&engine, query, level_bases);
             if (staged_nodes_count && query != staged_query) {
                 sz_size_t const entries = engine.nodes_offsets[query + 1] - engine.nodes_offsets[query];
@@ -295,15 +310,21 @@ STRINGZILLA_DEVICE void sz_overlap_scores_simt_(sz_overlap_engine_t engine, sz_s
             }
             for (slot = threadIdx.x; slot < tile_count * widths_count; slot += blockDim.x) counts[slot] = 0;
             __syncthreads();
-            btree.nodes = staged_nodes_count ? staged_nodes : query_nodes;
-            btree.levels = levels, btree.level_bases = level_bases;
-
-            for (chunk = threadIdx.x; chunk < chunks; chunk += blockDim.x) {
-                candidate = sz_overlap_last_not_above_simt_(chunk_offsets, tile_count, chunk);
-                sz_overlap_chunk_simt_(&engine, &btree, &candidates, tile_first + candidate,
-                                       (chunk - chunk_offsets[candidate]) * chunk_bytes, chunk_bytes, warm_up,
-                                       counts + candidate * widths_count);
-            }
+            // One tree per memory space, so no walk reads through a pointer that may be either.
+            sz_overlap_btree_simt_t const staged_tree = {staged_nodes, levels, level_bases};
+            sz_overlap_btree_simt_t const global_tree = {query_nodes, levels, level_bases};
+            if (staged_nodes_count && widths_count == 1)
+                sz_overlap_chunks_simt_(&engine, &staged_tree, &candidates, tile_first, chunks, chunk_offsets,
+                                        chunk_owners, chunk_bytes, warm_up, counts, 1, sz_true_k);
+            else if (staged_nodes_count)
+                sz_overlap_chunks_simt_(&engine, &staged_tree, &candidates, tile_first, chunks, chunk_offsets,
+                                        chunk_owners, chunk_bytes, warm_up, counts, widths_count, sz_true_k);
+            else if (widths_count == 1)
+                sz_overlap_chunks_simt_(&engine, &global_tree, &candidates, tile_first, chunks, chunk_offsets,
+                                        chunk_owners, chunk_bytes, warm_up, counts, 1, sz_false_k);
+            else
+                sz_overlap_chunks_simt_(&engine, &global_tree, &candidates, tile_first, chunks, chunk_offsets,
+                                        chunk_owners, chunk_bytes, warm_up, counts, widths_count, sz_false_k);
             __syncthreads();
 
             for (candidate = threadIdx.x; candidate < tile_count; candidate += blockDim.x) {

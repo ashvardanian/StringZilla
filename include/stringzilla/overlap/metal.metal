@@ -236,11 +236,10 @@ template <typename nodes_pointer_>
 inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch, sz_strings_tape_metal_t tape,
                                     constant sz_overlap_arguments_metal_t &arguments, nodes_pointer_ nodes,
                                     threadgroup uint const *filter, uint levels, thread uint const *level_bases,
-                                    ulong query, uint segment) {
+                                    ulong query, uint segment, ulong candidate) {
     device uint const *offsets = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.segments);
     device uint const *widths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.widths);
     device uint const *powers = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.powers);
-    ulong const candidate = sz_overlap_owner_metal_(offsets, arguments.candidates_count, segment);
     device uchar const *text = sz_strings_start_metal_(tape, candidate);
     ulong const text_length = sz_strings_length_metal_(tape, candidate);
     ulong const segment_start = (ulong)(segment - offsets[candidate]) * sz_overlap_segment_bytes_metal_k;
@@ -339,6 +338,11 @@ kernel void sz_overlap_scores_metal_kernel_(
     device uint const *nodes = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.nodes);
     device ulong const *nodes_offsets = sz_reach_metal_<ulong>(engine, arguments.engine_host, arguments.nodes_offsets);
     device uint const *keys_counts = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.keys_counts);
+    device uint const *offsets = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.segments);
+    // A thread keeps its segment across the queries its row strides, so it finds the owner once.
+    ulong const candidate = segment < arguments.segments_count
+                                ? sz_overlap_owner_metal_(offsets, arguments.candidates_count, segment)
+                                : 0;
 
     threadgroup atomic_uint *const filter_bits = (threadgroup atomic_uint *)filter;
     for (ulong query = group.y; query < arguments.queries_count; query += groups.y) {
@@ -363,10 +367,10 @@ kernel void sz_overlap_scores_metal_kernel_(
         if (segment < arguments.segments_count) {
             if (arguments.staged_nodes_count)
                 sz_overlap_sweep_metal_(engine, scratch, tape, arguments, (threadgroup uint const *)staged_nodes,
-                                        filter, levels, level_bases, query, segment);
+                                        filter, levels, level_bases, query, segment, candidate);
             else
                 sz_overlap_sweep_metal_(engine, scratch, tape, arguments, tree, filter, levels, level_bases, query,
-                                        segment);
+                                        segment, candidate);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }

@@ -2,20 +2,21 @@
  *  @file include/stringzilla/overlap/blackwell.cuh
  *  @author Ash Vardanian
  *  @date October 8, 2026
- *  @brief Blackwell tier of window overlap: the scoring kernel over the cluster launch control tile
- *      queue, and the @c _blackwell exports, over the CUDA host side.
+ *  @brief Blackwell tier of window overlap: the scoring kernel compiled for Blackwell, and the
+ *      @c _blackwell exports, over the CUDA host side.
  *
- *  A block done with its tile cancels a block not yet started and takes over its tile, keeping the
- *  chunks or the tree it already laid out whenever the two share candidates or a query.
+ *  Its blocks run their own tiles, as the CUDA tier's do, under a register budget sized for
+ *  Blackwell's multiprocessors alone. Taking over unstarted blocks through cluster launch control
+ *  does not pay here: a takeover lands a resident grid away, so it reuses neither the chunks nor
+ *  the tree laid out, and the hardware already starts blocks in that order.
  *
  *  @sa include/stringzilla/overlap/cuda.cuh
- *  @sa include/stringzilla/levenshtein/blackwell.cuh
+ *  @sa include/stringzilla/cuda.cuh
  */
 #ifndef STRINGZILLA_OVERLAP_BLACKWELL_CUH_
 #define STRINGZILLA_OVERLAP_BLACKWELL_CUH_
 
 #include "stringzilla/overlap/cuda.cuh"
-#include "stringzilla/levenshtein/blackwell.cuh" // `sz_tile_queue_open_blackwell_`, `sz_tile_queue_next_blackwell_`
 
 #if STRINGZILLA_ARCH_CUDA_
 #if STRINGZILLA_TARGET_BLACKWELL
@@ -24,13 +25,18 @@
 extern "C" {
 #endif
 
-static __global__ void sz_overlap_scores_blackwell_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
-                                                           sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                           sz_size_t scores_candidate_stride,
-                                                           sz_size_t staged_nodes_count) {
+/** Blocks one multiprocessor keeps resident, which caps the walk at 40 registers: it waits on
+ *  dependent loads, so more resident blocks hide more of them, up to where spills cost more. */
+enum { sz_overlap_blocks_per_multiprocessor_blackwell_k = 12 };
+
+static __global__ __launch_bounds__(
+    sz_overlap_candidates_per_block_cuda_k,
+    sz_overlap_blocks_per_multiprocessor_blackwell_k) void sz_overlap_scores_blackwell_kernel_( //
+    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_f32_t *scores, sz_size_t scores_query_stride,
+    sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
     sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
-                            staged_nodes_count, sz_shuffle_up_cuda_, sz_tile_queue_open_blackwell_,
-                            sz_tile_queue_next_blackwell_);
+                            staged_nodes_count, sz_shuffle_up_cuda_, sz_tile_queue_open_simt_,
+                            sz_tile_queue_next_simt_);
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t *engine,

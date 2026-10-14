@@ -55,6 +55,11 @@ enum { sz_overlap_staged_tree_share_metal_k = 3 };
 /** Bytes of the per-query membership filter every threadgroup keeps beside the staged tree. */
 enum { sz_overlap_filter_bytes_metal_k = 16384 };
 
+/** Threads a scoring grid carries before further queries fold into each thread's own loop, which
+ *  finds its segment's candidate once for all of them: several times what any Apple GPU keeps
+ *  resident, which Metal does not report. */
+enum { sz_overlap_grid_threads_metal_k = 1 << 20 };
+
 /** Candidates a round carries when the caller names no budget. */
 enum { sz_overlap_candidates_budget_default_metal_k = 4096 };
 
@@ -255,7 +260,10 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
         sz_size_t const staged_nodes_bytes = geometry->staged_nodes_count * sizeof(sz_u32_t);
         sz_size_t const staged_bytes = sz_size_divide_round_up(staged_nodes_bytes, 16) * 16;
         sz_size_t const per_group = geometry->candidates_per_group;
-        sz_metal_size_t const grid = {sz_size_divide_round_up(segments_count, per_group), engine->count, 1};
+        sz_size_t const groups = sz_size_divide_round_up(segments_count, per_group);
+        sz_size_t const rows = sz_min_of_two(
+            engine->count, sz_size_divide_round_up(sz_overlap_grid_threads_metal_k, groups * per_group));
+        sz_metal_size_t const grid = {groups, rows, 1};
         sz_metal_size_t const threads = {per_group, 1, 1};
         status = sz_overlap_enqueue_metal_(&call, "sz_overlap_scores_metal_kernel_", buffers, &arguments,
                                            staged_bytes ? staged_bytes : 16, grid, threads);

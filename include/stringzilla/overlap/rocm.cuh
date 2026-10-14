@@ -24,13 +24,17 @@ extern "C" {
 #endif
 
 /** Candidates one block's tile holds, and the threads it cuts their bytes across, when the device
- *  cannot be asked; measured flat from 32 to 512 and off a cliff at 1024, so this is the ceiling of
- *  the flat range rather than a tuned figure, and the widest tile the occupancy walk considers. */
+ *  cannot be asked, and the widest tile the occupancy walk considers: past it a block schedules
+ *  too coarsely for what residency returns. */
 enum { sz_overlap_candidates_per_block_rocm_k = 512 };
 
 /** Queries one grid carries on @c blockIdx.y; a batch past it strides, since a grid
  *  dimension is bounded. */
 enum { sz_overlap_queries_per_grid_rocm_k = 65535 };
+
+/** Waves of resident blocks a grid carries before further queries fold into each block's own loop,
+ *  which lays a tile's chunks out once for all of them. */
+enum { sz_overlap_grid_waves_rocm_k = 8 };
 
 /** The share of a block's shared memory a staged tree may take. Staging is worth about half again
  *  while the tree is small, and stops paying past that: the descent is data-dependent, and shared
@@ -52,13 +56,17 @@ typedef struct sz_overlap_geometry_rocm_t {
 
     /** @c u32 entries a block stages, sized by the widest tree, or zero for none. */
     sz_size_t staged_nodes_count;
+
+    /** Blocks the device keeps resident at that geometry, or zero where it cannot be asked. */
+    sz_size_t resident_blocks;
 } sz_overlap_geometry_rocm_t;
 
 /** Dynamic shared memory one block of @p threads takes: the staged tree, rounded up to a vector,
- *  then a count per width and a first chunk per candidate of its tile, and the tile's total. */
+ *  then a count per width and a first chunk per candidate of its tile, the tile's total, and two
+ *  16-bit owners per thread. */
 STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_rocm_(sz_size_t staged_nodes_count, sz_size_t threads,
                                                            sz_size_t widths_count) {
-    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 1) + 1) * sizeof(sz_u32_t);
+    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 2) + 1) * sizeof(sz_u32_t);
 }
 
 /** Prepares the forest on the device the caller already made current, for the tier whose @p kernel
@@ -152,6 +160,11 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
         sz_overlap_shared_bytes_rocm_(geometry->staged_nodes_count, sz_overlap_candidates_per_block_rocm_k,
                                       engine->widths_count),
         sz_overlap_candidates_per_block_rocm_k, sz_overlap_candidates_per_block_rocm_k);
+    geometry->resident_blocks = sz_device_multiprocessors_rocm_() *
+                                sz_resident_blocks_rocm_(kernel, geometry->candidates_per_block,
+                                                         sz_overlap_shared_bytes_rocm_(geometry->staged_nodes_count,
+                                                                                       geometry->candidates_per_block,
+                                                                                       engine->widths_count));
 
     engine->capability = capability;
     return sz_success_k;
@@ -211,8 +224,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
         engine);
     sz_size_t const per_block = geometry->candidates_per_block;
     sz_size_t const blocks = sz_size_divide_round_up(candidates->count, per_block);
-    sz_size_t const rows = engine->count < sz_overlap_queries_per_grid_rocm_k ? engine->count
-                                                                              : sz_overlap_queries_per_grid_rocm_k;
+    sz_size_t rows = sz_min_of_two(engine->count, (sz_size_t)sz_overlap_queries_per_grid_rocm_k);
+    if (geometry->resident_blocks)
+        rows = sz_min_of_two(rows,
+                             sz_size_divide_round_up(sz_overlap_grid_waves_rocm_k * geometry->resident_blocks, blocks));
     sz_size_t staged_nodes_count = geometry->staged_nodes_count;
     sz_size_t const shared_bytes = sz_overlap_shared_bytes_rocm_(staged_nodes_count, per_block, engine->widths_count);
 
