@@ -1120,9 +1120,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_sequence_(sz_regex_builder_t *builde
  *
  *  The folds of an uncased class that span several codepoints follow it as alternatives, each a
  *  sequence of single codepoints, so `[sß]` tries @c s before @c ss; a class left with no ranges is
- *  dropped from the alternation.
+ *  dropped from the alternation. Out of line, as it recurses for those folds and has six callers.
  */
-STRINGZILLA_INLINE sz_status_t sz_regex_add_class_(sz_regex_builder_t *builder, sz_size_t begin, sz_u32_t *index) {
+STRINGZILLA_OUTLINED_ sz_status_t sz_regex_add_class_(sz_regex_builder_t *builder, sz_size_t begin, sz_u32_t *index) {
     sz_size_t const base = builder->pending_count, expansions_count = builder->expansions_count;
     sz_status_t status;
     sz_regex_normalize_ranges_(builder, begin);

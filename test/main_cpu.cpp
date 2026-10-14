@@ -47,10 +47,6 @@ template class std::basic_string<char>;
 template class sz::string<>;
 template class sz::string_slice<char const>;
 
-template class std::vector<sz::string_t>;
-template class std::map<sz::string_t, int>;
-template class std::unordered_map<sz::string_t, int>;
-
 template class std::vector<sz::string_view_t>;
 template class std::map<sz::string_view_t, int>;
 template class std::unordered_map<sz::string_view_t, int>;

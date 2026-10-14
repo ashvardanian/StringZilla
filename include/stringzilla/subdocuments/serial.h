@@ -757,7 +757,7 @@ typedef enum sz_subdocuments_primary_t {
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_segments_(sz_subdocuments_parser_t *parser, sz_size_t root,
                                                                sz_bool_t filtering, sz_size_t *segments_count,
                                                                sz_bool_t *singular);
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser);
+STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser);
 
 /** Emits the instruction reading a query that ends at @p final_step as
  *  @p operation, unless already emitted. */
@@ -779,9 +779,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_emit_query_(sz_subdocuments_parse
  *
  *  @param[out] final_step For a query, its last step, whose live nodes are what it selects.
  */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_primary_(sz_subdocuments_parser_t *parser,
-                                                              sz_subdocuments_primary_t *primary,
-                                                              sz_size_t *final_step) {
+STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_primary_(sz_subdocuments_parser_t *parser,
+                                                                 sz_subdocuments_primary_t *primary,
+                                                                 sz_size_t *final_step) {
     sz_subdocuments_builder_t *const builder = parser->builder;
     sz_cptr_t const path = parser->path;
     sz_size_t const length = parser->length;
@@ -1020,8 +1020,9 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_and_(sz_subdocuments_parser
     return status;
 }
 
-/** Parses a disjunction of conjunctions: a whole logical expression. */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser) {
+/** Parses a disjunction of conjunctions: a whole logical expression. Every recursion of the filter
+ *  grammar passes through here, so it stays out of line, as GCC 15 crashed inlining that cycle. */
+STRINGZILLA_OUTLINED_ sz_status_t sz_subdocuments_parse_or_(sz_subdocuments_parser_t *parser) {
     sz_status_t status = sz_subdocuments_parse_and_(parser);
     while (status == sz_success_k) {
         sz_size_t const position = sz_subdocuments_skip_blanks_(parser->path, parser->length, parser->position);
