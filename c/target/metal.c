@@ -19,7 +19,7 @@
 #include "stringzilla/utf8_uncased_fold/metal.h"
 
 /*  `build.rs` compiles every `.c` under `c/`, so without Metal this unit defines nothing. */
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 
 STRINGZILLA_API sz_metal_context_t *sz_metal_contexts_(os_unfair_lock_t *contexts_lock) {
     static sz_metal_context_t contexts[sz_metal_contexts_max_k];
@@ -51,4 +51,4 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
     return sz_stream_synchronize_metal_(stream);
 }
 
-#endif // STRINGZILLA_WITH_METAL
+#endif // STRINGZILLA_ARCH_METAL_

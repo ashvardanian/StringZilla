@@ -1059,6 +1059,56 @@ STRINGZILLA_INLINE void sz_strings_split_commit_(sz_strings_span_t *tape, sz_str
     sz_strings_commit_(tape, output, allocator, STRINGZILLA_NULL);
 }
 
+/** Measures into @p length the join of @p rows rows of @p columns, multiplying out the frames and
+ *  separators, reading a tape column's first and last offsets and an accessor 64 views a call. */
+STRINGZILLA_INLINE sz_status_t sz_strings_join_measure_(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                        sz_size_t rows, sz_string_view_t const *frames,
+                                                        sz_string_view_t between, sz_size_t *length) {
+    sz_size_t framing = 0, cells = 0, overflow = 0;
+    sz_string_view_t views[64];
+    for (sz_size_t column = 0; column <= columns_count; ++column)
+        overflow |= frames[column].length > STRINGZILLA_SIZE_MAX - framing, framing += frames[column].length;
+    for (sz_size_t column = 0; column != columns_count && rows; ++column) {
+        sz_strings_view_t const *const strings = columns + column;
+        sz_bool_t const tape = (sz_bool_t)(strings->layout != sz_strings_accessor_k);
+        sz_size_t const bytes = tape ? sz_strings_view_offset_(strings, rows) - sz_strings_view_offset_(strings, 0) : 0;
+        overflow |= bytes > STRINGZILLA_SIZE_MAX - cells, cells += bytes;
+        // Accessor cells arrive 64 at a time, as each fetch costs one indirect call.
+        for (sz_size_t row = 0; !tape && row != rows; ++row) {
+            if (row % 64 == 0) sz_strings_get_block_(strings, row, views);
+            overflow |= views[row % 64].length > STRINGZILLA_SIZE_MAX - cells, cells += views[row % 64].length;
+        }
+    }
+    sz_size_t const separators = rows ? rows - 1 : 0;
+    overflow |= framing && rows > STRINGZILLA_SIZE_MAX / framing;
+    overflow |= between.length && separators > STRINGZILLA_SIZE_MAX / between.length;
+    sz_size_t const framed = framing * rows, separated = between.length * separators;
+    overflow |= framed > STRINGZILLA_SIZE_MAX - cells || separated > STRINGZILLA_SIZE_MAX - cells - framed;
+    if (overflow) return sz_bad_alloc_k;
+    *length = cells + framed + separated;
+    return sz_success_k;
+}
+
+/** Writes the measured join of @p columns into @p output row by row, fetching each cell alone, in
+ *  any layouts, which always succeeds. */
+STRINGZILLA_INLINE sz_status_t sz_strings_join_rows_serial_(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                            sz_size_t rows, sz_string_view_t const *frames,
+                                                            sz_string_view_t between, sz_ptr_t output) {
+    sz_size_t written = 0;
+    for (sz_size_t row = 0; row != rows; ++row) {
+        // Every cell follows its frame, and the last frame and the row separator follow the last.
+        for (sz_size_t column = 0; column <= columns_count; ++column) {
+            sz_string_view_t cell = {between.start, row + 1 != rows ? between.length : 0};
+            if (column != columns_count) sz_strings_get_(columns + column, &row, 1, &cell);
+            if (frames[column].length) memcpy(output + written, frames[column].start, frames[column].length);
+            written += frames[column].length;
+            if (cell.length) memcpy(output + written, cell.start, cell.length);
+            written += cell.length;
+        }
+    }
+    return sz_success_k;
+}
+
 #pragma endregion Drivers
 
 #if STRINGZILLA_TARGET_SERIAL
@@ -1177,23 +1227,8 @@ STRINGZILLA_API sz_status_t sz_strings_join_serial(sz_strings_view_t const *colu
                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
                                                    sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_size_t written = 0;
-    for (sz_size_t row = 0; row != rows; ++row) {
-        // Every cell follows its frame, and the last frame and the row separator follow the last.
-        for (sz_size_t column = 0; column <= columns_count; ++column) {
-            sz_string_view_t cell = {between.start, row + 1 != rows ? between.length : 0};
-            if (column != columns_count) sz_strings_get_(columns + column, &row, 1, &cell);
-            if (frames[column].length > STRINGZILLA_SIZE_MAX - written) return sz_bad_alloc_k;
-            if (output && frames[column].length) memcpy(output + written, frames[column].start, frames[column].length);
-            written += frames[column].length;
-            if (cell.length > STRINGZILLA_SIZE_MAX - written) return sz_bad_alloc_k;
-            if (output && cell.length) memcpy(output + written, cell.start, cell.length);
-            written += cell.length;
-        }
-    }
-    sz_assert_(!output || written == *length);
-    if (!output) *length = written;
-    return sz_success_k;
+    if (!output) return sz_strings_join_measure_(columns, columns_count, rows, frames, between, length);
+    return sz_strings_join_rows_serial_(columns, columns_count, rows, frames, between, output);
 }
 
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator) {

@@ -10,10 +10,13 @@
 #include "stringzilla/metal.h"
 #include "stringzilla/utf8_uncased_fold/serial.h"
 
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_METAL
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
@@ -86,8 +89,11 @@ STRINGZILLA_API sz_status_t sz_utf8_uncased_fold_metal(sz_cptr_t source, sz_size
     return sz_metal_commit_(&call, sz_success_k);
 }
 
+#endif // STRINGZILLA_TARGET_METAL
+
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_METAL
+
+#endif // STRINGZILLA_ARCH_METAL_
 #endif // STRINGZILLA_UTF8_UNCASED_FOLD_METAL_H_

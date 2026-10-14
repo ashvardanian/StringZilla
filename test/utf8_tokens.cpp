@@ -12,9 +12,7 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
-#endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
@@ -110,11 +108,13 @@ void test_utf8_tokens_unit() {
 
     // Test with `sz::string_t` - not just `sz::string_view_t`
     {
-        sz::string_t multiline = "a\nb\nc";
+        sz::string_t multiline;
+        verify(sz::succeeded(multiline.assign("a\nb\nc")));
         let_verify(auto l = multiline.utf8_split_newlines().template to<std::vector<std::string>>(),
                    l.size() == 3 && l[1] == "b");
 
-        sz::string_t words_str = "foo bar baz";
+        sz::string_t words_str;
+        verify(sz::succeeded(words_str.assign("foo bar baz")));
         let_verify(auto w = words_str.utf8_split_whitespaces().template to<std::vector<std::string>>(),
                    w.size() == 3 && w[2] == "baz");
     }

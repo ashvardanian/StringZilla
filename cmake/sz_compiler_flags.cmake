@@ -1,6 +1,6 @@
 # cmake/sz_compiler_flags.cmake — per-target compiler-flag helpers shared by every StringZilla target: warnings,
 # optimization, standards, architecture baselines, and the per-capability `STRINGZILLA_TARGET_*` stamps. Included after the option
-# block: the helpers read `STRINGZILLA_USE_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `STRINGZILLA_ARCH_*_` platform
+# block: the helpers read `STRINGZILLA_BUILD_SANITIZERS`, `STRINGZILLA_BUILD_COVERAGE`, and the `STRINGZILLA_ARCH_*_` platform
 # facts at call time.
 
 # Flags follow each source's language and compiler, as one target may mix C, C++, CUDA and HIP. `COMPILE_LANG_AND_ID`
@@ -247,7 +247,7 @@ function (set_compiler_flags target cpp_standard target_arch)
     # Sanitizer options for Debug mode; NVCC can't handle them:
     # https://stackoverflow.com/questions/75590579/cuda-fails-to-initialise-when-address-sanitizer-is-enabled
     target_compile_definitions(${target} PRIVATE "$<IF:$<CONFIG:Debug>,STRINGZILLA_DEBUG=1,STRINGZILLA_DEBUG=0>")
-    if (STRINGZILLA_USE_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
+    if (STRINGZILLA_BUILD_SANITIZERS AND NOT target_type STREQUAL "SHARED_LIBRARY")
         target_compile_options(
             ${target} PRIVATE "$<$<AND:${sz_msvc_},$<CONFIG:Debug>>:/fsanitize=address;/fsanitize=leak>"
                               "$<$<AND:${sz_gcc_style_},$<CONFIG:Debug>>:-fsanitize=address;-fsanitize=undefined>"

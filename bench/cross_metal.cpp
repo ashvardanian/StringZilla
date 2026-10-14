@@ -20,7 +20,7 @@
  */
 #include "cross.hpp"
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 #include <algorithm> // `std::min`
 #include <optional>  // `std::optional`
 #include <stdexcept> // `std::runtime_error`
@@ -35,7 +35,7 @@
 
 namespace ashvardanian::stringzilla::bench {
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_TARGET_METAL
 static void bench_overlap_scores(environment_t const &env, corpus_t const &corpus, overlap_corpus_t &resident,
                                  std::size_t query_bytes, device_backend_t const &runtime) {
     std::size_t const width = overlap_width_(corpus, query_bytes);
@@ -62,7 +62,7 @@ static void bench_overlap_scores(environment_t const &env, corpus_t const &corpu
 #endif
 
 int bench_cross_metal(environment_t &env, std::size_t ordinal) {
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     stream_t queue(ordinal, sz_stream_init_metal, sz_stream_free_metal);
     device_backend_t runtime;
     runtime.selected = sz::device_t::make(sz::device_kind_t::metal_k, ordinal).value;
@@ -71,6 +71,7 @@ int bench_cross_metal(environment_t &env, std::size_t ordinal) {
     if (sz_allocator_init_unified_metal(&runtime.unified) != sz_success_k)
         throw std::runtime_error("The Metal allocator could not be initialized.");
     fmt::println("Device: metal:{}", ordinal);
+#if STRINGZILLA_TARGET_METAL
     corpus_t const &corpus = env.corpora.multilingual_lines();
     std::size_t const count = std::min(corpus.tokens.size(), resident_candidates_per_call(env, runtime));
     std::vector<sz_string_view_t> views(count);
@@ -79,6 +80,9 @@ int bench_cross_metal(environment_t &env, std::size_t ordinal) {
     overlap_corpus_t resident(views, runtime);
     fmt::println("Starting window overlap benchmarks over {} resident candidates...", resident.candidates.size());
     bench_overlap_scores(env, corpus, resident, median_token_bytes(corpus), runtime);
+#else
+    sz_unused_(env);
+#endif
     return 0;
 #else
     sz_unused_(env);

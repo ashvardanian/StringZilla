@@ -163,6 +163,14 @@ STRINGZILLA_INLINE void sz_strings_split_emit_icelake_(sz_u8_t const *source, sz
     }
 }
 
+/** Copies @p length bytes of @p source to @p target: whole 64-byte blocks, then one masked. */
+STRINGZILLA_INLINE void sz_strings_join_piece_icelake_(sz_u8_t *target, sz_u8_t const *source, sz_size_t length) {
+    for (; length > 64; target += 64, source += 64, length -= 64)
+        _mm512_storeu_si512(target, _mm512_loadu_si512(source));
+    __mmask64 const tail_m64 = sz_u64_mask_until_(length);
+    _mm512_mask_storeu_epi8(target, tail_m64, _mm512_maskz_loadu_epi8(tail_m64, source));
+}
+
 /** The Ice Lake stages. */
 STRINGZILLA_INLINE sz_strings_walks_t sz_strings_walks_icelake_(void) {
     sz_strings_walks_t walks;
@@ -609,6 +617,39 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_icelake(sz_cptr_t text, sz_si
         written += lanes - (sz_size_t)_mm_popcnt_u64(removed);
     }
     sz_strings_split_commit_(tape, &output, payload, allocator);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_join_icelake(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                    sz_size_t rows, sz_string_view_t const *frames,
+                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                    sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!output) return sz_strings_join_measure_(columns, columns_count, rows, frames, between, length);
+    // Accessors join cell by cell, while masked loads read frames of any length in place.
+    sz_size_t by_cell = 0;
+    for (sz_size_t column = 0; column != columns_count && !by_cell; ++column)
+        by_cell = columns[column].layout == sz_strings_accessor_k;
+    if (by_cell) return sz_strings_join_rows_serial_(columns, columns_count, rows, frames, between, output);
+
+    sz_u8_t *target = (sz_u8_t *)output;
+    for (sz_size_t row = 0; row != rows; ++row) {
+        for (sz_size_t column = 0; column != columns_count; ++column) {
+            sz_strings_join_piece_icelake_(target, (sz_u8_t const *)frames[column].start, frames[column].length);
+            target += frames[column].length;
+            sz_size_t const start = sz_strings_view_offset_(columns + column, row);
+            sz_size_t const cell = sz_strings_view_offset_(columns + column, row + 1) - start;
+            sz_strings_join_piece_icelake_(target, (sz_u8_t const *)sz_strings_view_data_(columns + column) + start,
+                                           cell);
+            target += cell;
+        }
+        sz_size_t const separator = row + 1 != rows ? between.length : 0;
+        sz_strings_join_piece_icelake_(target, (sz_u8_t const *)frames[columns_count].start,
+                                       frames[columns_count].length);
+        target += frames[columns_count].length;
+        sz_strings_join_piece_icelake_(target, (sz_u8_t const *)between.start, separator);
+        target += separator;
+    }
     return sz_success_k;
 }
 

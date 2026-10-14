@@ -32,7 +32,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/compare/serial.h" // `sz_equal_serial_`
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 #include <TargetConditionals.h> // `TARGET_OS_OSX`
 #include <objc/message.h>       // `objc_msgSend`
 #include <objc/runtime.h>       // `sel_registerName`, `objc_getClass`
@@ -722,5 +722,5 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream) {
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_WITH_METAL
+#endif // STRINGZILLA_ARCH_METAL_
 #endif // STRINGZILLA_METAL_H_

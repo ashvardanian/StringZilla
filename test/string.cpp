@@ -15,9 +15,7 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
-#endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
@@ -72,6 +70,15 @@ inline void expect_equality(char const *first, char const *second, std::size_t s
     verify(first[mismatch_position] == second[mismatch_position]);
 }
 
+/** The owning string @c sz::string_t::make builds from @p content, a view or a lazy concatenation,
+ *  failing the test when the factory reports an error. */
+template <typename content_type_>
+sz::string_t owned_(content_type_ const &content) {
+    sz::expected<sz::string_t> made = sz::string_t::make(content);
+    verify(sz::succeeded(made.status));
+    return std::move(made.value);
+}
+
 /**
  *  @brief The sum of an arithmetic progression.
  *  @see https://en.wikipedia.org/wiki/Arithmetic_progression
@@ -85,9 +92,11 @@ inline std::size_t arithmetic_sum(std::size_t first, std::size_t last, std::size
     return sum;
 }
 
-/** Stateful allocator charging each byte to its counter, so two over distinct counters differ. */
+/** Stateful allocator charging each byte to its counter, so two over distinct counters differ.
+ *  A string adopts it on move assignment, the one way a stateful allocator moves without a copy. */
 struct accounting_allocator_t {
     using value_type = char;
+    using propagate_on_container_move_assignment = std::true_type;
     std::size_t *live_bytes;
 
     explicit accounting_allocator_t(std::size_t *live_bytes) noexcept : live_bytes(live_bytes) {}
@@ -563,17 +572,17 @@ void test_strings_unit() {
         verify(view.substr(7, 5) == "World"_sv);
         verify(view.front() == 'H' && view.back() == '!');
 
-        sz::string_t const owned = "Hello, World!";
+        sz::string_t const owned = owned_(view);
         verify(owned.size() == 13u);
         verify(owned == view);
-        verify(sz::string_t("apple").compare("banana") < 0);
+        verify(owned_("apple").compare("banana") < 0);
     }
 
     // Embedded NUL must be preserved verbatim by a stored `sz::string_t`: the size is the full byte length, and
     // indexing past the interior NUL reaches the trailing bytes rather than stopping at the C-string boundary.
     {
         char const with_nul[] = {'a', 'b', '\0', 'c', 'd'};
-        sz::string_t const owned(with_nul, sizeof(with_nul));
+        sz::string_t const owned = owned_(sz::string_view_t(with_nul, sizeof(with_nul)));
         verify(owned.size() == sizeof(with_nul));   // Full length, NUL is a stored byte
         verify(owned[2] == '\0');                   // The interior NUL survives
         verify(owned[3] == 'c' && owned[4] == 'd'); // Indexing past the NUL works
@@ -591,6 +600,8 @@ template <typename string_type>
 void test_stl_reads_unit() {
 
     using str = string_type;
+    // StringZilla clamps positions past the end like Python's slices, where the STL throws.
+    constexpr bool clamps = std::is_same_v<str, sz::string_view_t>;
 
     // Constructors.
     verify(str().empty());
@@ -620,10 +631,14 @@ void test_stl_reads_unit() {
     verify(str("hello world").substr(6, 5) == "world");
     verify(str("hello world").substr(6) == "world");
     verify(str("hello world").substr(6, 100) == "world"); // 106 is beyond the length of the string, but its OK
-    throws_verify(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
-    throws_verify(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
+    if constexpr (clamps) verify(str("hello world").substr(100).empty() && str("hello world").substr(20, 5).empty());
+    else {
+        throws_verify(str("hello world").substr(100), std::out_of_range);   // 100 is beyond the length of the string
+        throws_verify(str("hello world").substr(20, 5), std::out_of_range); // 20 is beyond the length of the string
+    }
 #if defined(__GNUC__) && !defined(__NVCC__) // -1 casts to unsigned without warnings on GCC, but not NVCC
-    throws_verify(str("hello world").substr(-1, 5), std::out_of_range);
+    if constexpr (clamps) verify(str("hello world").substr(-1, 5).empty());
+    else throws_verify(str("hello world").substr(-1, 5), std::out_of_range);
     verify(str("hello world").substr(0, -1) == "hello world");
 #endif
 
@@ -794,7 +809,8 @@ void test_stl_reads_unit() {
     verify(str("hello world").compare(0, 5, str("hello")) == 0);
     verify(str("hello world").compare(6, 5, str("earth")) > 0);
     verify(str("hello world").compare(6, 5, str("worlds")) < 0);
-    throws_verify(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
+    if constexpr (clamps) verify(str("hello world").compare(20, 5, str("worlds")) < 0);
+    else throws_verify(str("hello world").compare(20, 5, str("worlds")), std::out_of_range);
 
     // Compare substring with another `str`'s substring.
     verify(str("hello world").compare(0, 5, str("say hello"), 4, 5) == 0);
@@ -802,8 +818,13 @@ void test_stl_reads_unit() {
     verify(str("hello world").compare(6, 5, str("a better world"), 9, 5) == 0);
 
     // Out of bounds cases for both compared strings.
-    throws_verify(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
-    throws_verify(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
+    if constexpr (clamps)
+        verify(str("hello world").compare(20, 5, str("a better world"), 9, 5) < 0 &&
+               str("hello world").compare(6, 5, str("a better world"), 90, 5) > 0);
+    else {
+        throws_verify(str("hello world").compare(20, 5, str("a better world"), 9, 5), std::out_of_range);
+        throws_verify(str("hello world").compare(6, 5, str("a better world"), 90, 5), std::out_of_range);
+    }
 
     // Compare substring with a C-string.
     verify(str("hello world").compare(0, 5, "hello") == 0);
@@ -846,7 +867,8 @@ void test_stl_reads_unit() {
     // Exporting the contents of the string using the `str::copy` method.
     scope_verify(char buf[5 + 1] = {0}, str("hello").copy(buf, 5), std::strcmp(buf, "hello") == 0);
     scope_verify(char buf[4 + 1] = {0}, str("hello").copy(buf, 4, 1), std::strcmp(buf, "ello") == 0);
-    throws_verify(str("hello").copy((char *)"", 1, 100), std::out_of_range);
+    if constexpr (clamps) let_verify(char buf[1] = {0}, str("hello").copy(buf, 1, 100) == 0 && buf[0] == 0);
+    else throws_verify(str("hello").copy((char *)"", 1, 100), std::out_of_range);
 
     // Swaps.
     for (str const first : {"", "hello", "hellohellohellohellohellohellohellohellohellohellohellohello"}) {
@@ -873,155 +895,114 @@ void test_stl_reads_unit() {
 
 #pragma region STL Updates
 
-/** Invokes different C++ member methods of the memory-owning string class to make sure they all
- *  pass compilation, guaranteeing API compatibility with the STL @c std::basic_string template. */
-template <typename string_type>
+/** Invokes every mutating member @c sz::string_t shares with @c std::basic_string, with the same
+ *  arguments: each reports a status where the STL throws, and clamps positions past the end where
+ *  the STL raises @c std::out_of_range. */
 void test_stl_updates_unit() {
 
-    using str = string_type;
+    using str = sz::string_t;
+    auto const ok = [](sz::status_t status) noexcept { return sz::succeeded(status); };
+    static_assert(!std::is_copy_constructible_v<str> && !std::is_copy_assignable_v<str>);
 
-    // Constructors.
-    verify(str().empty());
-    verify(str().size() == 0);
-    verify(str("").empty());
-    verify(str("").size() == 0);
-    verify(str("hello").size() == 5);
-    verify(str("hello", 4) == "hell");
-    verify(str(5, 'a') == "aaaaa");
-    verify(str({'h', 'e', 'l', 'l', 'o'}) == "hello");
-    verify(str(str("hello"), 2) == "llo");
-    verify(str(str("hello"), 2, 2) == "ll");
-
-    // Corner case constructors and search behaviors for long strings
-    verify(str(258, '0').find(str(256, '1')) == str::npos);
+    // Construction goes through the factories, which report a failed allocation.
+    verify(str().empty() && str().size() == 0);
+    let_verify(str s = owned_(""), s.empty());
+    let_verify(str s = owned_("hello"), s.size() == 5);
+    let_verify(sz::expected<str> copied = owned_("hello").copy(), ok(copied.status) && copied.value == "hello");
+    let_verify(sz::expected<str> joined = str::make("hel"_sv | "lo"), ok(joined.status) && joined.value == "hello");
+    let_verify(str s, ok(s.assign(258, '0')) && s.find(std::string(256, '1')) == str::npos);
 
     // Assignments.
-    scope_verify(str s = "obsolete", s = "hello", s == "hello");
-    scope_verify(str s = "obsolete", s.assign("hello"), s == "hello");
-    scope_verify(str s = "obsolete", s.assign("hello", 4), s == "hell");
-    scope_verify(str s = "obsolete", s.assign(5, 'a'), s == "aaaaa");
-    scope_verify(str s = "obsolete", s.assign(32, 'a'), s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    scope_verify(str s = "obsolete", s.assign({'h', 'e', 'l', 'l', 'o'}), s == "hello");
-    scope_verify(str s = "obsolete", s.assign(str("hello")), s == "hello");
-    scope_verify(str s = "obsolete", s.assign(str("hello"), 2), s == "llo");
-    scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    scope_verify(str s = "obsolete", s.assign(str("hello"), 2, 2), s == "ll");
-    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");
-    scope_verify(str s = "obsolete", s.assign(s.begin(), s.end()), s == "obsolete");
-    scope_verify(str s = "obsolete", s.assign(s, 4), s == "lete");
-    scope_verify(str s = "obsolete", s.assign(s, 4, 3), s == "let");
+    let_verify(str s = owned_("obsolete"), ok(s.assign("hello")) && s == "hello");
+    let_verify(str s = owned_("obsolete"), ok(s.assign("hello", 4)) && s == "hell");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(5, 'a')) && s == "aaaaa");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(32, 'a')) && s == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    let_verify(str s = owned_("obsolete"), ok(s.assign({'h', 'e', 'l', 'l', 'o'})) && s == "hello");
+    let_verify(str s = owned_("obsolete"), ok(s.assign("hello"_sv, 2)) && s == "llo");
+    let_verify(str s = owned_("obsolete"), ok(s.assign("hello"_sv, 2, 2)) && s == "ll");
+    let_verify(str s = owned_("obsolete"), ok(s.assign("hello"_sv, 9)) && s.empty());
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s.begin(), s.end())) && s == "obsolete");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s, 4)) && s == "lete");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s, 4, 3)) && s == "let");
 
     // Self-assignment is a special case of assignment.
-    scope_verify(str s = "obsolete", s = s, s == "obsolete");
-    scope_verify(str s = "obsolete", s.assign(s), s == "obsolete");
-    scope_verify(str s = "obsolete", s.assign(s.data(), 2), s == "ob");
-    scope_verify(str s = "obsolete", s.assign(s.data(), s.size()), s == "obsolete");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s)) && s == "obsolete");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s.data(), 2)) && s == "ob");
+    let_verify(str s = owned_("obsolete"), ok(s.assign(s.data(), s.size())) && s == "obsolete");
 
     // Allocations, capacity and memory management.
-    scope_verify(str s, s.reserve(10), s.capacity() >= 10);
-    scope_verify(str s, s.resize(10), s.size() == 10);
-    scope_verify(str s, s.resize(10, 'a'), s.size() == 10 && s == "aaaaaaaaaa");
     verify(str().max_size() > 0);
     verify(str().get_allocator() == std::allocator<char>());
-    verify(std::strcmp(str("c_str").c_str(), "c_str") == 0);
+    verify(std::strcmp(owned_("c_str").c_str(), "c_str") == 0);
 
-#if defined(__cpp_lib_string_resize_and_overwrite)
-    // Test C++23 resize and overwrite functionality
-    scope_verify(str s("hello"),
-                 s.resize_and_overwrite(10,
-                                        [](char *p, std::size_t count) noexcept {
-                                            std::memset(p, 'X', count);
-                                            return count;
-                                        }),
-                 s.size() == 10 && s == "XXXXXXXXXX");
-
-    scope_verify(str s("test"),
-                 s.resize_and_overwrite(8,
-                                        [](char *p, std::size_t) noexcept {
-                                            std::strcpy(p, "ABCDE");
-                                            return 5;
-                                        }),
-                 s.size() == 5 && s == "ABCDE");
-
-    let_verify(str s("orig"), sz::succeeded(s.try_resize_and_overwrite(6,
-                                                                       [](char *p, std::size_t count) noexcept {
-                                                                           std::strcpy(p, "works!");
-                                                                           return count;
-                                                                       })) &&
-                                  s.size() == 6 && s == "works!");
-#endif
-
-    // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
-    // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
-    if (STRINGZILLA_ARCH_64BIT_)
-        scope_verify(str s = "hello", s.shrink_to_fit(), s.capacity() <= sz::string_t::min_capacity);
-
-    // Concatenation.
-    // Following are missing in strings, but are present in vectors.
-    verify(str().append("test") == "test");
-    verify(str("test") + "ing" == "testing");
-    verify(str("test") + str("ing") == "testing");
-    verify(str("test") + str("ing") + str("123") == "testing123");
-    scope_verify(str s = "!?", s.push_back('a'), s == "!?a");
-    scope_verify(str s = "!?", s.pop_back(), s == "!");
+    // Concatenation stays lazy until a verb materializes it.
+    let_verify(str s, ok(s.append("test")) && s == "test");
+    let_verify(str s, ok(s.assign("test"_sv | "ing")) && s == "testing");
+    let_verify(str s, ok(s.assign("test"_sv | "ing" | "123")) && s == "testing123");
+    scope_verify(str s = owned_("!?"), s.pop_back(), s == "!");
 
     // Incremental construction.
-    verify(str("__").insert(1, "test") == "_test_");
-    verify(str("__").insert(1, "test", 2) == "_te_");
-    verify(str("__").insert(1, 5, 'a') == "_aaaaa_");
-    verify(str("__").insert(1, str("test")) == "_test_");
-    verify(str("__").insert(1, str("test"), 2) == "_st_");
-    verify(str("__").insert(1, str("test"), 2, 1) == "_s_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, "test")) && s == "_test_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, "test", 2)) && s == "_te_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, 5, 'a')) && s == "_aaaaa_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, owned_("test"))) && s == "_test_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, "test"_sv, 2)) && s == "_st_");
+    let_verify(str s = owned_("__"), ok(s.insert(1, "test"_sv, 2, 1)) && s == "_s_");
 
-    // Inserting at a given iterator position yields back an iterator.
-    scope_verify(str s = "__", s.insert(s.begin() + 1, 5, 'a'), s == "_aaaaa_");
-    scope_verify(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}), s == "_abc_");
-    let_verify(str s = "__", s.insert(s.begin() + 1, 5, 'a') == (s.begin() + 1));
-    let_verify(str s = "__", s.insert(s.begin() + 1, {'a', 'b', 'c'}) == (s.begin() + 1));
+    // Inserting at a given iterator position yields back an iterator beside the status.
+    let_verify(str s = owned_("__"), ok(s.insert(s.begin() + 1, 5, 'a').status) && s == "_aaaaa_");
+    {
+        str s = owned_("__");
+        sz::expected<str::iterator> const inserted = s.insert(s.begin() + 1, {'a', 'b', 'c'});
+        verify(ok(inserted.status) && inserted.value == s.begin() + 1 && s == "_abc_");
+    }
 
-    // Handle exceptions.
-    // The `length_error` might be difficult to catch due to a large `max_size()`.
-    // throws_verify(large_string.insert(large_string.size() - 1, large_number_of_chars, 'a'), std::length_error);
-    throws_verify(str("hello").insert(6, "world"), std::out_of_range);         // `index > size()` case from STL
-    throws_verify(str("hello").insert(5, str("world"), 6), std::out_of_range); // `s_index > str.size()` case from STL
+    // Positions past the end clamp to it.
+    let_verify(str s = owned_("hello"), ok(s.insert(6, "world")) && s == "helloworld");
+    let_verify(str s = owned_("hello"), ok(s.insert(5, "world"_sv, 6)) && s == "hello");
+    let_verify(str s = owned_("hello"), ok(s.replace(9, 2, "!")) && s == "hello!");
+    let_verify(str s = owned_("hello"), s.append(str::npos, 'a') == sz::status_t::overflow_risk_k && s == "hello");
 
     // Erasure.
-    verify(str("").erase(0, 3) == "");
-    verify(str("test").erase(1, 2) == "tt");
-    verify(str("test").erase(1) == "t");
-    scope_verify(str s = "test", s.erase(s.begin() + 1), s == "tst");
-    scope_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
-    scope_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
-    let_verify(str s = "test", s.erase(s.begin() + 1) == (s.begin() + 1));
-    let_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
-    let_verify(str s = "test", s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
+    let_verify(str s, s.erase(0, 3) == "");
+    let_verify(str s = owned_("test"), s.erase(1, 2) == "tt");
+    let_verify(str s = owned_("test"), s.erase(1) == "t");
+    let_verify(str s = owned_("test"), s.erase(9) == "test");
+    scope_verify(str s = owned_("test"), s.erase(s.begin() + 1), s == "tst");
+    scope_verify(str s = owned_("test"), s.erase(s.begin() + 1, s.begin() + 2), s == "tst");
+    scope_verify(str s = owned_("test"), s.erase(s.begin() + 1, s.begin() + 3), s == "tt");
+    let_verify(str s = owned_("test"), s.erase(s.begin() + 1) == (s.begin() + 1));
+    let_verify(str s = owned_("test"), s.erase(s.begin() + 1, s.begin() + 2) == (s.begin() + 1));
+    let_verify(str s = owned_("test"), s.erase(s.begin() + 1, s.begin() + 3) == (s.begin() + 1));
 
     // Substitutions.
-    verify(str("hello").replace(1, 2, "123") == "h123lo");
-    verify(str("hello").replace(1, 2, str("123"), 1) == "h23lo");
-    verify(str("hello").replace(1, 2, "123", 1) == "h1lo");
-    verify(str("hello").replace(1, 2, "123", 1, 1) == "h2lo");
-    verify(str("hello").replace(1, 2, str("123"), 1, 1) == "h2lo");
-    verify(str("hello").replace(1, 2, 3, 'a') == "haaalo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, "123")) && s == "h123lo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, "123"_sv, 1)) && s == "h23lo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, "123", 1)) && s == "h1lo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, "123", 1, 1)) && s == "h2lo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, "123"_sv, 1, 1)) && s == "h2lo");
+    let_verify(str s = owned_("hello"), ok(s.replace(1, 2, 3, 'a')) && s == "haaalo");
 
     // Substitutions with iterators.
-    scope_verify(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, 3, 'a'), s == "haaalo");
-    scope_verify(str s = "hello", s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'}), s == "hablo");
+    let_verify(str s = owned_("hello"), ok(s.replace(s.begin() + 1, s.begin() + 3, 3, 'a')) && s == "haaalo");
+    let_verify(str s = owned_("hello"), ok(s.replace(s.begin() + 1, s.begin() + 3, {'a', 'b'})) && s == "hablo");
 
     // Some nice "tweetable" examples :)
-    verify(str("Loose").replace(2, 2, str("vath"), 1) == "Loathe");
-    verify(str("Loose").replace(2, 2, "vath", 1) == "Love");
+    let_verify(str s = owned_("Loose"), ok(s.replace(2, 2, "vath"_sv, 1)) && s == "Loathe");
+    let_verify(str s = owned_("Loose"), ok(s.replace(2, 2, "vath", 1)) && s == "Love");
 
     // Insertion is a special case of replacement.
     // Appending and assigning are special cases of insertion.
     // Still, we test them separately to make sure they are not broken.
-    verify(str("hello").append("123") == "hello123");
-    verify(str("hello").append(str("123")) == "hello123");
-    verify(str("hello").append(str("123"), 1) == "hello23");
-    verify(str("hello").append(str("123"), 1, 1) == "hello2");
-    verify(str("hello").append({'1', '2'}) == "hello12");
-    verify(str("hello").append(2, '!') == "hello!!");
-    let_verify(str s = "123", str("hello").append(s.begin(), s.end()) == "hello123");
+    let_verify(str s = owned_("hello"), ok(s.append("123")) && s == "hello123");
+    let_verify(str s = owned_("hello"), ok(s.append("123"_sv, 1)) && s == "hello23");
+    let_verify(str s = owned_("hello"), ok(s.append("123"_sv, 1, 1)) && s == "hello2");
+    let_verify(str s = owned_("hello"), ok(s.append({'1', '2'})) && s == "hello12");
+    let_verify(str s = owned_("hello"), ok(s.append(2, '!')) && s == "hello!!");
+    {
+        sz::string_view_t const tail = "123";
+        let_verify(str s = owned_("hello"), ok(s.append(tail.begin(), tail.end())) && s == "hello123");
+    }
 }
 
 /** Constructs StringZilla classes from STL and vice-versa, ensuring the conversions work. */
@@ -1029,7 +1010,7 @@ void test_stl_conversions_unit() {
     // From a mutable STL string to StringZilla and vice-versa.
     {
         std::string stl {"hello"};
-        sz::string_t sz = stl;
+        sz::string_t sz = owned_(stl);
         sz::string_view_t szv = stl;
         sz::string_span_t szs = stl;
         verify(sz == "hello");
@@ -1044,7 +1025,7 @@ void test_stl_conversions_unit() {
     }
     // From StringZilla views back into a fresh STL string.
     {
-        sz::string_t const sz {"hello"};
+        sz::string_t const sz = owned_("hello");
         std::string stl;
         stl = sz;
         verify(stl == "hello");
@@ -1054,7 +1035,7 @@ void test_stl_conversions_unit() {
     // From an immutable STL string to StringZilla.
     {
         std::string const stl {"hello"};
-        sz::string_t const sz = stl;
+        sz::string_t const sz = owned_(stl);
         sz::string_view_t const szv = stl;
         verify(sz == "hello");
         verify(szv == "hello");
@@ -1063,7 +1044,7 @@ void test_stl_conversions_unit() {
     // From STL `string_view_t` to StringZilla and vice-versa.
     {
         std::string_view stl {"hello"};
-        sz::string_t sz = stl;
+        sz::string_t sz = owned_(stl);
         sz::string_view_t szv = stl;
         verify(sz == "hello");
         verify(szv == "hello");
@@ -1081,11 +1062,11 @@ void test_stl_containers_unit() {
     // and each prefix precedes its own extension.
     char const *const ascending_keys[] = {"Zebra", "app", "apple", "apples", "banana"};
 
-    // The `sz::string_t` keys use the native ordering, the `std::string` keys go through `sz::less`.
-    std::map<sz::string_t, int> sorted_words_sz;
+    // Both maps order through the transparent `sz::less`, which also finds owning keys by views.
+    std::map<sz::string_t, int, sz::less> sorted_words_sz;
     std::map<std::string, int, sz::less> sorted_words_stl;
     for (int insertion = 4; insertion >= 0; --insertion) { // Reverse order, so sorting has work to do
-        sorted_words_sz.emplace(ascending_keys[insertion], insertion);
+        sorted_words_sz.emplace(owned_(ascending_keys[insertion]), insertion);
         sorted_words_stl.emplace(ascending_keys[insertion], insertion);
     }
     verify(sorted_words_sz.size() == 5);
@@ -1110,13 +1091,13 @@ void test_stl_containers_unit() {
     }
     verify(rank_stl == 5);
 
-    verify(sorted_words_sz.at("apple") == 2);
+    verify(sorted_words_sz.find("apple")->second == 2);
     verify(sorted_words_stl.at("apple") == 2);
     verify(sorted_words_sz.count("Apple") == 0); // Comparisons are case-sensitive
     verify(sorted_words_stl.count("Apple") == 0);
     verify(sorted_words_sz.count("appl") == 0); // A prefix of a present key is still absent
-    verify(sorted_words_sz.erase("app") == 1);
-    verify(sorted_words_sz.erase("app") == 0);
+    sorted_words_sz.erase(sorted_words_sz.find("app"));
+    verify(sorted_words_sz.find("app") == sorted_words_sz.end());
     verify(sorted_words_sz.size() == 4);
     verify(sorted_words_sz.begin()->first == "Zebra");
     verify(sorted_words_sz.lower_bound("apple")->first == "apple");
@@ -1124,15 +1105,15 @@ void test_stl_containers_unit() {
 
     // Equal-valued keys assembled from different storage must hash alike and compare equal,
     // so the second insertion collapses onto the first instead of adding a bucket.
-    std::unordered_map<sz::string_t, int> words_sz;
-    words_sz.emplace("banana", 7);
-    sz::string_t grown_sz = "bana";
-    grown_sz.append("na");
-    verify(std::hash<sz::string_t> {}(grown_sz) == std::hash<sz::string_t> {}(sz::string_t("banana")) &&
+    std::unordered_map<sz::string_t, int, sz::hash, sz::equal_to> words_sz;
+    words_sz.emplace(owned_("banana"), 7);
+    sz::string_t grown_sz = owned_("bana");
+    verify(sz::succeeded(grown_sz.append("na")));
+    verify(std::hash<sz::string_t> {}(grown_sz) == std::hash<sz::string_t> {}(owned_("banana")) &&
            "std::hash disagreed for equal-content strings built via different construction paths");
     verify(words_sz.find(grown_sz) != words_sz.end());
-    verify(words_sz.emplace(grown_sz, 9).second == false);
-    verify(words_sz.at(grown_sz) == 7);
+    verify(words_sz.emplace(std::move(grown_sz), 9).second == false);
+    verify(words_sz.find("banana")->second == 7);
     verify(words_sz.size() == 1);
     verify(words_sz.find("bananas") == words_sz.end());
 
@@ -1156,7 +1137,7 @@ void test_stl_containers_unit() {
     verify(sz::less {}("", "a"));
     verify(sz::less {}("a", "") == false);
     verify(sz::equal_to {}("", ""));
-    sorted_words_sz.emplace("", -1);
+    sorted_words_sz.emplace(owned_(""), -1);
     verify(sorted_words_sz.begin()->first == "");
     words_stl.emplace("", -1);
     verify(words_stl.at("") == -1);
@@ -1234,33 +1215,65 @@ void test_extensions_reads_unit() {
 void test_extensions_updates_unit() {
     using str = sz::string_t;
 
-    // Try methods.
-    verify(sz::succeeded(str("obsolete").try_assign("hello")));
-    verify(sz::succeeded(str().try_reserve(10)));
-    verify(sz::succeeded(str().try_resize(10)));
-    verify(sz::succeeded(str("__").try_insert(1, "test")));
-    verify(str("test").try_erase(1, 2));
-    verify(sz::succeeded(str("test").try_replace(1, 2, "aaaa")));
-    verify(sz::succeeded(str("test").try_push_back('a')));
-    verify(sz::succeeded(str("test").try_shrink_to_fit()));
+    // Allocating verbs return a status, and the signed-offset twins count negatives from the end.
+    let_verify(str s = owned_("obsolete"), sz::succeeded(s.assign("hello")) && s == "hello");
+    let_verify(str s = owned_("obsolete"), sz::succeeded(s.assign(owned_("hello"))) && s == "hello");
+    let_verify(str s = owned_("obsolete"), sz::succeeded(s.assign(s)) && s == "obsolete");
+    let_verify(str s, sz::succeeded(s.reserve(10)) && s.capacity() >= 10);
+    let_verify(str s, sz::succeeded(s.resize(10)) && s.size() == 10);
+    let_verify(str s, sz::succeeded(s.resize(10, 'a')) && s == "aaaaaaaaaa");
+    let_verify(str s = owned_("!?"), sz::succeeded(s.push_back('a')) && s == "!?a");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.append(owned_("123"))) && s == "hello123");
+    let_verify(str s = owned_("__"), sz::succeeded(s.insert_at(-1, "test")) && s == "_test_");
+    let_verify(str s = owned_("__"), sz::succeeded(s.insert_at(1, "test")) && s == "_test_");
+    let_verify(str s = owned_("__"), sz::succeeded(s.insert_at(9, "test")) && s == "__test");
+    let_verify(str s = owned_("test"), s.erase_slice(1, -1) == 2 && s == "tt");
+    let_verify(str s = owned_("test"), sz::succeeded(s.replace_slice(1, -1, "aaaa")) && s == "taaaat");
+    let_verify(str s, s.reserve(s.max_size() + 1) == sz::status_t::overflow_risk_k && s.empty());
+
+    // On 32-bit systems the base capacity can be larger than our `z::string::min_capacity`.
+    // It's true for MSVC: https://github.com/ashvardanian/StringZilla/issues/168
+    if (STRINGZILLA_ARCH_64BIT_)
+        let_verify(str s = owned_("hello"),
+                   sz::succeeded(s.shrink_to_fit()) && s.capacity() <= sz::string_t::min_capacity);
+
+    // Resizing hands the callback the grown buffer and keeps only the length it reports.
+    let_verify(str s = owned_("hello"), sz::succeeded(s.resize_and_overwrite(10,
+                                                                             [](char *p, std::size_t count) noexcept {
+                                                                                 std::memset(p, 'X', count);
+                                                                                 return count;
+                                                                             })) &&
+                                            s == "XXXXXXXXXX");
+    let_verify(str s = owned_("test"), sz::succeeded(s.resize_and_overwrite(8,
+                                                                            [](char *p, std::size_t) noexcept {
+                                                                                std::strcpy(p, "ABCDE");
+                                                                                return 5;
+                                                                            })) &&
+                                           s.size() == 5 && s == "ABCDE");
+    let_verify(str s = owned_("orig"), sz::succeeded(s.resize_and_overwrite(6,
+                                                                            [](char *p, std::size_t count) noexcept {
+                                                                                std::strcpy(p, "works!");
+                                                                                return count;
+                                                                            })) &&
+                                           s.size() == 6 && s == "works!");
 
     // Growing through a concatenation must succeed and land exactly on the concatenation's length.
-    let_verify(str s = "ab", sz::succeeded(s.try_assign("hello"_sv | "world")) && s == "helloworld");
+    let_verify(str s = owned_("ab"), sz::succeeded(s.assign("hello"_sv | "world")) && s == "helloworld");
 
-    // A throwing allocator must surface as `bad_alloc_k` from the `noexcept` twins.
-    let_verify(sz::string<throwing_allocator_t> s, s.try_reserve(1000) == sz::status_t::bad_alloc_k && s.empty());
+    // A throwing allocator must surface as `bad_alloc_k` from the `noexcept` verbs.
+    let_verify(sz::string<throwing_allocator_t> s, s.reserve(1000) == sz::status_t::bad_alloc_k && s.empty());
 
     // Self-referencing methods.
-    let_verify(str s = "test", sz::succeeded(s.try_assign(s.view())) && s == "test");
-    let_verify(str s = "test", sz::succeeded(s.try_assign(s.view().sub(1, 2))) && s == "e");
-    let_verify(str s = "test", sz::succeeded(s.try_append(s.view().sub(1, 2))) && s == "teste");
+    let_verify(str s = owned_("test"), sz::succeeded(s.assign(s.view())) && s == "test");
+    let_verify(str s = owned_("test"), sz::succeeded(s.assign(s.view().sub(1, 2))) && s == "e");
+    let_verify(str s = owned_("test"), sz::succeeded(s.append(s.view().sub(1, 2))) && s == "teste");
 
-    // Try methods going beyond and beneath capacity threshold.
+    // Growing beyond and shrinking beneath the capacity threshold.
     {
-        str s = "0123456789012345678901234567890123456789012345678901234567890123"; // 64 symbols at start
-        for (int doubling = 0; doubling != 4; ++doubling) verify(sz::succeeded(s.try_append(s)));
+        str s = owned_("0123456789012345678901234567890123456789012345678901234567890123"); // 64 symbols at start
+        for (int doubling = 0; doubling != 4; ++doubling) verify(sz::succeeded(s.append(s)));
         s.clear();
-        verify(sz::succeeded(s.try_shrink_to_fit()));
+        verify(sz::succeeded(s.shrink_to_fit()));
         verify(s.capacity() < sz::string_t::min_capacity);
     }
 
@@ -1270,72 +1283,70 @@ void test_extensions_updates_unit() {
         accounting_allocator_t const allocator {&live_bytes};
         {
             sz::string<accounting_allocator_t> s(allocator);
-            verify(sz::succeeded(s.try_assign("STRASSE AND STRASSE")));
-            verify(sz::succeeded(s.try_utf8_uncased_fold()) && s == "strasse and strasse");
-            verify(sz::succeeded(s.try_utf8_normalize(sz_normal_form_nfd_k)) && s == "strasse and strasse");
+            verify(sz::succeeded(s.assign("STRASSE AND STRASSE")));
+            verify(sz::succeeded(s.utf8_uncased_fold()) && s == "strasse and strasse");
+            verify(sz::succeeded(s.utf8_normalize(sz_normal_form_nfd_k)) && s == "strasse and strasse");
             verify(s.get_allocator() == allocator && live_bytes != 0);
         }
         verify(live_bytes == 0);
     }
 
     // Same length replacements.
-    scope_verify(str s = "hello", s.replace_all("xx", "xx"), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("l", "1"), s == "he11o");
-    scope_verify(str s = "hello", s.replace_all("he", "al"), s == "alllo");
-    scope_verify(str s = "hello", s.replace_all("x"_bs, "!"), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("o"_bs, "!"), s == "hell!");
-    scope_verify(str s = "hello", s.replace_all("ho"_bs, "!"), s == "!ell!");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("xx", "xx")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("l", "1")) && s == "he11o");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("he", "al")) && s == "alllo");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("x"_bs, "!")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("o"_bs, "!")) && s == "hell!");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("ho"_bs, "!")) && s == "!ell!");
 
     // Shorter replacements.
-    scope_verify(str s = "hello", s.replace_all("xx", "x"), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("l", ""), s == "heo");
-    scope_verify(str s = "hello", s.replace_all("h", ""), s == "ello");
-    scope_verify(str s = "hello", s.replace_all("o", ""), s == "hell");
-    scope_verify(str s = "hello", s.replace_all("llo", "!"), s == "he!");
-    scope_verify(str s = "hello", s.replace_all("x"_bs, ""), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("lo"_bs, ""), s == "he");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("xx", "x")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("l", "")) && s == "heo");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("h", "")) && s == "ello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("o", "")) && s == "hell");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("llo", "!")) && s == "he!");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("x"_bs, "")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("lo"_bs, "")) && s == "he");
 
     // Longer replacements.
-    scope_verify(str s = "hello", s.replace_all("xx", "xxx"), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("l", "ll"), s == "hellllo");
-    scope_verify(str s = "hello", s.replace_all("h", "hh"), s == "hhello");
-    scope_verify(str s = "hello", s.replace_all("o", "oo"), s == "helloo");
-    scope_verify(str s = "hello", s.replace_all("llo", "llo!"), s == "hello!");
-    scope_verify(str s = "hello", s.replace_all("x"_bs, "xx"), s == "hello");
-    scope_verify(str s = "hello", s.replace_all("lo"_bs, "lo"), s == "helololo");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("xx", "xxx")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("l", "ll")) && s == "hellllo");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("h", "hh")) && s == "hhello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("o", "oo")) && s == "helloo");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("llo", "llo!")) && s == "hello!");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("x"_bs, "xx")) && s == "hello");
+    let_verify(str s = owned_("hello"), sz::succeeded(s.replace_all("lo"_bs, "lo")) && s == "helololo");
 
     // Directly mapping bytes using a Look-Up Table.
     sz::look_up_table_t invert_case = sz::look_up_table_t::identity();
     for (char c = 'a'; c <= 'z'; c++) invert_case[c] = c - 'a' + 'A';
     for (char c = 'A'; c <= 'Z'; c++) invert_case[c] = c - 'A' + 'a';
-    scope_verify(str s = "hello", s.lookup(invert_case), s == "HELLO");
-    scope_verify(str s = "HeLLo", s.lookup(invert_case), s == "hEllO");
-    scope_verify(str s = "H-lL0", s.lookup(invert_case), s == "h-Ll0");
+    scope_verify(str s = owned_("hello"), s.lookup(invert_case), s == "HELLO");
+    scope_verify(str s = owned_("HeLLo"), s.lookup(invert_case), s == "hEllO");
+    scope_verify(str s = owned_("H-lL0"), s.lookup(invert_case), s == "h-Ll0");
 
-    // Concatenation.
-    verify(str(str("a") | str("b")) == "ab");
-    verify(str(str("a") | str("b") | str("ab")) == "abab");
+    // Concatenation stays lazy, and the factory reports a failed allocation.
+    verify(owned_(owned_("a") | owned_("b")) == "ab");
+    verify(owned_(owned_("a") | owned_("b") | owned_("ab")) == "abab");
 
-    verify(str(sz::concatenate("a"_sv, "b"_sv)) == "ab");
-    verify(str(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
+    verify(owned_(sz::concatenate("a"_sv, "b"_sv)) == "ab");
+    verify(owned_(sz::concatenate("a"_sv, "b"_sv, "c"_sv)) == "abc");
 
     // The cases above pass only rvalues carrying a `::value_type`. Named lvalues deduce to a
     // reference and raw literals to a character array, neither of which has member typedefs.
     {
-        str name = "ash", domain = "mail", tld = "com";
-        verify(str(sz::concatenate(name, "@", domain, ".", tld)) == "ash@mail.com");
-        verify(str(name | "@" | domain | "." | tld) == "ash@mail.com");
-        verify(str(sz::concatenate(name, domain)) == "ashmail");
-        verify(str(sz::concatenate("@", name)) == "@ash");
-
-        // Materializing uses an implicit conversion, so the concatenation constructor is not explicit.
-        sz::string_t email = name | "@" | domain;
-        verify(email == "ash@mail");
+        str name = owned_("ash"), domain = owned_("mail"), tld = owned_("com");
+        verify(owned_(sz::concatenate(name, "@", domain, ".", tld)) == "ash@mail.com");
+        verify(owned_(name | "@" | domain | "." | tld) == "ash@mail.com");
+        verify(owned_(sz::concatenate(name, domain)) == "ashmail");
+        verify(owned_(sz::concatenate("@", name)) == "@ash");
+        let_verify(sz::expected<str> email = str::make(name | "@" | domain),
+                   sz::succeeded(email.status) && email.value == "ash@mail");
     }
 
     // Range members slice the string they were called on, so offsets stay inside its own buffer.
     {
-        str text = "hello brave new world";
+        str text = owned_("hello brave new world");
         verify(offsets_within(text, text.utf8_wordbreaks()) ==
                    (std::vector<std::ptrdiff_t> {0, 5, 6, 11, 12, 15, 16}) &&
                "utf8_wordbreaks segment landed outside the caller's own buffer");
@@ -1343,15 +1354,14 @@ void test_extensions_updates_unit() {
                "utf8_split_whitespaces token landed outside the caller's own buffer");
         verify(offsets_within(text, text.utf8_split_delimiters()) == (std::vector<std::ptrdiff_t> {0, 6, 12, 16}) &&
                "utf8_split_delimiters field landed outside the caller's own buffer");
-        str sso = "a b c";
+        str sso = owned_("a b c");
         verify(offsets_within(sso, sso.utf8_split_whitespaces()) == (std::vector<std::ptrdiff_t> {0, 2, 4}) &&
                "utf8_split_whitespaces token landed outside the small-string-optimized buffer");
     }
 
-    // Randomization.
-    verify(str::random(0).empty());
-    verify(str::random(4).size() == 4);
-    verify(str::random(4, 42).size() == 4);
+    // Randomization fills a string the caller sized.
+    let_verify(str s, sz::succeeded(s.resize(4)) && s.fill_random(42).size() == 4);
+    let_verify(str s, s.fill_random().empty());
 }
 
 #pragma endregion Extensions
@@ -1426,7 +1436,7 @@ void test_extensions_ranges_unit() {
     verify("abc"_sv.find_all("", sz::exclude_overlaps_t {}).size() == 4);
     verify("abc"_sv.rfind_all("").size() == 4);
     verify(""_sv.find_all("").size() == 1);
-    verify(sz::find_all(sz::string_t("abc"), "").size() == 4);
+    verify(sz::find_all(owned_("abc"), "").size() == 4);
 
     verify("a.b.c.d"_sv.find_all(".").size() == 3);
     verify("a.,b.,c.,d"_sv.find_all(".,").size() == 3);
@@ -1447,27 +1457,27 @@ void test_extensions_ranges_unit() {
     verify(sz::rfind_all("abc"_sv, "b"_sv).size() == 1);
 
     {
-        sz::string_t h("abc"), n("b");
+        sz::string_t h = owned_("abc"), n = owned_("b");
         verify(sz::find_all(h, n).size() == 1);
     }
     {
-        sz::string_t h("hello"), n("l");
+        sz::string_t h = owned_("hello"), n = owned_("l");
         verify(sz::find_all(h, n).size() == 2);
     }
     {
-        sz::string_t h("abc"), n("b");
+        sz::string_t h = owned_("abc"), n = owned_("b");
         verify(sz::rfind_all(h, n).size() == 1);
     }
 
-    verify(sz::find_all(sz::string_t("abc"), sz::string_t("b")).size() == 1);
-    verify(sz::find_all(sz::string_t("hello"), sz::string_t("l")).size() == 2);
-    verify(sz::rfind_all(sz::string_t("abc"), sz::string_t("b")).size() == 1);
+    verify(sz::find_all(owned_("abc"), owned_("b")).size() == 1);
+    verify(sz::find_all(owned_("hello"), owned_("l")).size() == 2);
+    verify(sz::rfind_all(owned_("abc"), owned_("b")).size() == 1);
 
     // Lvalue haystacks are borrowed, so slices land inside the caller's own buffer. A copied
     // haystack would offset into a private copy - and under SSO those offsets look plausible.
     {
-        sz::string_t haystack("hello world, hello cpp");
-        sz::string_t sso("a b a");
+        sz::string_t haystack = owned_("hello world, hello cpp");
+        sz::string_t sso = owned_("a b a");
         verify(offsets_within(haystack, sz::find_all(haystack, "hello")) == (std::vector<std::ptrdiff_t> {0, 13}) &&
                "Match offsets did not land inside the borrowed lvalue haystack's own buffer");
         verify(offsets_within(sso, sz::find_all(sso, "a")) == (std::vector<std::ptrdiff_t> {0, 4}) &&
@@ -1475,13 +1485,13 @@ void test_extensions_ranges_unit() {
     }
 
     // Needles are copied into the matcher, so a temporary one outlives the expression that built it.
-    verify(sz::find_all(sz::string_t("hello world, hello cpp"), sz::string_t("hello")).size() == 2);
+    verify(sz::find_all(owned_("hello world, hello cpp"), owned_("hello")).size() == 2);
 
     // Haystack and needle need not share a type - literals, views, and owning strings mix.
     {
-        sz::string_t owning("a-b-c");
+        sz::string_t owning = owned_("a-b-c");
         sz::string_view_t view("a-b-c");
-        sz::string_t needle("-");
+        sz::string_t needle = owned_("-");
         verify(sz::find_all(view, "-").size() == 2);
         verify(sz::find_all(owning, "-").size() == 2);
         verify(sz::find_all(owning, view.substr(1, 1)).size() == 2);
@@ -1529,29 +1539,17 @@ void test_extensions_ranges_unit() {
 
 #pragma region String Class
 
-/** Tests copy constructor and copy-assignment constructor of @c sz::string_t. */
+/** Copies @c sz::string_t through @c copy and @c assign, the two verbs that report a failed
+ *  allocation, as the copy constructor and copy assignment are deleted. */
 void test_string_constructors_unit() {
     std::string alphabet {sz::ascii_printables(), sizeof(sz::ascii_printables())};
-    std::vector<sz::string_t> strings;
-    for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice)
-        strings.push_back(alphabet.substr(0, alphabet_slice));
-    std::vector<sz::string_t> copies {strings};
-    verify(copies.size() == strings.size());
-    for (size_t i = 0; i < copies.size(); ++i) {
-        verify(copies[i].size() == strings[i].size() && "Copy-constructed string has the wrong length at index i");
-        verify(copies[i] == strings[i] && "Copy-constructed string diverged from its source at index i");
-        for (size_t j = 0; j < strings[i].size(); j++)
-            verify(copies[i][j] == strings[i][j] && "Copy-constructed string mismatched a byte at index i, j");
+    for (std::size_t alphabet_slice = 0; alphabet_slice != alphabet.size(); ++alphabet_slice) {
+        sz::string_t const source = owned_(alphabet.substr(0, alphabet_slice));
+        sz::expected<sz::string_t> const copied = source.copy();
+        verify(sz::succeeded(copied.status) && copied.value == source && "`copy` diverged from its source");
+        sz::string_t assigned = owned_("obsolete");
+        verify(sz::succeeded(assigned.assign(source)) && assigned == source && "`assign` diverged from its source");
     }
-    std::vector<sz::string_t> assignments = strings;
-    for (size_t i = 0; i < assignments.size(); ++i) {
-        verify(assignments[i].size() == strings[i].size() && "Copy-assigned string has the wrong length at index i");
-        verify(assignments[i] == strings[i] && "Copy-assigned string diverged from its source at index i");
-        for (size_t j = 0; j < strings[i].size(); j++)
-            verify(assignments[i][j] == strings[i][j] && "Copy-assigned string mismatched a byte at index i, j");
-    }
-    verify(std::equal(strings.begin(), strings.end(), copies.begin()));
-    verify(std::equal(strings.begin(), strings.end(), assignments.begin()));
 }
 
 /** Validates that shrinking @c reserve calls are harmless no-ops, just like in the STL, and that
@@ -1595,12 +1593,13 @@ void test_string_reserve_unit() {
     }
     // C++ API: `sz::string_t::reserve` shrinking must match `std::string` behavior - keep the contents.
     {
-        sz::string_t str(100, 'a');
+        sz::string_t str;
+        verify(sz::succeeded(str.assign(100, 'a')));
         std::size_t const capacity_before = str.capacity();
-        str.reserve(50);
+        verify(sz::succeeded(str.reserve(50)));
         verify(str.size() == 100);
         verify(str.capacity() == capacity_before);
-        verify(str == sz::string_t(100, 'a'));
+        verify(str == std::string(100, 'a'));
     }
 }
 
@@ -1610,20 +1609,32 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
     static_assert(sizeof(accounting_string_t) == sizeof(sz::string_t) + sizeof(std::size_t *),
                   "Only a stateful allocator may widen the string");
 
+    // A stateful allocator that neither propagates nor compares equal could only move by copying,
+    // which might fail, so such strings have no move assignment at all.
+    struct pinned_allocator_t {
+        using value_type = char;
+        std::size_t *live_bytes;
+        char *allocate(std::size_t count);
+        void deallocate(char *block, std::size_t count);
+        bool operator==(pinned_allocator_t const &) const noexcept = default;
+    };
+    static_assert(!std::is_move_assignable_v<sz::string<pinned_allocator_t>>);
+    static_assert(std::is_nothrow_move_assignable_v<accounting_string_t>);
+
     std::size_t const iterations = context.iterations(100);
     std::size_t live_bytes = 0, foreign_bytes = 0;
     accounting_allocator_t const allocator {&live_bytes}, foreign_allocator {&foreign_bytes};
     accounting_string_t base(allocator);
-    for (std::size_t i = 0; i < length; ++i) base.push_back('c');
+    for (std::size_t i = 0; i < length; ++i) verify(sz::succeeded(base.push_back('c')));
     verify(base.length() == length && "Base string has the wrong length after `push_back` construction");
 
     // Do copies leak?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t copy(base);
-            verify(copy.get_allocator() == allocator);
-            verify(copy.length() == length && "Copy-constructed string has the wrong length at iteration i");
-            verify(copy == base && "Copy-constructed string diverged from `base` at iteration i");
+            sz::expected<accounting_string_t> const copy = base.copy();
+            verify(sz::succeeded(copy.status) && copy.value.get_allocator() == allocator);
+            verify(copy.value.length() == length && "Copied string has the wrong length at iteration i");
+            verify(copy.value == base && "Copied string diverged from `base` at iteration i");
         }
     });
 
@@ -1631,7 +1642,7 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
             accounting_string_t copy(allocator);
-            copy = base;
+            verify(sz::succeeded(copy.assign(base)));
             verify(copy.length() == length && "Copy-assigned string has the wrong length at iteration i");
             verify(copy == base && "Copy-assigned string diverged from `base` at iteration i");
         }
@@ -1640,7 +1651,7 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
     // How about the move constructor?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item(base);
+            accounting_string_t unique_item = base.copy().value;
             verify(unique_item.length() == length && "Pre-move string has the wrong length at iteration i");
             verify(unique_item == base && "Pre-move string diverged from `base` at iteration i");
             accounting_string_t copy(std::move(unique_item));
@@ -1652,7 +1663,7 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
     // And the move assignment operator with an empty target payload?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item(base);
+            accounting_string_t unique_item = base.copy().value;
             accounting_string_t copy(allocator);
             copy = std::move(unique_item);
             verify(copy.length() == length &&
@@ -1664,9 +1675,9 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
     // And move assignment where the target had a payload?
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item(base);
+            accounting_string_t unique_item = base.copy().value;
             accounting_string_t copy(allocator);
-            for (std::size_t j = 0; j < 317; j++) copy.push_back('q');
+            for (std::size_t j = 0; j < 317; j++) verify(sz::succeeded(copy.push_back('q')));
             copy = std::move(unique_item);
             verify(copy.length() == length &&
                    "Move-assigned (occupied target) string has the wrong length at iteration i");
@@ -1674,20 +1685,21 @@ void test_memory_stability_equivalence(test_context_t &context, std::size_t leng
         }
     });
 
-    // Across unequal allocators, both assignments copy bytes and the target keeps its own allocator.
+    // Across unequal allocators, a move adopts the source's allocator, and `assign` copies the
+    // bytes into the target's own.
     assert_balanced_memory(live_bytes, [&]() {
         for (std::size_t i = 0; i < iterations; ++i) {
-            accounting_string_t unique_item(base);
+            accounting_string_t unique_item = base.copy().value;
             accounting_string_t moved(foreign_allocator), copied(foreign_allocator);
-            for (std::size_t j = 0; j < 317; j++) moved.push_back('q');
+            for (std::size_t j = 0; j < 317; j++) verify(sz::succeeded(moved.push_back('q')));
             moved = std::move(unique_item);
-            copied = base;
-            verify(moved.get_allocator() == foreign_allocator && copied.get_allocator() == foreign_allocator);
+            verify(sz::succeeded(copied.assign(base)));
+            verify(moved.get_allocator() == allocator && copied.get_allocator() == foreign_allocator);
             verify(moved == base && "Move-assigned (foreign target) string diverged from `base` at iteration i");
             verify(copied == base && "Copy-assigned (foreign target) string diverged from `base` at iteration i");
         }
-        verify(foreign_bytes == 0);
     });
+    verify(foreign_bytes == 0);
 
     // Now let's clear the base and check that we're back to zero
     base = accounting_string_t(allocator);
@@ -1705,7 +1717,7 @@ void test_string_updates_equivalence(test_context_t &context, std::size_t repeti
         for (std::size_t length = 1; length != 200; ++length) {
             char c = alphabet_chars[generator() % 26];
             stl_string.push_back(c);
-            sz_string.push_back(c);
+            verify(sz::succeeded(sz_string.push_back(c)));
             verify(sz::string_view_t(stl_string) == sz::string_view_t(sz_string) &&
                    "sz::string_t diverged from std::string after `push_back`");
         }
@@ -1736,15 +1748,14 @@ void test_strings_all(test_context_t &context) { check_strings_equivalence_(cont
 #pragma endregion Drivers
 
 /** Explicit template instantiations for the entry points invoked from @c main(). */
-template void test_ascii_unit<sz::string_t>();
 template void test_ascii_unit<sz::string_view_t>();
 template void test_stl_reads_unit<std::string_view>();
 template void test_stl_reads_unit<std::string>();
 template void test_stl_reads_unit<sz::string_view_t>();
-template void test_stl_reads_unit<sz::string_t>();
-template void test_stl_updates_unit<std::string>();
-template void test_stl_updates_unit<sz::string_t>();
 template void test_extensions_reads_unit<sz::string_view_t>();
-template void test_extensions_reads_unit<sz::string_t>();
 
 } // namespace ashvardanian::stringzilla::test
+
+/*  The owning string forwards its reads to its view, so the view runs the read tests, and this
+ *  instantiation compiles every member of the owning string. */
+template class ashvardanian::stringzilla::string<std::allocator<char>>;

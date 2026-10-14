@@ -12,9 +12,7 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
-#endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Make sure to include the StringZilla headers before anything else, to intercept missing
@@ -78,13 +76,15 @@ void test_utf8_uncased_unit() {
 
     // In-place fold on a mutable `sz::string_t`.
     {
-        sz::string_t folded("HeLLo");
-        verify(sz::succeeded(folded.try_utf8_uncased_fold()));
+        sz::string_t folded;
+        verify(sz::succeeded(folded.assign("HeLLo")));
+        verify(sz::succeeded(folded.utf8_uncased_fold()));
         verify(folded == "hello");
     }
     {
-        sz::string_t folded("\xC3\x9F");
-        verify(sz::succeeded(folded.try_utf8_uncased_fold()));
+        sz::string_t folded;
+        verify(sz::succeeded(folded.assign("\xC3\x9F")));
+        verify(sz::succeeded(folded.utf8_uncased_fold()));
         verify(folded == "ss");
     }
 

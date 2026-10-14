@@ -42,7 +42,6 @@
  *  - `STRINGZILLA_HEADER_ONLY=0` - whether to inline every kernel instead of linking the library,
  *    whose dispatch points then report @c sz_missing_library_k.
  *  - `STRINGZILLA_ALLOW_MISALIGNED_LOADS=0` - whether to use misaligned loads where supported.
- *  - `STRINGZILLA_WITH_METAL=0` - whether to compile the Metal host API, which links Metal.
  *
  *  Performance tuning:
  *
@@ -75,7 +74,7 @@
 #ifndef STRINGZILLA_H_
 #define STRINGZILLA_H_
 
-#include "stringzilla/types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`, `STRINGZILLA_H_VERSION_MAJOR`
+#include "stringzilla/types.h"        // `sz_size_t`, `sz_bool_t`, `sz_ordering_t`, `STRINGZILLA_VERSION_MAJOR`
 #include "stringzilla/capabilities.h" // `sz_capability_t`, `sz_capabilities_enabled_cpu`, `sz_capabilities_name`
 #include "stringzilla/compare.h"      // `sz_equal_best`, `sz_order_best`
 #include "stringzilla/strings.h"      // `sz_strings_to_tape_best`, `sz_strings_escape_best`
@@ -110,9 +109,9 @@ STRINGZILLA_API int sz_version_minor(void);
 STRINGZILLA_API int sz_version_patch(void);
 
 #if STRINGZILLA_HEADER_ONLY
-STRINGZILLA_API int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-STRINGZILLA_API int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-STRINGZILLA_API int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+STRINGZILLA_API int sz_version_major(void) { return STRINGZILLA_VERSION_MAJOR; }
+STRINGZILLA_API int sz_version_minor(void) { return STRINGZILLA_VERSION_MINOR; }
+STRINGZILLA_API int sz_version_patch(void) { return STRINGZILLA_VERSION_PATCH; }
 #endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus

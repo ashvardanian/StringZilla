@@ -45,7 +45,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "STRINGZILLA_BUILD_CUDA": "OFF",
-        "STRINGZILLA_USE_SANITIZERS": "ON"
+        "STRINGZILLA_BUILD_SANITIZERS": "ON"
       }
     },
     {

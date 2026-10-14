@@ -838,8 +838,7 @@ inline void print(settings_t const &settings) {
 /** The facts this binary and this machine report: the library version, the capabilities compiled
  *  in and detected. */
 struct machine_t {
-    std::array<unsigned, 3> version {STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
-                                     STRINGZILLA_H_VERSION_PATCH};
+    std::array<unsigned, 3> version {STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR, STRINGZILLA_VERSION_PATCH};
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
 };
@@ -1066,7 +1065,6 @@ void test_strings_safety();
 template <typename string_type>
 void test_stl_reads_unit();
 
-template <typename string_type>
 void test_stl_updates_unit();
 
 void test_stl_conversions_unit();

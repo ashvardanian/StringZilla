@@ -36,7 +36,8 @@ void bench_cross_arm64([[maybe_unused]] environment_t &env) {
         bench_order_kernels<sz_order_neon>(env, "neon");
         bench_strings_kernels<sz_strings_to_tape_neon, sz_strings_escape_neon, sz_strings_unescape_neon,
                               sz_strings_lookup_neon, sz_strings_normalize_neon>(env, "neon");
-        bench_strings_split_kernels<sz_strings_split_neon, sz_strings_split_lines_neon>(env, "neon");
+        bench_strings_split_join_kernels<sz_strings_split_neon, sz_strings_split_lines_neon, sz_strings_join_neon>(
+            env, "neon");
         bench_map_kernels<sz_order_neon>(env, "neon");
         bench_sort_order_kernels<sz_sort_order_neon, sz_sort_uncased_order_neon>(env, "neon");
         bench_levenshtein_distances_kernels<sz_levenshtein_engine_init_neon, sz_levenshtein_distances_neon>(

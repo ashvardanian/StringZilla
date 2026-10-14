@@ -297,7 +297,7 @@ std::size_t test_cross_x8664(environment_t const &env) {
                                                  sz_strings_normalize_icelake,
                                                  sz_strings_split_icelake,
                                                  sz_strings_split_lines_icelake,
-                                                 sz_strings_join_serial};
+                                                 sz_strings_join_icelake};
     check("test_strings_unit_icelake", [&] { check_strings_unit_(strings_icelake); });
     check("test_strings_equivalence_icelake",
           [&](test_context_t &context) { check_strings_equivalence_(context, strings_icelake); });

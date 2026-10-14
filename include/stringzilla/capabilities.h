@@ -78,7 +78,7 @@
 #include <windows.h>
 #endif
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 #include "stringzilla/metal.h" // `sz_metal_list_devices_`, `sz_metal_device_`
 #endif
 
@@ -1280,17 +1280,17 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilit
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_serial(sz_stream_t stream);
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream);
 #endif
 
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream);
 #endif
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 /** @copydoc sz_stream_synchronize_best */
 STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 #endif
@@ -1300,7 +1300,7 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
 
 /** How many Metal devices the system lists, or zero. */
 STRINGZILLA_INLINE sz_size_t sz_device_count_metal_(void) {
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     return sz_metal_list_devices_();
 #else
     return 0;
@@ -1312,7 +1312,7 @@ STRINGZILLA_INLINE sz_size_t sz_device_count_metal_(void) {
 STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal, sz_capability_t *capabilities) {
     *capabilities = 0;
     if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
     SEL const supports = sel_registerName("supportsFamily:");
@@ -1328,7 +1328,7 @@ STRINGZILLA_INLINE sz_status_t sz_capabilities_detected_metal_(sz_size_t ordinal
 STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_stream_t *stream) {
     *stream = STRINGZILLA_NULL;
     if (ordinal >= sz_device_count_metal_()) return sz_missing_gpu_k;
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     void *const metal_device = sz_metal_device_(ordinal);
     if (!metal_device) return sz_device_code_mismatch_k;
     *stream = sz_metal_get_(metal_device, "newCommandQueue");
@@ -1341,7 +1341,7 @@ STRINGZILLA_INLINE sz_status_t sz_stream_init_metal_(sz_size_t ordinal, sz_strea
 /** Waits for @p stream, so its command buffers and the frees deferred behind it drain, then
  *  releases it; a null stream is the default one, which is only waited for. */
 STRINGZILLA_INLINE sz_status_t sz_stream_free_metal_(sz_stream_t stream) {
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     sz_status_t const status = sz_stream_synchronize_metal(stream);
     sz_metal_do_(stream, "release");
     return status;
@@ -1448,7 +1448,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream);
 #if STRINGZILLA_HEADER_ONLY
 
 /*  Compiled for CUDA or ROCm, the producers come from `cuda.cuh` or `rocm.cuh`, included below. */
-#if !STRINGZILLA_TARGET_CUDA
+#if !STRINGZILLA_ARCH_CUDA_
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
@@ -1467,7 +1467,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_cuda(sz_stream_t stream) {
     sz_unused_(stream);
     return sz_missing_gpu_k;
 }
-#endif // !STRINGZILLA_TARGET_CUDA
+#endif // !STRINGZILLA_ARCH_CUDA_
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_cuda(sz_capability_t *capabilities) {
     *capabilities = sz_capabilities_compiled_cuda_();
     return sz_success_k;
@@ -1477,7 +1477,7 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_cuda(sz_size_t ordinal, sz_c
     *capabilities &= sz_capabilities_compiled_cuda_();
     return status;
 }
-#if !STRINGZILLA_TARGET_ROCM
+#if !STRINGZILLA_ARCH_ROCM_
 STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
     *count = 0;
     return sz_missing_gpu_k;
@@ -1496,7 +1496,7 @@ STRINGZILLA_API sz_status_t sz_stream_free_rocm(sz_stream_t stream) {
     sz_unused_(stream);
     return sz_missing_gpu_k;
 }
-#endif // !STRINGZILLA_TARGET_ROCM
+#endif // !STRINGZILLA_ARCH_ROCM_
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_rocm(sz_capability_t *capabilities) {
     *capabilities = sz_capabilities_compiled_rocm_();
     return sz_success_k;

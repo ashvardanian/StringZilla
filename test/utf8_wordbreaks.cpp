@@ -11,9 +11,7 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
-#endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 #include <stringzilla/stringzilla.hpp> // `sz::string_view_t`

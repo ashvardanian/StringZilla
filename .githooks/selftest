@@ -2525,9 +2525,11 @@ void probe(void) { hipFree(0); }
 FIXTURE
 
 assert_rejects "compiler test in a vendor guard" "tests the GPU compiler" include/stringzilla/probe/rocm.cuh <<'FIXTURE'
+#if STRINGZILLA_ARCH_ROCM_
 #if STRINGZILLA_TARGET_ROCM && defined(__HIP__)
 void probe(void) { hipFree(0); }
 #endif // STRINGZILLA_TARGET_ROCM && defined(__HIP__)
+#endif // STRINGZILLA_ARCH_ROCM_
 FIXTURE
 
 assert_rejects "vendor spelling in a shared walk" "tests the GPU compiler" include/stringzilla/probe/simt.cuh <<'FIXTURE'
@@ -2566,6 +2568,44 @@ STRINGZILLA_INLINE sz_status_t sz_stream_probe_cuda(sz_stream_t stream) { return
 STRINGZILLA_API sz_status_t sz_probe_cuda(sz_stream_t stream) { return sz_success_k; }
 #endif // STRINGZILLA_TARGET_CUDA
 #endif // STRINGZILLA_ARCH_CUDA_
+FIXTURE
+
+assert_rejects "Metal kernel under its vendor alone" "guards a GPU kernel by its vendor" include/stringzilla/probe/metal.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_METAL_
+STRINGZILLA_API sz_status_t sz_probe_metal(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_ARCH_METAL_
+FIXTURE
+
+assert_rejects "GPU runtime service under a capability" "guards a GPU runtime service by a capability" include/stringzilla/probe.h <<'FIXTURE'
+#if STRINGZILLA_TARGET_ROCM
+STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream);
+#endif
+FIXTURE
+
+assert_rejects "GPU runtime service dispatched under a capability" "guards a GPU runtime service by a capability" c/dispatch/probe.c <<'FIXTURE'
+STRINGZILLA_API sz_status_t sz_probe_best(sz_capability_t capabilities, sz_stream_t stream) {
+    switch (sz_capability_group_of_(capabilities)) {
+#if STRINGZILLA_TARGET_METAL
+    case sz_capability_group_metal_k: return sz_stream_synchronize_metal(stream);
+#endif
+    default: return sz_missing_gpu_k;
+    }
+}
+FIXTURE
+
+assert_rejects "capability opened before its vendor" "opens a capability before its vendor" include/stringzilla/probe/metal.h <<'FIXTURE'
+#if STRINGZILLA_TARGET_METAL
+STRINGZILLA_API sz_status_t sz_probe_metal(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_TARGET_METAL
+FIXTURE
+
+assert_accepts "Metal runtime under its vendor, kernel under its capability" include/stringzilla/probe/metal.h <<'FIXTURE'
+#if STRINGZILLA_ARCH_METAL_
+STRINGZILLA_API sz_status_t sz_stream_synchronize_metal(sz_stream_t stream);
+#if STRINGZILLA_TARGET_METAL
+STRINGZILLA_API sz_status_t sz_probe_metal(sz_stream_t stream) { return sz_success_k; }
+#endif // STRINGZILLA_TARGET_METAL
+#endif // STRINGZILLA_ARCH_METAL_
 FIXTURE
 
 assert_rejects "raw CUDA compiler guard in a benchmark" "tests the GPU compiler in harness code" bench/probe.cpp <<'FIXTURE'
@@ -2727,6 +2767,30 @@ FIXTURE
 
 assert_accepts "full prefix, and a lowercase sz_ helper" include/stringzilla/probe.h <<'FIXTURE'
 static int probe(void) { return STRINGZILLA_DEBUG + sz_probe_(); }
+FIXTURE
+
+assert_rejects "retired switch family" "spells a retired macro family" CMakeLists.txt <<'FIXTURE'
+option(STRINGZILLA_USE_SANITIZERS "Sanitize Debug builds" ON)
+FIXTURE
+
+assert_rejects "vendor spelled as a feature" "spells a retired macro family" include/stringzilla/probe.h <<'FIXTURE'
+static int probe(void) { return STRINGZILLA_WITH_METAL; }
+FIXTURE
+
+assert_accepts "a feature switch and a vendor fact" include/stringzilla/probe.h <<'FIXTURE'
+static int probe(void) { return STRINGZILLA_WITH_LIBC + STRINGZILLA_ARCH_METAL_; }
+FIXTURE
+
+assert_rejects "include guard without its trailing _" "include guard without its trailing _" include/stringzilla/probe.h <<'FIXTURE'
+#ifndef STRINGZILLA_PROBE_H
+#define STRINGZILLA_PROBE_H
+#endif // STRINGZILLA_PROBE_H
+FIXTURE
+
+assert_accepts "include guard with its trailing _" include/stringzilla/probe.h <<'FIXTURE'
+#ifndef STRINGZILLA_PROBE_H_
+#define STRINGZILLA_PROBE_H_
+#endif // STRINGZILLA_PROBE_H_
 FIXTURE
 
 assert_rejects "fact tested with defined" "fact with defined; use #if" include/stringzilla/probe.h <<'FIXTURE'

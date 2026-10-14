@@ -1,6 +1,6 @@
 # Hash: Byte Sum, AES Hash, and SHA-256
 
-This directory holds the digest kernels behind `sz_bytesum_best`, `sz_hash_best`, the multi-seed `sz_hash_multiseed_best` fan-out, the streaming `sz_sha256_state_init_best` / `sz_sha256_state_update_best` / `sz_sha256_state_digest_best` trio, and the batched `sz_sha256_multistate_update_best` / `sz_sha256_multistate_digest_best` pair.
+This directory holds the digest kernels behind `sz_bytesum_best`, `sz_hash_best`, the multi-seed `sz_hash_multiseed_best` fan-out, the streaming `sz_sha256_state_init_best` / `sz_sha256_state_update_best` / `sz_sha256_state_digest_best` trio, the batched `sz_sha256_multistate_update_best` / `sz_sha256_multistate_digest_best` pair, and the column hash `sz_hash_strings_best`, which hashes every string of a collection under one seed in one call.
 Each operation has a serial baseline plus per-ISA SIMD backends — `westmere`, `haswell`, `skylake`, `icelake` on x86, with a dedicated `goldmont` SHA-NI path for SHA-256.
 SHA-256 has no Ice Lake form: SHA-NI is 128-bit only and has no VEX or EVEX encoding, so `goldmont` is the widest single-message kernel there will be.
 Each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
@@ -62,3 +62,14 @@ An empty cell is genuinely-missing data.
 | NEON @ 1× AWS Graviton4   |                       … |                      … |                        … |                     … |                        … |
 | SVE @ 1× AWS Graviton3    |                       … |                      … |                        … |                     … |                        … |
 | CUDA @ 18× Nvidia SM103   |                       … |                      … |                        … |                     … | 17.87 GB/s · 149 Mhash/s |
+
+## Columns
+
+`sz_hash_strings_best` hashes a batch of English lines under one seed per call.
+
+| Backend                    | `sz_hash_strings_best` |
+| :------------------------- | ---------------------: |
+| Serial @ 1× Intel Xeon6    |                      … |
+| Ice Lake @ 1× Intel Xeon6  |                      … |
+| Serial @ 1× Apple M5 Pro   |  0.59 GB/s · 5 Mhash/s |
+| NEON AES @ 1× Apple M5 Pro | 6.21 GB/s · 48 Mhash/s |

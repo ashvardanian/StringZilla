@@ -102,9 +102,9 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     }
 }
 
-STRINGZILLA_API int sz_version_major(void) { return STRINGZILLA_H_VERSION_MAJOR; }
-STRINGZILLA_API int sz_version_minor(void) { return STRINGZILLA_H_VERSION_MINOR; }
-STRINGZILLA_API int sz_version_patch(void) { return STRINGZILLA_H_VERSION_PATCH; }
+STRINGZILLA_API int sz_version_major(void) { return STRINGZILLA_VERSION_MAJOR; }
+STRINGZILLA_API int sz_version_minor(void) { return STRINGZILLA_VERSION_MINOR; }
+STRINGZILLA_API int sz_version_patch(void) { return STRINGZILLA_VERSION_PATCH; }
 STRINGZILLA_API char const *sz_status_name(sz_status_t status) { return sz_status_name_(status); }
 
 /*  The CPU's capabilities, probed on the first query: a query can be a system call, and the
@@ -241,7 +241,7 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_rocm(sz_size_t ordinal, sz_c
 
 /*  With Metal kernels in the library, `c/target/metal.c` counts, probes and opens streams on the
  *  devices instead. */
-#if !STRINGZILLA_WITH_METAL
+#if !STRINGZILLA_ARCH_METAL_
 
 STRINGZILLA_API sz_status_t sz_device_count_metal(sz_size_t *count) {
     *count = 0;
@@ -258,7 +258,7 @@ STRINGZILLA_API sz_status_t sz_stream_init_metal(sz_size_t ordinal, sz_stream_t 
 
 STRINGZILLA_API sz_status_t sz_stream_free_metal(sz_stream_t stream) { return sz_stream_free_metal_(stream); }
 
-#endif // !STRINGZILLA_WITH_METAL
+#endif // !STRINGZILLA_ARCH_METAL_
 
 STRINGZILLA_API sz_status_t sz_capabilities_compiled_metal(sz_capability_t *capabilities) {
     *capabilities = sz_capabilities_compiled_metal_();
@@ -276,13 +276,13 @@ STRINGZILLA_API sz_status_t sz_capabilities_enabled_metal(sz_size_t ordinal, sz_
 STRINGZILLA_API sz_status_t sz_stream_synchronize_best(sz_capability_t capabilities, sz_stream_t stream) {
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k: return sz_stream_synchronize_serial(stream);
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_stream_synchronize_cuda(stream);
 #endif
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_stream_synchronize_rocm(stream);
 #endif
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
     case sz_capability_group_metal_k: return sz_stream_synchronize_metal(stream);
 #endif
     default: return sz_missing_gpu_k;

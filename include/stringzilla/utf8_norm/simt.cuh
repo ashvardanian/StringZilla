@@ -30,11 +30,13 @@
 
 #include "stringzilla/utf8_norm/serial.h"
 
-#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
 
 /*  The device's copy of every table of `tables.h` a normalizing lookup reads, sized from the table
  *  itself and refilled by every call before its kernel runs. */
@@ -362,8 +364,11 @@ static __global__ void sz_utf8_norm_simt_kernel_(sz_u8_t const *text, sz_size_t 
 
 #pragma endregion Normalize Kernel
 
+#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+
 #ifdef __cplusplus
 }
 #endif
-#endif // STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
+
+#endif // STRINGZILLA_ARCH_CUDA_ || STRINGZILLA_ARCH_ROCM_
 #endif // STRINGZILLA_UTF8_NORM_SIMT_CUH_

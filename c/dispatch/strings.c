@@ -444,9 +444,16 @@ static sz_capability_kernels_t const *sz_strings_join_capabilities(void) {
     static sz_kernel_punned_t const cpu[] = {
         STRINGZILLA_NULL,
         (sz_kernel_punned_t)&sz_strings_join_serial,
+#if STRINGZILLA_TARGET_ICELAKE
+        (sz_kernel_punned_t)&sz_strings_join_icelake,
+#endif
+#if STRINGZILLA_TARGET_NEON
+        (sz_kernel_punned_t)&sz_strings_join_neon,
+#endif
     };
     static sz_capability_kernels_t const lists[sz_capability_groups_k] = {
-        {sz_cap_serial_k, cpu},
+        {sz_cap_serial_k | sz_cap_icelake_k * STRINGZILLA_TARGET_ICELAKE | sz_cap_neon_k * STRINGZILLA_TARGET_NEON,
+         cpu},
         {0, sz_no_kernels_},
         {0, sz_no_kernels_},
         {0, sz_no_kernels_},
@@ -555,13 +562,13 @@ STRINGZILLA_API sz_status_t sz_strings_find_kernel(sz_kernel_kind_t kind, sz_cap
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_best(sz_allocator_t *allocator, sz_capability_t capabilities) {
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k: return sz_allocator_init_unified_serial(allocator);
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_unified_cuda(allocator);
 #endif
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_unified_rocm(allocator);
 #endif
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
     case sz_capability_group_metal_k: return sz_allocator_init_unified_metal(allocator);
 #endif
     default: return sz_missing_gpu_k;
@@ -572,13 +579,13 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_best(sz_allocator_t *alloca
     sz_unused_(allocator);
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k: return sz_missing_kernel_k;
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_device_cuda(allocator);
 #endif
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_device_rocm(allocator);
 #endif
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
     case sz_capability_group_metal_k: return sz_allocator_init_unified_metal(allocator);
 #endif
     default: return sz_missing_gpu_k;
@@ -590,10 +597,10 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
     switch (sz_capability_group_of_(capabilities)) {
     case sz_capability_group_cpu_k:
     case sz_capability_group_metal_k: return sz_missing_kernel_k;
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
     case sz_capability_group_cuda_k: return sz_allocator_init_pinned_cuda(allocator);
 #endif
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
     case sz_capability_group_rocm_k: return sz_allocator_init_pinned_rocm(allocator);
 #endif
     default: return sz_missing_gpu_k;

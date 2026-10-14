@@ -344,7 +344,7 @@ STRINGZILLA_DEVICE int sz_lanes_any_rocm_(int predicate) {
 #pragma endregion Device Primitives
 
 /*  The library defines these once, in `c/target/rocm.hip`; header-only builds define them here. */
-#if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_device_count_rocm(sz_size_t *count) {
     *count = sz_device_count_rocm_();
@@ -386,7 +386,7 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_rocm(sz_stream_t stream) {
     return sz_stream_synchronize_rocm_(stream);
 }
 
-#endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_ROCM
+#endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 }

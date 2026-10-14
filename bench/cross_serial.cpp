@@ -45,7 +45,8 @@ void bench_cross_serial(environment_t &env) {
     bench_fill_random_kernels<sz_fill_random_serial>(env, "serial");
     bench_strings_kernels<sz_strings_to_tape_serial, sz_strings_escape_serial, sz_strings_unescape_serial,
                           sz_strings_lookup_serial, sz_strings_normalize_serial>(env, "serial");
-    bench_strings_split_kernels<sz_strings_split_serial, sz_strings_split_lines_serial>(env, "serial");
+    bench_strings_split_join_kernels<sz_strings_split_serial, sz_strings_split_lines_serial, sz_strings_join_serial>(
+        env, "serial");
     bench_aes256_ctr_kernels<sz_aes256_key_init_serial, sz_aes256_ctr_xor_serial>(env, "serial");
     bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encrypt_serial>(env, "serial");
     bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_serial, sz_aes256_gcm_encryptor_init_serial,

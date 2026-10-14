@@ -43,6 +43,8 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
     runtime.threads_per_multiprocessor = sz_device_threads_per_multiprocessor_rocm_();
     sz_device_leave_rocm_(caller);
     fmt::println("Device: rocm:{} ({} multiprocessors)", ordinal, runtime.multiprocessors.value_or(0));
+    int result = 0;
+#if STRINGZILLA_TARGET_ROCM
     simt_backend_t const backend {"rocm",
                                   runtime,
                                   sz_levenshtein_engine_init_rocm,
@@ -58,7 +60,10 @@ int bench_cross_rocm(environment_t &env, std::size_t ordinal) {
                                   sz_utf8_norm_rocm,
                                   sz_sha256_multistate_update_rocm,
                                   sz_sha256_multistate_digest_rocm};
-    int const result = bench_cross_simt(env, backend);
+    result += bench_cross_simt(env, backend);
+#else
+    sz_unused_(env);
+#endif
     return result;
 #else
     sz_unused_(env);

@@ -1,6 +1,7 @@
 # UTF-8 Runes: Codepoint Counting, Decoding, and Indexing
 
 This directory holds the kernels behind `sz_utf8_count_best`, `sz_utf8_decode_best`, and `sz_utf8_seek_best`, the low-level rune operations that count the codepoints in a UTF-8 string, decode each variable-length byte sequence into its 32-bit codepoint, and locate the byte offset of the Nth codepoint.
+`sz_utf8_count_strings_best` validates and counts every string of a collection in one call, naming the first malformed one.
 Each operation has a serial baseline plus `haswell` and `icelake` SIMD backends on x86 plus `neon` and `sve2` on Arm, and each `_best` dispatch point runs the best kernel among the capabilities its caller passes.
 
 ## Methodology
@@ -35,3 +36,14 @@ A `↑` cell means there is no dedicated kernel for that operation at that backe
 | NEON @ 1× AWS Graviton4   |                    … |                     … |                   … |
 | SVE2 @ 1× AWS Graviton4   |                    … |                     … |                   … |
 | SVE @ 1× AWS Graviton3    |                    … |                     … |                   … |
+
+## Columns
+
+`sz_utf8_count_strings_best` validates and counts a batch of XL-Sum lines per call.
+
+| Backend                   | `sz_utf8_count_strings_best` |
+| :------------------------ | ---------------------------: |
+| Serial @ 1× Intel Xeon6   |                            … |
+| Ice Lake @ 1× Intel Xeon6 |                            … |
+| Serial @ 1× Apple M5 Pro  |                    2.48 GB/s |
+| NEON @ 1× Apple M5 Pro    |                   12.81 GB/s |

@@ -30,7 +30,7 @@
 
 /** When set to 1, the library will include the C++ STL headers and implement automatic conversion
  *  from and to @c std::string_view and `std::basic_string<any_allocator>`. */
-#ifndef STRINGZILLA_WITH_STL
+#if !defined(STRINGZILLA_WITH_STL)
 #define STRINGZILLA_WITH_STL (1) // true or false
 #endif
 

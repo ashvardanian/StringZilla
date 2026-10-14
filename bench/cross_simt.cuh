@@ -38,8 +38,8 @@
  *  @endcode
  */
 #pragma once
-#ifndef STRINGZILLA_BENCH_CROSS_SIMT_CUH
-#define STRINGZILLA_BENCH_CROSS_SIMT_CUH
+#ifndef STRINGZILLA_BENCH_CROSS_SIMT_CUH_
+#define STRINGZILLA_BENCH_CROSS_SIMT_CUH_
 
 #include <cmath> // `std::ceil`, `std::log2`
 
@@ -838,4 +838,4 @@ inline int bench_cross_simt_levenshtein_overlap(environment_t &env, simt_backend
 
 } // namespace ashvardanian::stringzilla::bench
 
-#endif // STRINGZILLA_BENCH_CROSS_SIMT_CUH
+#endif // STRINGZILLA_BENCH_CROSS_SIMT_CUH_

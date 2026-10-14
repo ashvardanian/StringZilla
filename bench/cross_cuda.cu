@@ -44,6 +44,8 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
     runtime.threads_per_multiprocessor = sz_device_threads_per_multiprocessor_cuda_();
     sz_device_leave_cuda_(caller);
     fmt::println("Device: cuda:{} ({} multiprocessors)", ordinal, runtime.multiprocessors.value_or(0));
+    int result = 0;
+#if STRINGZILLA_TARGET_CUDA
     simt_backend_t const backend {"cuda",
                                   runtime,
                                   sz_levenshtein_engine_init_cuda,
@@ -59,7 +61,10 @@ int bench_cross_cuda(environment_t &env, std::size_t ordinal) {
                                   sz_utf8_norm_cuda,
                                   sz_sha256_multistate_update_cuda,
                                   sz_sha256_multistate_digest_cuda};
-    int result = bench_cross_simt(env, backend);
+    result += bench_cross_simt(env, backend);
+#else
+    sz_unused_(env);
+#endif
 #if STRINGZILLA_TARGET_HOPPER
     if (runtime.capabilities & sz_cap_hopper_k) {
         simt_backend_t const hopper {"hopper",

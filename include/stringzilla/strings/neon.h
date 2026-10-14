@@ -168,6 +168,23 @@ STRINGZILLA_INLINE void sz_strings_split_emit_neon_(sz_u8_t const *source, sz_u6
     }
 }
 
+/** Copies the @p length bytes of @p source to `target + written`: up to 16 in one load and store
+ *  when 16 bytes stay @p readable and fit before @p end, and exactly otherwise. */
+STRINGZILLA_INLINE void sz_strings_join_piece_neon_(sz_u8_t *target, sz_size_t written, sz_size_t end,
+                                                    sz_u8_t const *source, sz_size_t length, sz_size_t readable) {
+    if (length <= 16 && readable >= 16 && end - written >= 16) {
+        vst1q_u8(target + written, vld1q_u8(source));
+        return;
+    }
+    if (length < 16) {
+        for (sz_size_t copied = 0; copied != length; ++copied) target[written + copied] = source[copied];
+        return;
+    }
+    for (sz_size_t copied = 0; copied + 16 < length; copied += 16)
+        vst1q_u8(target + written + copied, vld1q_u8(source + copied));
+    vst1q_u8(target + written + length - 16, vld1q_u8(source + length - 16));
+}
+
 /** The NEON stages. */
 STRINGZILLA_INLINE sz_strings_walks_t sz_strings_walks_neon_(void) {
     sz_strings_walks_t walks;
@@ -610,6 +627,53 @@ STRINGZILLA_API sz_status_t sz_strings_split_lines_neon(sz_cptr_t text, sz_size_
         written += kept;
     }
     sz_strings_split_commit_(tape, &output, payload, allocator);
+    return sz_success_k;
+}
+
+STRINGZILLA_API sz_status_t sz_strings_join_neon(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    if (!output) return sz_strings_join_measure_(columns, columns_count, rows, frames, between, length);
+    // Accessors, frames longer than a register and more columns than slots join cell by cell.
+    sz_size_t by_cell = columns_count > 15 || between.length > 16;
+    for (sz_size_t column = 0; column <= columns_count && !by_cell; ++column)
+        by_cell |= frames[column].length > 16 ||
+                   (column != columns_count && columns[column].layout == sz_strings_accessor_k);
+    if (by_cell) return sz_strings_join_rows_serial_(columns, columns_count, rows, frames, between, output);
+
+    // Frames and the separator come from zero-padded slots, whose padding later pieces overwrite.
+    sz_u8_t slots[17][16];
+    sz_u8_t const *payloads[15];
+    sz_size_t payload_ends[15];
+    memset(slots, 0, sizeof(slots));
+    if (between.length) memcpy(slots[16], between.start, between.length);
+    for (sz_size_t column = 0; column <= columns_count; ++column)
+        if (frames[column].length) memcpy(slots[column], frames[column].start, frames[column].length);
+    for (sz_size_t column = 0; column != columns_count; ++column)
+        payloads[column] = (sz_u8_t const *)sz_strings_view_data_(columns + column),
+        payload_ends[column] = sz_strings_view_offset_(columns + column, columns[column].count);
+
+    sz_u8_t *const target = (sz_u8_t *)output;
+    sz_size_t const end = *length;
+    sz_size_t written = 0;
+    for (sz_size_t row = 0; row != rows; ++row) {
+        for (sz_size_t column = 0; column != columns_count; ++column) {
+            sz_strings_join_piece_neon_(target, written, end, slots[column], frames[column].length, 16);
+            written += frames[column].length;
+            sz_size_t const start = sz_strings_view_offset_(columns + column, row);
+            sz_size_t const cell = sz_strings_view_offset_(columns + column, row + 1) - start;
+            sz_strings_join_piece_neon_(target, written, end, payloads[column] + start, cell,
+                                        payload_ends[column] - start);
+            written += cell;
+        }
+        sz_size_t const separator = row + 1 != rows ? between.length : 0;
+        sz_strings_join_piece_neon_(target, written, end, slots[columns_count], frames[columns_count].length, 16);
+        written += frames[columns_count].length;
+        sz_strings_join_piece_neon_(target, written, end, slots[16], separator, 16);
+        written += separator;
+    }
     return sz_success_k;
 }
 

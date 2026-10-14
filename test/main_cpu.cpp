@@ -19,9 +19,7 @@
 #define _ITERATOR_DEBUG_LEVEL 1
 #endif
 
-#if defined(STRINGZILLA_DEBUG)
 #undef STRINGZILLA_DEBUG
-#endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
@@ -298,7 +296,6 @@ int main(int, char const **argv) {
     failures += run_test(env.settings, "test_substrings_all", test_substrings_all);
     failures += run_test(env.settings, "test_substrings_safety", test_substrings_safety);
 
-    failures += run_test(env.settings, "test_ascii_unit<sz::string_t>", test_ascii_unit<sz::string_t>);
     failures += run_test(env.settings, "test_ascii_unit<sz::string_view_t>", test_ascii_unit<sz::string_view_t>);
     failures += run_test(env.settings, "test_strings_unit", test_strings_unit);
     failures += run_test(env.settings, "test_strings_all", test_strings_all);
@@ -307,15 +304,11 @@ int main(int, char const **argv) {
     failures += run_test(env.settings, "test_stl_reads_unit<std::string>", test_stl_reads_unit<std::string>);
     failures += run_test(env.settings, "test_stl_reads_unit<sz::string_view_t>",
                          test_stl_reads_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_stl_reads_unit<sz::string_t>", test_stl_reads_unit<sz::string_t>);
-    failures += run_test(env.settings, "test_stl_updates_unit<std::string>", test_stl_updates_unit<std::string>);
-    failures += run_test(env.settings, "test_stl_updates_unit<sz::string_t>", test_stl_updates_unit<sz::string_t>);
+    failures += run_test(env.settings, "test_stl_updates_unit", test_stl_updates_unit);
     failures += run_test(env.settings, "test_stl_conversions_unit", test_stl_conversions_unit);
     failures += run_test(env.settings, "test_stl_containers_unit", test_stl_containers_unit);
     failures += run_test(env.settings, "test_extensions_reads_unit<sz::string_view_t>",
                          test_extensions_reads_unit<sz::string_view_t>);
-    failures += run_test(env.settings, "test_extensions_reads_unit<sz::string_t>",
-                         test_extensions_reads_unit<sz::string_t>);
     failures += run_test(env.settings, "test_extensions_updates_unit", test_extensions_updates_unit);
     failures += run_test(env.settings, "test_extensions_ranges_unit", test_extensions_ranges_unit);
     failures += run_test(env.settings, "test_string_constructors_unit", test_string_constructors_unit);

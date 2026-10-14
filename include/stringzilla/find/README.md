@@ -1,6 +1,6 @@
 # Find: Substring, Byte, and Byte Set Search
 
-This directory holds the search kernels behind `sz_find_best`, `sz_rfind_best`, `sz_find_byte_best`, `sz_rfind_byte_best`, `sz_find_byteset_best`, and `sz_rfind_byteset_best`.
+This directory holds the search kernels behind `sz_find_best`, `sz_rfind_best`, `sz_find_byte_best`, `sz_rfind_byte_best`, `sz_find_byteset_best`, `sz_rfind_byteset_best`, and the column search `sz_find_strings_best`, which finds one needle in every string of a collection in one call.
 Each operation has a serial SWAR baseline plus per-ISA SIMD backends — `westmere`, `haswell`, `skylake`, `icelake` on x86, `neon`, `sve`, `sve2` on Arm, and `rvv`, `loongsonasx`, `powervsx`, `v128` elsewhere.
 `sz_find_best` and its siblings run the best kernel the capability mask they are passed names.
 For hot paths on short inputs, like a per-token `find_byte`, pick a capability's kernel, like `sz_find_byte_neon`, or resolve one once through `sz_find_kernel_punned`, rather than paying the pick on every call.
@@ -37,3 +37,15 @@ A `↑` cell means there is no dedicated kernel at that ISA level, so `_best` re
 | Ice Lake @ 1× Intel Xeon6 |              ↑ |               ↑ |                   ↑ |                    ↑ |              4.92 GB/s |               4.68 GB/s |
 | NEON @ 1× AWS Graviton4   |              … |               … |                   … |                    … |                      … |                       … |
 | SVE @ 1× AWS Graviton3    |              … |               … |                   … |                    … |                      … |                       … |
+
+## Columns
+
+`sz_find_strings_best` searches a batch of English lines for one corpus word per call.
+
+| Backend                   | `sz_find_strings_best` |
+| :------------------------ | ---------------------: |
+| Serial @ 1× Intel Xeon6   |                      … |
+| Skylake @ 1× Intel Xeon6  |                      … |
+| Ice Lake @ 1× Intel Xeon6 |                      ↑ |
+| Serial @ 1× Apple M5 Pro  |             10.27 GB/s |
+| NEON @ 1× Apple M5 Pro    |             16.03 GB/s |

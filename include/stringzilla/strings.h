@@ -1023,6 +1023,25 @@ STRINGZILLA_API sz_status_t sz_strings_join_serial(sz_strings_view_t const *colu
                                                    sz_size_t rows, sz_string_view_t const *frames,
                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
                                                    sz_stream_t stream);
+
+#if STRINGZILLA_TARGET_ICELAKE
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_icelake(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                    sz_size_t rows, sz_string_view_t const *frames,
+                                                    sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                    sz_stream_t stream);
+#endif
+
+#if STRINGZILLA_TARGET_NEON
+
+/** @copydoc sz_strings_join_best */
+STRINGZILLA_API sz_status_t sz_strings_join_neon(sz_strings_view_t const *columns, sz_size_t columns_count,
+                                                 sz_size_t rows, sz_string_view_t const *frames,
+                                                 sz_string_view_t between, sz_ptr_t output, sz_size_t *length,
+                                                 sz_stream_t stream);
+#endif
+
 /**
  *  @brief Finds the strings kernel of @p kind, from the best of @p capabilities.
  *  @param[out] kernel The kernel, or null when none of @p capabilities has it.
@@ -1062,7 +1081,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_pinned_best(sz_allocator_t *alloca
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_serial(sz_allocator_t *allocator);
 
-#if STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_ARCH_CUDA_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_cuda(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_device_best */
@@ -1071,7 +1090,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_cuda(sz_allocator_t *alloca
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_cuda(sz_allocator_t *allocator);
 #endif
 
-#if STRINGZILLA_TARGET_ROCM
+#if STRINGZILLA_ARCH_ROCM_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_rocm(sz_allocator_t *allocator);
 /** @copydoc sz_allocator_init_device_best */
@@ -1080,7 +1099,7 @@ STRINGZILLA_API sz_status_t sz_allocator_init_device_rocm(sz_allocator_t *alloca
 STRINGZILLA_API sz_status_t sz_allocator_init_pinned_rocm(sz_allocator_t *allocator);
 #endif
 
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
 /** @copydoc sz_allocator_init_unified_best */
 STRINGZILLA_API sz_status_t sz_allocator_init_unified_metal(sz_allocator_t *allocator);
 #endif

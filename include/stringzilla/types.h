@@ -28,9 +28,9 @@
 #if !defined(STRINGZILLA_TYPES_H_)
 #define STRINGZILLA_TYPES_H_
 
-#define STRINGZILLA_H_VERSION_MAJOR 5
-#define STRINGZILLA_H_VERSION_MINOR 1
-#define STRINGZILLA_H_VERSION_PATCH 2
+#define STRINGZILLA_VERSION_MAJOR 5
+#define STRINGZILLA_VERSION_MINOR 1
+#define STRINGZILLA_VERSION_PATCH 2
 
 /*  Debugging and testing. */
 #if !defined(STRINGZILLA_DEBUG)
@@ -535,8 +535,8 @@
 
 /** Whether the Metal host API is compiled in. The build stamps it and nothing infers it: no C
  *  compiler predefines anything for Apple GPUs, and the layer links Metal and Foundation. */
-#if !defined(STRINGZILLA_WITH_METAL)
-#define STRINGZILLA_WITH_METAL (0)
+#if !defined(STRINGZILLA_ARCH_METAL_)
+#define STRINGZILLA_ARCH_METAL_ (0)
 #endif
 
 /** Defining the serial kernels: STRINGZILLA_TARGET_SERIAL. Header-only builds define them in every
@@ -578,9 +578,9 @@
 
 /*  Defining the Metal kernels, the SIMT baseline every Apple7 device runs:
  *  STRINGZILLA_TARGET_METAL. Forced off where Metal is not linked. */
-#if !defined(STRINGZILLA_TARGET_METAL) || (STRINGZILLA_TARGET_METAL && !STRINGZILLA_WITH_METAL)
+#if !defined(STRINGZILLA_TARGET_METAL) || (STRINGZILLA_TARGET_METAL && !STRINGZILLA_ARCH_METAL_)
 #undef STRINGZILLA_TARGET_METAL
-#define STRINGZILLA_TARGET_METAL STRINGZILLA_WITH_METAL
+#define STRINGZILLA_TARGET_METAL STRINGZILLA_ARCH_METAL_
 #endif
 
 /*  WebAssembly SIMD128 is opt-in via @c -msimd128 with no runtime probe: an engine validates a

@@ -134,7 +134,8 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_fill_random_kernels<sz_fill_random_icelake>(env, "icelake");
         bench_strings_kernels<sz_strings_to_tape_icelake, sz_strings_escape_icelake, sz_strings_unescape_icelake,
                               sz_strings_lookup_icelake, sz_strings_normalize_icelake>(env, "icelake");
-        bench_strings_split_kernels<sz_strings_split_icelake, sz_strings_split_lines_icelake>(env, "icelake");
+        bench_strings_split_join_kernels<sz_strings_split_icelake, sz_strings_split_lines_icelake,
+                                         sz_strings_join_icelake>(env, "icelake");
         bench_aes256_ctr_kernels<sz_aes256_key_init_icelake, sz_aes256_ctr_xor_icelake>(env, "icelake");
         bench_aes256_gcm_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encrypt_icelake>(env, "icelake");
         bench_aes256_gcm_stream_kernels<sz_aes256_gcm_key_init_icelake, sz_aes256_gcm_encryptor_init_icelake,

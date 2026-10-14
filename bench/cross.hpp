@@ -12,8 +12,8 @@
  *  CPU paths use direct kernels so header-only benchmarks need no compiled dispatch library.
  */
 #pragma once
-#ifndef STRINGZILLA_BENCH_CROSS_HPP
-#define STRINGZILLA_BENCH_CROSS_HPP
+#ifndef STRINGZILLA_BENCH_CROSS_HPP_
+#define STRINGZILLA_BENCH_CROSS_HPP_
 
 #include <bit>     // `std::bit_cast`
 #include <cstdint> // `std::uintptr_t`
@@ -1184,35 +1184,30 @@ struct strings_split_lines_from_sz {
     }
 };
 
-/** Joins every line of the corpus with @p join_ into one JSON array of unescaped strings: quotes as
- *  the frames, commas between rows, and brackets around, measuring first. */
+/** Joins the corpus lines, gathered into a tape, with @p join_ into one JSON array of unescaped
+ *  strings, measuring first: quotes as the frames, commas between rows, and brackets around. */
 template <sz_kernel_strings_join_t join_>
 struct strings_join_from_sz {
-    corpus_t const &corpus;
-    std::vector<sz_string_view_t> lines {};
+    strings_input_t &lines;
     std::string output {};
-    std::size_t lines_bytes = 0;
     sz_kernel_bytesum_t checksum = output_checksum_kernel();
 
-    void preprocess() {
-        if (!lines.empty()) return;
-        for (token_view_t const line : corpus.tokens)
-            lines.push_back({line.data(), line.size()}), lines_bytes += line.size();
-    }
+    void preprocess() { lines.preprocess(); }
 
     call_result_t operator()() {
-        sz_strings_view_t column;
-        sz_strings_from_string_views(lines.data(), lines.size(), &column);
+        std::size_t const rows = lines.tape.count;
+        sz_strings_view_t const column = lines.slice(0, rows);
         sz_string_view_t const frames[2] = {{"\"", 1}, {"\"", 1}};
         sz_string_view_t const between {",", 1};
         sz_size_t length = 0;
-        if (join_(&column, 1, lines.size(), frames, between, nullptr, &length, nullptr) != sz_success_k)
+        if (join_(&column, 1, rows, frames, between, nullptr, &length, nullptr) != sz_success_k)
             throw std::runtime_error("The join could not be measured.");
         output.resize(length + 2);
         output.front() = '[', output.back() = ']';
-        if (join_(&column, 1, lines.size(), frames, between, output.data() + 1, &length, nullptr) != sz_success_k)
+        if (join_(&column, 1, rows, frames, between, output.data() + 1, &length, nullptr) != sz_success_k)
             throw std::runtime_error("The join failed.");
-        return {lines_bytes, strings_check_value(checksum, output.data(), output.size()), lines.size()};
+        return {lines.offset(rows) - lines.offset(0), strings_check_value(checksum, output.data(), output.size()),
+                rows};
     }
 };
 
@@ -1250,9 +1245,11 @@ void bench_utf8_count_strings_kernels(environment_t &env, std::string_view kit) 
                        utf8_count_strings_from_sz<count_strings_> {lines, batch});
 }
 
-/** Times one capability's splits of the whole corpus, at spaces and at line breaks. */
-template <sz_kernel_strings_split_t split_, sz_kernel_strings_split_lines_t split_lines_>
-void bench_strings_split_kernels(environment_t &env, std::string_view kit) {
+/** Times one capability's splits of the whole corpus, at spaces and at line breaks, and its join of
+ *  the corpus lines into one JSON array. */
+template <sz_kernel_strings_split_t split_, sz_kernel_strings_split_lines_t split_lines_,
+          sz_kernel_strings_join_t join_>
+void bench_strings_split_join_kernels(environment_t &env, std::string_view kit) {
     corpus_t const &corpus = env.corpora.lines();
     sz_byteset_t spaces;
     sz_byteset_init(&spaces);
@@ -1263,6 +1260,9 @@ void bench_strings_split_kernels(environment_t &env, std::string_view kit) {
     bench_kernel_nullary(env, corpus, fmt::format("sz_strings_split_lines_{}", kit), "sz_strings_split_lines_serial",
                          strings_split_lines_from_sz<sz_strings_split_lines_serial> {corpus},
                          strings_split_lines_from_sz<split_lines_> {corpus});
+    strings_input_t lines(corpus);
+    bench_kernel_nullary(env, corpus, fmt::format("sz_strings_join_{}", kit), "sz_strings_join_serial",
+                         strings_join_from_sz<sz_strings_join_serial> {lines}, strings_join_from_sz<join_> {lines});
 }
 
 #pragma endregion Columns
@@ -1460,9 +1460,16 @@ void bench_aes256_gcm_stream_kernels(environment_t &env, std::string_view kit) {
 
 #pragma region Container
 
+/** A @p string_type_ holding the bytes of @p other: views borrow them, and an owning StringZilla
+ *  string copies them through its factory, aborting the benchmark when that fails. */
 template <typename string_type_, typename other_string_type_>
-string_type_ string_cast(other_string_type_ const &other) noexcept {
-    return string_type_(other.data(), other.size());
+string_type_ string_cast(other_string_type_ const &other) {
+    if constexpr (requires { string_type_::make(string_view_t(other.data(), other.size())); }) {
+        auto made = string_type_::make(string_view_t(other.data(), other.size()));
+        if (!made) throw std::runtime_error("The key could not be copied into an owning string.");
+        return std::move(made.value);
+    }
+    else return string_type_(other.data(), other.size());
 }
 
 /**
@@ -2502,4 +2509,4 @@ void bench_utf8_uncased_order_kernels(environment_t &env, std::string_view kit) 
 
 } // namespace ashvardanian::stringzilla::bench
 
-#endif // STRINGZILLA_BENCH_CROSS_HPP
+#endif // STRINGZILLA_BENCH_CROSS_HPP_

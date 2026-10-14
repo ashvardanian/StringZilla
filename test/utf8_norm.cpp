@@ -34,7 +34,7 @@ static utf8_norm_kernels_t const utf8_norm_dispatched {cpu_best<sz_utf8_norm_bes
  *  @brief Known-answer unit tests for UTF-8 normalization on simple, hand-verifiable inputs.
  *
  *  Exercises the normalizer and the normalization-violation finder through the dispatch points, and
- *  through the C++ @c sz::string_t and @c sz::string_view_t wrappers @c try_utf8_normalize,
+ *  through the C++ @c sz::string_t and @c sz::string_view_t wrappers @c utf8_normalize,
  *  @c is_normalized and @c utf8_find_denormalized, so a regression that the serial-vs-SIMD
  *  agreement tests would miss - because both share a wrong constant - is still caught against an
  *  external ground truth.
@@ -44,9 +44,10 @@ void test_utf8_norm_unit() {
 
     // C++ binding round-trip: NFC → NFD → NFC should recover the original NFC string.
     char const cafe_nfc[] = "caf\xC3\xA9"; // U+00E9 (precomposed é), 5 bytes
-    sz::string_t nfc_str {cafe_nfc};
-    verify(sz::succeeded(nfc_str.try_utf8_normalize(sz_normal_form_nfd_k)));
-    verify(sz::succeeded(nfc_str.try_utf8_normalize(sz_normal_form_nfc_k)));
+    sz::string_t nfc_str;
+    verify(sz::succeeded(nfc_str.assign(cafe_nfc)));
+    verify(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfd_k)));
+    verify(sz::succeeded(nfc_str.utf8_normalize(sz_normal_form_nfc_k)));
     verify(nfc_str == cafe_nfc);
 
     // is_normalized: NFC string is normalized under NFC, not NFD (é decomposes in NFD).
@@ -55,7 +56,8 @@ void test_utf8_norm_unit() {
     verify(!nfc_view.is_normalized(sz_normal_form_nfd_k));
 
     // is_normalized on the owning type mirrors the view behaviour.
-    sz::string_t nfc_own {cafe_nfc};
+    sz::string_t nfc_own;
+    verify(sz::succeeded(nfc_own.assign(cafe_nfc)));
     verify(nfc_own.is_normalized(sz_normal_form_nfc_k));
     verify(!nfc_own.is_normalized(sz_normal_form_nfd_k));
 
@@ -65,8 +67,9 @@ void test_utf8_norm_unit() {
 
     // NFKD of "ﬁ" (U+FB01 LATIN SMALL LIGATURE FI) decomposes to "fi".
     char const ligature_fi[] = "\xEF\xAC\x81"; // U+FB01
-    sz::string_t fi_str {ligature_fi};
-    verify(sz::succeeded(fi_str.try_utf8_normalize(sz_normal_form_nfkd_k)));
+    sz::string_t fi_str;
+    verify(sz::succeeded(fi_str.assign(ligature_fi)));
+    verify(sz::succeeded(fi_str.utf8_normalize(sz_normal_form_nfkd_k)));
     verify(fi_str.contains('f'));
     verify(fi_str.contains('i'));
 }

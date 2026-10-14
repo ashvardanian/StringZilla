@@ -405,7 +405,7 @@ using pinned_vector = std::vector<value_type_, pinned_alloc<value_type_>>;
  *  @brief Plain device memory a kernel can write and the host cannot touch.
  *
  *  @c vector is what the engines already store device-resident scratch in, and its
- *  @c try_resize_uninitialized is the only growth a non-host-accessible allocator admits.
+ *  @c resize_uninitialized is the only growth a non-host-accessible allocator admits.
  */
 template <typename value_type_>
 using device_vector = vector<value_type_, device_alloc<value_type_>>;
@@ -947,8 +947,7 @@ inline void print(settings_t const &settings) {
 /** The facts this binary and this machine report: the library version, the capabilities compiled
  *  in and detected, and the cache geometry that cache-resident benchmark shapes are sized from. */
 struct machine_t {
-    std::array<unsigned, 3> version {STRINGZILLA_H_VERSION_MAJOR, STRINGZILLA_H_VERSION_MINOR,
-                                     STRINGZILLA_H_VERSION_PATCH};
+    std::array<unsigned, 3> version {STRINGZILLA_VERSION_MAJOR, STRINGZILLA_VERSION_MINOR, STRINGZILLA_VERSION_PATCH};
     sz_capability_t compiled = 0;
     sz_capability_t detected = 0;
     sz_capability_t enabled = 0;

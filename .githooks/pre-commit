@@ -2965,7 +2965,7 @@ check_generations_split_into_tiers() {
 check_gpu_kernels_under_targets() {
     local gpu_capabilities misguarded
     gpu_capabilities=$(printf '%s\n' "$capability_architectures" |
-        awk '$2 ~ /^(CUDA|ROCM)$/ { printf "%s%s", separator, $1; separator = "|" }')
+        awk '$2 ~ /^(CUDA|ROCM|METAL)$/ { printf "%s%s", separator, $1; separator = "|" }')
     misguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
         added_list="$staged_added_line_numbers_list" gpu_capabilities=$gpu_capabilities awk '
         BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
@@ -2976,11 +2976,51 @@ check_gpu_kernels_under_targets() {
             if (!((NR in added) || (guard_line[depth] in added))) next
             name = substr($0, RSTART, RLENGTH); sub(/[[:space:]]*\($/, "", name); sub(/.*[^a-z0-9_]/, "", name)
             if (name ~ /allocator|memory_|stream_|sequence_realloc|device_count|capabilities_/) next
-            if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && guard[depth] ~ /STRINGZILLA_ARCH_(CUDA|ROCM)_/)
+            if (name ~ "_(" ENVIRON["gpu_capabilities"] ")$" && guard[depth] ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/)
                 printf "line %d: kernel %s under %s\n", NR, name, guard[depth]
         }' || true)
     [ -z "$misguarded" ] || reject_with_reason "$misguarded" \
         "$staged_path guards a GPU kernel by its vendor; open #if STRINGZILLA_TARGET_<CAPABILITY> inside the vendor's guard:"
+}
+
+# Rejects a GPU runtime service, like a stream, an allocator or a device query, declared, defined or dispatched under a
+# capability's `STRINGZILLA_TARGET_`, because the services exist wherever the vendor's runtime does, and a build that
+# drops a capability's kernels keeps them; the vendor's `STRINGZILLA_ARCH_` guards them.
+check_gpu_services_under_architectures() {
+    local misguarded
+    misguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        /^[[:space:]]*#[[:space:]]*if/ { guard[++depth] = $0; guard_line[depth] = NR; next }
+        /^[[:space:]]*#[[:space:]]*elif/ { guard[depth] = $0; guard_line[depth] = NR; next }
+        /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }
+        depth > 0 && guard[depth] ~ /STRINGZILLA_TARGET_/ &&
+            ($0 ~ /^(STRINGZILLA_[A-Z_]+|static|inline)[[:space:]]/ || $0 ~ /^[[:space:]]*case[[:space:]]/) &&
+            match($0, /sz_(allocator_init_[a-z]+|stream_(init|free|synchronize)|device_count|capabilities_detected)_(cuda|rocm|metal)[[:space:]]*\(/) {
+            if ((NR in added) || (guard_line[depth] in added))
+                printf "line %d: %s under %s\n", NR, substr($0, RSTART, RLENGTH - 1), guard[depth]
+        }' || true)
+    [ -z "$misguarded" ] || reject_with_reason "$misguarded" \
+        "$staged_path guards a GPU runtime service by a capability; open #if STRINGZILLA_ARCH_<VENDOR>_ instead:"
+}
+
+# Rejects a vendor header opening a capability's `STRINGZILLA_TARGET_` outside its vendor's `STRINGZILLA_ARCH_`, so
+# every CUDA, ROCm and Metal header reads alike: the runtime's guard, then the kernels' one inside it.
+check_gpu_headers_shaped() {
+    local unguarded
+    unguarded=$(printf '%s\n' "$staged_file_text" | blank_c_comments_preserving_columns |
+        added_list="$staged_added_line_numbers_list" awk '
+        BEGIN { count = split(ENVIRON["added_list"], numbers, "\n"); for (index_ = 1; index_ <= count; ++index_) added[numbers[index_] + 0] = 1 }
+        /^[[:space:]]*#[[:space:]]*if/ {
+            vendor[depth + 1] = vendor[depth] || $0 ~ /STRINGZILLA_ARCH_(CUDA|ROCM|METAL)_/
+            ++depth
+            if ($0 ~ /STRINGZILLA_TARGET_/ && !vendor[depth - 1] && (NR in added))
+                printf "line %d: %s outside the vendor guard\n", NR, $0
+            next
+        }
+        /^[[:space:]]*#[[:space:]]*endif/ { --depth; next }' || true)
+    [ -z "$unguarded" ] || reject_with_reason "$unguarded" \
+        "$staged_path opens a capability before its vendor; wrap #if STRINGZILLA_TARGET_ in #if STRINGZILLA_ARCH_<VENDOR>_:"
 }
 
 # Rejects an export macro on a binding definition, because the binding declares its helpers plain `extern`
@@ -3082,12 +3122,26 @@ check_fuzz_loops_scaled() {
 }
 
 # Rejects the retired `SZ_` prefix on an all-caps name, because every macro, CMake variable and environment
-# variable spells out the full `STRINGZILLA_`; lowercase `sz_` symbols keep theirs.
+# variable spells out the full `STRINGZILLA_`; lowercase `sz_` symbols keep theirs. The retired families go too:
+# `USE_`, `ON_`, `DETECT_`, `DEFINED_` and `AVOID_` switches, `WITH_` for a GPU vendor, and `H_VERSION_`.
 check_retired_prefix_absent() {
-    local retired
+    local retired families
     retired=$(printf '%s\n' "$staged_added_text" | grep -E '(^|[^A-Za-z0-9_]|-D)SZ_[A-Z0-9]' || true)
     [ -z "$retired" ] || reject_with_reason "$retired" \
         "$staged_path spells the retired SZ_ prefix; write the full STRINGZILLA_:"
+    families=$(printf '%s\n' "$staged_added_text" |
+        grep -E 'STRINGZILLA_(USE|ON|DETECT|DEFINED|AVOID|H_VERSION)_|STRINGZILLA_WITH_(CUDA|ROCM|METAL)' || true)
+    [ -z "$families" ] || reject_with_reason "$families" \
+        "$staged_path spells a retired macro family; write TARGET_, ARCH_..._, WITH_, BUILD_ or VERSION_:"
+}
+
+# Rejects an include guard without the trailing `_` that marks every guard internal.
+check_include_guards_internal() {
+    local guards
+    guards=$(added_code_text |
+        grep -E '^\+#[[:space:]]*(ifndef|define)[[:space:]]+STRINGZILLA_[A-Z0-9_]*_(H|HPP|CUH)([[:space:]]|$)' || true)
+    [ -z "$guards" ] || reject_with_reason "$guards" \
+        "$staged_path names an include guard without its trailing _; write STRINGZILLA_<PATH>_H_:"
 }
 
 # Rejects a positive `defined(...)` or `#ifdef` of an architecture, OS or toolchain fact, because each is
@@ -3259,6 +3313,7 @@ run_project_checks() {
         check_call_result_not_indexed
         check_iostreams_absent
         check_facts_tested_by_value
+        check_include_guards_internal
         check_all_caps_macros_object_like
         ;;
     esac
@@ -3302,7 +3357,18 @@ run_project_checks() {
         ;;
     esac
     case "$staged_path" in
-    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh) check_gpu_kernels_under_targets ;;
+    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h | \
+        c/*.c | c/dispatch/*.c)
+        check_gpu_services_under_architectures
+        ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h) check_gpu_headers_shaped ;;
+    esac
+    case "$staged_path" in
+    include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h)
+        check_gpu_kernels_under_targets
+        ;;
     c/*.cu | c/*.hip) check_launches_report_status ;;
     python/*.c | python/*/*.c | javascript/*.c) check_binding_exports_absent ;;
     esac

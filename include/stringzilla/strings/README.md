@@ -5,7 +5,7 @@ Every one reads a `sz_strings_view_t` in any layout, optionally reordered throug
 Every one that writes a tape is atomic: it succeeds and leaves the tape holding the whole result, or fails and leaves the tape, its blocks and their bytes exactly as they were.
 Calls measure first and finish every fallible step, like a refused allocation or a malformed string, before the first write into a block the tape holds, and the allocator's `reallocate` is an optional fast path.
 Each operation has a serial baseline plus per-ISA backends, like `haswell` and `icelake` on x86.
-The backends share one set of drivers and differ only in their byte-set search, which skips the bytes needing no escaping, their lookup-table kernel, and their normalization kernels, while NEON and Ice Lake split a text in loops of their own.
+The backends share one set of drivers and differ only in their byte-set search, which skips the bytes needing no escaping, their lookup-table kernel, and their normalization kernels, while NEON and Ice Lake split a text and join tape columns in loops of their own.
 `sz_strings_lookup_best` and its siblings run the best kernel the capability mask they are passed names.
 For hot paths on short inputs, pick a capability's kernel, like `sz_strings_lookup_neon`, or resolve one once through `sz_find_kernel_punned`, rather than paying the pick on every call.
 
@@ -68,11 +68,11 @@ A `↑` cell reuses the tier above, and a `…` cell is not measured yet.
 
 | Backend                   | `split` at `' '` | `split_lines` |     `join` |
 | :------------------------ | ---------------: | ------------: | ---------: |
-| Loop @ 1× Apple M5 Pro    |        0.41 GB/s |      1.5 GB/s |   6.4 GB/s |
-| Serial @ 1× Apple M5 Pro  |                … |             … |          … |
-| NEON @ 1× Apple M5 Pro    |                … |             … |          ↑ |
+| Loop @ 1× Apple M5 Pro    |        0.44 GB/s |      1.4 GB/s |   6.8 GB/s |
+| Serial @ 1× Apple M5 Pro  |        0.58 GB/s |      1.6 GB/s |   6.9 GB/s |
+| NEON @ 1× Apple M5 Pro    |         2.7 GB/s |      3.9 GB/s |   8.8 GB/s |
 | Haswell @ 1× Intel Xeon6  |                ↑ |             ↑ |          ↑ |
-| Ice Lake @ 1× Intel Xeon6 |                … |             … |          ↑ |
+| Ice Lake @ 1× Intel Xeon6 |                … |             … |          … |
 
 The vector kernels classify each 64-byte block into the bytes they remove and the ones that end parts, then set the offset of every end from the bytes kept before it.
 NEON slides each kept segment down with overlapping 16-byte stores, and Ice Lake packs the whole block with one `vpcompressb`.

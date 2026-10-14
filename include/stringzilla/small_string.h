@@ -41,9 +41,7 @@ extern "C" {
 /** The number of bytes a stack-allocated string can hold, including the @c STRINGZILLA_NULL
  *  terminator. It can't be changed from outside, yet an `#error` is avoided, as it may
  *  already be set. */
-#ifdef STRINGZILLA_STRING_INTERNAL_SPACE
 #undef STRINGZILLA_STRING_INTERNAL_SPACE
-#endif
 #define STRINGZILLA_STRING_INTERNAL_SPACE (sizeof(sz_size_t) * 3 - 1) // 3 pointers minus one byte for an 8-bit length
 
 /**

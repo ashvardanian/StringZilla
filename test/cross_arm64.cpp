@@ -25,7 +25,7 @@ std::size_t test_cross_arm64(environment_t const &env) {
                                               sz_strings_normalize_neon,
                                               sz_strings_split_neon,
                                               sz_strings_split_lines_neon,
-                                              sz_strings_join_serial};
+                                              sz_strings_join_neon};
     check("test_strings_unit_neon", [&] { check_strings_unit_(strings_neon); });
     check("test_strings_equivalence_neon",
           [&](test_context_t &context) { check_strings_equivalence_(context, strings_neon); });

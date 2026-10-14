@@ -406,7 +406,7 @@ STRINGZILLA_DEVICE int sz_lanes_any_cuda_(int predicate) { return __any_sync(0xF
 #pragma endregion Device Primitives
 
 /*  The library defines these once, in `c/target/cuda.cu`; header-only builds define them here. */
-#if STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_CUDA
+#if STRINGZILLA_HEADER_ONLY
 
 STRINGZILLA_API sz_status_t sz_device_count_cuda(sz_size_t *count) {
     *count = sz_device_count_cuda_();
@@ -448,7 +448,7 @@ STRINGZILLA_API sz_status_t sz_stream_synchronize_cuda(sz_stream_t stream) {
     return sz_stream_synchronize_cuda_(stream);
 }
 
-#endif // STRINGZILLA_HEADER_ONLY && STRINGZILLA_TARGET_CUDA
+#endif // STRINGZILLA_HEADER_ONLY
 
 #ifdef __cplusplus
 }

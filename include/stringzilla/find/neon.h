@@ -348,8 +348,11 @@ STRINGZILLA_API sz_status_t sz_find_strings_neon(sz_strings_view_t const *string
     // A block of 64 starts begins at the first unsettled string, or right after the last block.
     for (sz_size_t block = row_start; row != count; block = sz_max_of_two(block + 64, row_start)) {
         sz_size_t const starts = end > block + offsets[2] ? sz_min_of_two(end - block - offsets[2], (sz_size_t)64) : 0;
-        sz_u64_t candidates = starts == 64 ? sz_find_candidates_neon_(data + block, offsets, bytes)
-                                           : sz_find_candidates_serial_(data + block, starts, offsets, bytes);
+        // The last block backs off to end where the payload does, dropping the starts it repeats.
+        sz_size_t const back = 64 - starts;
+        sz_u64_t candidates = starts && block >= back
+                                  ? sz_find_candidates_neon_(data + block - back, offsets, bytes) >> back
+                                  : sz_find_candidates_serial_(data + block, starts, offsets, bytes);
         // Each step settles a string or drops one of its candidates, until one outruns the block.
         while (row != count && row_start < block + 64) {
             // The lanes of the string's starts in the block, none when the needle outgrows it.

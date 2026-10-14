@@ -12,8 +12,8 @@
  *  header-only test runs these checks, where every dispatch point is a stub.
  */
 #pragma once
-#ifndef STRINGZILLA_TEST_CROSS_HPP
-#define STRINGZILLA_TEST_CROSS_HPP
+#ifndef STRINGZILLA_TEST_CROSS_HPP_
+#define STRINGZILLA_TEST_CROSS_HPP_
 
 #include <stringzilla/stringzilla.h>
 
@@ -737,9 +737,11 @@ inline void check_strings_split_equivalence_(test_context_t &context, strings_ba
     std::uniform_int_distribution<std::size_t> columns_distribution(0, 3), rows_distribution(0, 150),
         cell_distribution(0, 12), frame_distribution(0, 3), layout_distribution(0, 3);
     for (std::size_t iteration = 0; iteration != context.iterations(30); ++iteration) {
-        std::size_t const columns_count = columns_distribution(generator), rows = rows_distribution(generator);
+        // The widest draws take 17 columns and frames, past the slots a backend keeps in registers.
+        std::size_t const drawn_columns = columns_distribution(generator), rows = rows_distribution(generator);
+        std::size_t const columns_count = drawn_columns == 3 ? 17 : drawn_columns;
         std::vector<std::vector<std::string>> columns(columns_count, std::vector<std::string>(rows));
-        std::array<std::optional<strings_layouts_t>, 3> layouts;
+        std::vector<std::optional<strings_layouts_t>> layouts(columns_count);
         std::vector<sz_strings_view_t> views;
         for (std::size_t column = 0; column != columns_count; ++column) {
             for (std::string &cell : columns[column]) {
@@ -751,7 +753,10 @@ inline void check_strings_split_equivalence_(test_context_t &context, strings_ba
             views.push_back(named[layout_distribution(generator)].view);
         }
         std::vector<std::string> frames(columns_count + 1);
-        for (std::string &frame : frames) frame = random_string(generator, frame_distribution(generator), cells);
+        for (std::string &frame : frames) {
+            std::size_t const frame_length = frame_distribution(generator);
+            frame = random_string(generator, frame_length == 3 ? 17 : frame_length, cells);
+        }
         std::string const between = random_string(generator, frame_distribution(generator), cells);
         check_join_(candidate, views, rows, frames, between, join_oracle_(columns, rows, frames, between));
     }
@@ -7376,4 +7381,4 @@ inline void check_utf8_uncased_safety_(test_context_t &context, utf8_uncased_ker
 
 } // namespace ashvardanian::stringzilla::test
 
-#endif // STRINGZILLA_TEST_CROSS_HPP
+#endif // STRINGZILLA_TEST_CROSS_HPP_

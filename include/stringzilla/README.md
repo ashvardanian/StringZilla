@@ -143,7 +143,7 @@ The most important ones, mirrored from `stringzilla.h`:
 Per-ISA backends are toggled with their own macros; if left undefined they are auto-detected from the compiler's target flags:
 `STRINGZILLA_TARGET_WESTMERE` for SSE4.2 + AES-NI, `STRINGZILLA_TARGET_GOLDMONT` for SHA-NI, `STRINGZILLA_TARGET_HASWELL` for AVX2, `STRINGZILLA_TARGET_SKYLAKE` for AVX-512 F/BW/VL, `STRINGZILLA_TARGET_ICELAKE` for AVX-512 VBMI + VAES, then `STRINGZILLA_TARGET_NEON`, `STRINGZILLA_TARGET_NEONAES`, `STRINGZILLA_TARGET_NEONSHA`, `STRINGZILLA_TARGET_SVE`, `STRINGZILLA_TARGET_SVE2`, and `STRINGZILLA_TARGET_SVE2AES` on ARM, `STRINGZILLA_TARGET_V128` and `STRINGZILLA_TARGET_V128RELAXED` for WebAssembly SIMD128, `STRINGZILLA_TARGET_RVV` and `STRINGZILLA_TARGET_RVVCRYPTO` for the RISC-V Vector extension, `STRINGZILLA_TARGET_LOONGSONASX` for LoongArch, and `STRINGZILLA_TARGET_POWERVSX` for IBM Power.
 
-The umbrella header also exposes the version triple as `STRINGZILLA_H_VERSION_MAJOR`/`_MINOR`/`_PATCH`, with matching `sz_version_major()`, `sz_version_minor()`, and `sz_version_patch()` accessors.
+The umbrella header also exposes the version triple as `STRINGZILLA_VERSION_MAJOR`/`_MINOR`/`_PATCH`, with matching `sz_version_major()`, `sz_version_minor()`, and `sz_version_patch()` accessors.
 
 ### Compilers and Platforms
 
@@ -162,7 +162,7 @@ The RVV kernels need Clang 21 or newer, as older Clang hides the 64-bit vector t
 On macOS, prefer Homebrew Clang over Apple Clang; on Windows, MinGW with GCC works alongside MSVC.
 NVCC with CUDA 12 builds the device backends of the engine families, reached by building an engine with the mask `sz_capabilities_enabled_cuda` reports for a device.
 HIP-Clang builds the same sources for AMD GPUs, reached through `sz_capabilities_enabled_rocm`.
-With `STRINGZILLA_WITH_METAL` set, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
+Built with `STRINGZILLA_BUILD_METAL`, the three engines also run on Apple GPUs of the Apple7 family and newer, through the same constructors and verbs.
 
 A device round reads memory the device reaches, and strings only as a tape, never through an accessor, which is host code. `strings.h` declares allocation and gathering into tapes; `capabilities.h` declares stream creation, synchronization and release. Their `_best` dispatch points take a mask, with `_serial`, `_cuda`, `_rocm` and `_metal` twins, the GPU ones exported only where built:
 
@@ -250,7 +250,7 @@ The C++ layer lives in `namespace ashvardanian::stringzilla`, conventionally ali
 - `sz::strings_view_t` — a borrowed column of strings, wrapping a `sz_strings_view_t` in any of its layouts.
 - `sz::strings<allocator = sz::heap_alloc<char>>` — an owned, move-only column, a `sz_strings_span_t` tape and the allocator of its blocks; the alias `sz::strings_t` uses the default.
 - `sz::byteset_t` — the C++ wrapper around `sz_byteset_t`, constructible from an initializer list, a `(pointer, count)` pair, or a `std::array`, and composable with `operator|`.
-- `sz::status_t` — a scoped enum mirroring `sz_status_t` with `success_k`, `bad_alloc_k`, `invalid_utf8_k`, `contains_duplicates_k`, and the rest, returned by the fallible `try_*` free functions.
+- `sz::status_t` — a scoped enum mirroring `sz_status_t` with `success_k`, `bad_alloc_k`, `invalid_utf8_k`, `contains_duplicates_k`, and the rest, returned by the fallible free functions and the string's allocating verbs.
 
 `sz::string_view_t` is implicitly constructible from a `char const *`, a `(pointer, length)` pair, `std::string`, and `std::string_view`, and converts back to both; `sz::string_t` adds construction from repeats, sub-ranges, initializer lists, and lazy `sz::concatenate(...)` expressions.
 Both satisfy the `std::string`/`std::string_view` member surface — `data`, `size`, `length`, `empty`, `at`, `front`, `back`, iterators, `substr`, `compare`, the relational operators, and on C++20 `operator<=>` — so they are drop-in for most code.
@@ -507,8 +507,9 @@ Matches sit on codepoint boundaries, so an empty needle matches at every boundar
 When you need the folded text itself, fold a `sz::string_t` in place:
 
 ```cpp
-sz::string_t greeting = "Grüße";
-greeting.try_utf8_uncased_fold(); // in place; `ß` expands to `ss`
+sz::string_t greeting;
+if (sz::failed(greeting.assign("Grüße"))) return 1;
+if (sz::failed(greeting.utf8_uncased_fold())) return 1; // in place; `ß` expands to `ss`
 assert(greeting == "grüsse");
 ```
 
@@ -554,7 +555,8 @@ int main() {
     sz::look_up_table_t to_upper = sz::look_up_table_t::identity();
     for (int i = 'a'; i <= 'z'; ++i) to_upper[(char)i] = (char)(i - 32);
 
-    sz::string_t text = "hello";
+    sz::string_t text;
+    if (sz::failed(text.assign("hello"))) return 1;
     text.lookup(to_upper); // in place
     assert(text == "HELLO");
     return 0;
@@ -899,23 +901,25 @@ int main(void) {
 
 ### C++
 
-In C++, `sz::string_t` is the owning, SSO container and `sz::string_span_t` is its mutable view; both rebuild the `std::string` surface.
-Mutating members (`append`, `push_back`, `insert`, `erase`, `replace`, `resize`, `reserve`, `shrink_to_fit`, `clear`, `swap`, `operator+=`, `operator+`, `assign`) are present, alongside `data`/`c_str`/`size`/`capacity` and the relational operators.
-Every potentially-allocating mutation also has a non-throwing `try_*` twin — `try_append`, `try_reserve`, `try_resize`, `try_assign`, `try_insert`, `try_replace`, `try_replace_all`, and so on — that returns a `bool`/`size_type` instead of throwing, for allocation-failure-aware code.
+In C++, `sz::string_t` is the owning, SSO container and `sz::string_span_t` is its mutable view; both rebuild the `std::string` surface, and nothing in them throws.
+Mutating members (`append`, `push_back`, `insert`, `erase`, `replace`, `resize`, `reserve`, `shrink_to_fit`, `clear`, `swap`, `assign`) are present, alongside `data`/`c_str`/`size`/`capacity` and the relational operators.
+Every allocating verb returns a `sz::status_t`, or an `sz::expected` beside an iterator, and `insert_at`, `erase_slice` and `replace_slice` take signed offsets counted from the end, like Python's slices.
+Copies and conversions come from `copy` and `make`, which return an `sz::expected`, and positions past the end clamp to it.
 
 ```cpp
 #include <stringzilla/stringzilla.hpp>
 namespace sz = ashvardanian::stringzilla;
 
 int main() {
-    sz::string_t greeting = "hello";
-    greeting.append(", ");
-    greeting += "world";
+    sz::expected<sz::string_t> made = sz::string_t::make("hello");
+    if (!made) return 1;
+    sz::string_t greeting = std::move(made.value);
+    if (sz::failed(greeting.append(", world"))) return 1;
     assert(greeting == "hello, world");
-    greeting.push_back('!');
 
-    if (sz::failed(greeting.try_reserve(1024))) return 1; // non-throwing growth
-    greeting.replace_all("l", "L");                       // via try_replace_all under the hood
+    if (sz::failed(greeting.push_back('!'))) return 1; // allocating verbs return a status
+    if (sz::failed(greeting.reserve(1024))) return 1;
+    if (sz::failed(greeting.replace_all("l", "L"))) return 1;
 
     assert(greeting.starts_with("heLLo"));
     return 0;
@@ -1148,7 +1152,7 @@ To avoid those issues, StringZilla provides an alternative consistent interface.
 It supports signed arguments, and doesn't have more than 3 arguments per function or
 
 ```cpp
-using str = sz::string_t;
+using str = sz::string_view_t;
 
 str("a:b").front(1) == "a"; // no checks, unlike `substr`
 str("a:b").front(2) == "a:"; // take first 2 characters
@@ -1231,9 +1235,8 @@ text.back(sz::digits_set()); // all numerical symbols forming the suffix
 
 // Incremental construction
 using sz::string_t::unchecked;
-text.push_back('x'); // no surprises here
+text.push_back('x'); // returns `bad_alloc_k` instead of throwing if growing fails
 text.push_back('x', unchecked); // no bounds checking, Rust style
-text.try_push_back('x'); // returns `bad_alloc_k` instead of throwing if growing fails
 
 sz::concatenate(text, "@", domain, ".", tld); // No allocations
 ```
@@ -1256,13 +1259,9 @@ __`STRINGZILLA_TARGET_GOLDMONT`, `STRINGZILLA_TARGET_WESTMERE`, `STRINGZILLA_TAR
 
 __`STRINGZILLA_TARGET_CUDA`, `STRINGZILLA_TARGET_ROCM`, `STRINGZILLA_TARGET_METAL`__:
 
-> Compile the GPU kernels of one vendor: CUDA wherever the unit is compiled as CUDA, by nvcc or by Clang, ROCm wherever it is compiled as HIP, and Metal under `STRINGZILLA_WITH_METAL`.
+> Compile the GPU kernels of one vendor: CUDA wherever the unit is compiled as CUDA, by nvcc or by Clang, ROCm wherever it is compiled as HIP, and Metal wherever the build links Metal and Foundation, as `STRINGZILLA_BUILD_METAL` does.
+> The Metal kernels travel as embedded source and compile on the device at first use.
 > Each defaults to 1 wherever its vendor is present, and setting it to 0 keeps the host API while dropping that vendor's kernels.
-
-__`STRINGZILLA_WITH_METAL`__:
-
-> Compiles in the Metal host API and the Apple GPU kernels, which travel as embedded source and compile on the device at first use.
-> It defaults to 0; set it to 1 only in targets that link the Metal and Foundation frameworks.
 
 __`STRINGZILLA_HEADER_ONLY`__:
 

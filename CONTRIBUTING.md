@@ -106,7 +106,6 @@ A name without it is a public contract, either a switch you may set or a value y
 | ISA tier, backend, GPU generation | `STRINGZILLA_TARGET_<TIER>`   | `STRINGZILLA_TARGET_HASWELL`         |
 | Build mode                        | `STRINGZILLA_HEADER_ONLY`     |                                      |
 | Optional feature                  | `STRINGZILLA_WITH_<FEATURE>`  | `STRINGZILLA_WITH_LIBC`              |
-| GPU runtime the build links       | `STRINGZILLA_WITH_<RUNTIME>`  | `STRINGZILLA_WITH_METAL`             |
 | Permission for a liberty          | `STRINGZILLA_ALLOW_<LIBERTY>` | `STRINGZILLA_ALLOW_MISALIGNED_LOADS` |
 | Architecture fact                 | `STRINGZILLA_ARCH_<ARCH>_`    | `STRINGZILLA_ARCH_X8664_`            |
 | Operating-system fact             | `STRINGZILLA_OS_<OS>_`        | `STRINGZILLA_OS_LINUX_`              |
@@ -162,8 +161,8 @@ Each of these words has one meaning across the library:
 For C++ code:
 
 - Explicitly use `std::` or `sz::` namespaces over global `memcpy`, `uint64_t`, etc.
-- Explicitly mark `noexcept` or `noexcept(false)` for all library interfaces, except for `__global__` CUDA functions.
-- Document all possible exceptions of an interface using `@throw` in Doxygen.
+- Mark every library interface `noexcept`, except `__global__` CUDA functions, stream output and conversions into STL types, whose failures belong to the STL.
+- Return a `status_t` or an `expected` from every fallible interface, never throw, and clamp positions past the end like Python's slices.
 - Avoid C-style variadic arguments in favor of templates.
 - Avoid C-style casts in favor of `static_cast`, `reinterpret_cast`, and `const_cast`, except for places where a C function is called.
 - Use lower-case names for everything, except settings/conditions macros.
@@ -253,7 +252,7 @@ cmake --build build_release --config Release --parallel
 Using modern syntax, this is how you build and run the test suite:
 
 ```bash
-cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_USE_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
+cmake -D STRINGZILLA_BUILD_TEST=1 -D STRINGZILLA_BUILD_SANITIZERS=0 -D CMAKE_BUILD_TYPE=Debug -B build_debug
 cmake --build build_debug --config Debug --parallel   # Which will produce the following targets:
 build_debug/stringzilla_test            # Dispatch points, C++ wrappers, and every kernel of the static library
 build_debug/stringzilla_shared_test     # Dispatch points alone, through the shared library
@@ -726,7 +725,7 @@ The ISA probes pick the SIMD capabilities exactly as they do for the C library.
 CMake options pass through `-C`:
 
 ```bash
-uv pip install . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_USE_SANITIZERS=OFF # debug asserts on
+uv pip install . -C cmake.build-type=Debug -C cmake.define.STRINGZILLA_BUILD_SANITIZERS=OFF # debug asserts on
 uv pip install . -C cmake.define.STRINGZILLA_BUILD_CUDA=ON                               # CUDA backends too
 STRINGZILLA_TARGET_ARCH=native uv pip install .                                           # tuned for this machine
 ```
@@ -938,7 +937,7 @@ go test
 ```
 
 An archive elsewhere, like a Debug one, links through `CGO_LDFLAGS="-L<its directory>"`.
-cGo links no sanitizer runtime, so build that one with `-D STRINGZILLA_USE_SANITIZERS=OFF`.
+cGo links no sanitizer runtime, so build that one with `-D STRINGZILLA_BUILD_SANITIZERS=OFF`.
 
 To benchmark:
 

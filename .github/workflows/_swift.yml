@@ -30,11 +30,11 @@ jobs:
         with:
           version-file: "VERSION"
           update-major-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MAJOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_MAJOR (\d+)
           update-minor-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_MINOR (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_MINOR (\d+)
           update-patch-version-in: |
-            include/stringzilla/types.h:^#define STRINGZILLA_H_VERSION_PATCH (\d+)
+            include/stringzilla/types.h:^#define STRINGZILLA_VERSION_PATCH (\d+)
           dry-run: "false"
       - name: Upload Bumped Files
         uses: actions/upload-artifact@v7

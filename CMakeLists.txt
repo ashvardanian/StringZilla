@@ -163,10 +163,10 @@ option(STRINGZILLA_BUILD_SWIFT "Package the static library for SwiftPM, as an XC
 option(STRINGZILLA_BUILD_CUDA "Add CUDA to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_BUILD_ROCM "Add ROCm for AMD GPUs to the libraries and to the tests and benchmarks built" OFF)
 option(STRINGZILLA_BUILD_METAL "Add Metal for Apple GPUs to the libraries and to the tests and benchmarks built" OFF)
-option(STRINGZILLA_USE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
+option(STRINGZILLA_BUILD_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer in Debug builds" ON)
 
 # Clang source-based coverage for the header-only library. Recipe (single-arch, native backends only): cmake -B
-# build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_USE_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
+# build_cov -DSTRINGZILLA_BUILD_COVERAGE=1 -DSTRINGZILLA_BUILD_SANITIZERS=0 -DCMAKE_CXX_COMPILER=clang++ cmake --build
 # build_cov --target stringzilla_test -j LLVM_PROFILE_FILE=/tmp/sz.profraw ./build_cov/stringzilla_test
 # llvm-profdata merge -sparse /tmp/sz.profraw -o /tmp/sz.profdata llvm-cov report ./build_cov/stringzilla_test
 # -instr-profile=/tmp/sz.profdata include/stringzilla/ `-march=native` compiles out the non-native backends, so a
@@ -545,7 +545,7 @@ if (STRINGZILLA_BUILD_ROCM)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
     # Metal compiles on the device, so its one code names the family the baseline needs.
-    sz_add_gpu_unit_(c/target/metal.c "apple7" "STRINGZILLA_WITH_METAL=1" "-framework Metal" "-framework Foundation")
+    sz_add_gpu_unit_(c/target/metal.c "apple7" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal" "-framework Foundation")
     target_compile_options(stringzilla_metal_ PRIVATE ${STRINGZILLA_EMBED_OPTIONS_})
     foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
         target_compile_options(${library_} PUBLIC ${STRINGZILLA_EMBED_OPTIONS_})
@@ -811,7 +811,7 @@ foreach (suite bench test)
         set(unit_ "stringzilla_${vendor}_${suite}_")
         define_gpu_suite(${unit_} ${language_} ${source_})
         if (vendor STREQUAL "metal" AND STRINGZILLA_BUILD_METAL)
-            target_compile_definitions(${unit_} PRIVATE STRINGZILLA_WITH_METAL=1)
+            target_compile_definitions(${unit_} PRIVATE STRINGZILLA_ARCH_METAL_=1)
         endif ()
         target_sources(stringzilla_${suite} PRIVATE $<TARGET_OBJECTS:${unit_}>)
         if (suite STREQUAL "test" AND TARGET stringzilla_shared_test)

@@ -25,11 +25,13 @@
 #include "stringzilla/metal.h"
 #include "stringzilla/levenshtein/serial.h"
 
-#if STRINGZILLA_TARGET_METAL
+#if STRINGZILLA_ARCH_METAL_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#if STRINGZILLA_TARGET_METAL
 
 #pragma region Metal
 
@@ -482,8 +484,11 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
 
 #pragma endregion Metal
 
+#endif // STRINGZILLA_TARGET_METAL
+
 #ifdef __cplusplus
 }
 #endif
-#endif
-#endif
+
+#endif // STRINGZILLA_ARCH_METAL_
+#endif // STRINGZILLA_LEVENSHTEIN_METAL_H_

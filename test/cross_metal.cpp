@@ -8,14 +8,14 @@
 
 #include "harness.hpp"
 
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
 #include "cross_device.hpp"
 #endif
 
 namespace ashvardanian::stringzilla::test {
 
 std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
-#if STRINGZILLA_WITH_METAL
+#if STRINGZILLA_ARCH_METAL_
     std::size_t const capability_failures = run_test(env.settings, "test_metal_capabilities_unit", [&] {
         sz_size_t devices = 0;
         sz_capability_t reported = 0;
@@ -33,6 +33,19 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
     verify(sz_allocator_init_unified_metal(&runtime.unified) == sz_success_k);
     runtime.init = sz_stream_init_metal;
     runtime.free = sz_stream_free_metal;
+    cross_section_t check(env);
+    check.detected = runtime.capabilities;
+    check.section("Cross Metal", sz_cap_metal_k);
+    check("test_allocator_metal", [&] {
+        sz_allocator_t device {};
+        verify(sz_allocator_init_device_best(&device, sz_cap_metal_k) == sz_success_k);
+        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
+               device.handle == runtime.unified.handle);
+        verify(sz_allocator_init_pinned_best(&device, sz_cap_metal_k) == sz_missing_kernel_k);
+        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
+               device.handle == runtime.unified.handle);
+    });
+#if STRINGZILLA_TARGET_METAL
     device_kernels const metal {
         "metal",
         runtime,
@@ -47,18 +60,6 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
         nullptr,
         nullptr,
     };
-    cross_section_t check(env);
-    check.detected = runtime.capabilities;
-    check.section("Cross Metal", sz_cap_metal_k);
-    check("test_allocator_metal", [&] {
-        sz_allocator_t device {};
-        verify(sz_allocator_init_device_best(&device, sz_cap_metal_k) == sz_success_k);
-        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
-               device.handle == runtime.unified.handle);
-        verify(sz_allocator_init_pinned_best(&device, sz_cap_metal_k) == sz_missing_kernel_k);
-        verify(device.allocate == runtime.unified.allocate && device.free == runtime.unified.free &&
-               device.handle == runtime.unified.handle);
-    });
     check_device_kernels_(check, metal);
     strings_backend_t const strings_metal {"metal",
                                            sz_strings_to_tape_metal,
@@ -68,6 +69,7 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
                                            sz_strings_lookup_metal,
                                            sz_strings_normalize_metal};
     check_device_strings_(check, runtime, strings_metal);
+#endif
     return capability_failures + check.failures + test_cross_dispatch_device(env, runtime, nullptr, nullptr);
 #else
     sz_unused_(env);

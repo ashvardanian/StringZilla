@@ -55,7 +55,6 @@
 #include <concepts>    // `std::convertible_to`
 #include <iosfwd>      // `std::basic_ostream`
 #include <span>        // `std::span`
-#include <stdexcept>   // `std::out_of_range`
 #include <string>      // `std::string`
 #include <string_view> // `std::string_view`
 #include <vector>      // `std::vector`
@@ -370,7 +369,7 @@ struct matcher_find {
     using size_type = typename string_type_::size_type;
     needle_type_ needle_;
 
-    matcher_find(needle_type_ needle = {}) noexcept : needle_(needle) {}
+    matcher_find(needle_type_ needle = {}) noexcept : needle_(std::move(needle)) {}
 
     /** Borrows the needle of a matcher that owns it, as the range iterators do. */
     template <typename owned_type_>
@@ -397,7 +396,7 @@ struct matcher_rfind {
     using size_type = typename string_type_::size_type;
     needle_type_ needle_;
 
-    matcher_rfind(needle_type_ needle = {}) noexcept : needle_(needle) {}
+    matcher_rfind(needle_type_ needle = {}) noexcept : needle_(std::move(needle)) {}
 
     /** Borrows the needle of a matcher that owns it, as the range iterators do. */
     template <typename owned_type_>
@@ -524,15 +523,20 @@ struct range_haystack_for<haystack_type_ &> {
 /**
  *  @brief Infers how a needle is stored inside a matcher.
  *
- *  Unlike the haystack, the needle is always stored by value in its own type, which is what keeps
- *  `find_all(haystack, sz::string_t("x"))` safe - viewing a temporary needle would leave the
- *  matcher pointing at freed memory for the whole life of the range. Raw character buffers are the
- *  exception: they have no `length()` member to match against, and string literals have static
- *  storage, so they are narrowed to the haystack's view type instead.
+ *  As with the haystack, an lvalue needle is borrowed as the haystack's view type, and an rvalue
+ *  one is moved in and kept by value, which is what keeps `find_all(haystack, std::move(needle))`
+ *  safe - viewing a temporary needle would leave the matcher pointing at freed memory for the
+ *  whole life of the range. Raw character buffers have no `length()` member to match against, and
+ *  string literals have static storage, so they are narrowed to the view type too.
  */
 template <typename view_type_, typename needle_type_>
 struct range_needle_for {
     using type = needle_type_;
+};
+
+template <typename view_type_, typename needle_type_>
+struct range_needle_for<view_type_, needle_type_ &> {
+    using type = view_type_;
 };
 
 template <typename view_type_, std::size_t length_>
@@ -1568,10 +1572,11 @@ range_haystack_type<haystack_type_> borrow_range_haystack_(haystack_type_ &&h) n
 template <typename haystack_type_, typename needle_type_>
 find_matches_view<range_haystack_type<haystack_type_>, matcher_find<range_view_type<haystack_type_>, include_overlaps_t,
                                                                     range_needle_type<haystack_type_, needle_type_>>>
-find_all(haystack_type_ &&h, needle_type_ const &n, include_overlaps_t = {}) noexcept {
+find_all(haystack_type_ &&h, needle_type_ &&n, include_overlaps_t = {}) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_find<range_view_type<haystack_type_>, include_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_find<range_view_type<haystack_type_>, include_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1585,10 +1590,11 @@ template <typename haystack_type_, typename needle_type_>
 rfind_matches_view<
     range_haystack_type<haystack_type_>,
     matcher_rfind<range_view_type<haystack_type_>, include_overlaps_t, range_needle_type<haystack_type_, needle_type_>>>
-rfind_all(haystack_type_ &&h, needle_type_ const &n, include_overlaps_t = {}) noexcept {
+rfind_all(haystack_type_ &&h, needle_type_ &&n, include_overlaps_t = {}) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_rfind<range_view_type<haystack_type_>, include_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_rfind<range_view_type<haystack_type_>, include_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1601,10 +1607,11 @@ rfind_all(haystack_type_ &&h, needle_type_ const &n, include_overlaps_t = {}) no
 template <typename haystack_type_, typename needle_type_>
 find_matches_view<range_haystack_type<haystack_type_>, matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t,
                                                                     range_needle_type<haystack_type_, needle_type_>>>
-find_all(haystack_type_ &&h, needle_type_ const &n, exclude_overlaps_t) noexcept {
+find_all(haystack_type_ &&h, needle_type_ &&n, exclude_overlaps_t) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1618,10 +1625,11 @@ template <typename haystack_type_, typename needle_type_>
 rfind_matches_view<
     range_haystack_type<haystack_type_>,
     matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, range_needle_type<haystack_type_, needle_type_>>>
-rfind_all(haystack_type_ &&h, needle_type_ const &n, exclude_overlaps_t) noexcept {
+rfind_all(haystack_type_ &&h, needle_type_ &&n, exclude_overlaps_t) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1683,10 +1691,11 @@ rfind_all_other_characters(haystack_type_ &&h, needle_type_ const &n) noexcept {
 template <typename haystack_type_, typename needle_type_>
 find_splits_view<range_haystack_type<haystack_type_>, matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t,
                                                                    range_needle_type<haystack_type_, needle_type_>>>
-split(haystack_type_ &&h, needle_type_ const &n) noexcept {
+split(haystack_type_ &&h, needle_type_ &&n) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_find<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1701,10 +1710,11 @@ template <typename haystack_type_, typename needle_type_>
 rfind_splits_view<
     range_haystack_type<haystack_type_>,
     matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, range_needle_type<haystack_type_, needle_type_>>>
-rsplit(haystack_type_ &&h, needle_type_ const &n) noexcept {
+rsplit(haystack_type_ &&h, needle_type_ &&n) noexcept {
     using needle_storage = range_needle_type<haystack_type_, needle_type_>;
     return {borrow_range_haystack_(std::forward<haystack_type_>(h)),
-            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(needle_storage(n))};
+            matcher_rfind<range_view_type<haystack_type_>, exclude_overlaps_t, needle_storage>(
+                needle_storage(std::forward<needle_type_>(n)))};
 }
 
 /**
@@ -1770,31 +1780,6 @@ template <typename iterator_type>
 std::size_t range_length(iterator_type first, iterator_type last) {
     return static_cast<std::size_t>(std::distance(first, last));
 }
-
-#pragma endregion
-
-#pragma region Helper Types
-
-#if STRINGZILLA_WITH_STL
-
-/**
- *  @brief Throws the exception matching a failed @p status, and returns on success.
- *  @throws @c std::bad_alloc for @c bad_alloc_k, @c std::length_error for @c overflow_risk_k,
- *      @c std::invalid_argument for malformed inputs, and @c std::runtime_error for the rest.
- */
-inline void raise(status_t status) noexcept(false) {
-    switch (status) {
-    case status_t::success_k: return;
-    case status_t::bad_alloc_k: throw std::bad_alloc();
-    case status_t::overflow_risk_k: throw std::length_error(status_name(status));
-    case status_t::invalid_utf8_k:
-    case status_t::contains_duplicates_k:
-    case status_t::unexpected_dimensions_k: throw std::invalid_argument(status_name(status));
-    default: throw std::runtime_error(status_name(status));
-    }
-}
-
-#endif
 
 #pragma endregion
 
@@ -2230,44 +2215,30 @@ class string_slice {
         length_ -= n;
     }
 
-#if STRINGZILLA_WITH_STL
-
     /** Added for STL compatibility. */
     string_slice_t substr() const noexcept { return *this; }
 
-    /**
-     *  @brief Return a slice of this view after first @p n bytes.
-     *  @throws @c std::out_of_range if `n > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
-     */
-    string_slice_t substr(size_type n) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice_t::substr");
+    /** Return a slice of this view after first @p n bytes, empty when @p n passes the end, like
+     *  Python's `text[n:]`. */
+    string_slice_t substr(size_type n) const noexcept {
+        n = sz_min_of_two(n, length_);
         return string_slice_t(start_ + n, length_ - n);
     }
 
-    /**
-     *  @brief Return a slice of this view after first @p n bytes, taking at most @c count bytes.
-     *  @throws @c std::out_of_range if `n > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
-     */
-    string_slice_t substr(size_type n, size_type count) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice_t::substr");
+    /** Return a slice of this view after first @p n bytes, taking at most @p count bytes, empty
+     *  when @p n passes the end, like Python's `text[n:n + count]`. */
+    string_slice_t substr(size_type n, size_type count) const noexcept {
+        n = sz_min_of_two(n, length_);
         return string_slice_t(start_ + n, sz_min_of_two(count, length_ - n));
     }
 
-    /**
-     *  @brief Exports a slice of this view after first @p n bytes, taking at most @p count bytes.
-     *  @throws @c std::out_of_range if `n > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
-     */
-    size_type copy(value_type *destination, size_type count, size_type n = 0) const noexcept(false) {
-        if (n > size()) throw std::out_of_range("string_slice_t::copy");
-        count = sz_min_of_two(count, length_ - n);
-        if (count) std::memcpy(destination, start_ + n, count);
-        return count;
+    /** Exports at most @p count bytes of this view after the first @p n, none when @p n passes
+     *  the end. @return The number of bytes written. */
+    size_type copy(value_type *destination, size_type count, size_type n = 0) const noexcept {
+        string_slice_t const exported = substr(n, count);
+        if (exported.size()) std::memcpy(destination, exported.data(), exported.size());
+        return exported.size();
     }
-
-#endif // STRINGZILLA_WITH_STL
 
 #pragma endregion
 
@@ -2291,9 +2262,9 @@ class string_slice {
      *      then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, string_view_t other) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, string_view_t other) const noexcept {
         return substr(pos1, count1).compare(other);
     }
 
@@ -2302,10 +2273,10 @@ class string_slice {
      *      of @p other, lexicographically, then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()` or if `pos2 > other.size()`.
+     *  @note A position past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, string_view_t other, size_type pos2, size_type count2) const
-        noexcept(false) {
+    int compare(size_type pos1, size_type count1, string_view_t other, size_type pos2,
+                size_type count2) const noexcept {
         return substr(pos1, count1).compare(other.substr(pos2, count2));
     }
 
@@ -2321,9 +2292,9 @@ class string_slice {
      *      then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, const_pointer other) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, const_pointer other) const noexcept {
         return substr(pos1, count1).compare(string_view_t(other));
     }
 
@@ -2332,9 +2303,9 @@ class string_slice {
      *      @p other, lexicographically, then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept {
         return substr(pos1, count1).compare(string_view_t(other, count2));
     }
 
@@ -2472,7 +2443,7 @@ class string_slice {
      *  @return The offset of the first character of the match, or @c npos if not found.
      *  @return For an @b empty @p other, `min(until, size())`.
      */
-    size_type rfind(string_view_t other, size_type until) const noexcept(false) {
+    size_type rfind(string_view_t other, size_type until) const noexcept {
         return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
     }
 
@@ -3052,10 +3023,10 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *  Functions defined for @c string, but not present in @c string_slice:
  *
  *  - @c replace, @c insert, @c erase, @c append, @c push_back, @c pop_back, @c resize,
- *  - @c try_ exception-free twins, returning a @c status_t instead of throwing,
+ *  - @c insert_at, @c replace_slice and @c erase_slice twins over signed offsets,
  *  - @c replace_all and @c erase_all similar to Boost,
  *  - @c translate for character mapping,
- *  - @c randomize, @c random for fast random string generation.
+ *  - @c fill_random for fast random string generation.
  *
  *  Functions defined for @c string_slice, but not present in @c string:
  *
@@ -3063,14 +3034,12 @@ inline utf8_uncased_needle_t::utf8_uncased_needle_t(string_view_t needle) noexce
  *    enforce lifetimes over long operations,
  *  - @c remove_prefix and @c remove_suffix.
  *
- *  @section sz_cpp_exceptions Exceptions
+ *  @section sz_cpp_errors Errors
  *
- *  Default constructor is @c constexpr. Move constructor and move assignment operator are
- *  @c noexcept. Copy constructor and copy assignment operator are not! They may throw
- *  @c std::bad_alloc if the memory allocation fails. Similar to STL @c std::out_of_range if the
- *  position argument to some of the functions is out of bounds. Same as with STL, the bound checks
- *  are often asymmetric, so pay attention to docs. If exceptions are disabled, on failure,
- *  @c std::terminate is called.
+ *  Nothing throws. The default constructor is @c constexpr, and moves are @c noexcept. Copies
+ *  and conversions go through @c copy, @c make and @c assign, and every allocating verb returns
+ *  a @c status_t, or an @c expected beside an iterator. Positions past the end clamp to it, like
+ *  Python's slices, and @c at checks its position with a debug assertion only.
  */
 template <typename allocator_type_ = std::allocator<char>>
 class string {
@@ -3094,22 +3063,6 @@ class string {
             sz_string_free(&string_, &allocator);
             return sz_success_k;
         });
-    }
-
-    void init(std::size_t length, char_type value) noexcept(false) {
-        sz_ptr_t start;
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            return (start = sz_string_init_length(&string_, length, &allocator)) ? sz_success_k : sz_bad_alloc_k;
-        }));
-        std::memset(start, value, length);
-    }
-
-    void init(string_view_t other) noexcept(false) {
-        sz_ptr_t start;
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            return (start = sz_string_init_length(&string_, other.size(), &allocator)) ? sz_success_k : sz_bad_alloc_k;
-        }));
-        if (other.size()) std::memcpy(start, other.data(), other.size());
     }
 
     void move(string &other) noexcept {
@@ -3177,62 +3130,49 @@ class string {
 
     string(string &&other) noexcept : allocator_(std::move(other.allocator_)) { move(other); }
 
-    /** Steals the buffer when the allocators propagate or compare equal, and copies the bytes
-     *  otherwise. */
-    string &operator=(string &&other) noexcept(allocator_traits_t::propagate_on_container_move_assignment::value ||
-                                               allocator_traits_t::is_always_equal::value) {
+    /** Steals the buffer, so the allocators must propagate on move or always compare equal; any
+     *  other pair copies through @ref assign, which reports a failed allocation. */
+    string &operator=(string &&other) noexcept
+        requires(allocator_traits_t::propagate_on_container_move_assignment::value ||
+                 allocator_traits_t::is_always_equal::value)
+    {
         if (this == &other) return *this;
-        if constexpr (allocator_traits_t::propagate_on_container_move_assignment::value) {
-            release();
+        release();
+        if constexpr (allocator_traits_t::propagate_on_container_move_assignment::value)
             allocator_ = std::move(other.allocator_);
-            move(other);
-        }
-        else if constexpr (allocator_traits_t::is_always_equal::value) {
-            release();
-            move(other);
-        }
-        else if (allocator_ == other.allocator_) {
-            release();
-            move(other);
-        }
-        else { assign(other.view()); }
+        move(other);
         return *this;
     }
 
-    string(string const &other) noexcept(false)
-        : allocator_(allocator_traits_t::select_on_container_copy_construction(other.allocator_)) {
-        init(other);
-    }
-
-    /** Adopts the other allocator first when it propagates, so the copy lands in its memory. */
-    string &operator=(string const &other) noexcept(false) {
-        if (this == &other) return *this;
-        if constexpr (allocator_traits_t::propagate_on_container_copy_assignment::value) {
-            if (allocator_ != other.allocator_) release();
-            allocator_ = other.allocator_;
-        }
-        return assign(other);
-    }
-
-    string(string_view_t view) noexcept(false) { init(view); }
-    string(string_view_t view, allocator_type_ const &allocator) noexcept(false) : allocator_(allocator) { init(view); }
-    string &operator=(string_view_t view) noexcept(false) { return assign(view); }
-
-    string(const_pointer c_string) noexcept(false) : string(string_view_t(c_string)) {}
-    string(const_pointer c_string, size_type length) noexcept(false) : string(string_view_t(c_string, length)) {}
-    string &operator=(const_pointer other) noexcept(false) { return assign(string_view_t(other)); }
-
+    /** Copies go through @ref copy and @ref assign, which report a failed allocation. */
+    string(string const &) = delete;
+    string &operator=(string const &) = delete;
     string(std::nullptr_t) = delete;
 
-    /** Construct a string by repeating a certain @p character @p count times. */
-    string(size_type count, value_type character) noexcept(false) { init(count, character); }
-
-    string(string const &other, size_type pos) noexcept(false) { init(string_view_t(other).substr(pos)); }
-    string(string const &other, size_type pos, size_type count) noexcept(false) {
-        init(string_view_t(other).substr(pos, count));
+    /** A copy of this string, in memory of the allocator that
+     *  @c select_on_container_copy_construction picks. */
+    expected<string> copy() const noexcept {
+        expected<string> result {string(allocator_traits_t::select_on_container_copy_construction(allocator_)),
+                                 status_t::success_k};
+        result.status = result.value.assign(view());
+        return result;
     }
 
-    string(std::initializer_list<value_type> list) noexcept(false) { init(string_view_t(list.begin(), list.size())); }
+    /** A new string holding @p content, in memory of @p allocator. */
+    static expected<string> make(string_view_t content, allocator_type_ const &allocator = allocator_type_()) noexcept {
+        expected<string> result {string(allocator), status_t::success_k};
+        result.status = result.value.assign(content);
+        return result;
+    }
+
+    /** A new string holding a lazy concatenation, like `name | "@" | domain`, in one allocation. */
+    template <typename first_type_, typename second_type_>
+    static expected<string> make(concatenation<first_type_, second_type_> const &expression,
+                                 allocator_type_ const &allocator = allocator_type_()) noexcept {
+        expected<string> result {string(allocator), status_t::success_k};
+        result.status = result.value.assign(expression);
+        return result;
+    }
 
     operator string_view_t() const noexcept sz_lifetime_bound_ { return view(); }
     string_view_t view() const noexcept sz_lifetime_bound_ {
@@ -3269,9 +3209,6 @@ class string {
 
 #if STRINGZILLA_WITH_STL
 
-    string(std::string const &other) noexcept(false) : string(other.data(), other.size()) {}
-    string &operator=(std::string const &other) noexcept(false) { return assign({other.data(), other.size()}); }
-
     // As we are need both `data()` and `size()`, going through `operator string_view_t()`
     // and `sz_string_unpack` is faster than separate invocations.
     operator std::string() const { return view(); }
@@ -3286,30 +3223,7 @@ class string {
         return os.write(str.data(), str.size());
     }
 
-    string(std::string_view other) noexcept(false) : string(other.data(), other.size()) {}
-    string &operator=(std::string_view other) noexcept(false) { return assign({other.data(), other.size()}); }
     operator std::string_view() const noexcept { return view(); }
-
-    /**
-     *  @brief Materializes a lazy concatenation expression into an owning string in one allocation.
-     *  @note Implicit on purpose, so that the documented form works:
-     *      `sz::string_t email = name | "@" | domain;`.
-     */
-    template <typename first_type_, typename second_type_>
-    string(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            sz_ptr_t ptr = sz_string_init_length(&string_, expression.length(), &allocator);
-            if (!ptr) return sz_bad_alloc_k;
-            expression.copy(ptr);
-            return sz_success_k;
-        }));
-    }
-
-    template <typename first_type_, typename second_type_>
-    string &operator=(concatenation<first_type_, second_type_> const &expression) noexcept(false) {
-        raise(try_assign(expression));
-        return *this;
-    }
 
 #endif // STRINGZILLA_WITH_STL
 
@@ -3347,18 +3261,15 @@ class string {
     pointer c_str() noexcept sz_lifetime_bound_ { return string_.internal.start; }
     const_pointer c_str() const noexcept sz_lifetime_bound_ { return string_.internal.start; }
 
-#if STRINGZILLA_WITH_STL
-
-    reference at(size_type pos) noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::string::at");
+    /** Element access checked by a debug assertion, as @c operator[] is unchecked. */
+    reference at(size_type pos) noexcept sz_lifetime_bound_ {
+        sz_assert_(pos < size());
         return string_.internal.start[pos];
     }
-    const_reference at(size_type pos) const noexcept(false) sz_lifetime_bound_ {
-        if (pos >= size()) throw std::out_of_range("sz::string::at");
+    const_reference at(size_type pos) const noexcept sz_lifetime_bound_ {
+        sz_assert_(pos < size());
         return string_.internal.start[pos];
     }
-
-#endif // STRINGZILLA_WITH_STL
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
     size_type size() const noexcept { return sz_string_length(&string_); }
@@ -3447,29 +3358,12 @@ class string {
         sz_string_erase(&string_, size() - n, n);
     }
 
-    /** Added for STL compatibility. */
-    string substr() const noexcept { return *this; }
-
     /**
-     *  @brief Return a slice of this view after first @c skip bytes.
-     *  @throws @c std::out_of_range if `skip > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
+     *  @brief Exports at most @p count bytes after the first @p skip, and none at all when
+     *      @p skip passes the end of the string.
+     *  @return The number of bytes written.
      */
-    string substr(size_type skip) const noexcept(false) { return view().substr(skip); }
-
-    /**
-     *  @brief Return a slice of this view after first @p skip bytes, taking at most @c count bytes.
-     *  @throws @c std::out_of_range if `skip > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
-     */
-    string substr(size_type skip, size_type count) const noexcept(false) { return view().substr(skip, count); }
-
-    /**
-     *  @brief Exports a slice of this view after the first @p skip bytes, at most @p count long.
-     *  @throws @c std::out_of_range if `skip > size()`.
-     *  @sa sub for a cleaner exception-less alternative.
-     */
-    size_type copy(value_type *destination, size_type count, size_type skip = 0) const noexcept(false) {
+    size_type copy(value_type *destination, size_type count, size_type skip = 0) const noexcept {
         return view().copy(destination, count, skip);
     }
 
@@ -3493,9 +3387,9 @@ class string {
      *      then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, string_view_t other) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, string_view_t other) const noexcept {
         return view().compare(pos1, count1, other);
     }
 
@@ -3504,10 +3398,10 @@ class string {
      *      of @p other, lexicographically, then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()` or if `pos2 > other.size()`.
+     *  @note A position past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, string_view_t other, size_type pos2, size_type count2) const
-        noexcept(false) {
+    int compare(size_type pos1, size_type count1, string_view_t other, size_type pos2,
+                size_type count2) const noexcept {
         return view().compare(pos1, count1, other, pos2, count2);
     }
 
@@ -3523,9 +3417,9 @@ class string {
      *      then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, const_pointer other) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, const_pointer other) const noexcept {
         return view().compare(pos1, count1, other);
     }
 
@@ -3534,9 +3428,9 @@ class string {
      *      @p other, lexicographically, then by length on a common prefix.
      *  @return 0 if equal, negative if `*this` is less than @p other, positive if `*this` is
      *      greater than @p other.
-     *  @throws @c std::out_of_range if `pos1 > size()`.
+     *  @note A @p pos1 past the end compares an empty slice.
      */
-    int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept(false) {
+    int compare(size_type pos1, size_type count1, const_pointer other, size_type count2) const noexcept {
         return view().compare(pos1, count1, other, count2);
     }
 
@@ -3828,26 +3722,29 @@ class string {
      *  @param[in] count The new size of the string.
      *  @param[in] character The character to fill new elements with, if expanding, by default
      *      the null character.
-     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
+     *  @return @c success_k, @c overflow_risk_k for a @p count past @c max_size, or @c bad_alloc_k
+     *      if the allocation failed.
      */
-    status_t try_resize(size_type count, value_type character = '\0') noexcept;
+    status_t resize(size_type count, value_type character = '\0') noexcept;
 
     /**
-     *  @brief Attempts to reduce memory usage by freeing unused memory.
+     *  @brief Reduces memory usage by freeing unused memory.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_shrink_to_fit() noexcept {
+    status_t shrink_to_fit() noexcept {
         return with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_shrink_to_fit(&string_, &allocator) ? sz_success_k : sz_bad_alloc_k;
         });
     }
 
     /**
-     *  @brief Attempts to reserve enough space for a specified number of characters.
+     *  @brief Reserves enough space for a specified number of characters.
      *  @param[in] capacity The new capacity to reserve.
-     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
+     *  @return @c success_k, @c overflow_risk_k for a @p capacity past @c max_size, or
+     *      @c bad_alloc_k if the allocation failed.
      */
-    status_t try_reserve(size_type capacity) noexcept {
+    status_t reserve(size_type capacity) noexcept {
+        if (capacity > max_size()) return status_t::overflow_risk_k;
         return with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_reserve(&string_, capacity, &allocator) ? sz_success_k : sz_bad_alloc_k;
         });
@@ -3858,7 +3755,7 @@ class string {
      *  @param[in] other The string view whose contents to assign.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_assign(string_view_t other) noexcept;
+    status_t assign(string_view_t other) noexcept;
 
     /**
      *  @brief Assigns a concatenated sequence to the string, replacing its current contents.
@@ -3866,71 +3763,63 @@ class string {
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
     template <typename first_type_, typename second_type_>
-    status_t try_assign(concatenation<first_type_, second_type_> const &other) noexcept;
+    status_t assign(concatenation<first_type_, second_type_> const &other) noexcept;
 
     /**
-     *  @brief Attempts to add a single character to the end of the string.
+     *  @brief Adds a single character to the end of the string.
      *  @param[in] c The character to add.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_push_back(char_type c) noexcept;
+    status_t push_back(char_type c) noexcept;
 
     /**
-     *  @brief Attempts to append a given character array to the string.
+     *  @brief Appends a given character array to the string.
      *  @param[in] str The pointer to the array of characters to append.
      *  @param[in] length The number of characters to append.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_append(const_pointer str, size_type length) noexcept;
+    status_t append(const_pointer str, size_type length) noexcept;
 
     /**
-     *  @brief Attempts to append a string view to the string.
+     *  @brief Appends a string view to the string.
      *  @param[in] str The string view to append.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_append(string_view_t str) noexcept { return try_append(str.data(), str.size()); }
+    status_t append(string_view_t str) noexcept { return append(str.data(), str.size()); }
 
     /**
-     *  @brief Erases @b (in-place) a range of characters defined with signed offsets.
+     *  @brief Erases @b (in-place) the characters between two signed offsets, counted from the
+     *      end when negative, like Python's `del text[start:end]`.
      *  @return Number of characters removed.
      */
-    size_type try_erase(difference_type signed_start_offset = 0, difference_type signed_end_offset = npos) noexcept {
+    size_type erase_slice(difference_type signed_start_offset = 0, difference_type signed_end_offset = npos) noexcept {
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
-        if (!normalized_length) return false;
-        sz_string_erase(&string_, normalized_offset, normalized_length);
+        if (normalized_length) sz_string_erase(&string_, normalized_offset, normalized_length);
         return normalized_length;
     }
 
     /**
-     *  @brief Inserts @b (in-place) a range of characters at a given signed offset.
-     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
+     *  @brief Inserts @b (in-place) @p string at a signed offset, counted from the end when
+     *      negative, like Python's `text[offset:offset] = string`.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    status_t try_insert(difference_type signed_offset, string_view_t string) noexcept {
+    status_t insert_at(difference_type signed_offset, string_view_t string) noexcept {
         sz_size_t normalized_offset, normalized_length;
-        sz_ssize_clamp_interval(size(), signed_offset, 0, &normalized_offset, &normalized_length);
-        status_t const status = with_allocator_([&](sz_alloc_type &allocator) {
-            return sz_string_expand(&string_, normalized_offset, string.size(), &allocator) ? sz_success_k
-                                                                                            : sz_bad_alloc_k;
-        });
-        if (failed(status)) return status;
-        if (string.size()) std::memcpy(data() + normalized_offset, string.data(), string.size());
-        return status_t::success_k;
+        sz_ssize_clamp_interval(size(), signed_offset, signed_offset, &normalized_offset, &normalized_length);
+        return insert(normalized_offset, string);
     }
 
     /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
+     *  @brief Replaces @b (in-place) the characters between two signed offsets, counted from the
+     *      end when negative, like Python's `text[start:end] = replacement`.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    status_t try_replace(difference_type signed_start_offset, difference_type signed_end_offset,
-                         string_view_t replacement) noexcept {
-
+    status_t replace_slice(difference_type signed_start_offset, difference_type signed_end_offset,
+                           string_view_t replacement) noexcept {
         sz_size_t normalized_offset, normalized_length;
         sz_ssize_clamp_interval(size(), signed_start_offset, signed_end_offset, &normalized_offset, &normalized_length);
-        status_t const status = try_preparing_replacement(normalized_offset, normalized_length, replacement.size());
-        if (failed(status)) return status;
-        if (replacement.size()) std::memcpy(data() + normalized_offset, replacement.data(), replacement.size());
-        return status_t::success_k;
+        return replace(normalized_offset, normalized_length, replacement);
     }
 
     /**
@@ -3944,7 +3833,7 @@ class string {
      *  @see https://en.cppreference.com/w/cpp/string/string/resize_and_overwrite
      */
     template <typename operation_type_>
-    status_t try_resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
+    status_t resize_and_overwrite(size_type count, operation_type_ operation) noexcept {
         if (count > max_size()) return status_t::overflow_risk_k;
 
         sz_ptr_t string_start;
@@ -4007,309 +3896,167 @@ class string {
      */
     iterator erase(const_iterator pos) noexcept sz_lifetime_bound_ { return erase(pos, pos + 1); }
 
-#if STRINGZILLA_WITH_STL
-
     /**
-     *  @brief Resizes the string to match @p count, filling the new space with the given
-     *      @p character.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
+     *  @brief Inserts @b (in-place) @p character @p repeats times at @p offset, clamped to the end.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    void resize(size_type count, value_type character = '\0') noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::string::resize");
-        raise(try_resize(count, character));
+    status_t insert(size_type offset, size_type repeats, char_type character) noexcept {
+        offset = sz_min_of_two(offset, size());
+        status_t const status = preparing_replacement(offset, 0, repeats);
+        if (succeeded(status)) std::memset(data() + offset, character, repeats);
+        return status;
     }
 
     /**
-     *  @brief Resizes the string to a specified number of characters without initializing new
-     *      elements, calling the provided callback to overwrite the resized contents.
-     *  @param[in] count The new size of the string.
-     *  @param[in] operation A callback that receives a pointer and the new size, and returns the
-     *      actual new size.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @see https://en.cppreference.com/w/cpp/string/string/resize_and_overwrite
+     *  @brief Inserts @b (in-place) @p other at @p offset, clamped to the end.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    template <typename operation_type_>
-    void resize_and_overwrite(size_type count, operation_type_ operation) noexcept(false) {
-        if (count > max_size()) throw std::length_error("sz::string::resize_and_overwrite");
-        raise(try_resize_and_overwrite(count, operation));
+    status_t insert(size_type offset, string_view_t other) noexcept {
+        offset = sz_min_of_two(offset, size());
+        status_t const status = preparing_replacement(offset, 0, other.size());
+        if (succeeded(status) && other.size()) std::memcpy(data() + offset, other.data(), other.size());
+        return status;
     }
 
-    /**
-     *  @brief Reclaims the unused memory, if any.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    void shrink_to_fit() noexcept(false) { raise(try_shrink_to_fit()); }
-
-    /**
-     *  @brief Informs the string object of a planned change in size, so that it pre-allocate once.
-     *  @throws @c std::length_error if the string is too long.
-     */
-    void reserve(size_type capacity) noexcept(false) {
-        if (capacity > max_size()) throw std::length_error("sz::string::reserve");
-        raise(try_reserve(capacity));
-    }
-
-    /**
-     *  @brief Inserts @b (in-place) a ::character multiple times at the given offset.
-     *  @throws @c std::out_of_range if `offset > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    string &insert(size_type offset, size_type repeats, char_type character) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::string::insert");
-        if (size() + repeats > max_size()) throw std::length_error("sz::string::insert");
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            return sz_string_expand(&string_, offset, repeats, &allocator) ? sz_success_k : sz_bad_alloc_k;
-        }));
-        std::memset(data() + offset, character, repeats);
-        return *this;
-    }
-
-    /**
-     *  @brief Inserts @b (in-place) a range of characters at the given offset.
-     *  @throws @c std::out_of_range if `offset > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    string &insert(size_type offset, string_view_t other) noexcept(false) {
-        if (offset > size()) throw std::out_of_range("sz::string::insert");
-        if (size() + other.size() > max_size()) throw std::length_error("sz::string::insert");
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            return sz_string_expand(&string_, offset, other.size(), &allocator) ? sz_success_k : sz_bad_alloc_k;
-        }));
-        if (other.size()) std::memcpy(data() + offset, other.data(), other.size());
-        return *this;
-    }
-
-    /**
-     *  @brief Inserts @b (in-place) a range of characters at the given offset.
-     *  @throws @c std::out_of_range if `offset > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    string &insert(size_type offset, const_pointer start, size_type length) noexcept(false) {
+    /** Inserts @b (in-place) @p length characters from @p start at @p offset, clamped to the
+     *  end. */
+    status_t insert(size_type offset, const_pointer start, size_type length) noexcept {
         return insert(offset, string_view_t(start, length));
     }
 
-    /**
-     *  @brief Inserts @b (in-place) a slice of another string at the given offset.
-     *  @throws @c std::out_of_range if `offset > size()` or `other_index > other.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    string &insert(size_type offset, string_view_t other, size_type other_index,
-                   size_type count = npos) noexcept(false) {
+    /** Inserts @b (in-place) at most @p count characters of @p other after its first @p other_index
+     *  at @p offset, clamping both positions to their ends. */
+    status_t insert(size_type offset, string_view_t other, size_type other_index, size_type count = npos) noexcept {
         return insert(offset, other.substr(other_index, count));
     }
 
     /**
-     *  @brief Inserts @b (in-place) one ::character at the given iterator position.
-     *  @throws @c std::out_of_range if `pos > size()` or `other_index > other.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
+     *  @brief Inserts @b (in-place) @p character before @p it.
+     *  @return The iterator to the inserted character, with the status of the allocation.
      */
-    iterator insert(const_iterator it, char_type character) noexcept(false) sz_lifetime_bound_ {
-        auto pos = range_length(cbegin(), it);
-        insert(pos, string_view_t(&character, 1));
-        return begin() + pos;
+    expected<iterator> insert(const_iterator it, char_type character) noexcept sz_lifetime_bound_ {
+        return insert(it, size_type(1), character);
     }
 
     /**
-     *  @brief Inserts @b (in-place) a ::character multiple times at the given iterator position.
-     *  @throws @c std::out_of_range if `pos > size()` or `other_index > other.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
+     *  @brief Inserts @b (in-place) @p character @p repeats times before @p it.
+     *  @return The iterator to the first inserted character, with the status of the allocation.
      */
-    iterator insert(const_iterator it, size_type repeats, char_type character) noexcept(false) sz_lifetime_bound_ {
-        auto pos = range_length(cbegin(), it);
-        insert(pos, repeats, character);
-        return begin() + pos;
+    expected<iterator> insert(const_iterator it, size_type repeats, char_type character) noexcept sz_lifetime_bound_ {
+        size_type const offset = range_length(cbegin(), it);
+        status_t const status = insert(offset, repeats, character);
+        return {begin() + offset, status};
     }
 
     /**
-     *  @brief Inserts @b (in-place) a range at the given iterator position.
-     *  @throws @c std::out_of_range if `pos > size()` or `other_index > other.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
+     *  @brief Inserts @b (in-place) the characters between @p first and @p last before @p it.
+     *  @return The iterator to the first inserted character, with the status of the allocation.
      */
     template <typename input_iterator>
-    iterator insert(const_iterator it, input_iterator first, input_iterator last) noexcept(false) sz_lifetime_bound_ {
-
-        auto pos = range_length(cbegin(), it);
-        if (pos > size()) throw std::out_of_range("sz::string::insert");
-
-        auto added_length = range_length(first, last);
-        if (size() + added_length > max_size()) throw std::length_error("sz::string::insert");
-
-        raise(with_allocator_([&](sz_alloc_type &allocator) {
-            return sz_string_expand(&string_, pos, added_length, &allocator) ? sz_success_k : sz_bad_alloc_k;
-        }));
-
-        iterator result = begin() + pos;
-        for (iterator output = result; first != last; ++first, ++output) *output = *first;
-        return result;
+    expected<iterator> insert(const_iterator it, input_iterator first,
+                              input_iterator last) noexcept sz_lifetime_bound_ {
+        size_type const offset = range_length(cbegin(), it);
+        status_t const status = preparing_replacement(offset, 0, range_length(first, last));
+        iterator const inserted = begin() + offset;
+        for (iterator output = inserted; succeeded(status) && first != last; ++first, ++output) *output = *first;
+        return {inserted, status};
     }
 
     /**
-     *  @brief Inserts @b (in-place) an initializer list of characters.
-     *  @throws @c std::out_of_range if `pos > size()` or `other_index > other.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
+     *  @brief Inserts @b (in-place) the characters of @p list before @p it.
+     *  @return The iterator to the first inserted character, with the status of the allocation.
      */
-    iterator insert(const_iterator it, std::initializer_list<char_type> list) noexcept(false) sz_lifetime_bound_ {
+    expected<iterator> insert(const_iterator it, std::initializer_list<char_type> list) noexcept sz_lifetime_bound_ {
         return insert(it, list.begin(), list.end());
     }
 
-    /**
-     *  @brief Erases @b (in-place) the given range of characters.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @sa try_erase_slice for a cleaner exception-less alternative.
-     */
-    string &erase(size_type pos = 0, size_type count = npos) noexcept(false) {
-        if (!count || empty()) return *this;
-        if (pos >= size()) throw std::out_of_range("sz::string::erase");
-        sz_string_erase(&string_, pos, count);
+    /** Erases @b (in-place) at most @p count characters from @p pos, none when @p pos passes the
+     *  end. */
+    string &erase(size_type pos = 0, size_type count = npos) noexcept {
+        if (pos < size()) sz_string_erase(&string_, pos, count);
         return *this;
     }
 
     /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
+     *  @brief Replaces @b (in-place) at most @p count characters from @p pos with @p str, clamping
+     *      @p pos to the end, where the replacement appends.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    string &replace(size_type pos, size_type count, string_view_t const &str) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::string::replace");
-        if (size() - count + str.size() > max_size()) throw std::length_error("sz::string::replace");
-        raise(try_preparing_replacement(pos, count, str.size()));
-        if (str.size()) std::memcpy(data() + pos, str.data(), str.size());
-        return *this;
+    status_t replace(size_type pos, size_type count, string_view_t const &str) noexcept {
+        pos = sz_min_of_two(pos, size()), count = sz_min_of_two(count, size() - pos);
+        status_t const status = preparing_replacement(pos, count, str.size());
+        if (succeeded(status) && str.size()) std::memcpy(data() + pos, str.data(), str.size());
+        return status;
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(const_iterator first, const_iterator last, string_view_t const &str) noexcept(false) {
-        return replace(range_length(cbegin(), first), last - first, str);
+    /** Replaces @b (in-place) the characters between @p first and @p last with @p str. */
+    status_t replace(const_iterator first, const_iterator last, string_view_t const &str) noexcept {
+        return replace(range_length(cbegin(), first), range_length(first, last), str);
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()` or `pos2 > str.size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(size_type pos, size_type count, string_view_t const &str, size_type pos2,
-                    size_type count2 = npos) noexcept(false) {
+    /** Replaces @b (in-place) at most @p count characters from @p pos with at most @p count2
+     *  characters of @p str after its first @p pos2, clamping every position to its end. */
+    status_t replace(size_type pos, size_type count, string_view_t const &str, size_type pos2,
+                     size_type count2 = npos) noexcept {
         return replace(pos, count, str.substr(pos2, count2));
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(size_type pos, size_type count, const_pointer cstr, size_type count2) noexcept(false) {
+    /** Replaces @b (in-place) at most @p count characters from @p pos with @p count2 characters
+     *  from @p cstr. */
+    status_t replace(size_type pos, size_type count, const_pointer cstr, size_type count2) noexcept {
         return replace(pos, count, string_view_t(cstr, count2));
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(const_iterator first, const_iterator last, const_pointer cstr, size_type count2) noexcept(false) {
-        return replace(range_length(cbegin(), first), last - first, string_view_t(cstr, count2));
+    /** Replaces @b (in-place) the characters between @p first and @p last with @p count2
+     *  characters from @p cstr. */
+    status_t replace(const_iterator first, const_iterator last, const_pointer cstr, size_type count2) noexcept {
+        return replace(first, last, string_view_t(cstr, count2));
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(size_type pos, size_type count, const_pointer cstr) noexcept(false) {
+    /** Replaces @b (in-place) at most @p count characters from @p pos with the null-terminated
+     *  @p cstr. */
+    status_t replace(size_type pos, size_type count, const_pointer cstr) noexcept {
         return replace(pos, count, string_view_t(cstr));
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(const_iterator first, const_iterator last, const_pointer cstr) noexcept(false) {
-        return replace(range_length(cbegin(), first), last - first, string_view_t(cstr));
+    /** Replaces @b (in-place) the characters between @p first and @p last with the
+     *  null-terminated @p cstr. */
+    status_t replace(const_iterator first, const_iterator last, const_pointer cstr) noexcept {
+        return replace(first, last, string_view_t(cstr));
     }
 
     /**
-     *  @brief Replaces @b (in-place) a range of characters with a repetition of given characters.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
+     *  @brief Replaces @b (in-place) at most @p count characters from @p pos with @p character
+     *      repeated @p count2 times, clamping @p pos to the end.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    string &replace(size_type pos, size_type count, size_type count2, char_type character) noexcept(false) {
-        if (pos > size()) throw std::out_of_range("sz::string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::string::replace");
-        raise(try_preparing_replacement(pos, count, count2));
-        std::memset(data() + pos, character, count2);
-        return *this;
+    status_t replace(size_type pos, size_type count, size_type count2, char_type character) noexcept {
+        pos = sz_min_of_two(pos, size()), count = sz_min_of_two(count, size() - pos);
+        status_t const status = preparing_replacement(pos, count, count2);
+        if (succeeded(status)) std::memset(data() + pos, character, count2);
+        return status;
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a repetition of given characters.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(const_iterator first, const_iterator last, size_type count2, char_type character) noexcept(false) {
-        return replace(range_length(cbegin(), first), last - first, count2, character);
+    /** Replaces @b (in-place) the characters between @p first and @p last with @p character
+     *  repeated @p count2 times. */
+    status_t replace(const_iterator first, const_iterator last, size_type count2, char_type character) noexcept {
+        return replace(range_length(cbegin(), first), range_length(first, last), count2, character);
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given string.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
+    /** Replaces @b (in-place) the characters between @p first and @p last with those between
+     *  @p first2 and @p last2. */
     template <typename input_iterator>
-    string &replace(const_iterator first, const_iterator last, input_iterator first2,
-                    input_iterator last2) noexcept(false) {
-        auto pos = range_length(cbegin(), first);
-        auto count = range_length(first, last);
-        auto count2 = range_length(first2, last2);
-        if (pos > size()) throw std::out_of_range("sz::string::replace");
-        if (size() - count + count2 > max_size()) throw std::length_error("sz::string::replace");
-        raise(try_preparing_replacement(pos, count, count2));
-        for (iterator output = begin() + pos; first2 != last2; ++first2, ++output) *output = *first2;
-        return *this;
+    status_t replace(const_iterator first, const_iterator last, input_iterator first2, input_iterator last2) noexcept {
+        size_type const pos = range_length(cbegin(), first);
+        status_t const status = preparing_replacement(pos, range_length(first, last), range_length(first2, last2));
+        for (iterator output = begin() + pos; succeeded(status) && first2 != last2; ++first2, ++output)
+            *output = *first2;
+        return status;
     }
 
-    /**
-     *  @brief Replaces @b (in-place) a range of characters with a given initializer list.
-     *  @throws @c std::out_of_range if `pos > size()`.
-     *  @throws @c std::length_error if the string is too long.
-     *  @sa try_replace for a cleaner exception-less alternative.
-     */
-    string &replace(const_iterator first, const_iterator last, std::initializer_list<char_type> list) noexcept(false) {
+    /** Replaces @b (in-place) the characters between @p first and @p last with those of @p list. */
+    status_t replace(const_iterator first, const_iterator last, std::initializer_list<char_type> list) noexcept {
         return replace(first, last, list.begin(), list.end());
-    }
-
-    /**
-     *  @brief Appends the given character at the end.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    void push_back(char_type ch) noexcept(false) {
-        if (size() == max_size()) throw std::length_error("string::push_back");
-        raise(try_push_back(ch));
     }
 
     /**
@@ -4319,152 +4066,62 @@ class string {
     void pop_back() noexcept { sz_string_erase(&string_, size() - 1, 1); }
 
     /**
-     *  @brief Overwrites the string with the given string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
+     *  @brief Overwrites the string with @p character repeated @p repeats times.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    string &assign(string_view_t other) noexcept(false) {
-        raise(try_assign(other));
-        return *this;
+    status_t assign(size_type repeats, char_type character) noexcept {
+        status_t const status = resize(repeats, character);
+        if (succeeded(status)) std::memset(data(), character, repeats);
+        return status;
     }
 
-    /**
-     *  @brief Overwrites the string with the given repeated character.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
-     */
-    string &assign(size_type repeats, char_type character) noexcept(false) {
-        resize(repeats, character);
-        std::memset(data(), character, repeats);
-        return *this;
-    }
+    /** Overwrites the string with @p length characters from @p other. */
+    status_t assign(const_pointer other, size_type length) noexcept { return assign(string_view_t(other, length)); }
 
-    /**
-     *  @brief Overwrites the string with the given string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
-     */
-    string &assign(const_pointer other, size_type length) noexcept(false) { return assign({other, length}); }
-
-    /**
-     *  @brief Overwrites the string with the given string.
-     *  @throws @c std::length_error if the string is too long or `pos > str.size()`.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
-     */
-    string &assign(string_view_t str, size_type pos, size_type count = npos) noexcept(false) {
+    /** Overwrites the string with at most @p count characters of @p str after its first @p pos,
+     *  clamping @p pos to its end. */
+    status_t assign(string_view_t str, size_type pos, size_type count = npos) noexcept {
         return assign(str.substr(pos, count));
     }
 
-    /**
-     *  @brief Overwrites the string with the given iterator range.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
-     */
+    /** Overwrites the string with the characters between @p first and @p last. */
     template <typename input_iterator>
-    string &assign(input_iterator first, input_iterator last) noexcept(false) {
-        resize(range_length(first, last));
-        for (iterator output = begin(); first != last; ++first, ++output) *output = *first;
-        return *this;
+    status_t assign(input_iterator first, input_iterator last) noexcept {
+        status_t const status = resize(range_length(first, last));
+        for (iterator output = begin(); succeeded(status) && first != last; ++first, ++output) *output = *first;
+        return status;
     }
 
-    /**
-     *  @brief Overwrites the string with the given initializer list.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_assign for a cleaner exception-less alternative.
-     */
-    string &assign(std::initializer_list<char_type> list) noexcept(false) { return assign(list.begin(), list.end()); }
+    /** Overwrites the string with the characters of @p list. */
+    status_t assign(std::initializer_list<char_type> list) noexcept { return assign(list.begin(), list.end()); }
 
-    /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
-    string &append(string_view_t str) noexcept(false) {
-        raise(try_append(str));
-        return *this;
-    }
-
-    /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long or `pos > str.size()`.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
-    string &append(string_view_t str, size_type pos, size_type length = npos) noexcept(false) {
+    /** Appends at most @p length characters of @p str after its first @p pos, clamping @p pos to
+     *  its end. */
+    status_t append(string_view_t str, size_type pos, size_type length = npos) noexcept {
         return append(str.substr(pos, length));
     }
 
-    /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
-    string &append(const_pointer str, size_type length) noexcept(false) { return append({str, length}); }
+    /** Appends the null-terminated @p str. */
+    status_t append(const_pointer str) noexcept { return append(string_view_t(str)); }
 
     /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
+     *  @brief Appends @p character repeated @p repeats times.
+     *  @return @c success_k, @c bad_alloc_k, or @c overflow_risk_k past @c max_size.
      */
-    string &append(const_pointer str) noexcept(false) { return append(string_view_t(str)); }
-
-    /**
-     *  @brief Appends a repeated character to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
-    string &append(size_type repeats, char_type ch) noexcept(false) {
-        resize(size() + repeats, ch);
-        return *this;
+    status_t append(size_type repeats, char_type character) noexcept {
+        if (repeats > max_size() - size()) return status_t::overflow_risk_k;
+        return resize(size() + repeats, character);
     }
 
-    /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
-    string &append(std::initializer_list<char_type> other) noexcept(false) {
-        return append(other.begin(), other.end());
-    }
+    /** Appends the characters of @p other. */
+    status_t append(std::initializer_list<char_type> other) noexcept { return append(other.begin(), other.end()); }
 
-    /**
-     *  @brief Appends to the end of the current string.
-     *  @throws @c std::length_error if the string is too long.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     *  @sa try_append for a cleaner exception-less alternative.
-     */
+    /** Appends the characters between @p first and @p last. */
     template <typename input_iterator>
-    string &append(input_iterator first, input_iterator last) noexcept(false) {
-        insert<input_iterator>(cend(), first, last);
-        return *this;
+    status_t append(input_iterator first, input_iterator last) noexcept {
+        return insert<input_iterator>(cend(), first, last).status;
     }
 
-    string &operator+=(string_view_t other) noexcept(false) { return append(other); }
-    string &operator+=(std::initializer_list<char_type> other) noexcept(false) { return append(other); }
-    string &operator+=(char_type character) noexcept(false) { return operator+=(string_view_t(&character, 1)); }
-    string &operator+=(const_pointer other) noexcept(false) { return operator+=(string_view_t(other)); }
-
-    string operator+(char_type character) const noexcept(false) { return operator+(string_view_t(&character, 1)); }
-    string operator+(const_pointer other) const noexcept(false) { return operator+(string_view_t(other)); }
-    string operator+(string_view_t other) const noexcept(false) {
-        return string {concatenation<string_view_t, string_view_t> {view(), other}};
-    }
-    string operator+(std::initializer_list<char_type> other) const noexcept(false) {
-        return string {concatenation<string_view_t, string_view_t> {view(), string_view_t(other)}};
-    }
-
-#endif
 #pragma endregion
 #pragma endregion
 
@@ -4504,23 +4161,6 @@ class string {
     }
 
     /**
-     *  @brief Generate a new random binary string of given @p length.
-     *  @param[in] length The length of the generated string.
-     *  @param[in] nonce "Number used once" seeding the random number generator, @b never repeat it!
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    static string random(size_type length, std::uint64_t nonce) noexcept(false) {
-        return string(length, '\0').fill_random(nonce);
-    }
-
-    /**
-     *  @brief Generate a new random binary string of given @p length.
-     *  @param[in] length The length of the generated string.
-     *  @throws @c std::bad_alloc if the allocation fails.
-     */
-    static string random(size_type length) noexcept(false) { return string(length, '\0').fill_random(); }
-
-    /**
      *  @brief Replaces @b (in-place) all occurrences of a given string with the @p replacement.
      *  @note Similar to @c boost::algorithm::replace_all and Python's `str.replace`.
      *
@@ -4528,9 +4168,8 @@ class string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    string &replace_all(string_view_t pattern, string_view_t replacement) noexcept(false) {
-        raise(try_replace_all(pattern, replacement));
-        return *this;
+    status_t replace_all(string_view_t pattern, string_view_t replacement) noexcept {
+        return replace_all_<string_view_t>(pattern, replacement);
     }
 
     /**
@@ -4542,34 +4181,8 @@ class string {
      *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
      *  or when this string is made exclusively of the pattern.
      */
-    string &replace_all(byteset_t pattern, string_view_t replacement) noexcept(false) {
-        raise(try_replace_all(pattern, replacement));
-        return *this;
-    }
-
-    /**
-     *  @brief Replaces @b (in-place) all occurrences of a given string with the @p replacement.
-     *  @note Similar to @c boost::algorithm::replace_all and Python's `str.replace`.
-     *
-     *  The implementation is less composable than search ranges combined with a replacing mapping
-     *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
-     *  or when this string is made exclusively of the pattern.
-     */
-    status_t try_replace_all(string_view_t pattern, string_view_t replacement) noexcept {
-        return try_replace_all_<string_view_t>(pattern, replacement);
-    }
-
-    /**
-     *  @brief Replaces @b (in-place) all occurrences of a given character set with the
-     *      @p replacement string.
-     *  @note Similar to @c boost::algorithm::replace_all and Python's `str.replace`.
-     *
-     *  The implementation is less composable than search ranges combined with a replacing mapping
-     *  for matches, and may be suboptimal when exporting the cleaned-up string to another buffer,
-     *  or when this string is made exclusively of the pattern.
-     */
-    status_t try_replace_all(byteset_t pattern, string_view_t replacement) noexcept {
-        return try_replace_all_<byteset_t>(pattern, replacement);
+    status_t replace_all(byteset_t pattern, string_view_t replacement) noexcept {
+        return replace_all_<byteset_t>(pattern, replacement);
     }
 
     /**
@@ -4658,7 +4271,7 @@ class string {
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      *  @note The string may grow due to expansions, like U+00DF → "ss", by 3× in the worst case.
      */
-    status_t try_utf8_uncased_fold() noexcept {
+    status_t utf8_uncased_fold() noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
@@ -4667,7 +4280,7 @@ class string {
 
         // Allocate result buffer (worst-case 3x expansion), fold into it, then swap
         string result(allocator_);
-        status_t const status = result.try_resize_and_overwrite(
+        status_t const status = result.resize_and_overwrite(
             string_length * 3, [string_start, string_length](char_type *buf, size_type) {
                 return best_result_<sz_utf8_uncased_fold_best, sz_size_t>(string_start, string_length, buf);
             });
@@ -4711,7 +4324,7 @@ class string {
      *      @c sz_normal_form_nfkd_k, or @c sz_normal_form_nfkc_k.
      *  @return @c success_k, or @c bad_alloc_k if the allocation failed.
      */
-    status_t try_utf8_normalize(sz_normal_form_t form) noexcept {
+    status_t utf8_normalize(sz_normal_form_t form) noexcept {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_size_t string_space;
@@ -4720,7 +4333,7 @@ class string {
 
         // Allocate result buffer (worst-case 18x expansion), normalize into it, then swap
         string result(allocator_);
-        status_t const status = result.try_resize_and_overwrite(
+        status_t const status = result.resize_and_overwrite(
             string_length * 18, [string_start, string_length, form](char_type *buf, size_type) {
                 return best_result_<sz_utf8_norm_best, sz_size_t>(string_start, string_length, form, buf);
             });
@@ -4732,13 +4345,13 @@ class string {
 
   private:
     template <typename pattern_type>
-    status_t try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept;
+    status_t replace_all_(pattern_type pattern, string_view_t replacement) noexcept;
 
     /**
-     *  @brief Tries to prepare the string for a replacement of a given range with a new string.
+     *  @brief Prepares the string for a replacement of a given range with a new string.
      *  @warning Allocates memory if the replacement is longer than the replaced range.
      */
-    status_t try_preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
+    status_t preparing_replacement(size_type offset, size_type length, size_type new_length) noexcept;
 };
 
 using string_t = string<>;
@@ -4753,7 +4366,8 @@ inline constexpr byteset_t operator""_bs(char const *str, std::size_t length) no
 } // namespace literals
 
 template <typename allocator_>
-status_t string<allocator_>::try_resize(size_type count, value_type character) noexcept {
+status_t string<allocator_>::resize(size_type count, value_type character) noexcept {
+    if (count > max_size()) return status_t::overflow_risk_k;
     sz_ptr_t string_start;
     sz_size_t string_length;
     sz_size_t string_space;
@@ -4784,7 +4398,7 @@ status_t string<allocator_>::try_resize(size_type count, value_type character) n
 }
 
 template <typename allocator_>
-status_t string<allocator_>::try_assign(string_view_t other) noexcept {
+status_t string<allocator_>::assign(string_view_t other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -4815,7 +4429,7 @@ status_t string<allocator_>::try_assign(string_view_t other) noexcept {
 }
 
 template <typename allocator_>
-status_t string<allocator_>::try_push_back(char_type c) noexcept {
+status_t string<allocator_>::push_back(char_type c) noexcept {
     return with_allocator_([&](sz_alloc_type &allocator) {
         auto old_size = size();
         sz_ptr_t start = sz_string_expand(&string_, STRINGZILLA_SIZE_MAX, 1, &allocator);
@@ -4826,7 +4440,7 @@ status_t string<allocator_>::try_push_back(char_type c) noexcept {
 }
 
 template <typename allocator_>
-status_t string<allocator_>::try_append(const_pointer str, size_type length) noexcept {
+status_t string<allocator_>::append(const_pointer str, size_type length) noexcept {
     return with_allocator_([&](sz_alloc_type &allocator) {
         // Sometimes we are inserting part of this string into itself.
         // By the time `sz_string_expand` finished, the old `str` pointer may be invalidated,
@@ -4849,7 +4463,7 @@ status_t string<allocator_>::try_append(const_pointer str, size_type length) noe
 
 template <typename allocator_>
 template <typename pattern_type>
-status_t string<allocator_>::try_replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
+status_t string<allocator_>::replace_all_(pattern_type pattern, string_view_t replacement) noexcept {
     // Depending on the size of the pattern and the replacement, we may need to allocate more space.
     // There are 3 cases to consider:
     // 1. The pattern and the replacement are of the same length. Piece of cake!
@@ -4897,7 +4511,7 @@ status_t string<allocator_>::try_replace_all_(pattern_type pattern, string_view_
             ++matches_iterator;
         } while (matches_iterator != end_sentinel_t {});
 
-        return try_resize(compacted_end - begin());
+        return resize(compacted_end - begin());
     }
 
     // 3. The pattern is shorter than the replacement. We may have to allocate more memory.
@@ -4918,7 +4532,7 @@ status_t string<allocator_>::try_replace_all_(pattern_type pattern, string_view_
         auto added_length = matches_count * replacement_delta_length;
         auto old_length = size();
         auto new_length = old_length + added_length;
-        status_t const status = try_resize(new_length);
+        status_t const status = resize(new_length);
         if (failed(status)) return status;
         this_view = view().front(old_length);
 
@@ -4946,7 +4560,7 @@ status_t string<allocator_>::try_replace_all_(pattern_type pattern, string_view_
 
 template <typename allocator_>
 template <typename first_type_, typename second_type_>
-status_t string<allocator_>::try_assign(concatenation<first_type_, second_type_> const &other) noexcept {
+status_t string<allocator_>::assign(concatenation<first_type_, second_type_> const &other) noexcept {
     // We can't just assign the other string state, as its start address may be somewhere else on the stack.
     sz_ptr_t string_start;
     sz_size_t string_length;
@@ -4966,7 +4580,7 @@ status_t string<allocator_>::try_assign(concatenation<first_type_, second_type_>
 }
 
 template <typename allocator_>
-status_t string<allocator_>::try_preparing_replacement( //
+status_t string<allocator_>::preparing_replacement( //
     size_type offset, size_type length, size_type replacement_length) noexcept {
 
     // There are three cases:
@@ -4985,6 +4599,7 @@ status_t string<allocator_>::try_preparing_replacement( //
     }
     // 3. The replacement is longer than the replaced range. An allocation may occur.
     else {
+        if (replacement_length - length > max_size() - size()) return status_t::overflow_risk_k;
         return with_allocator_([&](sz_alloc_type &allocator) {
             return sz_string_expand(&string_, offset + length, replacement_length - length, &allocator)
                        ? sz_success_k
@@ -5003,6 +4618,9 @@ status_t string<allocator_>::try_preparing_replacement( //
  *  @see std::less: https://en.cppreference.com/w/cpp/utility/functional/less
  */
 struct less {
+
+    /** Lets ordered containers find owning keys by views, without building a key to search for. */
+    using is_transparent = void;
     inline bool operator()(string_view_t a, string_view_t b) const noexcept { return a < b; }
 };
 
@@ -5016,6 +4634,9 @@ struct less {
  *  @see std::equal_to: https://en.cppreference.com/w/cpp/utility/functional/equal_to
  */
 struct equal_to {
+
+    /** Lets hashed containers find owning keys by views, beside a transparent @ref hash. */
+    using is_transparent = void;
     inline bool operator()(string_view_t a, string_view_t b) const noexcept { return a == b; }
 };
 
@@ -5029,6 +4650,9 @@ struct equal_to {
  *  @see std::hash: https://en.cppreference.com/w/cpp/utility/functional/hash
  */
 struct hash {
+
+    /** Lets hashed containers find owning keys by views, beside a transparent @ref equal_to. */
+    using is_transparent = void;
     inline std::size_t operator()(string_view_t str) const noexcept { return str.hash(); }
 };
 
@@ -5054,7 +4678,7 @@ struct concatenation_result<first_type_, following_types_...> {
  */
 template <typename first_type_, typename second_type_>
 concatenation<typename concatenation_operand<first_type_>::type, typename concatenation_operand<second_type_>::type>
-concatenate(first_type_ &&first, second_type_ &&second) noexcept(false) {
+concatenate(first_type_ &&first, second_type_ &&second) noexcept {
     return {first, second};
 }
 
@@ -5064,7 +4688,7 @@ concatenate(first_type_ &&first, second_type_ &&second) noexcept(false) {
  */
 template <typename first_type_, typename second_type_, typename... following_types_>
 typename concatenation_result<first_type_, second_type_, following_types_...>::type concatenate(
-    first_type_ &&first, second_type_ &&second, following_types_ &&...following) noexcept(false) {
+    first_type_ &&first, second_type_ &&second, following_types_ &&...following) noexcept {
     // Fold expression like the one below would result in faster compile times,
     // but would incur the penalty of additional `if`-statements in every `append` call.
     //      std::size_t total_size = (strings.size() + ... + 0);
@@ -5235,7 +4859,7 @@ expected<string<allocator_type_>> strings_view_t::join(std::span<sz_strings_view
     result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
                                                                separator, nullptr, &length, capabilities, stream));
     if (failed(result.status)) return result;
-    status_t const resized = result.value.try_resize_and_overwrite(length, [&](char *output, std::size_t) {
+    status_t const resized = result.value.resize_and_overwrite(length, [&](char *output, std::size_t) {
         result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
                                                                    separator, output, &length, capabilities, stream));
         return length;

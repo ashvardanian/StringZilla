@@ -324,10 +324,12 @@ void bench_strings_split_join(environment_t const &env, corpus_t const &corpus) 
     print(bench_nullary(env, corpus, "split_lines<loop>", split_lines_best_t {corpus}, split_lines_by_loop_t {corpus}),
           baseline_of(lines));
 
+    strings_input_t gathered(corpus);
     using join_best_t = strings_join_from_sz<cpu_best<sz_strings_join_best>>;
-    std::optional<row_t> const joined = bench_nullary(env, corpus, "sz_strings_join_best", join_best_t {corpus});
+    std::optional<row_t> const joined = bench_nullary(env, corpus, "sz_strings_join_best", join_best_t {gathered});
     print(joined);
-    print(bench_nullary(env, corpus, "join<loop>", join_best_t {corpus}, join_by_loop_t {corpus}), baseline_of(joined));
+    print(bench_nullary(env, corpus, "join<loop>", join_best_t {gathered}, join_by_loop_t {corpus}),
+          baseline_of(joined));
 }
 
 #pragma endregion Strings
