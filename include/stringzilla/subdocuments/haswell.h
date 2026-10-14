@@ -6,7 +6,8 @@
  *      search, under the serial walks.
  *
  *  A 64-byte block is two registers, each classified by one pair of nibble lookups. Shifting a
- *  class bit to the top of its byte makes that class's mask one movemask per register.
+ *  class bit to the top of its byte makes that class's mask one movemask per register, and the
+ *  bytes inside strings are one carry-less multiply of the quotes by all ones.
  *
  *  @sa include/stringzilla/subdocuments.h
  */
@@ -25,13 +26,19 @@ extern "C" {
 #if STRINGZILLA_ARCH_X8664_
 #if STRINGZILLA_ARCH_X8664_HASWELL_
 #if defined(__clang__)
-#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt"))), apply_to = function)
+#pragma clang attribute push(__attribute__((target("avx2,bmi,bmi2,lzcnt,pclmul"))), apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
-#pragma GCC target("avx2", "bmi", "bmi2", "lzcnt")
+#pragma GCC target("avx2", "bmi", "bmi2", "lzcnt", "pclmul")
 #endif
 
 #pragma region Haswell
+
+/** @ref sz_subdocuments_prefix_xor_serial_ as one carry-less multiply by all ones. */
+STRINGZILLA_INLINE sz_u64_t sz_subdocuments_prefix_xor_haswell_(sz_u64_t bits) {
+    return (sz_u64_t)_mm_cvtsi128_si64(
+        _mm_clmulepi64_si128(_mm_cvtsi64_si128((long long)bits), _mm_set1_epi8((char)0xFF), 0));
+}
 
 /** Classifies a block as two halves, moving each class bit to the top of its byte for a movemask; a
  *  16-bit shift by at most 7 leaves every byte's top bit its own. */
@@ -61,7 +68,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_haswell_(sz_
                       _mm256_or_si256(_mm256_slli_epi16(classes_u8x32, 1), classes_u8x32))
                   << shift;
     }
-    return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
+    return sz_subdocuments_block_settle_with_(quotes, backslashes, opens, closes, separators, blanks,
+                                              &sz_subdocuments_prefix_xor_haswell_, carry);
 }
 
 #if STRINGZILLA_TARGET_HASWELL

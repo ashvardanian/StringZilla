@@ -233,8 +233,8 @@ typedef enum sz_levenshtein_classes_width_t {
  *
  *  @param[inout] cursors Byte offsets into each candidate's text, advanced past what was emitted.
  *  @param[in] transpose_start The absolute position of the transpose's first symbol.
- *  @param[out] transpose_classes @c positions × candidates class ids, @c sz_u32_t for
- *      the transposes here.
+ *  @param[out] transpose_classes @c positions × candidates class ids, of which the rows filled are
+ *      written, @c sz_u32_t for the transposes here.
  */
 typedef sz_size_t (*sz_levenshtein_transpose_t_)(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
                                                  sz_u64_t const *byte_counts, sz_size_t candidates, sz_size_t *cursors,
@@ -287,9 +287,12 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_utf8_(sz_levenshtein_query
                 query, sz_utf8_next_rune_(texts[candidate], byte_counts[candidate], cursors + candidate));
         if (emitted != 0 && cursors[candidate] == byte_counts[candidate])
             symbol_counts[candidate] = transpose_start + emitted;
-        for (sz_size_t position = emitted; position != positions; ++position)
-            classes[position * candidates + candidate] = 0;
+        // Pads rows below `filled` row by row, as compilers turn a padded column into scatters.
+        for (sz_size_t position = filled; position < emitted; ++position)
+            for (sz_size_t earlier = 0; earlier != candidate; ++earlier) classes[position * candidates + earlier] = 0;
         filled = sz_max_of_two(filled, emitted);
+        for (sz_size_t position = emitted; position != filled; ++position)
+            classes[position * candidates + candidate] = 0;
     }
     return filled;
 }

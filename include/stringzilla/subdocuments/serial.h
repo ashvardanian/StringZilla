@@ -1585,12 +1585,21 @@ static sz_u8_t const sz_subdocuments_high_nibble_classes_k[16] = {0x80, 0, 0x58,
 /** Signature of a tier's classifier: 64 readable bytes in, their masks out. */
 typedef sz_subdocuments_block_t (*sz_subdocuments_classify_t)(sz_u8_t const *, sz_subdocuments_carry_t *);
 
+/** Each bit of @p bits XORed with every bit below it, which turns unescaped quotes into the bytes
+ *  inside strings; the tiers with a carry-less multiply replace it. */
+STRINGZILLA_CONSTEXPR sz_u64_t sz_subdocuments_prefix_xor_serial_(sz_u64_t bits) {
+    bits ^= bits << 1, bits ^= bits << 2, bits ^= bits << 4;
+    bits ^= bits << 8, bits ^= bits << 16, bits ^= bits << 32;
+    return bits;
+}
+
 /** Turns a block's raw byte masks into the walk's: drops escaped quotes, clears everything inside
- *  strings, and marks the first byte of every scalar. Every tier's classifier ends here. */
-STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_(sz_u64_t quotes, sz_u64_t backslashes,
-                                                                         sz_u64_t opens, sz_u64_t closes,
-                                                                         sz_u64_t separators, sz_u64_t blanks,
-                                                                         sz_subdocuments_carry_t *carry) {
+ *  strings with @p prefix_xor, and marks the first byte of every scalar. */
+STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_with_(sz_u64_t quotes, sz_u64_t backslashes,
+                                                                              sz_u64_t opens, sz_u64_t closes,
+                                                                              sz_u64_t separators, sz_u64_t blanks,
+                                                                              sz_u64_t (*prefix_xor)(sz_u64_t),
+                                                                              sz_subdocuments_carry_t *carry) {
     sz_u64_t escaped, in_string, scalars;
     sz_subdocuments_block_t block;
 
@@ -1605,10 +1614,7 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_(sz_u64_
         carry->escaped = (escape_and_terminal & backslashes) >> 63;
     }
     quotes &= ~escaped;
-    in_string = quotes;
-    in_string ^= in_string << 1, in_string ^= in_string << 2, in_string ^= in_string << 4;
-    in_string ^= in_string << 8, in_string ^= in_string << 16, in_string ^= in_string << 32;
-    in_string ^= carry->in_string;
+    in_string = prefix_xor(quotes) ^ carry->in_string;
     carry->in_string = 0 - (in_string >> 63);
 
     opens &= ~in_string, closes &= ~in_string, separators &= ~in_string;
@@ -1617,6 +1623,16 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_(sz_u64_
     block.structurals = opens | closes | separators | quotes | (scalars & ~(scalars << 1 | carry->scalar));
     carry->scalar = scalars >> 63;
     return block;
+}
+
+/** @ref sz_subdocuments_block_settle_with_ over the shift ladder, where every tier without a
+ *  carry-less multiply ends its classifier. */
+STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_block_settle_(sz_u64_t quotes, sz_u64_t backslashes,
+                                                                         sz_u64_t opens, sz_u64_t closes,
+                                                                         sz_u64_t separators, sz_u64_t blanks,
+                                                                         sz_subdocuments_carry_t *carry) {
+    return sz_subdocuments_block_settle_with_(quotes, backslashes, opens, closes, separators, blanks,
+                                              &sz_subdocuments_prefix_xor_serial_, carry);
 }
 
 /** One bit per byte of @p top_bits, set where that byte's top bit is, as a movemask would. */
