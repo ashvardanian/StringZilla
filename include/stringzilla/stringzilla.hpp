@@ -17,10 +17,6 @@
 
 #include "stringzilla/types.hpp"
 
-#if STRINGZILLA_HEADER_ONLY
-#error "The C++ layer dispatches through the compiled library: link `stringzilla::static` or `stringzilla::shared`."
-#endif
-
 /**
  *  @brief For higher safety, we annotate the lifetime bound of the returned string slices.
  *  @see Clang lifetimebound attribute: https://clang.llvm.org/docs/AttributeReference.html#id11
@@ -71,25 +67,25 @@ template <std::size_t count_characters>
 using carray = char[count_characters];
 
 /**
- *  @brief Calls the dispatch point @p best_ over @c default_capabilities, for the calls that take
- *      no mask from their caller.
+ *  @brief Calls the dispatch point @p best_ over @c default_capabilities, or its serial twin
+ *      @p serial_ in header-only builds, for the calls that take no mask from their caller.
  *
- *  That mask always holds serial and the library is linked, so the call cannot fail by
- *  construction, and debug builds assert that it didn't. Every call over a mask the caller passes
- *  returns the status of the dispatch point instead.
+ *  That mask always holds serial when the library is linked, and the serial twin needs none, so
+ *  the call cannot fail by construction, and debug builds assert that it didn't. Every call over a
+ *  mask the caller passes returns the status of @c dispatch_ instead.
  */
-template <auto best_, typename... arguments_types_>
+template <auto best_, auto serial_, typename... arguments_types_>
 void best_call_(arguments_types_... arguments) noexcept {
-    sz_status_t const status = best_(arguments..., default_capabilities(), nullptr);
+    sz_status_t const status = dispatch_<best_, serial_>(default_capabilities(), nullptr, arguments...);
     sz_assert_(status == sz_success_k);
 }
 
 /** Like @c best_call_, returning the result @p best_ reports through its out-parameter, the last
  *  one before the mask. */
-template <auto best_, typename result_type_, typename... arguments_types_>
+template <auto best_, auto serial_, typename result_type_, typename... arguments_types_>
 result_type_ best_result_(arguments_types_... arguments) noexcept {
     result_type_ result {};
-    best_call_<best_>(arguments..., &result);
+    best_call_<best_, serial_>(arguments..., &result);
     return result;
 }
 
@@ -443,7 +439,8 @@ struct matcher_find_first_of {
     constexpr size_type needle_length() const noexcept { return 1; }
     constexpr size_type skip_length() const noexcept { return 1; }
     size_type operator()(haystack_type_ haystack) const noexcept {
-        auto match = best_result_<sz_find_byteset_best, sz_cptr_t>(haystack.data(), haystack.size(), &set_.raw());
+        auto match = best_result_<sz_find_byteset_best, sz_find_byteset_serial, sz_cptr_t>(
+            haystack.data(), haystack.size(), &set_.raw());
         return match ? static_cast<size_type>(match - haystack.data()) : haystack_type_::npos;
     }
 };
@@ -460,7 +457,8 @@ struct matcher_find_last_of {
     constexpr size_type needle_length() const noexcept { return 1; }
     constexpr size_type skip_length() const noexcept { return 1; }
     size_type operator()(haystack_type_ haystack) const noexcept {
-        auto match = best_result_<sz_rfind_byteset_best, sz_cptr_t>(haystack.data(), haystack.size(), &set_.raw());
+        auto match = best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(
+            haystack.data(), haystack.size(), &set_.raw());
         return match ? static_cast<size_type>(match - haystack.data()) : haystack_type_::npos;
     }
 };
@@ -1062,8 +1060,8 @@ class utf8_runes_view {
         size_type runes_index_;
 
         void decode_() noexcept {
-            next_ += best_result_<sz_utf8_decode_best, sz_size_t>(next_, static_cast<size_type>(end_ - next_), runes_,
-                                                                  steps_, &runes_count_);
+            next_ += best_result_<sz_utf8_decode_best, sz_utf8_decode_serial, sz_size_t>(
+                next_, static_cast<size_type>(end_ - next_), runes_, steps_, &runes_count_);
             runes_index_ = 0;
         }
 
@@ -1104,7 +1102,7 @@ class utf8_runes_view {
                 return *this;
             }
             // Past the batch, the remaining runes are counted from `next_`, the first one after it.
-            sz_cptr_t const target = best_result_<sz_utf8_seek_best, sz_cptr_t>(
+            sz_cptr_t const target = best_result_<sz_utf8_seek_best, sz_utf8_seek_serial, sz_cptr_t>(
                 next_, static_cast<size_type>(end_ - next_), n - buffered);
             next_ = target ? target : end_;
             decode_();
@@ -1132,7 +1130,7 @@ class utf8_runes_view {
     /** Count UTF-8 characters in the string. */
     size_type size() const noexcept {
         string_view_type view(haystack_);
-        return best_result_<sz_utf8_count_best, sz_size_t>(view.data(), view.size());
+        return best_result_<sz_utf8_count_best, sz_utf8_count_serial, sz_size_t>(view.data(), view.size());
     }
 
     difference_type ssize() const noexcept { return static_cast<difference_type>(size()); }
@@ -1174,10 +1172,17 @@ enum class empty_segments_t { keep_k, skip_k };
 using utf8_tokenizer_best_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *,
                                               sz_size_t *, sz_capability_t, void *);
 
+/** The serial twin of a @c utf8_tokenizer_best_t, like @c sz_utf8_newlines_serial. */
+using utf8_tokenizer_serial_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t *, sz_size_t, sz_size_t *,
+                                                sz_size_t *, void *);
+
 /** A tiling segmenter's dispatch point, like @c sz_utf8_graphemes_best, which
  *  @ref utf8_segments_view drives over @c default_capabilities. */
 using utf8_segmenter_best_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *,
                                               sz_capability_t, void *);
+
+/** The serial twin of a @c utf8_segmenter_best_t, like @c sz_utf8_graphemes_serial. */
+using utf8_segmenter_serial_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *, sz_size_t, sz_size_t *, void *);
 
 /**
  *  @brief A range of string slices split on the delimiter codepoints that a @b token kernel
@@ -1199,13 +1204,15 @@ using utf8_segmenter_best_t = sz_status_t (*)(sz_cptr_t, sz_size_t, sz_size_t *,
  *  @c both_k is lossless only when empties are kept.
  *
  *  @tparam tokenizer_ A token kernel reporting delimiter spans, like @c sz_utf8_whitespaces_best.
+ *  @tparam tokenizer_serial_ Its serial twin, like @c sz_utf8_whitespaces_serial.
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Delimiters fetched per kernel call.
  *  @tparam parts_ Which parts to yield: between segments, the delimiters, or both interleaved.
  *  @tparam empties_ Whether empty segments are kept or skipped.
  */
-template <utf8_tokenizer_best_t tokenizer_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
-          split_parts_t parts_ = split_parts_t::between_k, empty_segments_t empties_ = empty_segments_t::keep_k>
+template <utf8_tokenizer_best_t tokenizer_, utf8_tokenizer_serial_t tokenizer_serial_, typename string_type_,
+          std::size_t steps_ = sz_iterators_default_steps_k, split_parts_t parts_ = split_parts_t::between_k,
+          empty_segments_t empties_ = empty_segments_t::keep_k>
 class utf8_split_view {
   public:
     using string_type = string_type_;
@@ -1252,7 +1259,7 @@ class utf8_split_view {
         void refill_(char const *start) noexcept {
             sz_size_t offsets[steps_], lengths[steps_], count = 0, consumed = 0;
             size_type const length = static_cast<size_type>(end_ - start);
-            best_call_<tokenizer_>(start, length, offsets, lengths, steps_, &count, &consumed);
+            best_call_<tokenizer_, tokenizer_serial_>(start, length, offsets, lengths, steps_, &count, &consumed);
             bounds_[0] = start;
             for (size_type i = 0; i != count; ++i)
                 bounds_[2 * i + 1] = start + offsets[i], bounds_[2 * i + 2] = start + offsets[i] + lengths[i];
@@ -1314,14 +1321,15 @@ class utf8_split_view {
     end_sentinel_t end_sentinel() const noexcept { return {}; }
 
     /** The same split with empty segments dropped (compile-time, branchless). */
-    utf8_split_view<tokenizer_, string_type_, steps_, parts_, empty_segments_t::skip_k> skip_empty() const noexcept {
+    utf8_split_view<tokenizer_, tokenizer_serial_, string_type_, steps_, parts_, empty_segments_t::skip_k> skip_empty()
+        const noexcept {
         return {haystack_};
     }
 
     /** The same split yielding segments @b and delimiters interleaved, losslessly, turning
      *  @c between_k into @c both_k. */
-    utf8_split_view<tokenizer_, string_type_, steps_, split_parts_t::both_k, empties_> with_separators()
-        const noexcept {
+    utf8_split_view<tokenizer_, tokenizer_serial_, string_type_, steps_, split_parts_t::both_k, empties_>
+    with_separators() const noexcept {
         return {haystack_};
     }
 
@@ -1348,10 +1356,12 @@ class utf8_split_view {
  *  empty segments arise.
  *
  *  @tparam segmenter_ A segmenter returning tiling units, like @c sz_utf8_wordbreaks_best.
+ *  @tparam segmenter_serial_ Its serial twin, like @c sz_utf8_wordbreaks_serial.
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  *  @tparam steps_ Units fetched per kernel call.
  */
-template <utf8_segmenter_best_t segmenter_, typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
+template <utf8_segmenter_best_t segmenter_, utf8_segmenter_serial_t segmenter_serial_, typename string_type_,
+          std::size_t steps_ = sz_iterators_default_steps_k>
 class utf8_segments_view {
   public:
     using string_type = string_type_;
@@ -1385,7 +1395,8 @@ class utf8_segments_view {
         size_type index_;
 
         void fill_() noexcept {
-            best_call_<segmenter_>(suffix_, static_cast<size_type>(end_ - suffix_), lengths_, steps_, &count_);
+            best_call_<segmenter_, segmenter_serial_>(suffix_, static_cast<size_type>(end_ - suffix_), lengths_, steps_,
+                                                      &count_);
             index_ = 0;
         }
 
@@ -1449,15 +1460,15 @@ class utf8_segments_view {
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_split_newlines_view =
-    utf8_split_view<sz_utf8_newlines_best, string_type_, steps_, split_parts_t::between_k, empties_>;
+using utf8_split_newlines_view = utf8_split_view<sz_utf8_newlines_best, sz_utf8_newlines_serial, string_type_, steps_,
+                                                 split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 newline runs themselves (LF, CR, CRLF, NEL, LS, PS, ...); see
  *  @ref utf8_split_newlines_view. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_newlines_view =
-    utf8_split_view<sz_utf8_newlines_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
+using utf8_newlines_view = utf8_split_view<sz_utf8_newlines_best, sz_utf8_newlines_serial, string_type_, steps_,
+                                           split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of string slices @b between UTF-8 whitespace runs - i.e. the tokens.
@@ -1469,15 +1480,15 @@ using utf8_newlines_view =
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_split_whitespaces_view =
-    utf8_split_view<sz_utf8_whitespaces_best, string_type_, steps_, split_parts_t::between_k, empties_>;
+using utf8_split_whitespaces_view = utf8_split_view<sz_utf8_whitespaces_best, sz_utf8_whitespaces_serial, string_type_,
+                                                    steps_, split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 whitespace runs themselves; see @ref utf8_split_whitespaces_view for the
  *  tokens between them. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_whitespaces_view =
-    utf8_split_view<sz_utf8_whitespaces_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
+using utf8_whitespaces_view = utf8_split_view<sz_utf8_whitespaces_best, sz_utf8_whitespaces_serial, string_type_,
+                                              steps_, split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of string slices @b between any UTF-8 delimiter codepoints - i.e. the fields.
@@ -1490,15 +1501,15 @@ using utf8_whitespaces_view =
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_split_delimiters_view =
-    utf8_split_view<sz_utf8_delimiters_best, string_type_, steps_, split_parts_t::between_k, empties_>;
+using utf8_split_delimiters_view = utf8_split_view<sz_utf8_delimiters_best, sz_utf8_delimiters_serial, string_type_,
+                                                   steps_, split_parts_t::between_k, empties_>;
 
 /** A range of the UTF-8 delimiter runs themselves (P/S/Z categories); see
  *  @ref utf8_split_delimiters_view. */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k,
           empty_segments_t empties_ = empty_segments_t::keep_k>
-using utf8_delimiters_view =
-    utf8_split_view<sz_utf8_delimiters_best, string_type_, steps_, split_parts_t::separators_k, empties_>;
+using utf8_delimiters_view = utf8_split_view<sz_utf8_delimiters_best, sz_utf8_delimiters_serial, string_type_, steps_,
+                                             split_parts_t::separators_k, empties_>;
 
 /**
  *  @brief A range of UAX-29 word segments, in order.
@@ -1511,7 +1522,8 @@ using utf8_delimiters_view =
  *  @tparam steps_ Segments fetched per kernel call.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_wordbreaks_view = utf8_segments_view<sz_utf8_wordbreaks_best, string_type_, steps_>;
+using utf8_wordbreaks_view =
+    utf8_segments_view<sz_utf8_wordbreaks_best, sz_utf8_wordbreaks_serial, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-29 grapheme cluster boundaries, in order.
@@ -1523,7 +1535,7 @@ using utf8_wordbreaks_view = utf8_segments_view<sz_utf8_wordbreaks_best, string_
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes_best, string_type_, steps_>;
+using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes_best, sz_utf8_graphemes_serial, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-29 sentence boundaries, in order.
@@ -1535,7 +1547,7 @@ using utf8_graphemes_view = utf8_segments_view<sz_utf8_graphemes_best, string_ty
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences_best, string_type_, steps_>;
+using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences_best, sz_utf8_sentences_serial, string_type_, steps_>;
 
 /**
  *  @brief A range of string slices split at UAX-14 line break opportunities, in order.
@@ -1548,7 +1560,8 @@ using utf8_sentences_view = utf8_segments_view<sz_utf8_sentences_best, string_ty
  *  @tparam string_type_ String type, like @c string_view_t, @c string_slice_t, or @c std::string.
  */
 template <typename string_type_, std::size_t steps_ = sz_iterators_default_steps_k>
-using utf8_linebreaks_view = utf8_segments_view<sz_utf8_linebreaks_best, string_type_, steps_>;
+using utf8_linebreaks_view =
+    utf8_segments_view<sz_utf8_linebreaks_best, sz_utf8_linebreaks_serial, string_type_, steps_>;
 
 /**
  *  @brief Resolves a forwarded haystack into the form the range views store, checking that it
@@ -1936,7 +1949,7 @@ class utf8_uncased_needle_t {
 
   public:
     explicit utf8_uncased_needle_t(char const *needle, std::size_t length) noexcept {
-        best_call_<sz_utf8_uncased_needle_init_best>(needle, length, &prepared_);
+        best_call_<sz_utf8_uncased_needle_init_best, sz_utf8_uncased_needle_init_serial>(needle, length, &prepared_);
     }
 
     explicit utf8_uncased_needle_t(string_view_t needle) noexcept;
@@ -1979,8 +1992,8 @@ struct matcher_utf8_uncased_search {
     size_type operator()(string_type_ haystack) noexcept {
         sz_size_t match_length = 0;
         sz_cptr_t match = nullptr;
-        best_call_<sz_utf8_uncased_search_best>(haystack.data(), haystack.size(), &needle_.raw(), &match,
-                                                &match_length);
+        best_call_<sz_utf8_uncased_search_best, sz_utf8_uncased_search_serial>(haystack.data(), haystack.size(),
+                                                                               &needle_.raw(), &match, &match_length);
         if (!match) return string_type_::npos;
         size_type const offset = static_cast<size_type>(match - haystack.data());
         size_type const rest = haystack.size() - offset;
@@ -2254,7 +2267,8 @@ class string_slice {
      *      greater than @p other.
      */
     int compare(string_view_t other) const noexcept {
-        return (int)best_result_<sz_order_best, sz_ordering_t>(data(), size(), other.data(), other.size());
+        return (int)best_result_<sz_order_best, sz_order_serial, sz_ordering_t>(data(), size(), other.data(),
+                                                                                other.size());
     }
 
     /**
@@ -2312,15 +2326,16 @@ class string_slice {
     /** Checks if the string is equal to the other string. */
     bool operator==(string_view_t other) const noexcept {
         return size() == other.size() &&
-               best_result_<sz_equal_best, sz_bool_t>(data(), other.data(), other.size()) == sz_true_k;
+               best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(data(), other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string is equal to a concatenation of two strings. */
     bool operator==(concatenation<string_view_t, string_view_t> const &other) const noexcept {
         return size() == other.size() &&
-               best_result_<sz_equal_best, sz_bool_t>(data(), other.first.data(), other.first.size()) == sz_true_k &&
-               best_result_<sz_equal_best, sz_bool_t>(data() + other.first.size(), other.second.data(),
-                                                      other.second.size()) == sz_true_k;
+               best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(data(), other.first.data(),
+                                                                       other.first.size()) == sz_true_k &&
+               best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(data() + other.first.size(), other.second.data(),
+                                                                       other.second.size()) == sz_true_k;
     }
 
     /** Computes the lexicographic ordering between this and the ::other string. */
@@ -2336,14 +2351,14 @@ class string_slice {
     /** Checks if the string starts with the other string. */
     bool starts_with(string_view_t other) const noexcept {
         return length_ >= other.size() &&
-               best_result_<sz_equal_best, sz_bool_t>(start_, other.data(), other.size()) == sz_true_k;
+               best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(start_, other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string starts with the other string. */
     bool starts_with(const_pointer other) const noexcept {
         auto other_length = null_terminated_length(other);
         return length_ >= other_length &&
-               best_result_<sz_equal_best, sz_bool_t>(start_, other, other_length) == sz_true_k;
+               best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(start_, other, other_length) == sz_true_k;
     }
 
     /** Checks if the string starts with the other character. */
@@ -2353,7 +2368,7 @@ class string_slice {
     bool ends_with(string_view_t other) const noexcept {
         if (length_ < other.size()) return false;
         auto suffix = start_ + length_ - other.size();
-        return best_result_<sz_equal_best, sz_bool_t>(suffix, other.data(), other.size()) == sz_true_k;
+        return best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(suffix, other.data(), other.size()) == sz_true_k;
     }
 
     /** Checks if the string ends with the other string. */
@@ -2361,7 +2376,7 @@ class string_slice {
         auto other_length = null_terminated_length(other);
         if (length_ < other_length) return false;
         auto suffix = start_ + length_ - other_length;
-        return best_result_<sz_equal_best, sz_bool_t>(suffix, other, other_length) == sz_true_k;
+        return best_result_<sz_equal_best, sz_equal_serial, sz_bool_t>(suffix, other, other_length) == sz_true_k;
     }
 
     /** Checks if the string ends with the other character. */
@@ -2404,7 +2419,8 @@ class string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(string_view_t other, size_type skip = 0) const noexcept {
-        auto ptr = best_result_<sz_find_best, sz_cptr_t>(start_ + skip, length_ - skip, other.data(), other.size());
+        auto ptr = best_result_<sz_find_best, sz_find_serial, sz_cptr_t>(start_ + skip, length_ - skip, other.data(),
+                                                                         other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2414,7 +2430,8 @@ class string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find(value_type character, size_type skip = 0) const noexcept {
-        auto ptr = best_result_<sz_find_byte_best, sz_cptr_t>(start_ + skip, length_ - skip, &character);
+        auto ptr = best_result_<sz_find_byte_best, sz_find_byte_serial, sz_cptr_t>(start_ + skip, length_ - skip,
+                                                                                   &character);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2434,7 +2451,7 @@ class string_slice {
      *  @return `size()` for an @b empty @p other.
      */
     size_type rfind(string_view_t other) const noexcept {
-        auto ptr = best_result_<sz_rfind_best, sz_cptr_t>(start_, length_, other.data(), other.size());
+        auto ptr = best_result_<sz_rfind_best, sz_rfind_serial, sz_cptr_t>(start_, length_, other.data(), other.size());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2452,7 +2469,7 @@ class string_slice {
      *  @return The offset of the match, or @c npos if not found.
      */
     size_type rfind(value_type character) const noexcept {
-        auto ptr = best_result_<sz_rfind_byte_best, sz_cptr_t>(start_, length_, &character);
+        auto ptr = best_result_<sz_rfind_byte_best, sz_rfind_byte_serial, sz_cptr_t>(start_, length_, &character);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2537,7 +2554,8 @@ class string_slice {
      *  @warning The behavior is @b undefined if `skip > size()`.
      */
     size_type find_first_of(byteset_t set, size_type skip = 0) const noexcept {
-        auto ptr = best_result_<sz_find_byteset_best, sz_cptr_t>(start_ + skip, length_ - skip, &set.raw());
+        auto ptr = best_result_<sz_find_byteset_best, sz_find_byteset_serial, sz_cptr_t>(start_ + skip, length_ - skip,
+                                                                                         &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2552,7 +2570,7 @@ class string_slice {
 
     /** Find the last occurrence of a character from a @p set. */
     size_type find_last_of(byteset_t set) const noexcept {
-        auto ptr = best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
+        auto ptr = best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(start_, length_, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2565,7 +2583,7 @@ class string_slice {
      */
     size_type find_last_of(byteset_t set, size_type until) const noexcept {
         auto len = sz_min_of_two(until + 1, length_);
-        auto ptr = best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, len, &set.raw());
+        auto ptr = best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2581,7 +2599,9 @@ class string_slice {
      *  @brief Count the number of UTF-8 characters (not bytes) in the string.
      *  @return Number of UTF-8 codepoints.
      */
-    size_type utf8_count() const noexcept { return best_result_<sz_utf8_count_best, sz_size_t>(start_, length_); }
+    size_type utf8_count() const noexcept {
+        return best_result_<sz_utf8_count_best, sz_utf8_count_serial, sz_size_t>(start_, length_);
+    }
 
     /**
      *  @brief Return a pointer to the first byte violating the given Unicode normalization form.
@@ -2591,7 +2611,8 @@ class string_slice {
      *      into this string at the first offending byte.
      */
     sz_cptr_t utf8_find_denormalized(sz_normal_form_t form) const noexcept {
-        return best_result_<sz_utf8_find_denormalized_best, sz_cptr_t>(start_, length_, form);
+        return best_result_<sz_utf8_find_denormalized_best, sz_utf8_find_denormalized_serial, sz_cptr_t>(start_,
+                                                                                                         length_, form);
     }
 
     /**
@@ -2610,7 +2631,7 @@ class string_slice {
      *  @return Byte offset of the Nth character, or npos if string has fewer than n characters.
      */
     size_type utf8_seek(size_type n) const noexcept {
-        auto ptr = best_result_<sz_utf8_seek_best, sz_cptr_t>(start_, length_, n);
+        auto ptr = best_result_<sz_utf8_seek_best, sz_utf8_seek_serial, sz_cptr_t>(start_, length_, n);
         return ptr ? ptr - start_ : npos;
     }
 
@@ -2620,8 +2641,8 @@ class string_slice {
      *      greater than @p other.
      */
     int utf8_uncased_order(string_view_t other) const noexcept {
-        return (int)best_result_<sz_utf8_uncased_order_best, sz_ordering_t>(start_, length_, other.data(),
-                                                                            other.size());
+        return (int)best_result_<sz_utf8_uncased_order_best, sz_utf8_uncased_order_serial, sz_ordering_t>(
+            start_, length_, other.data(), other.size());
     }
 
     struct sized_match_t {
@@ -2656,7 +2677,8 @@ class string_slice {
     sized_match_t utf8_uncased_search(utf8_uncased_needle_t const &needle) const noexcept {
         sz_size_t match_length = 0;
         sz_cptr_t ptr = nullptr;
-        best_call_<sz_utf8_uncased_search_best>(start_, length_, &needle.raw(), &ptr, &match_length);
+        best_call_<sz_utf8_uncased_search_best, sz_utf8_uncased_search_serial>(start_, length_, &needle.raw(), &ptr,
+                                                                               &match_length);
         if (!ptr) return {npos, static_cast<size_type>(0)};
         return {static_cast<size_type>(ptr - start_), match_length};
     }
@@ -2834,7 +2856,8 @@ class string_slice {
      */
     string_slice_t lstrip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
+        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_find_byteset_serial, sz_cptr_t>(start_, length_,
+                                                                                                        &set.raw());
         return new_start ? string_slice_t {new_start, length_ - static_cast<size_type>(new_start - start_)}
                          : string_slice_t();
     }
@@ -2845,7 +2868,8 @@ class string_slice {
      */
     string_slice_t rstrip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_end = (pointer)best_result_<sz_rfind_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
+        auto new_end = (pointer)best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(start_, length_,
+                                                                                                        &set.raw());
         return new_end ? string_slice_t {start_, static_cast<size_type>(new_end - start_ + 1)} : string_slice_t();
     }
 
@@ -2855,10 +2879,11 @@ class string_slice {
      */
     string_slice_t strip(byteset_t set) const noexcept {
         set = set.inverted();
-        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_cptr_t>(start_, length_, &set.raw());
+        auto new_start = (pointer)best_result_<sz_find_byteset_best, sz_find_byteset_serial, sz_cptr_t>(start_, length_,
+                                                                                                        &set.raw());
         if (!new_start) return string_slice_t();
-        auto new_end = best_result_<sz_rfind_byteset_best, sz_cptr_t>(new_start, length_ - (new_start - start_),
-                                                                      &set.raw());
+        auto new_end = best_result_<sz_rfind_byteset_best, sz_rfind_byteset_serial, sz_cptr_t>(
+            new_start, length_ - (new_start - start_), &set.raw());
         return string_slice_t {new_start, static_cast<size_type>(new_end - new_start + 1)};
     }
 
@@ -2943,7 +2968,7 @@ class string_slice {
     /** Hashes the string, equivalent to `std::hash<string_view_t>{}(str)`. */
     size_type hash(std::uint64_t seed = 0) const noexcept {
         return static_cast<size_type>(
-            best_result_<sz_hash_best, sz_u64_t>(start_, length_, static_cast<sz_u64_t>(seed)));
+            best_result_<sz_hash_best, sz_hash_serial, sz_u64_t>(start_, length_, static_cast<sz_u64_t>(seed)));
     }
 
     /**
@@ -2954,14 +2979,14 @@ class string_slice {
      */
     void hash_multiseed(std::span<std::uint64_t const> seeds, std::span<std::uint64_t> hashes) const noexcept {
         sz_assert_(seeds.size() == hashes.size() && "Need one output slot per seed");
-        best_call_<sz_hash_multiseed_best>(start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()),
-                                           static_cast<sz_size_t>(seeds.size()),
-                                           reinterpret_cast<sz_u64_t *>(hashes.data()));
+        best_call_<sz_hash_multiseed_best, sz_hash_multiseed_serial>(
+            start_, length_, reinterpret_cast<sz_u64_t const *>(seeds.data()), static_cast<sz_size_t>(seeds.size()),
+            reinterpret_cast<sz_u64_t *>(hashes.data()));
     }
 
     /** Aggregates the values of individual bytes of a string. */
     size_type bytesum() const noexcept {
-        return static_cast<size_type>(best_result_<sz_bytesum_best, sz_u64_t>(start_, length_));
+        return static_cast<size_type>(best_result_<sz_bytesum_best, sz_bytesum_serial, sz_u64_t>(start_, length_));
     }
 
     /** Populate a character set with characters present in this string. */
@@ -4143,7 +4168,7 @@ class string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        best_call_<sz_fill_random_best>(start, length, static_cast<sz_u64_t>(nonce));
+        best_call_<sz_fill_random_best, sz_fill_random_serial>(start, length, static_cast<sz_u64_t>(nonce));
         return *this;
     }
 
@@ -4211,7 +4236,7 @@ class string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        return best_result_<sz_utf8_count_best, sz_size_t>(start, length);
+        return best_result_<sz_utf8_count_best, sz_utf8_count_serial, sz_size_t>(start, length);
     }
 
     /**
@@ -4223,7 +4248,7 @@ class string {
         sz_ptr_t start;
         sz_size_t length;
         sz_string_range(&string_, &start, &length);
-        auto ptr = best_result_<sz_utf8_seek_best, sz_cptr_t>(start, length, n);
+        auto ptr = best_result_<sz_utf8_seek_best, sz_utf8_seek_serial, sz_cptr_t>(start, length, n);
         return ptr ? ptr - start : npos;
     }
 
@@ -4282,7 +4307,8 @@ class string {
         string result(allocator_);
         status_t const status = result.resize_and_overwrite(
             string_length * 3, [string_start, string_length](char_type *buf, size_type) {
-                return best_result_<sz_utf8_uncased_fold_best, sz_size_t>(string_start, string_length, buf);
+                return best_result_<sz_utf8_uncased_fold_best, sz_utf8_uncased_fold_serial, sz_size_t>(
+                    string_start, string_length, buf);
             });
         if (failed(status)) return status;
 
@@ -4301,7 +4327,8 @@ class string {
         sz_ptr_t string_start;
         sz_size_t string_length;
         sz_string_range(&string_, &string_start, &string_length);
-        return best_result_<sz_utf8_find_denormalized_best, sz_cptr_t>(string_start, string_length, form);
+        return best_result_<sz_utf8_find_denormalized_best, sz_utf8_find_denormalized_serial, sz_cptr_t>(
+            string_start, string_length, form);
     }
 
     /**
@@ -4335,7 +4362,8 @@ class string {
         string result(allocator_);
         status_t const status = result.resize_and_overwrite(
             string_length * 18, [string_start, string_length, form](char_type *buf, size_type) {
-                return best_result_<sz_utf8_norm_best, sz_size_t>(string_start, string_length, form, buf);
+                return best_result_<sz_utf8_norm_best, sz_utf8_norm_serial, sz_size_t>(string_start, string_length,
+                                                                                       form, buf);
             });
         if (failed(status)) return status;
 
@@ -4713,8 +4741,8 @@ typename concatenation_result<first_type_, second_type_, following_types_...>::t
 inline status_t fill_random(string_span_t string, std::uint64_t nonce,
                             sz_capability_t capabilities = default_capabilities(),
                             sz_stream_t stream = nullptr) noexcept {
-    return static_cast<status_t>(
-        sz_fill_random_best(string.data(), string.size(), static_cast<sz_u64_t>(nonce), capabilities, stream));
+    return static_cast<status_t>(dispatch_<sz_fill_random_best, sz_fill_random_serial>(
+        capabilities, stream, string.data(), string.size(), static_cast<sz_u64_t>(nonce)));
 }
 
 /**
@@ -4754,8 +4782,8 @@ inline status_t lookup(string_view_t source, look_up_table_t const &table, char 
         strings.data.u64_tape.data = source.data(), strings.data.u64_tape.offsets = wide_source;
         tape.data.u64_tape.data = target, tape.data.u64_tape.offsets = in_place ? wide_source : wide_target;
     }
-    return static_cast<status_t>(
-        sz_strings_lookup_best(&strings, nullptr, 1, (sz_cptr_t)table.raw(), nullptr, &tape, capabilities, stream));
+    return static_cast<status_t>(dispatch_<sz_strings_lookup_best, sz_strings_lookup_serial>(
+        capabilities, stream, &strings, nullptr, 1, (sz_cptr_t)table.raw(), nullptr, &tape));
 }
 
 /**
@@ -4805,15 +4833,15 @@ string_view_t strings<allocator_type_>::operator[](std::size_t index) const noex
 inline status_t strings_view_t::find(string_view_t needle, std::span<std::size_t> positions,
                                      sz_capability_t capabilities, sz_stream_t stream) const noexcept {
     if (positions.size() < raw.count) return status_t::unexpected_dimensions_k;
-    return static_cast<status_t>(sz_find_strings_best(&raw, nullptr, raw.count, needle.data(), needle.size(),
-                                                      positions.data(), capabilities, stream));
+    return static_cast<status_t>(dispatch_<sz_find_strings_best, sz_find_strings_serial>(
+        capabilities, stream, &raw, nullptr, raw.count, needle.data(), needle.size(), positions.data()));
 }
 
 inline status_t strings_view_t::hashes(std::span<u64_t> hashes, u64_t seed, sz_capability_t capabilities,
                                        sz_stream_t stream) const noexcept {
     if (hashes.size() < raw.count) return status_t::unexpected_dimensions_k;
-    return static_cast<status_t>(
-        sz_hash_strings_best(&raw, nullptr, raw.count, seed, hashes.data(), capabilities, stream));
+    return static_cast<status_t>(dispatch_<sz_hash_strings_best, sz_hash_strings_serial>(
+        capabilities, stream, &raw, nullptr, raw.count, seed, hashes.data()));
 }
 
 template <typename allocator_type_>
@@ -4822,8 +4850,8 @@ expected<strings<allocator_type_>> strings_view_t::lookup(look_up_table_t const 
                                                           sz_stream_t stream) const noexcept {
     expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
     result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-        return sz_strings_lookup_best(&raw, nullptr, raw.count, table.raw(), &c_allocator, &result.value.raw,
-                                      capabilities, stream);
+        return dispatch_<sz_strings_lookup_best, sz_strings_lookup_serial>(
+            capabilities, stream, &raw, nullptr, raw.count, table.raw(), &c_allocator, &result.value.raw);
     });
     return result;
 }
@@ -4831,8 +4859,8 @@ expected<strings<allocator_type_>> strings_view_t::lookup(look_up_table_t const 
 inline status_t strings_view_t::utf8_count(std::span<std::size_t> runes, std::size_t &malformed_index,
                                            sz_capability_t capabilities, sz_stream_t stream) const noexcept {
     if (!runes.empty() && runes.size() < raw.count) return status_t::unexpected_dimensions_k;
-    return static_cast<status_t>(sz_utf8_count_strings_best(
-        &raw, nullptr, raw.count, runes.empty() ? nullptr : runes.data(), &malformed_index, capabilities, stream));
+    return static_cast<status_t>(dispatch_<sz_utf8_count_strings_best, sz_utf8_count_strings_serial>(
+        capabilities, stream, &raw, nullptr, raw.count, runes.empty() ? nullptr : runes.data(), &malformed_index));
 }
 
 template <typename allocator_type_>
@@ -4856,12 +4884,12 @@ expected<string<allocator_type_>> strings_view_t::join(std::span<sz_strings_view
 
     sz_string_view_t const separator {between.data(), between.size()};
     sz_size_t length = 0;
-    result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
-                                                               separator, nullptr, &length, capabilities, stream));
+    result.status = static_cast<status_t>(dispatch_<sz_strings_join_best, sz_strings_join_serial>(
+        capabilities, stream, columns.data(), columns.size(), rows, frames.data(), separator, nullptr, &length));
     if (failed(result.status)) return result;
     status_t const resized = result.value.resize_and_overwrite(length, [&](char *output, std::size_t) {
-        result.status = static_cast<status_t>(sz_strings_join_best(columns.data(), columns.size(), rows, frames.data(),
-                                                                   separator, output, &length, capabilities, stream));
+        result.status = static_cast<status_t>(dispatch_<sz_strings_join_best, sz_strings_join_serial>(
+            capabilities, stream, columns.data(), columns.size(), rows, frames.data(), separator, output, &length));
         return length;
     });
     if (failed(resized)) result.status = resized;
@@ -4875,8 +4903,8 @@ expected<strings<allocator_type_>> strings<allocator_type_>::split(string_view_t
                                                                    sz_stream_t stream) noexcept {
     expected<strings> result {strings(allocator), status_t::success_k};
     result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-        return sz_strings_split_best(text.data(), text.size(), &delimiters.raw(), kind, &c_allocator, &result.value.raw,
-                                     capabilities, stream);
+        return dispatch_<sz_strings_split_best, sz_strings_split_serial>(
+            capabilities, stream, text.data(), text.size(), &delimiters.raw(), kind, &c_allocator, &result.value.raw);
     });
     return result;
 }
@@ -4887,8 +4915,8 @@ expected<strings<allocator_type_>> strings<allocator_type_>::split_lines(string_
                                                                          sz_stream_t stream) noexcept {
     expected<strings> result {strings(allocator), status_t::success_k};
     result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-        return sz_strings_split_lines_best(text.data(), text.size(), &c_allocator, &result.value.raw, capabilities,
-                                           stream);
+        return dispatch_<sz_strings_split_lines_best, sz_strings_split_lines_serial>(
+            capabilities, stream, text.data(), text.size(), &c_allocator, &result.value.raw);
     });
     return result;
 }
@@ -4959,8 +4987,9 @@ status_t argsort(container_type_ const &container, string_extractor_ const &extr
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        return sz_sort_order_best(&strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
-                                  &c_allocator, order.data(), capabilities, stream);
+        return dispatch_<sz_sort_order_best, sz_sort_order_serial>(
+            capabilities, stream, &strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
+            &c_allocator, order.data());
     });
 }
 
@@ -4982,8 +5011,9 @@ status_t argsort_utf8_uncased(container_type_ const &container, string_extractor
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     return with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        return sz_sort_uncased_order_best(&strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
-                                          &c_allocator, order.data(), capabilities, stream);
+        return dispatch_<sz_sort_uncased_order_best, sz_sort_uncased_order_serial>(
+            capabilities, stream, &strings, static_cast<sz_size_t>(top_count), static_cast<sz_bool_t>(reverse),
+            &c_allocator, order.data());
     });
 }
 
@@ -5030,9 +5060,9 @@ expected<std::size_t> intersect(                                                
     using sz_alloc_type = sz_allocator_t;
     typename std::allocator_traits<allocator_type_>::template rebind_alloc<char> bytes_allocator(allocator);
     status_t status = with_allocator_(bytes_allocator, [&](sz_alloc_type &c_allocator) {
-        return sz_intersect_best(&first_strings, &second_strings, &c_allocator, static_cast<sz_u64_t>(seed),
-                                 &intersection_count, first_positions.data(), second_positions.data(), capabilities,
-                                 stream);
+        return dispatch_<sz_intersect_best, sz_intersect_serial>(
+            capabilities, stream, &first_strings, &second_strings, &c_allocator, static_cast<sz_u64_t>(seed),
+            &intersection_count, first_positions.data(), second_positions.data());
     });
     return {intersection_count, status};
 }

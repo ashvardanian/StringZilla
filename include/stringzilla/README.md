@@ -101,7 +101,7 @@ target_link_libraries(your_app PRIVATE stringzilla::header)
 ```
 
 The kernels your compiler flags enable then compile into your translation units, and you call them by name, like `sz_find_haswell`.
-Every dispatch point and finder reports `sz_missing_library_k` there, so the C++ layer, which calls the dispatch points, requires one of the libraries.
+Every dispatch point and finder reports `sz_missing_library_k` there, so the C++ layer runs the serial kernels over its default mask, which is empty in these builds.
 
 ### CMake, Installed Package
 
@@ -961,10 +961,10 @@ It returns `sz_missing_kernel_k` when no capability in the mask has the kernel, 
 
 - __Library builds, `STRINGZILLA_HEADER_ONLY=0`, the default.__
   Every capability the toolchain builds is compiled into one binary, and the dispatch points pick among them by the mask each call passes.
-  This is how the prebuilt libraries ship, so a single binary runs optimally on any CPU, and it is what `stringzilla.hpp` links against.
+  This is how the prebuilt libraries ship, so a single binary runs optimally on any CPU.
 - __Header-only builds, `STRINGZILLA_HEADER_ONLY=1`.__
   The kernels your compiler flags enable inline into your translation unit, so calling one of them by name, like `sz_find_haswell`, costs no indirection at all.
-  The dispatch points and finders compile to stubs returning `sz_missing_library_k`, so this mode serves C alone, and C++ requires the library.
+  The dispatch points and finders compile to stubs returning `sz_missing_library_k`, while the C++ layer runs the serial kernels over its default mask, which is empty here.
 
 Capabilities are introspectable at both compile and run time.
 `sz_capability_t` is a 64-bit mask from `capabilities.h`, one bit per capability.

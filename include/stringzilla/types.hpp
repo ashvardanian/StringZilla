@@ -314,7 +314,7 @@ class device_t {
 
 /** The mask every wrapper dispatches over by default: the CPU's enabled capabilities, as
  *  @c device_t::cpu().capabilities_enabled() reports them, or none in header-only builds, whose
- *  dispatch points are stubs. */
+ *  dispatch points are stubs, so every wrapper runs the serial reference instead. */
 inline sz_capability_t default_capabilities() noexcept {
 #if STRINGZILLA_HEADER_ONLY
     return 0;
@@ -322,6 +322,13 @@ inline sz_capability_t default_capabilities() noexcept {
     sz_capability_t capabilities = 0;
     return sz_capabilities_enabled_cpu(&capabilities) == sz_success_k ? capabilities : sz_cap_serial_k;
 #endif
+}
+
+/** Calls the dispatch point @p best_ over a non-zero @p capabilities, or its serial twin @p serial_
+ *  over an empty one, the mask of header-only builds, whose dispatch points are stubs. */
+template <auto best_, auto serial_, typename... arguments_types_>
+sz_status_t dispatch_(sz_capability_t capabilities, sz_stream_t stream, arguments_types_... arguments) noexcept {
+    return capabilities ? best_(arguments..., capabilities, stream) : serial_(arguments..., stream);
 }
 
 #pragma endregion Devices
@@ -667,8 +674,8 @@ struct strings_view_t {
         if (raw.count && rows.size() / raw.count < width) return {0, status_t::unexpected_dimensions_k};
         sz_strings_rows_t const destination {.data = rows.data(), .stride = width, .width = width};
         sz_size_t longest = 0;
-        sz_status_t const status = sz_strings_to_rows_best(&raw, nullptr, raw.count, &destination, &longest,
-                                                           capabilities, stream);
+        sz_status_t const status = dispatch_<sz_strings_to_rows_best, sz_strings_to_rows_serial>(
+            capabilities, stream, &raw, nullptr, raw.count, &destination, &longest);
         return {longest, static_cast<status_t>(status)};
     }
 
@@ -682,8 +689,8 @@ struct strings_view_t {
                                               sz_stream_t stream = nullptr) const noexcept {
         expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
         result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return sz_strings_to_tape_best(&raw, nullptr, raw.count, &c_allocator, &result.value.raw, capabilities,
-                                           stream);
+            return dispatch_<sz_strings_to_tape_best, sz_strings_to_tape_serial>(
+                capabilities, stream, &raw, nullptr, raw.count, &c_allocator, &result.value.raw);
         });
         return result;
     }
@@ -698,8 +705,8 @@ struct strings_view_t {
                                               sz_stream_t stream = nullptr) const noexcept {
         expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
         result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return sz_strings_escape_best(&raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw, capabilities,
-                                          stream);
+            return dispatch_<sz_strings_escape_best, sz_strings_escape_serial>(
+                capabilities, stream, &raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw);
         });
         return result;
     }
@@ -716,8 +723,9 @@ struct strings_view_t {
                                                 sz_stream_t stream = nullptr) const noexcept {
         expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
         result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return sz_strings_unescape_best(&raw, nullptr, raw.count, kind, &c_allocator, &result.value.raw,
-                                            &malformed_index, capabilities, stream);
+            return dispatch_<sz_strings_unescape_best, sz_strings_unescape_serial>(capabilities, stream, &raw, nullptr,
+                                                                                   raw.count, kind, &c_allocator,
+                                                                                   &result.value.raw, &malformed_index);
         });
         return result;
     }
@@ -741,8 +749,8 @@ struct strings_view_t {
                                                  sz_stream_t stream = nullptr) const noexcept {
         expected<strings<allocator_type_>> result {strings<allocator_type_>(allocator), status_t::success_k};
         result.status = with_allocator_(result.value.allocator, [&](sz_allocator_t &c_allocator) {
-            return sz_strings_normalize_best(&raw, nullptr, raw.count, form, &c_allocator, &result.value.raw,
-                                             capabilities, stream);
+            return dispatch_<sz_strings_normalize_best, sz_strings_normalize_serial>(
+                capabilities, stream, &raw, nullptr, raw.count, form, &c_allocator, &result.value.raw);
         });
         return result;
     }

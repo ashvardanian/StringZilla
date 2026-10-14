@@ -23,11 +23,9 @@
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
 /*  Include the StringZilla headers before anything else, to intercept missing @c #include
- *  directives and other issues. The C++ layer needs the library, so header-only builds skip it. */
-#include <stringzilla/stringzilla.h> // Primary C API
-#if !STRINGZILLA_HEADER_ONLY
-#include <stringzilla/stringzilla.hpp> // C++ string class replacement
-#endif
+ *  directives and other issues. */
+#include "stringzilla/stringzilla.h"   // Primary C API
+#include "stringzilla/stringzilla.hpp" // C++ string class replacement
 
 #include <map>           // `std::map`
 #include <string>        // `std::string` baseline
@@ -43,8 +41,6 @@ using namespace ashvardanian::stringzilla::test;
 
 /*  Instantiate all the templates to make the symbols visible and also check for weird compilation
  *  errors on uncommon paths. */
-#if !STRINGZILLA_HEADER_ONLY
-
 template class std::basic_string_view<char>;
 template class sz::string_slice<char>;
 template class std::basic_string<char>;
@@ -58,7 +54,6 @@ template class std::unordered_map<sz::string_t, int>;
 template class std::vector<sz::string_view_t>;
 template class std::map<sz::string_view_t, int>;
 template class std::unordered_map<sz::string_view_t, int>;
-#endif // !STRINGZILLA_HEADER_ONLY
 
 namespace ashvardanian::stringzilla::test {
 
@@ -168,6 +163,11 @@ void test_dispatch_stubs_unit() {
         call_stub_(sz_utf8_find_cased_best),
     };
     for (sz_status_t status : statuses) verify(status == sz_missing_library_k);
+
+    // The C++ layer runs the serial kernels over the empty default mask instead.
+    sz::string_view_t const text = "a quick brown fox";
+    verify(text.find("brown") == 8);
+    verify(text.utf8_count() == 17);
 }
 
 #endif // !STRINGZILLA_HEADER_ONLY

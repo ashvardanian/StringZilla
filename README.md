@@ -701,7 +701,7 @@ sz_find_best(text, length, pattern, 3, &match, sz_cap_serial_k, NULL);          
 
 Each capability kernel is also callable directly, with the same arguments short of the mask.
 Use it to guarantee constant performance, or to explore how different algorithms scale on your hardware.
-Header-only C builds, with `STRINGZILLA_HEADER_ONLY=1`, compile the kernels into your translation unit for exactly that, while their dispatch points return `sz_missing_library_k`, so the C++ layer and the bindings link the library.
+Header-only C builds, with `STRINGZILLA_HEADER_ONLY=1`, compile the kernels into your translation unit for exactly that, while their dispatch points return `sz_missing_library_k`, so the C++ layer falls back to the serial kernels and the bindings link the library.
 
 ```c
 sz_find_westmere(text, length, pattern, 3, &match, NULL); // Intel Westmere+ SSE4.2
