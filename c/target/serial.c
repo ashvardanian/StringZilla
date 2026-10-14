@@ -19,6 +19,7 @@
 #include "stringzilla/overlap/serial.h"
 #include "stringzilla/substrings/serial.h"
 #include "stringzilla/regex/serial.h"
+#include "stringzilla/subdocuments/serial.h"
 #include "stringzilla/utf8_runes/serial.h"
 #include "stringzilla/utf8_tokens/serial.h"
 #include "stringzilla/utf8_wordbreaks/serial.h"

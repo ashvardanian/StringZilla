@@ -95,6 +95,16 @@ std::size_t test_cross_ppc64(environment_t const &env) {
     check("test_substrings_equivalence_powervsx",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_powervsx); });
 
+    constexpr subdocuments_tier_t subdocuments_powervsx {
+        .init = sz_subdocuments_engine_init_powervsx,
+        .counts = sz_subdocuments_counts_powervsx,
+        .find = sz_subdocuments_find_powervsx,
+    };
+    check("test_subdocuments_unit_powervsx", [&] { check_subdocuments_unit_(subdocuments_powervsx); });
+    check("test_subdocuments_safety_powervsx", [&] { check_subdocuments_safety_(subdocuments_powervsx); });
+    check("test_subdocuments_equivalence_powervsx",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_powervsx); });
+
     constexpr utf8_runes_backend_t utf8_runes_powervsx {"powervsx", sz_utf8_count_powervsx, sz_utf8_seek_powervsx,
                                                         sz_utf8_decode_powervsx};
     check("test_utf8_runes_unit_powervsx", [&] { check_utf8_runes_unit_(utf8_runes_powervsx); });

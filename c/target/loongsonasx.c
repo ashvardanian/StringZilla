@@ -11,6 +11,7 @@
 #include "stringzilla/hash/loongsonasx.h"
 #include "stringzilla/find/loongsonasx.h"
 #include "stringzilla/substrings/loongsonasx.h"
+#include "stringzilla/subdocuments/loongsonasx.h"
 #include "stringzilla/utf8_runes/loongsonasx.h"
 #include "stringzilla/utf8_tokens/loongsonasx.h"
 #include "stringzilla/utf8_wordbreaks/loongsonasx.h"

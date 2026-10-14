@@ -59,6 +59,8 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
         sz_regex_find_metal,
         sz_regex_replace_metal,
         sz_regex_extract_metal,
+        sz_subdocuments_counts_metal,
+        sz_subdocuments_find_metal,
         sz_utf8_uncased_fold_metal,
         sz_utf8_norm_metal,
         nullptr,

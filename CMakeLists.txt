@@ -576,6 +576,7 @@ if (STRINGZILLA_BUILD_PYTHON)
         python/stringzilla/overlap.c
         python/stringzilla/substrings.c
         python/stringzilla/regex.c
+        python/stringzilla/subdocuments.c
         python/stringzilla/utf8_runes.c
         python/stringzilla/utf8_tokens.c
         python/stringzilla/utf8_boundaries.c
@@ -757,6 +758,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/overlap.cpp
         test/substrings.cpp
         test/regex.cpp
+        test/subdocuments.cpp
         test/string.cpp
         test/find.cpp
         test/utf8_runes.cpp

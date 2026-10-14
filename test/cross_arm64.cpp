@@ -85,6 +85,16 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_regex_equivalence_neon",
           [&](test_context_t &context) { check_regex_equivalence_(context, regex_neon); });
 
+    constexpr subdocuments_tier_t subdocuments_neon {
+        .init = sz_subdocuments_engine_init_neon,
+        .counts = sz_subdocuments_counts_neon,
+        .find = sz_subdocuments_find_neon,
+    };
+    check("test_subdocuments_unit_neon", [&] { check_subdocuments_unit_(subdocuments_neon); });
+    check("test_subdocuments_safety_neon", [&] { check_subdocuments_safety_(subdocuments_neon); });
+    check("test_subdocuments_equivalence_neon",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_neon); });
+
     constexpr utf8_runes_backend_t utf8_runes_neon {"neon", sz_utf8_count_neon, sz_utf8_seek_neon, sz_utf8_decode_neon,
                                                     sz_utf8_count_strings_neon};
     check("test_utf8_runes_unit_neon", [&] { check_utf8_runes_unit_(utf8_runes_neon); });
@@ -283,6 +293,16 @@ std::size_t test_cross_arm64(environment_t const &env) {
     check("test_substrings_unit_sve2", [&] { check_substrings_unit_(substrings_sve2); });
     check("test_substrings_equivalence_sve2",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_sve2); });
+
+    constexpr subdocuments_tier_t subdocuments_sve2 {
+        .init = sz_subdocuments_engine_init_sve2,
+        .counts = sz_subdocuments_counts_sve2,
+        .find = sz_subdocuments_find_sve2,
+    };
+    check("test_subdocuments_unit_sve2", [&] { check_subdocuments_unit_(subdocuments_sve2); });
+    check("test_subdocuments_safety_sve2", [&] { check_subdocuments_safety_(subdocuments_sve2); });
+    check("test_subdocuments_equivalence_sve2",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_sve2); });
 
     constexpr utf8_runes_backend_t utf8_runes_sve2 {"sve2", sz_utf8_count_sve2, sz_utf8_seek_sve2, sz_utf8_decode_sve2};
     check("test_utf8_runes_unit_sve2", [&] { check_utf8_runes_unit_(utf8_runes_sve2); });

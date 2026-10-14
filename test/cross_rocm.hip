@@ -49,6 +49,8 @@ std::size_t test_cross_rocm(environment_t const &env, std::size_t ordinal) {
         sz_regex_find_rocm,
         sz_regex_replace_rocm,
         sz_regex_extract_rocm,
+        sz_subdocuments_counts_rocm,
+        sz_subdocuments_find_rocm,
         sz_utf8_uncased_fold_rocm,
         sz_utf8_norm_rocm,
         sz_sha256_multistate_update_rocm,

@@ -162,6 +162,16 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_regex_equivalence_haswell",
           [&](test_context_t &context) { check_regex_equivalence_(context, regex_haswell); });
 
+    constexpr subdocuments_tier_t subdocuments_haswell {
+        .init = sz_subdocuments_engine_init_haswell,
+        .counts = sz_subdocuments_counts_haswell,
+        .find = sz_subdocuments_find_haswell,
+    };
+    check("test_subdocuments_unit_haswell", [&] { check_subdocuments_unit_(subdocuments_haswell); });
+    check("test_subdocuments_safety_haswell", [&] { check_subdocuments_safety_(subdocuments_haswell); });
+    check("test_subdocuments_equivalence_haswell",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_haswell); });
+
     constexpr utf8_runes_backend_t utf8_runes_haswell {"haswell", sz_utf8_count_haswell, sz_utf8_seek_haswell,
                                                        sz_utf8_decode_haswell};
     check("test_utf8_runes_unit_haswell", [&] { check_utf8_runes_unit_(utf8_runes_haswell); });
@@ -386,6 +396,16 @@ std::size_t test_cross_x8664(environment_t const &env) {
     check("test_regex_unit_icelake", [&] { check_regex_unit_(regex_icelake); });
     check("test_regex_equivalence_icelake",
           [&](test_context_t &context) { check_regex_equivalence_(context, regex_icelake); });
+
+    constexpr subdocuments_tier_t subdocuments_icelake {
+        .init = sz_subdocuments_engine_init_icelake,
+        .counts = sz_subdocuments_counts_icelake,
+        .find = sz_subdocuments_find_icelake,
+    };
+    check("test_subdocuments_unit_icelake", [&] { check_subdocuments_unit_(subdocuments_icelake); });
+    check("test_subdocuments_safety_icelake", [&] { check_subdocuments_safety_(subdocuments_icelake); });
+    check("test_subdocuments_equivalence_icelake",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_icelake); });
 
     constexpr utf8_runes_backend_t utf8_runes_icelake {"icelake", sz_utf8_count_icelake, sz_utf8_seek_icelake,
                                                        sz_utf8_decode_icelake, sz_utf8_count_strings_icelake};

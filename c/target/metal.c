@@ -9,6 +9,7 @@
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/regex.h"
+#include "stringzilla/subdocuments.h"
 #include "stringzilla/utf8_norm.h"
 #include "stringzilla/utf8_uncased_fold.h"
 
@@ -17,6 +18,7 @@
 #include "stringzilla/strings/metal.h"
 #include "stringzilla/substrings/metal.h"
 #include "stringzilla/regex/metal.h"
+#include "stringzilla/subdocuments/metal.h"
 #include "stringzilla/utf8_norm/metal.h"
 #include "stringzilla/utf8_uncased_fold/metal.h"
 

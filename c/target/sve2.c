@@ -13,6 +13,7 @@
 #include "stringzilla/hash/sve2.h"
 #include "stringzilla/find/sve2.h"
 #include "stringzilla/substrings/sve2.h"
+#include "stringzilla/subdocuments/sve2.h"
 #include "stringzilla/utf8_runes/sve2.h"
 #include "stringzilla/utf8_tokens/sve2.h"
 #include "stringzilla/utf8_wordbreaks/sve2.h"

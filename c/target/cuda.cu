@@ -14,6 +14,7 @@
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/regex.h"
+#include "stringzilla/subdocuments.h"
 #include "stringzilla/utf8_uncased_fold.h"
 #include "stringzilla/utf8_norm.h"
 
@@ -23,6 +24,7 @@
 #include "stringzilla/strings/cuda.cuh"
 #include "stringzilla/substrings/cuda.cuh"
 #include "stringzilla/regex/cuda.cuh"
+#include "stringzilla/subdocuments/cuda.cuh"
 #include "stringzilla/utf8_uncased_fold/cuda.cuh"
 #include "stringzilla/utf8_norm/cuda.cuh"
 

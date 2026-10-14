@@ -1114,6 +1114,9 @@ void test_substrings_safety(test_context_t &context);
 void test_regex_unit();
 void test_regex_all(test_context_t &context);
 void test_regex_safety(test_context_t &context);
+void test_subdocuments_unit();
+void test_subdocuments_all(test_context_t &context);
+void test_subdocuments_safety(test_context_t &context);
 
 #pragma endregion Sequence Algorithms
 

@@ -10,6 +10,7 @@
 #include "stringzilla/overlap.h"
 #include "stringzilla/substrings.h"
 #include "stringzilla/regex.h"
+#include "stringzilla/subdocuments.h"
 #include "stringzilla/utf8_uncased_fold.h"
 #include "stringzilla/utf8_norm.h"
 
@@ -19,6 +20,7 @@
 #include "stringzilla/strings/rocm.cuh"
 #include "stringzilla/substrings/rocm.cuh"
 #include "stringzilla/regex/rocm.cuh"
+#include "stringzilla/subdocuments/rocm.cuh"
 #include "stringzilla/utf8_uncased_fold/rocm.cuh"
 #include "stringzilla/utf8_norm/rocm.cuh"
 

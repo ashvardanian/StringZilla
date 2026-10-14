@@ -883,6 +883,7 @@ struct sz_levenshtein_engine_t;   // Forward declaration of a batch of prepared 
 struct sz_overlap_engine_t;       // Forward declaration of a forest of prepared overlap query trees
 struct sz_substrings_engine_t;    // Forward declaration of a compiled multi-pattern vocabulary
 struct sz_regex_engine_t;         // Forward declaration of a compiled vocabulary of regular expressions
+struct sz_subdocuments_engine_t;  // Forward declaration of a compiled vocabulary of JSONPath or XPath queries
 typedef sz_size_t sz_pgram_t;     // "Pointer-sized N-gram" of a string
 
 /**
@@ -1000,6 +1001,16 @@ typedef struct sz_match_t {
     /** Haystack bytes the match spans, which folding can make differ from the needle's length. */
     sz_size_t byte_length;
 } sz_match_t;
+
+/** The document grammar a subdocuments engine reads, and the path language that addresses it. */
+typedef enum sz_subdocuments_format_t {
+
+    /** RFC 8259 documents, addressed by RFC 9535 JSONPath. */
+    sz_subdocuments_json_k = 0,
+
+    /** XML 1.0 documents, addressed by XPath 1.0 along forward axes. */
+    sz_subdocuments_xml_k = 1,
+} sz_subdocuments_format_t;
 
 /** How matches that share bytes resolve: reported in full, or thinned to a leftmost run. */
 typedef enum sz_substrings_overlap_policy_t {

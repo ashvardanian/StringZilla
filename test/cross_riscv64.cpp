@@ -75,6 +75,16 @@ std::size_t test_cross_riscv64(environment_t const &env) {
     check("test_substrings_equivalence_rvv",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_rvv); });
 
+    constexpr subdocuments_tier_t subdocuments_rvv {
+        .init = sz_subdocuments_engine_init_rvv,
+        .counts = sz_subdocuments_counts_rvv,
+        .find = sz_subdocuments_find_rvv,
+    };
+    check("test_subdocuments_unit_rvv", [&] { check_subdocuments_unit_(subdocuments_rvv); });
+    check("test_subdocuments_safety_rvv", [&] { check_subdocuments_safety_(subdocuments_rvv); });
+    check("test_subdocuments_equivalence_rvv",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_rvv); });
+
     constexpr utf8_runes_backend_t utf8_runes_rvv {"rvv", sz_utf8_count_rvv, sz_utf8_seek_rvv, sz_utf8_decode_rvv};
     check("test_utf8_runes_unit_rvv", [&] { check_utf8_runes_unit_(utf8_runes_rvv); });
     check("test_utf8_runes_safety_rvv",

@@ -72,6 +72,16 @@ std::size_t test_cross_loongarch64(environment_t const &env) {
     check("test_substrings_equivalence_loongsonasx",
           [&](test_context_t &context) { check_substrings_equivalence_(context, substrings_loongsonasx); });
 
+    constexpr subdocuments_tier_t subdocuments_loongsonasx {
+        .init = sz_subdocuments_engine_init_loongsonasx,
+        .counts = sz_subdocuments_counts_loongsonasx,
+        .find = sz_subdocuments_find_loongsonasx,
+    };
+    check("test_subdocuments_unit_loongsonasx", [&] { check_subdocuments_unit_(subdocuments_loongsonasx); });
+    check("test_subdocuments_safety_loongsonasx", [&] { check_subdocuments_safety_(subdocuments_loongsonasx); });
+    check("test_subdocuments_equivalence_loongsonasx",
+          [&](test_context_t &context) { check_subdocuments_equivalence_(context, subdocuments_loongsonasx); });
+
     constexpr utf8_runes_backend_t utf8_runes_loongsonasx {"loongsonasx", sz_utf8_count_loongsonasx,
                                                            sz_utf8_seek_loongsonasx, sz_utf8_decode_loongsonasx};
     check("test_utf8_runes_unit_loongsonasx", [&] { check_utf8_runes_unit_(utf8_runes_loongsonasx); });

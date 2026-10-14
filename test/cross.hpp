@@ -4794,6 +4794,552 @@ inline void check_regex_equivalence_(test_context_t &context, regex_tier_t const
 
 #pragma endregion Regex
 
+#pragma region Subdocuments
+
+struct subdocuments_tier_t {
+    sz_kernel_subdocuments_engine_init_t init;
+    sz_kernel_subdocuments_counts_t counts;
+    sz_kernel_subdocuments_find_t find;
+};
+
+/** What a tier reports over a batch: its status, the first malformed document, and every match. */
+struct subdocuments_found_t {
+    sz_status_t status = sz_success_k;
+    sz_size_t malformed_index = 0;
+    std::vector<sz_match_t> matches;
+    std::vector<sz_size_t> offsets;
+};
+
+/** Compiles @p paths with @p tier, from @p allocator or from the heap when it is null. */
+inline sz_status_t subdocuments_compile_(subdocuments_tier_t const &tier, sz_subdocuments_engine_t *engine,
+                                         std::vector<std::string> const &paths, sz_subdocuments_format_t format,
+                                         sz_size_t *malformed_index, sz_allocator_t *allocator) {
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const path_strings = strings_over_(paths, views);
+    return tier.init(engine, &path_strings, format, malformed_index, allocator, nullptr);
+}
+
+/** Every match @p engine reports over @p documents: a sizing call, then a filling one that must
+ *  agree with it and with the counts. A malformed batch stops after the sizing call. */
+inline subdocuments_found_t subdocuments_find_(subdocuments_tier_t const &tier, sz_subdocuments_engine_t *engine,
+                                               std::vector<std::string> const &documents) {
+    std::vector<sz_string_view_t> views;
+    sz_strings_view_t const document_strings = strings_over_(documents, views);
+    subdocuments_found_t found;
+    found.offsets.assign(documents.size() + 1, 0);
+    found.status = tier.find(engine, &document_strings, nullptr, 0, found.offsets.data(), &found.malformed_index,
+                             nullptr);
+    if (found.status != sz_success_k) return found;
+
+    std::vector<sz_size_t> const sized = found.offsets;
+    std::vector<sz_size_t> counts(documents.size(), 0);
+    found.matches.resize(sized.back());
+    verify(tier.find(engine, &document_strings, found.matches.data(), found.matches.size(), found.offsets.data(),
+                     &found.malformed_index, nullptr) == sz_success_k);
+    verify(found.offsets == sized);
+    verify(tier.counts(engine, &document_strings, counts.data(), 1, &found.malformed_index, nullptr) == sz_success_k);
+    for (std::size_t index = 0; index != documents.size(); ++index)
+        verify(counts[index] == sized[index + 1] - sized[index]);
+    return found;
+}
+
+/** The status of compiling @p paths, freeing the engine again once it compiles; @p malformed_index
+ *  names the refused path. */
+inline sz_status_t subdocuments_compile_status_(subdocuments_tier_t const &tier, std::vector<std::string> const &paths,
+                                                sz_subdocuments_format_t format, sz_size_t &malformed_index) {
+    handle_checked_heap_t heap;
+    sz_subdocuments_engine_t engine;
+    sz_status_t const status = subdocuments_compile_(tier, &engine, paths, format, &malformed_index, &heap.allocator);
+    if (status == sz_success_k) sz_subdocuments_engine_free(&engine, nullptr);
+    verify(heap.live_allocations == 0);
+    return status;
+}
+
+/** The status of walking @p documents with @p path alone, where @p malformed_index
+ *  names the first malformed one. */
+inline sz_status_t subdocuments_walk_status_(subdocuments_tier_t const &tier, std::string const &path,
+                                             std::vector<std::string> const &documents, sz_subdocuments_format_t format,
+                                             sz_size_t &malformed_index) {
+    sz_subdocuments_engine_t engine;
+    verify(subdocuments_compile_(tier, &engine, {path}, format, &malformed_index, nullptr) == sz_success_k);
+    subdocuments_found_t const found = subdocuments_find_(tier, &engine, documents);
+    sz_subdocuments_engine_free(&engine, nullptr);
+    malformed_index = found.malformed_index;
+    return found.status;
+}
+
+/** Checks that @p paths select exactly @p expected out of @p document, in document order. */
+inline void check_subdocuments_values_(subdocuments_tier_t const &tier, std::string const &document,
+                                       std::vector<std::string> const &paths, std::vector<std::string> const &expected,
+                                       sz_subdocuments_format_t format = sz_subdocuments_json_k) {
+    handle_checked_heap_t heap;
+    sz_subdocuments_engine_t engine;
+    sz_size_t malformed_index = 0;
+    sz_status_t const status = subdocuments_compile_(tier, &engine, paths, format, &malformed_index, &heap.allocator);
+    // A header-only build links no regex dispatch, so `match()` and `search()` need the library.
+    if (STRINGZILLA_HEADER_ONLY && status == sz_missing_library_k) return;
+    verify(status == sz_success_k);
+    subdocuments_found_t const found = subdocuments_find_(tier, &engine, {document});
+    verify(found.status == sz_success_k);
+    std::vector<std::string> values;
+    for (sz_match_t const &match : found.matches)
+        values.push_back(document.substr(match.byte_offset, match.byte_length));
+    verify(values == expected);
+    sz_subdocuments_engine_free(&engine, nullptr);
+    verify(heap.live_allocations == 0);
+}
+
+/** RFC 9535's bookstore and examples, XPath over an XML bookstore, refused paths, and capacities
+ *  that cut the matches anywhere. */
+inline void check_subdocuments_unit_(subdocuments_tier_t const &tier) {
+    sz_subdocuments_format_t const json = sz_subdocuments_json_k, xml = sz_subdocuments_xml_k;
+    std::string const bookstore = "{ \"store\": {\n"                                                      //
+                                  "    \"book\": [\n"                                                     //
+                                  "      { \"category\": \"reference\", \"author\": \"Nigel Rees\", "     //
+                                  "\"title\": \"Sayings of the Century\", \"price\": 8.95 },\n"           //
+                                  "      { \"category\": \"fiction\", \"author\": \"Evelyn Waugh\", "     //
+                                  "\"title\": \"Sword of Honour\", \"price\": 12.99 },\n"                 //
+                                  "      { \"category\": \"fiction\", \"author\": \"Herman Melville\", "  //
+                                  "\"title\": \"Moby Dick\", \"isbn\": \"0-553-21311-3\",\n"              //
+                                  "        \"price\": 8.99 },\n"                                          //
+                                  "      { \"category\": \"fiction\", \"author\": \"J. R. R. Tolkien\", " //
+                                  "\"title\": \"The Lord of the Rings\",\n"                               //
+                                  "        \"isbn\": \"0-395-19395-8\", \"price\": 22.99 }\n"             //
+                                  "    ],\n"                                                              //
+                                  "    \"bicycle\": { \"color\": \"red\", \"price\": 399 }\n"             //
+                                  "  }\n"                                                                 //
+                                  "}";
+    std::vector<std::string> const authors {R"("Nigel Rees")", R"("Evelyn Waugh")", R"("Herman Melville")",
+                                            R"("J. R. R. Tolkien")"};
+    check_subdocuments_values_(tier, bookstore, {"$.store.book[*].author"}, authors);
+    check_subdocuments_values_(tier, bookstore, {"$..author"}, authors);
+    // A one-byte `\u` escape in a key or a name selector stands for its rune, not the letter `u`.
+    check_subdocuments_values_(tier, R"({"ab": 1, "au": 2})", {"$.ab", "$['\\u0061u']"}, {"1", "2"});
+    check_subdocuments_values_(tier, bookstore, {"$.store..price"}, {"8.95", "12.99", "8.99", "22.99", "399"});
+    check_subdocuments_values_(tier, bookstore, {"$..book[1::2]['title']"},
+                               {R"("Sword of Honour")", R"("The Lord of the Rings")"});
+    check_subdocuments_values_(tier, bookstore, {"$"}, {bookstore});
+    check_subdocuments_values_(tier, bookstore, {"$..book[4]", "$.missing", "$..price.x", "$..book[::0]"}, {});
+    check_subdocuments_values_(tier, bookstore, {"$ .store [ 'bicycle' ] [\"color\"]"}, {R"("red")"});
+
+    // Paths selecting one node report it once each, by path, after the container holding it.
+    check_subdocuments_values_(
+        tier, bookstore, {"$..bicycle.price", "$.store.bicycle", "$..price", "$.*.bicycle..price"},
+        {"8.95", "12.99", "8.99", "22.99", R"({ "color": "red", "price": 399 })", "399", "399", "399"});
+    check_subdocuments_values_(tier, R"({"a":{"a":{"b":1}}})", {"$..a..b", "$..b", "$..a"},
+                               {R"({"a":{"b":1}})", R"({"b":1})", "1", "1"});
+    check_subdocuments_values_(tier, R"([[0, 1], [2, [3, 4]], 5])", {"$..[1]", "$[*][*]"},
+                               {"0", "1", "1", "[2, [3, 4]]", "2", "[3, 4]", "[3, 4]", "4"});
+    check_subdocuments_values_(tier, R"( [ -1.5e+3 , true , false , null , "" ] )", {"$[0:5:2]", "$[3:]"},
+                               {"-1.5e+3", "false", "null", R"("")", R"("")"});
+
+    // Negative indices, backward slices and unions, still reported in document order,
+    // each node once per path.
+    check_subdocuments_values_(tier, bookstore, {"$..book[-1].title", "$..book[0,1].title"},
+                               {R"("Sayings of the Century")", R"("Sword of Honour")", R"("The Lord of the Rings")"});
+    check_subdocuments_values_(tier, bookstore, {"$..book[-2:].author", "$.store.book[-5]", "$..book[-4].price"},
+                               {"8.95", R"("Herman Melville")", R"("J. R. R. Tolkien")"});
+    check_subdocuments_values_(tier, bookstore, {"$..book[::-1].price", "$..book[3:0:-2].price"},
+                               {"8.95", "12.99", "12.99", "8.99", "22.99", "22.99"});
+    std::string const letters = R"(["a","b","c","d","e","f","g"])";
+    check_subdocuments_values_(tier, letters, {"$[5:1:-2]"}, {R"("d")", R"("f")"});
+    check_subdocuments_values_(tier, letters, {"$[0:2, 5]", "$[0, 0]"}, {R"("a")", R"("a")", R"("b")", R"("f")"});
+    check_subdocuments_values_(tier, letters, {"$[-1:-3:-1]", "$[:-5]", "$[-3:-1]"},
+                               {R"("a")", R"("b")", R"("e")", R"("f")", R"("f")", R"("g")"});
+    // Pending runs nest, and a run's array is reported before what the run settles.
+    check_subdocuments_values_(tier, "[[1,2,3],[4,5]]", {"$..[-1]", "$[-1][-1]"}, {"3", "[4,5]", "5", "5"});
+    check_subdocuments_values_(tier, R"([{"a":1},{"a":2,"b":[3,{"a":4}]}])", {"$[-1]..a"}, {"2", "4"});
+
+    // Filters: existence, comparisons, the functions, nesting, and filters inside pending runs.
+    check_subdocuments_values_(
+        tier, bookstore, {"$..book[?@.isbn].title", "$..book[?!@.isbn].author"},
+        {R"("Nigel Rees")", R"("Evelyn Waugh")", R"("Moby Dick")", R"("The Lord of the Rings")"});
+    check_subdocuments_values_(
+        tier, bookstore, {"$..book[?@.price<10].title", "$..book[?@.price < 10 && @.category == 'fiction'].title"},
+        {R"("Sayings of the Century")", R"("Moby Dick")", R"("Moby Dick")"});
+    check_subdocuments_values_(tier, bookstore,
+                               {"$..book[?length(@.title) > 15].title", "$.store[?count(@.*) == 2].color"},
+                               {R"("Sayings of the Century")", R"("The Lord of the Rings")", R"("red")"});
+    check_subdocuments_values_(tier, bookstore, {"$.store.book[?value(@..price) > 20].title"},
+                               {R"("The Lord of the Rings")"});
+    check_subdocuments_values_(
+        tier, bookstore, {"$..book[?match(@.author, '.*Tolkien')].price", "$..book[?search(@.title, 'of')].price"},
+        {"8.95", "12.99", "22.99", "22.99"});
+    std::string const filtered =
+        R"({"a": [3, 5, 1, 2, 4, 6, {"b": "j"}, {"b": "k"}, {"b": {}}, {"b": "kilo"}], )" R"("o": {"p": 1, "q": 2, "r": 3, "s": 5, "t": {"u": 6}}, "e": "f"})";
+    check_subdocuments_values_(tier, filtered, {"$.a[?@.b == 'kilo']", "$.a[?(@.b == 'kilo')]"},
+                               {R"({"b": "kilo"})", R"({"b": "kilo"})"});
+    check_subdocuments_values_(tier, filtered, {"$.a[?@>3.5]", "$.a[?@<2 || @.b == \"k\"]"},
+                               {"5", "1", "4", "6", R"({"b": "k"})"});
+    check_subdocuments_values_(tier, filtered, {"$.o[?@<3, ?@<3]", "$.o[?@>1 && @<4]", "$.o[?@.u || @.x]"},
+                               {"1", "2", "2", "3", R"({"u": 6})"});
+    check_subdocuments_values_(
+        tier, filtered, {"$.a[?match(@.b, \"[jk]\")]", "$.a[?search(@.b, \"[jk]\")]"},
+        {R"({"b": "j"})", R"({"b": "j"})", R"({"b": "k"})", R"({"b": "k"})", R"({"b": "kilo"})"});
+    // I-Regexp's `.` skips line breaks, and its `^` and `$` are plain characters.
+    check_subdocuments_values_(tier, R"(["a\nb", "axb", "^a$", "a"])",
+                               {"$[?match(@, 'a.b')]", "$[?search(@, '^a')]", "$[?match(@, 'a')]"},
+                               {R"("axb")", R"("^a$")", R"("a")"});
+    check_subdocuments_values_(tier, R"([{"x": [1, 5]}, {"x": [2]}, {"y": 9}])",
+                               {"$[?@.x[?@ > 4]]", "$[?@.y, 0]", "$[-1][?@ == 9]"},
+                               {R"({"x": [1, 5]})", R"({"x": [1, 5]})", R"({"y": 9})", "9"});
+    check_subdocuments_values_(tier, R"({"a": {"a": {"b": 1}}, "b": 2})",
+                               {"$..[?@.b]", "$..[?@ == 1]", "$..[?length(@) == 1]"},
+                               {R"({"a": {"b": 1}})", R"({"b": 1})", R"({"b": 1})", "1"});
+
+    // Keys match after unescaping either side, and duplicate keys are all reported, as written.
+    std::string const escaped = "{\"a\\\"b\":1,\"A\":2,\"caf\xC3\xA9\":3,\"\\ud83d\\ude00\":4," //
+                                "\"a\\\\b\":5,\"x\\/y\":6,\"caf\\u00e9\":7}";
+    check_subdocuments_values_(tier, escaped, {R"($['a"b'])", R"($["a\"b"])", "$.A"}, {"1", "1", "2"});
+    check_subdocuments_values_(tier, escaped, {"$['caf\xC3\xA9']", R"($['caf\u00e9'])"}, {"3", "3", "7", "7"});
+    check_subdocuments_values_(tier, escaped, {"$['\xF0\x9F\x98\x80']", R"($['a\\b'])", "$['x/y']"}, {"4", "5", "6"});
+
+    std::string const bookstore_markup = R"(<?xml version="1.0"?>
+<!-- the catalog -->
+<store xmlns:b="urn:books">
+  <book category="reference" b:id="1"><author>Nigel Rees</author><title lang="en">Sayings</title><price>8.95</price></book>
+  <book category="fiction"><author>Evelyn Waugh</author><title lang='en'>Sword</title><price>12.99</price></book>
+  <b:book category="fiction"><author>Herman &amp; Melville</author><title>Moby Dick</title></b:book>
+  <bicycle color="red"><price>399</price></bicycle>
+</store>)";
+    check_subdocuments_values_(tier, bookstore_markup, {"/store/book/author"},
+                               {"<author>Nigel Rees</author>", "<author>Evelyn Waugh</author>"}, xml);
+    check_subdocuments_values_(tier, bookstore_markup, {"//author/text()"},
+                               {"Nigel Rees", "Evelyn Waugh", "Herman &amp; Melville"}, xml);
+    check_subdocuments_values_(tier, bookstore_markup, {"/store/book[2]/title/@lang", "//@category"},
+                               {"reference", "fiction", "en", "fiction"}, xml);
+    // QName prefixes stay as written, positions count the siblings passing the step's test, and a
+    // namespace declaration is no attribute.
+    check_subdocuments_values_(tier, bookstore_markup,
+                               {"/store/*[3]/title/text()", "//b:book/author/text()", "//@b:id", "/store/@*"},
+                               {"1", "Herman &amp; Melville", "Moby Dick"}, xml);
+    check_subdocuments_values_(tier, bookstore_markup, {"//book[1]/price/text()", "//price/text()"},
+                               {"8.95", "8.95", "12.99", "399"}, xml);
+    check_subdocuments_values_(tier, bookstore_markup, {"/store/bicycle"},
+                               {R"(<bicycle color="red"><price>399</price></bicycle>)"}, xml);
+    check_subdocuments_values_(tier, bookstore_markup, {"/store/text()[5]", "/store/text()[6]"}, {"\n"}, xml);
+    // A text node is any character data and CDATA between other markup, so comments and processing
+    // instructions split one, and an empty CDATA section is one.
+    std::string const mixed = "<a>x<![CDATA[y<]]>z<!--c-->w<?pi d?>v<b/>u<c><![CDATA[]]></c></a>";
+    check_subdocuments_values_(tier, mixed, {"/a/text()", "/a/text()[2]"}, {"x<![CDATA[y<]]>z", "w", "w", "v", "u"},
+                               xml);
+    check_subdocuments_values_(tier, mixed, {"/a/b", "//c/text()"}, {"<b/>", "<![CDATA[]]>"}, xml);
+    check_subdocuments_values_(tier, "<a k='x>\"y' j = \"1\" ></a >", {"/a/@k", "/a/@*"}, {"x>\"y", "x>\"y", "1"}, xml);
+    std::string const nested = "<r><a>1</a><b><a>2</a><a>3</a></b><a>4</a></r>";
+    check_subdocuments_values_(tier, nested, {"//a[1]"}, {"<a>1</a>", "<a>2</a>"}, xml);
+    check_subdocuments_values_(tier, nested, {"//a[2]", "/r/a[2]/text()", "//a[0]"}, {"<a>3</a>", "<a>4</a>", "4"},
+                               xml);
+    check_subdocuments_values_(tier, "<a><a><a/></a></a>", {"//a//a", "/a"},
+                               {"<a><a><a/></a></a>", "<a><a/></a>", "<a/>"}, xml);
+
+    // Refused paths are named by their index among accepted ones.
+    sz_size_t malformed_index = 0;
+    for (char const *path : {"$[0,]", "$[?@.a == @.b]", "$[?$.a]", "$[?count(@.a)]", "$..", "$[01]", "$ ", "$[- 1]",
+                             R"($["\x"])", R"($['\ud800'])", "", "$[9007199254740992]", "$[1:2:-0]", "$..[-0]",
+                             "$[?((((((((((((((((((((((((((((((((@.a))))))))))))))))))))))))))))))))]"}) {
+        verify(subdocuments_compile_status_(tier, {"$.fine", "$[0]", path, "$.too"}, json, malformed_index) ==
+               sz_invalid_syntax_k);
+        verify(malformed_index == 2);
+    }
+    for (char const *path : {"$", "/", "//", "/a/", "/a[-1]", "/a[x]", "/a/..", "/child::a", "/a[1][2]", "/a|/b"}) {
+        verify(subdocuments_compile_status_(tier, {"/fine", path}, xml, malformed_index) == sz_invalid_syntax_k);
+        verify(malformed_index == 1);
+    }
+    for (char const *path :
+         {"$[9007199254740991]", "$ .a", "$[::]", "$..[*]", "$['']", "$[-1]", "$[ 0 , 'a' , * , 1:2: , -2 ]",
+          "$[?@.a, ?@.b]", "$..[?@.x[?@.y > -1.5e+3]]", "$[?@ == true || @ == null || @ != \"x\"]"})
+        verify(subdocuments_compile_status_(tier, {path}, json, malformed_index) == sz_success_k);
+    for (char const *path : {"/a/text", "/p:a//q:b[3]", "//\xC3\xA9", "/a-b.c_d", "/a[0]"})
+        verify(subdocuments_compile_status_(tier, {path}, xml, malformed_index) == sz_success_k);
+
+    // A capacity cuts the matches anywhere, leaving offsets true and the array past it untouched.
+    auto const check_capacities = [&](std::vector<std::string> const &documents, std::vector<std::string> const &paths,
+                                      sz_subdocuments_format_t format) {
+        std::vector<sz_string_view_t> views;
+        sz_strings_view_t const document_strings = strings_over_(documents, views);
+        sz_subdocuments_engine_t engine;
+        verify(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr) == sz_success_k);
+        subdocuments_found_t const full = subdocuments_find_(tier, &engine, documents);
+        sz_size_t const total = full.offsets.back();
+        for (sz_size_t capacity : {sz_size_t(1), sz_size_t(63), sz_size_t(65), total - 1, total}) {
+            sz_match_t const sentinel {111, 222, 333, 444};
+            std::vector<sz_match_t> matches(capacity + 1, sentinel);
+            std::vector<sz_size_t> offsets(documents.size() + 1, 999);
+            verify(tier.find(&engine, &document_strings, matches.data(), capacity, offsets.data(), &malformed_index,
+                             nullptr) == sz_success_k);
+            verify(offsets == full.offsets);
+            verify(std::memcmp(matches.data(), full.matches.data(), capacity * sizeof(sz_match_t)) == 0);
+            verify(std::memcmp(&matches[capacity], &sentinel, sizeof(sz_match_t)) == 0);
+        }
+        // A strided count leaves the entries between its own alone.
+        std::vector<sz_size_t> counts(documents.size() * 2, 7);
+        verify(tier.counts(&engine, &document_strings, counts.data(), 2, &malformed_index, nullptr) == sz_success_k);
+        for (std::size_t index = 0; index != documents.size(); ++index) {
+            verify(counts[index * 2] == full.offsets[index + 1] - full.offsets[index]);
+            verify(counts[index * 2 + 1] == 7);
+        }
+        sz_subdocuments_engine_free(&engine, nullptr);
+    };
+    std::vector<std::string> json_documents(5, bookstore);
+    json_documents.push_back(R"([[[[1]]], {"x": [true, null]}])");
+    check_capacities(json_documents, {"$..*", "$..price", "$", "$..[-1]", "$..[?@.price > 10]"}, json);
+    check_capacities(std::vector<std::string>(5, bookstore_markup), {"//*", "//@*", "//text()", "/store/book[2]"}, xml);
+}
+
+/** Malformed documents fail with their index, as does every truncation of one spanning several
+ *  blocks, refused allocations return everything taken before them, and a hundred thousand levels
+ *  of nesting walk like one. */
+inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
+    sz_subdocuments_format_t const json = sz_subdocuments_json_k, xml = sz_subdocuments_xml_k;
+    sz_size_t malformed_index = 0;
+
+    // Unbalanced, unterminated and misplaced structure, behind a valid document,
+    // so the index is not the first.
+    for (char const *document :
+         {R"({"a":1)", "{\"a\":\"b}", "[1,2]]", R"({"a" 1})", R"({"a":1,})", "[1 2]", R"({"a":tru})", R"({"a":01})",
+          R"({"a":1}x)", "", "[}", R"(["\"])", "[1.]", R"({"a":1}{})"})
+        for (char const *path : {"$..*", "$..[-1]", "$..[?@]"}) {
+            verify(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index) ==
+                   sz_invalid_syntax_k);
+            verify(malformed_index == 1);
+        }
+    for (char const *document :
+         {"<a>", "<a></b>", "<a>x</a></a>", "<a b=\"x>", "<a><!-- x</a>", "<a><![CDATA[x</a>", "<a><?pi</a>",
+          "<a/><b/>", "text<a/>", "", "<a x=1/>", "<a><b></a></b>", "<!DOCTYPE a [<!ENTITY e \"x\">]><a/>"})
+        for (char const *path : {"//*", "//@*", "//text()", "/z"}) {
+            verify(subdocuments_walk_status_(tier, path, {"<a/>", document}, xml, malformed_index) ==
+                   sz_invalid_syntax_k);
+            verify(malformed_index == 1);
+        }
+
+    // What no path enters is skipped by its nesting alone, so it goes unvalidated.
+    verify(subdocuments_walk_status_(tier, "$.b", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index) == sz_success_k);
+    verify(subdocuments_walk_status_(tier, "$..*", {R"({"a":{"x":tru},"b":1})"}, json, malformed_index) ==
+           sz_invalid_syntax_k);
+    verify(subdocuments_walk_status_(tier, "/a/z", {"<a><b><c></d></b></a>"}, xml, malformed_index) == sz_success_k);
+    verify(subdocuments_walk_status_(tier, "//*", {"<a><b><c></d></b></a>"}, xml, malformed_index) ==
+           sz_invalid_syntax_k);
+
+    // Every proper prefix of a document spanning several blocks is malformed, walked or skipped.
+    std::string const json_document =
+        "{\"store\": {\"book\": [{\"title\": \"Sayings \\\"of\\\" the [Century]\", \"price\": 8.95, "        //
+        "\"tags\": [\"a,b\", \"c:d\", {}]}, {\"title\": \"Sword\\\\\", \"price\": 12.99, \"isbn\": null}], " //
+        "\"bicycle\": {\"color\": \"red\", \"price\": 399, \"gears\": [1, -2.5e+3, true, false]}}}";
+    std::string const xml_document =
+        R"(<?xml version="1.0"?><!-- c --><store xmlns:b="u"><book id='1' b:k="x>y">)" R"(<title>A &amp; B</title><![CDATA[<x>]]><?pi d?></book><b:book/>)" R"(<price>8.95</price></store>)";
+    for (std::size_t length = 0; length != json_document.size(); ++length)
+        for (char const *path : {"$..*", "$.x", "$..[-1]", "$..[?@.price > 1]"}) {
+            verify(subdocuments_walk_status_(tier, path, {json_document, json_document.substr(0, length)}, json,
+                                             malformed_index) == sz_invalid_syntax_k);
+            verify(malformed_index == 1);
+        }
+    for (std::size_t length = 0; length != xml_document.size(); ++length)
+        for (char const *path : {"//*", "/z", "//text()"}) {
+            verify(subdocuments_walk_status_(tier, path, {xml_document, xml_document.substr(0, length)}, xml,
+                                             malformed_index) == sz_invalid_syntax_k);
+            verify(malformed_index == 1);
+        }
+
+    // An empty vocabulary compiles nothing; a zero stride cannot address one count per document.
+    verify(subdocuments_compile_status_(tier, {}, json, malformed_index) == sz_unexpected_dimensions_k);
+    {
+        std::vector<std::string> const documents {"1"};
+        std::vector<sz_string_view_t> views;
+        sz_strings_view_t const document_strings = strings_over_(documents, views);
+        sz_subdocuments_engine_t engine;
+        sz_size_t count = 7;
+        verify(subdocuments_compile_(tier, &engine, {"$"}, json, &malformed_index, nullptr) == sz_success_k);
+        verify(tier.counts(&engine, &document_strings, &count, 0, &malformed_index, nullptr) ==
+               sz_unexpected_dimensions_k);
+        verify(count == 7);
+        sz_subdocuments_engine_free(&engine, nullptr);
+    }
+
+    // Every allocation refused in turn, the regex engine's too where a library compiles one,
+    // returns all before it.
+    auto const check_refusals = [&](std::vector<std::string> const &paths, std::vector<std::string> const &documents,
+                                    sz_subdocuments_format_t format) {
+        for (std::size_t growths = 0;; ++growths) {
+            verify(growths != 64 && "A walk must succeed once the allocator grants it enough");
+            sized_heap_t heap;
+            heap.growths_left = growths;
+            sz_subdocuments_engine_t engine;
+            sz_status_t status = subdocuments_compile_(tier, &engine, paths, format, &malformed_index, &heap.allocator);
+            if (status == sz_success_k) {
+                status = subdocuments_find_(tier, &engine, documents).status;
+                sz_subdocuments_engine_free(&engine, nullptr);
+            }
+            verify(heap.blocks.empty());
+            verify(heap.mismatches == 0);
+            if (status == sz_success_k) break;
+            verify(status == sz_bad_alloc_k);
+        }
+    };
+    std::vector<std::string> json_paths {"$..a", "$['c']..d", "$..[-1]", "$..[?@.a > 0]"};
+    if (!STRINGZILLA_HEADER_ONLY) json_paths.push_back("$..[?search(@, 'x')]");
+    check_refusals(json_paths, {std::string(1000, '[') + std::string(1000, ']'), R"({"a":"x"})"}, json);
+    std::string deep_markup;
+    for (std::size_t level = 0; level != 1000; ++level) deep_markup += "<a>";
+    for (std::size_t level = 0; level != 1000; ++level) deep_markup += "</a>";
+    check_refusals({"//a", "/a/b[2]", "//@x"}, {deep_markup, R"(<a x="1"/>)"}, xml);
+
+    // The depth stack lives on the heap rather than in recursion,
+    // so a hundred thousand levels walk like one.
+    std::size_t const levels = 100000;
+    sz_subdocuments_engine_t engine;
+    verify(subdocuments_compile_(tier, &engine, {"$..*", "$[0][0][0][0][0]..[0]", "$..[-1]", "$..[?@]"}, json,
+                                 &malformed_index, nullptr) == sz_success_k);
+    subdocuments_found_t const nested = subdocuments_find_(tier, &engine,
+                                                           {std::string(levels, '[') + "7" + std::string(levels, ']')});
+    verify(nested.status == sz_success_k);
+    verify(nested.offsets.back() == levels + (levels - 5) + levels + levels);
+    sz_subdocuments_engine_free(&engine, nullptr);
+    for (char const *path : {"$..*", "$.x"})
+        verify(subdocuments_walk_status_(tier, path, {std::string(levels, '[') + std::string(levels - 1, ']')}, json,
+                                         malformed_index) == sz_invalid_syntax_k);
+    deep_markup.clear();
+    for (std::size_t level = 0; level != levels; ++level) deep_markup += "<a>";
+    for (std::size_t level = 0; level != levels; ++level) deep_markup += "</a>";
+    verify(subdocuments_compile_(tier, &engine, {"//a", "/a/a/a//a[1]", "/z"}, xml, &malformed_index, nullptr) ==
+           sz_success_k);
+    subdocuments_found_t const nested_markup = subdocuments_find_(tier, &engine, {deep_markup});
+    verify(nested_markup.status == sz_success_k);
+    verify(nested_markup.offsets.back() == levels + (levels - 3));
+    sz_subdocuments_engine_free(&engine, nullptr);
+}
+
+/** A random JSON value at most @p depth containers deep, over a few keys, one of them spelled with
+ *  an escape, so random paths reach into it, and strings holding brackets, escapes and runs long
+ *  enough to cross a block. */
+inline void random_json_(std::mt19937 &generator, std::size_t depth, std::string &json) {
+    static char const *const keys[] = {"a", "b", "name", "n\\u0061me", "x\\\"y"};
+    static char const *const scalars[] = {"0", "-1.5e+3", "7", "true", "false", "null"};
+    static char const *const pieces[] = {"a", "{", "]", ":", ",", "\x20", "\\\"", "\\\\", "\\n", "\xC3\xA9"};
+    static char const *const blanks[] = {"", "", "\x20", "\n\t"};
+    std::size_t const kind = generator() % (depth ? 10 : 6);
+    if (kind < 3) json += scalars[generator() % std::size(scalars)];
+    else if (kind < 6) {
+        json += '"';
+        for (std::size_t count = generator() % 48; count; --count) json += pieces[generator() % std::size(pieces)];
+        json += '"';
+    }
+    else {
+        bool const object = kind < 8;
+        json += object ? '{' : '[';
+        for (std::size_t index = 0, count = generator() % 5; index != count; ++index) {
+            json += index ? "," : "";
+            json += blanks[generator() % std::size(blanks)];
+            if (object)
+                json += std::string("\"") + keys[generator() % std::size(keys)] + "\"" +
+                        blanks[generator() % std::size(blanks)] + ":";
+            json += blanks[generator() % std::size(blanks)];
+            random_json_(generator, depth - 1, json);
+        }
+        json += blanks[generator() % std::size(blanks)];
+        json += object ? '}' : ']';
+    }
+}
+
+/** A random XML element at most @p depth levels deep, with prefixed names, both quotes, entities,
+ *  and CDATA, comments and processing instructions mixed into its content. */
+inline void random_xml_(std::mt19937 &generator, std::size_t depth, std::string &xml) {
+    static char const *const names[] = {"a", "b", "p:a"};
+    static char const *const attributes[] = {" k=\"1\"", " p:k='x>\"y'", " j = \"&amp;\"", " xmlns:p=\"u\""};
+    static char const *const contents[] = {"x", " &lt;y ", "<![CDATA[<a>]]>", "<!-- <a> -->", "<?pi d?>", "\n  "};
+    std::string const name = names[generator() % std::size(names)];
+    xml += "<" + name;
+    for (char const *attribute : attributes) xml += generator() % 3 ? "" : attribute;
+    if (!depth || generator() % 4 == 0) {
+        xml += "/>";
+        return;
+    }
+    xml += ">";
+    for (std::size_t count = generator() % 5; count; --count)
+        if (generator() % 2) random_xml_(generator, depth - 1, xml);
+        else xml += contents[generator() % std::size(contents)];
+    xml += "</" + name + ">";
+}
+
+/** Random paths over random JSON and XML documents, every tier reporting exactly
+ *  what the serial one reports. */
+inline void check_subdocuments_equivalence_(test_context_t &context, subdocuments_tier_t const &tier) {
+    static char const *const segments[] = {".a",
+                                           ".b",
+                                           "..a",
+                                           ".name",
+                                           ".*",
+                                           "[0]",
+                                           "[-1]",
+                                           "[1:]",
+                                           "..*",
+                                           "[::-1]",
+                                           "['a',0]",
+                                           "..name",
+                                           "..[1]",
+                                           "[?@.a]",
+                                           "[?@ > 0]",
+                                           "[?@.name == 'a']",
+                                           "[?length(@) > 1]"};
+    static char const *const steps[] = {"/a", "/b", "//a", "//p:a", "/*", "//*", "/a[1]", "//*[2]"};
+    static char const *const ends[] = {"", "", "/text()", "//text()", "/@k", "//@*", "/@p:k"};
+    subdocuments_tier_t const serial {sz_subdocuments_engine_init_serial, sz_subdocuments_counts_serial,
+                                      sz_subdocuments_find_serial};
+    std::mt19937 &generator = context.generator;
+
+    auto const check_batch = [&](std::vector<std::string> const &paths, std::vector<std::string> const &documents,
+                                 sz_subdocuments_format_t format) {
+        sz_subdocuments_engine_t expected_engine, engine;
+        sz_size_t malformed_index = 0;
+        verify(subdocuments_compile_(serial, &expected_engine, paths, format, &malformed_index, nullptr) ==
+               sz_success_k);
+        verify(subdocuments_compile_(tier, &engine, paths, format, &malformed_index, nullptr) == sz_success_k);
+        subdocuments_found_t const expected = subdocuments_find_(serial, &expected_engine, documents);
+        subdocuments_found_t const found = subdocuments_find_(tier, &engine, documents);
+        verify(expected.status == sz_success_k);
+        verify(found.status == sz_success_k);
+        verify(found.offsets == expected.offsets);
+        verify(found.matches.empty() || std::memcmp(found.matches.data(), expected.matches.data(),
+                                                    found.matches.size() * sizeof(sz_match_t)) == 0);
+        sz_subdocuments_engine_free(&expected_engine, nullptr);
+        sz_subdocuments_engine_free(&engine, nullptr);
+    };
+
+    for (std::size_t round = 0; round != context.iterations(24); ++round) {
+        bool const markup = round % 3 == 2;
+        std::vector<std::string> paths, documents;
+        for (std::size_t index = 0; index != 1 + round % 8; ++index) {
+            std::string path = markup ? "" : "$";
+            for (std::size_t count = 1 + generator() % 3; count; --count)
+                path += markup ? steps[generator() % std::size(steps)] : segments[generator() % std::size(segments)];
+            paths.push_back(markup ? path + ends[generator() % std::size(ends)] : path);
+        }
+        for (std::size_t index = 0; index != 2 + round % 5; ++index) {
+            documents.emplace_back();
+            if (markup) random_xml_(generator, 2 + round % 3, documents.back());
+            else random_json_(generator, 2 + round % 3, documents.back());
+        }
+        check_batch(paths, documents, markup ? sz_subdocuments_xml_k : sz_subdocuments_json_k);
+    }
+
+    // Hundreds of values side by side, so pending runs, skips and text runs cross many blocks.
+    for (std::size_t round = 0; round != context.iterations(4); ++round) {
+        std::vector<std::string> documents(3, "["), markup {"<r>"};
+        for (std::string &document : documents) {
+            for (std::size_t index = 0; index != 200 + round * 50; ++index) {
+                document += index ? ", " : "";
+                random_json_(generator, 3, document);
+            }
+            document += "]";
+        }
+        for (std::size_t index = 0; index != 200 + round * 50; ++index) random_xml_(generator, 3, markup.back());
+        markup.back() += "</r>";
+        check_batch({"$[*]", "$..name", "$[-1]..*", "$[?@.a]", "$[100:][::-1].b"}, documents, sz_subdocuments_json_k);
+        check_batch({"/r/*", "//p:a/@*", "//text()", "/r/a[3]//b"}, markup, sz_subdocuments_xml_k);
+    }
+}
+
+#pragma endregion Subdocuments
+
 #pragma region UTF8 Runes
 
 /** Repeats one UTF-8 encoded codepoint @p repeats times, giving a run of a single byte-width. */

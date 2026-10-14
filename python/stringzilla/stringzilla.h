@@ -129,6 +129,7 @@ extern PyTypeObject LevenshteinEngineType;
 extern PyTypeObject OverlapEngineType;
 extern PyTypeObject SubstringsEngineType;
 extern PyTypeObject RegexEngineType;
+extern PyTypeObject SubdocumentsEngineType;
 
 extern struct PyModuleDef stringzilla_module;
 

@@ -30,6 +30,7 @@
  *  - @c overlap.h - window overlap between batches of queries and candidates, on a CPU or GPU.
  *  - @c substrings.h - multi-pattern search over a compiled vocabulary, on a CPU or a CUDA device.
  *  - @c regex.h - leftmost-first regular expression search over a compiled vocabulary of patterns.
+ *  - @c subdocuments.h - JSONPath and XPath extraction over batches of JSON or XML documents.
  *  - @c small_string.h - "Small String Optimization" in C 99.
  *  - @c stringzilla.h - umbrella header for the core C API.
  *  - @c stringzilla.hpp - umbrella header for the core C++ API.
@@ -83,12 +84,13 @@
 #include "stringzilla/cipher.h"       // `sz_aes256_key_init_best`, `sz_aes256_ctr_xor_best`
 #include "stringzilla/find.h"         // `sz_find_best`, `sz_find_byteset_best`, `sz_rfind_best`
 
-#include "stringzilla/sort.h"        // `sz_sort_order_best`, `sz_sort_uncased_order_best`
-#include "stringzilla/intersect.h"   // `sz_intersect_best`
-#include "stringzilla/levenshtein.h" // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
-#include "stringzilla/overlap.h"     // `sz_overlap_engine_init`, `sz_overlap_scores`
-#include "stringzilla/substrings.h"  // `sz_substrings_engine_init`, `sz_substrings_find`
-#include "stringzilla/regex.h"       // `sz_regex_engine_init`, `sz_regex_find`
+#include "stringzilla/sort.h"         // `sz_sort_order_best`, `sz_sort_uncased_order_best`
+#include "stringzilla/intersect.h"    // `sz_intersect_best`
+#include "stringzilla/levenshtein.h"  // `sz_levenshtein_engine_init`, `sz_levenshtein_distances`
+#include "stringzilla/overlap.h"      // `sz_overlap_engine_init`, `sz_overlap_scores`
+#include "stringzilla/substrings.h"   // `sz_substrings_engine_init`, `sz_substrings_find`
+#include "stringzilla/regex.h"        // `sz_regex_engine_init`, `sz_regex_find`
+#include "stringzilla/subdocuments.h" // `sz_subdocuments_engine_init`, `sz_subdocuments_find`
 
 #include "stringzilla/utf8_runes.h"        // `sz_utf8_count_best`, `sz_utf8_seek_best`, `sz_utf8_decode_best`
 #include "stringzilla/utf8_tokens.h"       // `sz_utf8_{newlines,whitespaces,delimiters}_best`

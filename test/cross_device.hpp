@@ -45,6 +45,8 @@ struct device_kernels {
     sz_kernel_regex_find_t regex_find;
     sz_kernel_regex_replace_t regex_replace;
     sz_kernel_regex_extract_t regex_extract;
+    sz_kernel_subdocuments_counts_t subdocuments_counts;
+    sz_kernel_subdocuments_find_t subdocuments_find;
     fold_type_ utf8_uncased_fold;
     norm_type_ utf8_norm;
 
@@ -1785,6 +1787,282 @@ inline void test_regex_device_safety(auto const &backend) {
 
 #pragma endregion Regex Checks
 
+#pragma region Subdocuments Checks
+
+/** One vocabulary of paths compiled twice: for the host and for @c stream 's device. */
+struct subdocuments_device_engines_t {
+
+    /** What the serial oracle's engine is built from. */
+    handle_checked_heap_t heap;
+
+    /** The serial oracle's engine, in plain host memory. */
+    sz_subdocuments_engine_t host {};
+
+    /** The device's engine. */
+    sz_subdocuments_engine_t device {};
+    sz_stream_t stream;
+
+    subdocuments_device_engines_t(device_vocabulary_t &vocabulary, auto const &backend, sz_subdocuments_format_t format)
+        : stream(backend.runtime.stream) {
+        sz_strings_view_t const paths = vocabulary.view();
+        try {
+            verify(sz_subdocuments_engine_init_serial(&host, &paths, format, nullptr, &heap.allocator, nullptr) ==
+                   sz_success_k);
+            verify(sz_subdocuments_engine_init(&device, &paths, format, nullptr, backend.runtime.capabilities,
+                                               &vocabulary.unified, backend.runtime.stream) == sz_success_k);
+        }
+        catch (...) {
+            reset();
+            throw;
+        }
+    }
+    subdocuments_device_engines_t(subdocuments_device_engines_t const &) = delete;
+    subdocuments_device_engines_t &operator=(subdocuments_device_engines_t const &) = delete;
+    ~subdocuments_device_engines_t() noexcept { reset(); }
+    void reset() noexcept {
+        sz_subdocuments_engine_free(&device, stream);
+        sz_subdocuments_engine_free(&host, nullptr);
+    }
+};
+
+/** The device's boundaries, matches and counts against serial's, every match in order, under a
+ *  capacity holding them all and one holding half; or, for a malformed corpus, the same refusal. */
+inline void check_subdocuments_against_serial_(auto const &backend, std::vector<std::string> const &documents,
+                                               std::vector<std::string> const &paths,
+                                               sz_subdocuments_format_t format = sz_subdocuments_json_k) {
+    device_corpus_t corpus(backend.runtime, documents);
+    device_vocabulary_t vocabulary(backend.runtime, paths);
+    subdocuments_device_engines_t engines(vocabulary, backend, format);
+    sz_strings_view_t const tape = corpus.device_tape.view().raw;
+    sz_stream_t const stream = backend.runtime.stream;
+    std::size_t const count = documents.size();
+
+    std::vector<sz_size_t> serial_offsets(count + 1, 0);
+    sz_size_t serial_malformed = STRINGZILLA_SIZE_MAX, device_malformed = STRINGZILLA_SIZE_MAX;
+    sz_status_t const serial_status = sz_subdocuments_find_serial(&engines.host, &tape, nullptr, 0,
+                                                                  serial_offsets.data(), &serial_malformed, nullptr);
+    if (serial_status != sz_success_k) {
+        unified_vector<sz_size_t> offsets(count + 1, 0, unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+        verify(serial_status == sz_invalid_syntax_k);
+        verify(backend.subdocuments_find(&engines.device, &tape, nullptr, 0, offsets.data(), &device_malformed,
+                                         stream) == sz_invalid_syntax_k);
+        verify(device_malformed == serial_malformed);
+        return;
+    }
+    std::size_t const total = serial_offsets[count];
+    std::vector<sz_match_t> serial_matches(total);
+    verify(sz_subdocuments_find_serial(&engines.host, &tape, serial_matches.data(), total, serial_offsets.data(),
+                                       &serial_malformed, nullptr) == sz_success_k);
+
+    sz_match_t const untouched {STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX, STRINGZILLA_SIZE_MAX};
+    for (std::size_t const capacity : {total, total / 2}) {
+        unified_vector<sz_size_t> offsets(count + 1, STRINGZILLA_SIZE_MAX,
+                                          unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+        unified_vector<sz_match_t> matches(total + 1, untouched,
+                                           unified_alloc<sz_match_t>(backend.runtime.unified, stream));
+        verify(backend.subdocuments_find(&engines.device, &tape, matches.data(), capacity, offsets.data(),
+                                         &device_malformed, stream) == sz_success_k);
+        join_(backend.runtime, stream);
+        for (std::size_t index = 0; index <= count; ++index) verify(offsets[index] == serial_offsets[index]);
+        for (std::size_t index = 0; index != capacity; ++index)
+            verify(matches[index].haystack_index == serial_matches[index].haystack_index &&
+                   matches[index].needle_index == serial_matches[index].needle_index &&
+                   matches[index].byte_offset == serial_matches[index].byte_offset &&
+                   matches[index].byte_length == serial_matches[index].byte_length);
+        for (std::size_t index = capacity; index <= total; ++index)
+            verify(matches[index].haystack_index == STRINGZILLA_SIZE_MAX);
+    }
+
+    // The dispatched verb runs the kernel of the capability the engine recorded, so both agree.
+    unified_vector<sz_size_t> device_counts(count, 0, unified_alloc<sz_size_t>(backend.runtime.unified, stream)),
+        dispatched_counts(count, 0, unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+    verify(backend.subdocuments_counts(&engines.device, &tape, device_counts.data(), 1, &device_malformed, stream) ==
+           sz_success_k);
+    verify(sz_subdocuments_counts(&engines.device, &tape, dispatched_counts.data(), 1, &device_malformed, stream) ==
+           sz_success_k);
+    join_(backend.runtime, stream);
+    for (std::size_t index = 0; index != count; ++index)
+        verify(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
+               dispatched_counts[index] == device_counts[index]);
+    engines.reset();
+    verify(engines.heap.live_allocations == 0);
+}
+
+/** One random JSON value nesting at most @p depth levels, over few keys, so paths select often. */
+inline std::string subdocuments_device_value_(std::mt19937 &generator, std::size_t depth) {
+    static char const *const keys[] = {"a", "b", "c", "name", "x y", "\xC3\xA9", "a\\u0062", "\\\"q"};
+    static char const *const scalars[] = {"1", "-2.5e3", "0", "true", "false", "null", "\"s\"", "\"q\\\"u\"", "\"\""};
+    static char const *const blanks[] = {"", " ", "\n", "\t "}; // " " is one literal
+    std::size_t const kind = depth ? generator() % 4 : 3;
+    std::string text;
+    if (kind == 3) return scalars[generator() % (sizeof(scalars) / sizeof(scalars[0]))];
+    text += kind == 1 ? '[' : '{';
+    for (std::size_t index = 0, members = generator() % 5; index != members; ++index) {
+        if (index) text += ',';
+        text += blanks[generator() % 4];
+        if (kind != 1) text += "\"" + std::string(keys[generator() % (sizeof(keys) / sizeof(keys[0]))]) + "\":";
+        text += subdocuments_device_value_(generator, depth - 1);
+    }
+    text += kind == 1 ? ']' : '}';
+    return text;
+}
+
+/** Known corners: names, wildcards, descendants, indices and slices, escaped keys, slices an
+ *  array's length settles, filters, XML paths, documents needing more frames than a thread's first
+ *  stack holds, and malformed documents, which fail both tiers at the same index. */
+inline void test_subdocuments_device_unit(auto const &backend) {
+    std::string const store =
+        R"({"store": {"book": [{"author": "R", "price": 9}, {"author": "W"}, {"author": "M", "isbn": 0}], "bike": 1}})";
+    check_subdocuments_against_serial_(backend, {store, "[]", "{}", "7", "{\"author\": [1, {\"author\": 2}]}"},
+                                       {"$.store.book[*].author", "$..author", "$.store.*", "$..book[2]",
+                                        "$..book[0:2]", "$..*", "$['store']['bike', 'book']"});
+    check_subdocuments_against_serial_(backend, {"{\"a\\u0062\": 1, \"ab\": 2, \"\\u00e9\": [3]}"},
+                                       {"$.ab", "$['\\u00e9'][0]"});
+
+    // Negative indices and backward slices keep their array's nodes pending until it closes.
+    check_subdocuments_against_serial_(
+        backend, {store, "[1, [2, 3], [4, [5, 6, 7]]]", "[]"},
+        {"$..book[-1]", "$..book[::-1].author", "$..[-2]", "$..book[-2:]", "$[-1:0:-1]"});
+
+    // Filters decide at the close of the node they filter,
+    // `search()` walking the regex engine's DFA there.
+    check_subdocuments_against_serial_(
+        backend, {store, R"([{"a": 1}, {"a": "q"}, "e", 3])"},
+        {"$.store.book[?@.price < 10].author", "$..book[?@.isbn]", "$..[?@.author == 'W']", "$..[?length(@) > 1]",
+         "$..[?count(@.*) == 2]", "$..[?value(@.a) == 1]", "$..[?search(@, 'e')]", "$..[?@.price && !@.isbn]"});
+
+    // XML: names, wildcards, attributes, text around CDATA, sibling positions, namespaced names.
+    std::string const library = std::string(R"(<?xml version="1.0"?><!-- c --><library xmlns:x="urn:x" id="L1">)") +
+                                R"(<book id="b1"><title>R</title></book><book id="b2"><title>W<![CDATA[a<u>]]>e)" +
+                                R"(</title><x:note x:kind="k">n</x:note></book><shelf><book id="b3"/></shelf>)" +
+                                "tail</library>";
+    check_subdocuments_against_serial_(backend, {library, "<a/>"},
+                                       {"/library/book/title", "//book", "/library/book[2]/title/text()", "//@id",
+                                        "/library/*/@*", "/library/text()", "//x:note/@x:kind", "//book[1]"},
+                                       sz_subdocuments_xml_k);
+
+    // Forty levels, past the first stacks, so the deep documents walk again with deeper ones:
+    // plain, under a pending run and a filter at every depth, and as XML elements.
+    std::string const deep = std::string(40, '[') + "1" + std::string(40, ']');
+    check_subdocuments_against_serial_(backend, {deep, "[[1]]", deep + ' '}, {"$..*", "$..[0]"});
+    check_subdocuments_against_serial_(backend, {deep, "[[1]]", deep}, {"$..[-1]", "$..[?@ == 1]", "$..[?@[?@ == 1]]"});
+    std::string deep_markup;
+    for (std::size_t level = 0; level != 40; ++level) deep_markup += "<a id=\"" + std::to_string(level) + "\">t";
+    for (std::size_t level = 0; level != 40; ++level) deep_markup += "</a>";
+    check_subdocuments_against_serial_(backend, {deep_markup, "<a><a/></a>"}, {"//a", "//a/text()", "//a[1]/@id"},
+                                       sz_subdocuments_xml_k);
+
+    // Unbalanced, unterminated and stray bytes, each after a well-formed document.
+    check_subdocuments_against_serial_(backend, {"{}", "{\"a\": [1, 2}"}, {"$..*"});
+    check_subdocuments_against_serial_(backend, {"[1]", "[1]", "{\"a\": \"open"}, {"$.a"});
+    check_subdocuments_against_serial_(backend, {"[1] x"}, {"$[0]"});
+    check_subdocuments_against_serial_(backend, {"<a/>", "<a><b></a>"}, {"//a"}, sz_subdocuments_xml_k);
+    check_subdocuments_against_serial_(backend, {"<a/>", "<!DOCTYPE a [<!ENTITY e 'x'>]><a/>"}, {"//a"},
+                                       sz_subdocuments_xml_k);
+}
+
+/** A JSON document of tens of megabytes, which the device walks over chunks: a wide array of
+ *  scalars, a wide array of objects with escaped keys and strings, a chain 100'000 levels deep, and
+ *  strings whose runs of backslashes cross chunks. */
+inline std::string subdocuments_device_large_(std::mt19937 &generator) {
+    std::string text = "{\"wide\": [", closers;
+    for (std::size_t index = 0; index != 3000000; ++index) text += (index ? "," : "") + std::to_string(index % 997);
+    text += "], \"objects\": [";
+    for (std::size_t index = 0; index != 150000; ++index)
+        text += (index ? ", {\"a\": " : "{\"a\": ") + std::to_string(index) + ", \"b\": [" + std::to_string(index % 7) +
+                ", \"q\\\"\\\\\"], \"name\": \"n" + std::to_string(index % 13) + "\", \"a\\u0062\": true}";
+    text += "], \"deep\": ";
+    for (std::size_t level = 0; level != 100000; ++level) {
+        text += level % 3 ? "[" : "{\"x\": ";
+        closers += level % 3 ? ']' : '}';
+    }
+    text += "{\"a\": 1, \"x\": [1, 2, 3]}";
+    text.append(closers.rbegin(), closers.rend());
+    text += ", \"strings\": [";
+    for (std::size_t index = 0; index != 200; ++index)
+        text += (index ? ", \"" : "\"") + std::string(2 * (generator() % 400), '\\') + "\\\"e\"";
+    return text + "]}";
+}
+
+/** One unbalanced batch: a document of tens of megabytes between two of a few megabytes, amid
+ *  thousands of empty, scalar and few-byte ones, under names, wildcards, descendants, positive and
+ *  negative indices, backward slices and unions; then the same batch with a comma missing inside an
+ *  array the paths enter, which fails at the middle document's index while the large documents
+ *  around it still walk in one pipeline. */
+inline void check_subdocuments_device_unbalanced_(std::mt19937 &generator, auto const &backend) {
+    static char const *const tiny[] = {"{}", "[]", "7", "\"s\"", "null", "true", "[1]", "{\"a\": 1}", "-0.5e3"};
+    std::vector<std::string> const paths = {"$.wide[-1]",     "$.wide[::-1000000]",
+                                            "$.objects[*].a", "$..a",
+                                            "$..b[-1]",       "$.objects[5:1:-2]['a', 'name']",
+                                            "$..x[-1]",       "$['wide', 'strings'][0]",
+                                            "$..ab",          "$.objects[-1:-4:-1].b[-2]",
+                                            "$.deep..a",      "$.*"};
+    std::string const large = subdocuments_device_large_(generator);
+    std::string wide = "{\"wide\": [", objects = "[";
+    for (std::size_t index = 0; index != 400000; ++index) wide += (index ? "," : "") + std::to_string(index % 991);
+    for (std::size_t index = 0; index != 60000; ++index)
+        objects += (index ? ", {\"a\": " : "{\"a\": ") + std::to_string(index) + ", \"x\": [" +
+                   std::to_string(index % 5) + "]}";
+    wide += "], \"a\": 1}", objects += "]";
+    std::vector<std::string> documents;
+    std::size_t middle = 0;
+    for (std::size_t index = 0; index != 4000; ++index) {
+        if (index == 1000) documents.push_back(wide);
+        if (index == 2000) middle = documents.size(), documents.push_back(large);
+        if (index == 3000) documents.push_back(objects);
+        documents.push_back(index % 3 ? std::string(tiny[index % 9]) : subdocuments_device_value_(generator, 2));
+    }
+    check_subdocuments_against_serial_(backend, documents, paths);
+    documents[middle][large.find(',')] = ' ';
+    check_subdocuments_against_serial_(backend, documents, paths);
+}
+
+/** Random documents of every size, under random vocabularies of JSON paths, slices and filters
+ *  among them, and one unbalanced batch. */
+inline void test_subdocuments_device_equivalence(test_context_t &context, auto const &backend) {
+    std::mt19937 &generator = context.generator;
+    static char const *const pool[] = {"$.a",      "$.a.b",     "$..b",        "$.*",         "$[*]",     "$..[0]",
+                                       "$.a[1:3]", "$..c[::2]", "$['a', 'b']", "$..*",        "$.name.*", "$..['x y']",
+                                       "$[-1]",    "$..[::-2]", "$..[?@.a]",   "$..[?@ == 1]"};
+    for (std::size_t round = 0; round != context.iterations(16); ++round) {
+        std::vector<std::string> paths, documents;
+        for (std::size_t index = 0; index != 1 + round % 4; ++index)
+            paths.push_back(pool[generator() % (sizeof(pool) / sizeof(pool[0]))]);
+        for (std::size_t index = 0; index != 1 + round % 64; ++index)
+            documents.push_back(subdocuments_device_value_(generator, 1 + round % 6));
+        for (std::size_t index = 0; index != round % 3; ++index) {
+            std::string array = "[";
+            for (std::size_t element = 0; element != 2000; ++element)
+                array += (element ? "," : "") + subdocuments_device_value_(generator, 4);
+            documents.push_back(array + "]");
+        }
+        check_subdocuments_against_serial_(backend, documents, paths);
+    }
+    check_subdocuments_device_unbalanced_(generator, backend);
+}
+
+/** What the device verbs refuse: outputs a kernel cannot reach, and a zero stride. */
+inline void test_subdocuments_device_safety(auto const &backend) {
+    sz_stream_t const stream = backend.runtime.stream;
+    device_corpus_t corpus(backend.runtime, {"{\"a\": 1}"});
+    device_vocabulary_t vocabulary(backend.runtime, {"$.a"});
+    subdocuments_device_engines_t engines(vocabulary, backend, sz_subdocuments_json_k);
+    sz_strings_view_t const tape = corpus.device_tape.view().raw;
+    sz_size_t malformed = STRINGZILLA_SIZE_MAX;
+    std::vector<sz_size_t> host_counts(1, 0);
+    verify(backend.subdocuments_counts(&engines.device, &tape, host_counts.data(), 1, &malformed, stream) ==
+           sz_device_memory_mismatch_k);
+    unified_vector<sz_size_t> counts(1, STRINGZILLA_SIZE_MAX,
+                                     unified_alloc<sz_size_t>(backend.runtime.unified, stream));
+    verify(backend.subdocuments_counts(&engines.device, &tape, counts.data(), 0, &malformed, stream) ==
+           sz_unexpected_dimensions_k);
+    verify(counts[0] == STRINGZILLA_SIZE_MAX);
+    engines.reset();
+    verify(engines.heap.live_allocations == 0);
+}
+
+#pragma endregion Subdocuments Checks
+
 #pragma region UTF8 Uncased Checks
 
 /** @p fold called the way a CPU fold is, its text, output and length staged where the device
@@ -2204,6 +2482,15 @@ inline void check_device_regex_(cross_section_t &check, auto const &backend) {
     check("test_regex_safety_" + suffix, [&] { test_regex_device_safety(backend); });
 }
 
+/** Registers the subdocuments checks of a vendor's kernels, or of dispatch points, in @p check. */
+inline void check_device_subdocuments_(cross_section_t &check, auto const &backend) {
+    std::string const suffix = backend.name;
+    check("test_subdocuments_unit_" + suffix, [&] { test_subdocuments_device_unit(backend); });
+    check("test_subdocuments_equivalence_" + suffix,
+          [&](test_context_t &context) { test_subdocuments_device_equivalence(context, backend); });
+    check("test_subdocuments_safety_" + suffix, [&] { test_subdocuments_device_safety(backend); });
+}
+
 /** Registers the strings checks of one vendor's kernels in @p check, which no tier narrows. */
 inline void check_device_strings_(cross_section_t &check, device_backend_t const &runtime,
                                   strings_backend_t const &kernels) {
@@ -2285,6 +2572,7 @@ inline void check_device_kernels_(cross_section_t &check, auto const &backend) {
     check_device_overlap_(check, backend);
     check_device_substrings_(check, backend);
     check_device_regex_(check, backend);
+    check_device_subdocuments_(check, backend);
     check("test_utf8_uncased_equivalence_" + suffix,
           [&](test_context_t &context) { check_utf8_uncased_device_equivalence_(context, backend); });
     check("test_utf8_uncased_safety_" + suffix,
@@ -2318,6 +2606,8 @@ inline std::size_t test_cross_dispatch_device(environment_t const &env, device_b
                                      sz_regex_find,
                                      sz_regex_replace,
                                      sz_regex_extract,
+                                     sz_subdocuments_counts,
+                                     sz_subdocuments_find,
                                      gpu_best<sz_utf8_uncased_fold_best>(capabilities),
                                      gpu_best<sz_utf8_norm_best>(capabilities),
                                      sha256_multistate_update,

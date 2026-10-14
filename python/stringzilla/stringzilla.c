@@ -727,6 +727,7 @@ static struct {
     {"OverlapEngine", &OverlapEngineType},
     {"SubstringsEngine", &SubstringsEngineType},
     {"RegexEngine", &RegexEngineType},
+    {"SubdocumentsEngine", &SubdocumentsEngineType},
 };
 
 PyMODINIT_FUNC PyInit_stringzilla(void) {

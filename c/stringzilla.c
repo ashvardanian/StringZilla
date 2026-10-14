@@ -103,6 +103,9 @@ STRINGZILLA_API sz_status_t sz_find_kernel_punned(sz_kernel_kind_t kind, sz_capa
     case sz_kernel_regex_find_k:
     case sz_kernel_regex_replace_k:
     case sz_kernel_regex_extract_k: return sz_regex_find_kernel(kind, capabilities, kernel, capability);
+    case sz_kernel_subdocuments_engine_init_k:
+    case sz_kernel_subdocuments_counts_k:
+    case sz_kernel_subdocuments_find_k: return sz_subdocuments_find_kernel(kind, capabilities, kernel, capability);
     default: *kernel = STRINGZILLA_NULL, *capability = 0; return sz_missing_kernel_k;
     }
 }
