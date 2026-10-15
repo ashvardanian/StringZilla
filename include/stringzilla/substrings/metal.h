@@ -68,6 +68,9 @@ enum { sz_substrings_bm25_groups_metal_k = 64 };
  *  an Apple GPU. */
 enum { sz_substrings_chunk_budget_metal_k = 1 << 16 };
 
+/** Jumps one doubling round chains, as in the kernels. */
+enum { sz_substrings_round_hops_metal_k = 8 };
+
 /** The buffers a round binds, in the order the kernels number them, the launch record after the
  *  last. A dispatch that clears or scans binds its target in the cleared or scanned slot. */
 enum {
@@ -344,8 +347,9 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
     if (status == sz_success_k && covering) {
         status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_link_metal_kernel_", arguments,
                                              sz_substrings_groups_metal_(engine->matches_budget));
-        // A chain holds at most the budget's matches; each round doubles how far a mark reaches.
-        for (sz_size_t reach = 1; status == sz_success_k && reach < engine->matches_budget; reach *= 2) {
+        // A chain holds at most the budget's matches; each round multiplies how far a mark reaches.
+        for (sz_size_t reach = 1; status == sz_success_k && reach < engine->matches_budget;
+             reach *= sz_substrings_round_hops_metal_k) {
             sz_u64_t const jumps = arguments->jumps;
             status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_double_metal_kernel_", arguments,
                                                  sz_substrings_groups_metal_(engine->matches_budget));

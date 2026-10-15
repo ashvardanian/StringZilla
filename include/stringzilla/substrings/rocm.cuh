@@ -9,9 +9,9 @@
  *  No compute verb joins the stream. Every size a launch needs is either fixed when the engine is
  *  built - the chunk and match budgets - or derived on the device from one the host never sees, and
  *  what a round discovered reaches the caller through @c sz_substrings_report_t after the caller's
- *  own join. When a round outruns its match budget the writing walk, the cover, the compaction and
- *  the boundaries kernel each retire at their first instruction, so an output is left untouched
- *  rather than truncated.
+ *  own join. When a round outruns its match budget the gather, the cover, the compaction and the
+ *  boundaries kernel each retire at their first instruction, so an output is left untouched and
+ *  never holds a truncated answer.
  *
  *  AMD devices group no blocks into clusters, so BM25 scoring walks each haystack with one block.
  *
@@ -47,10 +47,14 @@ typedef enum sz_substrings_matches_rocm_t {
     sz_substrings_matches_needed_rocm_k = 1,
 } sz_substrings_matches_rocm_t;
 
-/** The walk kernel of @p engine's case sensitivity. */
-STRINGZILLA_INLINE void const *sz_substrings_walk_kernel_rocm_(sz_substrings_engine_t const *engine) {
-    return engine->case_sensitivity == sz_uncased_k ? (void const *)sz_substrings_walk_uncased_simt_kernel_
-                                                    : (void const *)sz_substrings_walk_cased_simt_kernel_;
+/** The walk kernel of @p engine's case sensitivity, the one keeping matches when @p keeping. */
+STRINGZILLA_INLINE void const *sz_substrings_walk_kernel_rocm_(sz_substrings_engine_t const *engine,
+                                                               sz_bool_t keeping) {
+    if (engine->case_sensitivity == sz_uncased_k)
+        return keeping ? (void const *)sz_substrings_keep_uncased_simt_kernel_
+                       : (void const *)sz_substrings_walk_uncased_simt_kernel_;
+    return keeping ? (void const *)sz_substrings_keep_cased_simt_kernel_
+                   : (void const *)sz_substrings_walk_cased_simt_kernel_;
 }
 
 /** Words of the acceptance bitmap, one bit per double-array slot. */
@@ -117,42 +121,6 @@ STRINGZILLA_INLINE sz_size_t sz_substrings_tiles_rocm_(sz_size_t count) {
     return sz_size_divide_round_up(count, sz_substrings_threads_per_block_simt_k);
 }
 
-/**
- *  @brief Turns @p values into its own exclusive prefix sum, leaving the grand total
- *      in @c values[count].
- *  @param[in] live How many leading values the device wrote, scanned with one more slot for their
- *      total, or @c STRINGZILLA_NULL to scan all @p count; the grid covers @p count either way.
- *  @param[in] scan_chain Zeroed slot the tiles chain their totals through, zeroed again on return.
- *
- *  One launch: each tile sums itself, waits for the tiles before it to chain theirs, then scans.
- */
-STRINGZILLA_INLINE sz_status_t sz_substrings_scan_rocm_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
-                                                        sz_size_t *scan_chain, sz_stream_t stream) {
-    sz_size_t const tiles = sz_min_of_two(sz_substrings_tiles_rocm_(count), (sz_size_t)sz_chain_tiles_max_k);
-    sz_size_t counted = count;
-    sz_size_t elements_per_tile;
-    void *arguments[5];
-    if (!count) return sz_success_k;
-    elements_per_tile = sz_size_divide_round_up(count, tiles);
-    arguments[0] = &values, arguments[1] = &counted, arguments[2] = &live, arguments[3] = &elements_per_tile;
-    arguments[4] = &scan_chain;
-    return sz_substrings_launch_rocm_((void const *)sz_substrings_scan_simt_kernel_, (unsigned)tiles, arguments, 0,
-                                      stream);
-}
-
-/** Scans the sizing walk's @p chunk_slots as @ref sz_substrings_scan_rocm_ does, its last tile then
- *  publishing into @p report what the walk found and whether it fit @p matches_budget. */
-STRINGZILLA_INLINE sz_status_t sz_substrings_scan_sized_rocm_(sz_size_t *chunk_slots, sz_size_t count,
-                                                              sz_size_t *scan_chain, sz_size_t matches_budget,
-                                                              sz_bool_t emitting, sz_substrings_report_t *report,
-                                                              sz_stream_t stream) {
-    sz_size_t const tiles = sz_min_of_two(sz_substrings_tiles_rocm_(count), (sz_size_t)sz_chain_tiles_max_k);
-    sz_size_t elements_per_tile = sz_size_divide_round_up(count, tiles);
-    void *arguments[] = {&chunk_slots, &count, &elements_per_tile, &scan_chain, &matches_budget, &emitting, &report};
-    return sz_substrings_launch_rocm_((void const *)sz_substrings_scan_sized_simt_kernel_, (unsigned)tiles, arguments,
-                                      0, stream);
-}
-
 /** How many hot rows a kernel may stage in shared memory. */
 typedef enum sz_substrings_staging_rocm_t {
 
@@ -203,7 +171,7 @@ STRINGZILLA_INLINE sz_u32_t sz_substrings_staged_rows_rocm_(sz_substrings_engine
 
 /** Hot rows this tier's walk stages, which fixes both its shared memory and its residency. */
 STRINGZILLA_INLINE sz_u32_t sz_substrings_walk_rows_rocm_(sz_substrings_engine_t const *engine) {
-    return sz_substrings_staged_rows_rocm_(engine, sz_substrings_walk_kernel_rocm_(engine), 0,
+    return sz_substrings_staged_rows_rocm_(engine, sz_substrings_walk_kernel_rocm_(engine, sz_false_k), 0,
                                            sz_substrings_stage_whole_rocm_k);
 }
 
@@ -243,8 +211,22 @@ typedef struct sz_substrings_arena_rocm_t {
      *  into output offsets. */
     sz_size_t chunk_slots;
 
-    /** Offset of the one slot every scan chains its tile totals through. */
+    /** Offset of the one slot every scan takes its tickets from. */
     sz_size_t scan_chain;
+
+    /** Offset of the two buffers of @c sz_chain_tiles_max_k words scans publish their tile totals
+     *  through. */
+    sz_size_t scan_states;
+
+    /** Offset of the counter of matches the sizing walk spilled. */
+    sz_size_t spilled;
+
+    /** Offset of the @b [slots_count] chunks' first matches the sizing walk keeps, three words per
+     *  kept match. */
+    sz_size_t kept;
+
+    /** Offset of the @b [matches_budget] matches past what their chunks keep. */
+    sz_size_t spills;
 
     /** Offset of the @b [matches_budget] emitted matches, before any cover thins them. */
     sz_size_t emitted;
@@ -294,7 +276,11 @@ STRINGZILLA_INLINE sz_substrings_arena_rocm_t sz_substrings_arena_rocm_(sz_subst
     arena.haystack_offsets = arena.chunk_offsets + boundaries * sizeof(sz_size_t);
     arena.chunk_slots = arena.haystack_offsets + boundaries * sizeof(sz_size_t);
     arena.scan_chain = arena.chunk_slots + arena.slots_count * sizeof(sz_size_t);
-    arena.emitted = arena.scan_chain + sizeof(sz_size_t);
+    arena.scan_states = arena.scan_chain + sizeof(sz_size_t);
+    arena.spilled = arena.scan_states + 2 * sz_chain_tiles_max_k * sizeof(sz_u64_t);
+    arena.kept = arena.spilled + sizeof(sz_size_t);
+    arena.spills = arena.kept + arena.slots_count * sz_substrings_kept_matches_simt_k * 3 * sizeof(sz_u32_t);
+    arena.emitted = arena.spills + matches * sizeof(sz_substrings_spill_simt_t);
     arena.reported = arena.emitted + match_bytes;
     arena.keep_offsets = arena.reported + (covering ? match_bytes : 0);
     arena.gap_offsets = arena.keep_offsets + (covering ? (matches + 1) * sizeof(sz_size_t) : 0);
@@ -319,8 +305,20 @@ typedef struct sz_substrings_round_rocm_t {
      *  exclusive output offset. */
     sz_size_t *chunk_slots;
 
-    /** The slot every scan chains its tile totals through, zero between scans. */
+    /** The slot every scan takes its tickets from, zero between scans. */
     sz_size_t *scan_chain;
+
+    /** Two buffers of one word per tile, each scan publishing through one and zeroing the other,
+     *  which the next scan takes. */
+    sz_u64_t *scan_states;
+
+    /** Scans the round has launched, whose parity picks the next one's buffer. */
+    sz_size_t scans;
+
+    /** The chunks' first matches the sizing walk keeps, the rest it spills, and their count. */
+    sz_u32_t *kept;
+    sz_substrings_spill_simt_t *spills;
+    sz_size_t *spilled;
 
     /** Every emitted match, before any cover thins them. */
     sz_match_t *emitted;
@@ -338,7 +336,7 @@ typedef struct sz_substrings_round_rocm_t {
      *  without a cover. */
     sz_size_t *jumps, *doubled;
 
-    /** Entries of @c chunk_slots, so the scan's grand total is its last one. */
+    /** Entries of @c chunk_slots, which bound the walks' grids and the scan of their slots. */
     sz_size_t slots_count;
 } sz_substrings_round_rocm_t;
 
@@ -353,6 +351,11 @@ STRINGZILLA_INLINE void sz_substrings_round_bind_rocm_(sz_substrings_engine_t co
     round->haystack_offsets = (sz_size_t *)(block + arena.haystack_offsets);
     round->chunk_slots = (sz_size_t *)(block + arena.chunk_slots);
     round->scan_chain = (sz_size_t *)(block + arena.scan_chain);
+    round->scan_states = (sz_u64_t *)(block + arena.scan_states);
+    round->scans = 0;
+    round->kept = (sz_u32_t *)(block + arena.kept);
+    round->spills = (sz_substrings_spill_simt_t *)(block + arena.spills);
+    round->spilled = (sz_size_t *)(block + arena.spilled);
     round->emitted = (sz_match_t *)(block + arena.emitted);
     round->reported = covering ? (sz_match_t *)(block + arena.reported) : round->emitted;
     round->keep_offsets = covering ? (sz_size_t *)(block + arena.keep_offsets) : STRINGZILLA_NULL;
@@ -360,6 +363,51 @@ STRINGZILLA_INLINE void sz_substrings_round_bind_rocm_(sz_substrings_engine_t co
     round->jumps = covering ? (sz_size_t *)(block + arena.jumps) : STRINGZILLA_NULL;
     round->doubled = covering ? (sz_size_t *)(block + arena.doubled) : STRINGZILLA_NULL;
     round->slots_count = arena.slots_count;
+}
+
+/**
+ *  @brief Turns @p values into its own exclusive prefix sum, leaving the grand total
+ *      in @c values[count].
+ *  @param[in] live How many leading values the device wrote, scanned with one more slot for their
+ *      total, or @c STRINGZILLA_NULL to scan all @p count; the grid covers @p count either way.
+ *
+ *  One launch: each tile sums itself, publishes its total, and looks back over the totals before
+ *  it, so no tile waits for its predecessors to finish one at a time.
+ */
+STRINGZILLA_INLINE sz_status_t sz_substrings_scan_rocm_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
+                                                        sz_substrings_round_rocm_t *round, sz_stream_t stream) {
+    sz_size_t const tiles = sz_min_of_two(sz_substrings_tiles_rocm_(count), (sz_size_t)sz_chain_tiles_max_k);
+    sz_u64_t *states = round->scan_states + (round->scans & 1) * sz_chain_tiles_max_k;
+    sz_u64_t *stale = round->scan_states + (~round->scans & 1) * sz_chain_tiles_max_k;
+    sz_size_t counted = count;
+    sz_size_t elements_per_tile;
+    void *arguments[7];
+    if (!count) return sz_success_k;
+    ++round->scans;
+    elements_per_tile = sz_size_divide_round_up(count, tiles);
+    arguments[0] = &values, arguments[1] = &counted, arguments[2] = &live, arguments[3] = &elements_per_tile;
+    arguments[4] = &round->scan_chain, arguments[5] = &states, arguments[6] = &stale;
+    return sz_substrings_launch_rocm_((void const *)sz_substrings_scan_simt_kernel_, (unsigned)tiles, arguments, 0,
+                                      stream);
+}
+
+/** Scans the sizing walk's @p chunk_slots as @ref sz_substrings_scan_rocm_ does, as far as the
+ *  round's @p chunks_count, its last tile then publishing into @p report what the walk found and
+ *  whether it fit @p matches_budget. */
+STRINGZILLA_INLINE sz_status_t sz_substrings_scan_sized_rocm_(sz_size_t *chunk_slots, sz_size_t count,
+                                                              sz_size_t const *chunks_count,
+                                                              sz_substrings_round_rocm_t *round,
+                                                              sz_size_t matches_budget, sz_bool_t emitting,
+                                                              sz_substrings_report_t *report, sz_stream_t stream) {
+    sz_size_t const tiles = sz_min_of_two(sz_substrings_tiles_rocm_(count), (sz_size_t)sz_chain_tiles_max_k);
+    sz_u64_t *states = round->scan_states + (round->scans & 1) * sz_chain_tiles_max_k;
+    sz_u64_t *stale = round->scan_states + (~round->scans & 1) * sz_chain_tiles_max_k;
+    sz_size_t elements_per_tile = sz_size_divide_round_up(count, tiles);
+    void *arguments[] = {&chunk_slots, &count, &chunks_count,   &elements_per_tile, &round->scan_chain,
+                         &states,      &stale, &matches_budget, &emitting,          &report};
+    ++round->scans;
+    return sz_substrings_launch_rocm_((void const *)sz_substrings_scan_sized_simt_kernel_, (unsigned)tiles, arguments,
+                                      0, stream);
 }
 
 /** Takes the one arena every round of this engine runs out of, sized for its haystacks budget, so
@@ -385,7 +433,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_clear_rocm_(sz_substrings_eng
     sz_substrings_arena_rocm_t const arena = sz_substrings_arena_rocm_(engine, haystacks_count);
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
     // The head of the arena only, so no round pays a memset proportional to a budget it did not spend.
-    return sz_fill_rocm_(block + arena.report, arena.emitted - arena.report, 0, stream);
+    return sz_fill_rocm_(block + arena.report, arena.kept - arena.report, 0, stream);
 }
 
 /**
@@ -419,15 +467,12 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_rocm_(sz_substrings_engine_t *
     sz_substrings_report_t *report;
     sz_strings_view_t launched_haystacks = *haystacks;
     sz_substrings_engine_t launched_engine;
-    sz_substrings_gpu_pass_t walk_pass = sz_substrings_gpu_sizing_k;
-    sz_size_t *emitted_at;
-    void *arguments[8];
+    void *arguments[10];
     sz_status_t status;
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
     sz_substrings_round_bind_rocm_(engine, haystacks->count, round);
     if (haystack_offsets) round->haystack_offsets = haystack_offsets;
     report = engine->report, launched_engine = *engine;
-    emitted_at = round->chunk_slots + round->slots_count - 1;
     status = sz_substrings_arena_clear_rocm_(engine, haystacks->count, stream);
 
     // Round one: how many chunks each haystack owns, scanned into the range that haystack's chunks take.
@@ -437,34 +482,34 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_rocm_(sz_substrings_engine_t *
                                             sz_substrings_grid_rocm_(haystacks->count), arguments, 0, stream);
     }
     if (status == sz_success_k)
-        status = sz_substrings_scan_rocm_(round->chunk_offsets, boundaries, STRINGZILLA_NULL, round->scan_chain,
-                                          stream);
+        status = sz_substrings_scan_rocm_(round->chunk_offsets, boundaries, STRINGZILLA_NULL, round, stream);
 
     // Round two: the sizing walk, launched against the chunk budget rather than a discovered chunk count.
     if (status == sz_success_k) {
         arguments[0] = &launched_engine, arguments[1] = &staged_rows, arguments[2] = &launched_haystacks;
-        arguments[3] = &round->chunk_offsets, arguments[4] = &report, arguments[5] = &round->chunk_slots;
-        arguments[6] = &round->emitted, arguments[7] = &walk_pass;
+        arguments[3] = &round->chunk_offsets, arguments[4] = &round->chunk_slots, arguments[5] = &round->slots_count;
+        arguments[6] = &round->kept, arguments[7] = &round->spills, arguments[8] = &round->spilled;
+        arguments[9] = &matches_budget;
         status = sz_substrings_launch_rocm_(
-            sz_substrings_walk_kernel_rocm_(engine),
-            sz_substrings_grid_for_rocm_(sz_substrings_walk_kernel_rocm_(engine), staged_bytes, round->slots_count),
+            sz_substrings_walk_kernel_rocm_(engine, emitting),
+            sz_substrings_grid_for_rocm_(sz_substrings_walk_kernel_rocm_(engine, emitting), staged_bytes,
+                                         round->slots_count),
             arguments, staged_bytes, stream);
     }
     if (status == sz_success_k)
-        status = sz_substrings_scan_sized_rocm_(round->chunk_slots, round->slots_count, round->scan_chain,
-                                                matches_budget, emitting, report, stream);
+        status = sz_substrings_scan_sized_rocm_(round->chunk_slots, round->slots_count,
+                                                round->chunk_offsets + haystacks->count, round, matches_budget,
+                                                emitting, report, stream);
 
-    // Round three: the writing walk, the cover over what it wrote, and the per-haystack boundaries both
-    // feed. Each retires at its first instruction when the sizing walk outran the budget.
+    // Round three: the gather of the kept matches, the cover over them, and the per-haystack
+    // boundaries both feed. Each retires at its first instruction when the walk outran the budget.
     if (status == sz_success_k && emitting) {
-        walk_pass = sz_substrings_gpu_writing_k;
-        arguments[0] = &launched_engine, arguments[1] = &staged_rows, arguments[2] = &launched_haystacks;
-        arguments[3] = &round->chunk_offsets, arguments[4] = &report, arguments[5] = &round->chunk_slots;
-        arguments[6] = &round->emitted, arguments[7] = &walk_pass;
-        status = sz_substrings_launch_rocm_(
-            sz_substrings_walk_kernel_rocm_(engine),
-            sz_substrings_grid_for_rocm_(sz_substrings_walk_kernel_rocm_(engine), staged_bytes, round->slots_count),
-            arguments, staged_bytes, stream);
+        arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = &round->chunk_offsets;
+        arguments[3] = &report, arguments[4] = &round->chunk_slots, arguments[5] = &round->slots_count;
+        arguments[6] = &round->kept, arguments[7] = &round->spills, arguments[8] = &round->spilled;
+        arguments[9] = &round->emitted;
+        status = sz_substrings_launch_rocm_((void const *)sz_substrings_gather_simt_kernel_,
+                                            sz_substrings_grid_rocm_(round->slots_count), arguments, 0, stream);
     }
     if (status == sz_success_k && covering) {
         sz_size_t *jumps = round->jumps, *doubled = round->doubled, reach;
@@ -477,8 +522,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_rocm_(sz_substrings_engine_t *
             status = sz_substrings_launch_rocm_((void const *)sz_substrings_link_simt_kernel_,
                                                 sz_substrings_grid_rocm_(matches_budget), arguments, 0, stream);
         }
-        // A chain holds at most the budget's matches; each round doubles how far a mark reaches.
-        for (reach = 1; status == sz_success_k && reach < matches_budget; reach *= 2) {
+        // A chain holds at most the budget's matches; each round multiplies how far a mark reaches.
+        for (reach = 1; status == sz_success_k && reach < matches_budget; reach *= sz_substrings_round_hops_simt_k) {
             sz_size_t *const swapped = jumps;
             arguments[0] = &report, arguments[1] = &jumps, arguments[2] = &doubled;
             arguments[3] = &round->keep_offsets;
@@ -487,7 +532,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_rocm_(sz_substrings_engine_t *
             jumps = doubled, doubled = swapped;
         }
         if (status == sz_success_k)
-            status = sz_substrings_scan_rocm_(round->keep_offsets, matches_budget + 1, emitted_at, round->scan_chain,
+            status = sz_substrings_scan_rocm_(round->keep_offsets, matches_budget + 1, &report->matches_emitted, round,
                                               stream);
         if (status == sz_success_k) {
             arguments[0] = &round->emitted, arguments[1] = &report;
@@ -544,7 +589,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_engine_init_rocm_(
         return sz_device_memory_mismatch_k;
     }
     staged_bytes = (sz_size_t)sz_substrings_walk_rows_rocm_(engine) * engine->classes_count * sizeof(sz_u32_t);
-    engine->chunk_budget = sz_substrings_resident_threads_rocm_(sz_substrings_walk_kernel_rocm_(engine), staged_bytes) *
+    engine->chunk_budget = sz_substrings_resident_threads_rocm_(sz_substrings_walk_kernel_rocm_(engine, sz_false_k),
+                                                                staged_bytes) *
                            sz_substrings_chunks_per_thread_simt_k;
     engine->haystacks_budget = haystacks_budget;
     status = sz_substrings_arena_reserve_rocm_(engine, stream);
@@ -666,7 +712,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_rocm_(sz_substrings_engine_
         (void const *)sz_substrings_rewrite_offsets_simt_kernel_,
         sz_substrings_grid_rocm_(haystacks->count * sz_substrings_threads_per_block_simt_k), arguments, 0, stream);
     if (status == sz_success_k)
-        status = sz_substrings_scan_rocm_(offsets, boundaries, STRINGZILLA_NULL, round.scan_chain, stream);
+        status = sz_substrings_scan_rocm_(offsets, boundaries, STRINGZILLA_NULL, &round, stream);
     if (status == sz_success_k) {
         arguments[0] = &rewritten_at, arguments[1] = &target_ceiling, arguments[2] = &report;
         status = sz_substrings_launch_rocm_((void const *)sz_substrings_target_simt_kernel_, 1, arguments, 0, stream);

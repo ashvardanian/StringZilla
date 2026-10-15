@@ -38,6 +38,9 @@ constant uint sz_substrings_tally_slots_metal_k = 1u << sz_substrings_tally_slot
 /** Slots a hashed tally probes before spilling a needle to the threadgroup's overflow row. */
 constant uint sz_substrings_tally_probes_metal_k = 16;
 
+/** Jumps one doubling round chains, so each round reaches this many times as far as the last. */
+constant uint sz_substrings_round_hops_metal_k = 8;
+
 /** What a chunk walk does at each match, as @c sz_substrings_gpu_pass_t numbers it. */
 constant ulong sz_substrings_gpu_sizing_metal_k = 0, sz_substrings_gpu_writing_metal_k = 1,
                sz_substrings_gpu_tallying_metal_k = 2;
@@ -560,8 +563,8 @@ kernel void sz_substrings_link_metal_kernel_(device uchar *scratch [[buffer(1)]]
     }
 }
 
-/** One doubling round: every marked match marks the match its jump reaches,
- *  and jumps twice as far next round. */
+/** One doubling round: every marked match marks the matches its first hops reach, and jumps as far
+ *  as all of them next round. */
 kernel void sz_substrings_double_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
                                                uint position [[thread_position_in_grid]],
@@ -575,10 +578,14 @@ kernel void sz_substrings_double_metal_kernel_(device uchar *scratch [[buffer(1)
     device ulong *keep = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.keep_offsets);
     ulong const count = report->matches_emitted;
     for (ulong index = position; index < count; index += threads) {
-        ulong const jump = jumps[index];
+        ulong jump = jumps[index];
         // A mark set in this round only reaches matches that are on the chain anyway.
-        if (keep[index] && jump != count) keep[jump] = 1;
-        doubled[index] = jump == count ? count : jumps[jump];
+        bool const marked = keep[index] != 0;
+        for (uint hop = 1; hop != sz_substrings_round_hops_metal_k && jump != count; ++hop) {
+            if (marked) keep[jump] = 1;
+            jump = jumps[jump];
+        }
+        doubled[index] = jump;
     }
 }
 

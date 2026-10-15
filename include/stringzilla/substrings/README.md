@@ -42,6 +42,8 @@ All three parallelize over haystack __chunks__ rather than over haystacks, so a 
 A chunk reports every match ending inside it and primes itself from the bytes before its own start, clamped to its own haystack, so every match is found exactly once.
 A leftmost cover is settled after the walk instead, since inside it would cost every thread a ring wide enough for the longest match.
 On CUDA and ROCm each block stages the class map and as much of the hot tier as fits beside its own scratch into shared memory.
+Their walk that counts a chunk's matches also keeps them, the first four beside the chunk's count and the rest in a pool the round shares, so once the counts are scanned a gather copies them to their offsets instead of a second walk.
+A thread there walks one chain rather than eight: the resident warps already hide the transition's latency, and more chains per thread cost the registers those warps need.
 BM25 gives each block one haystack and a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, and sums in fixed point so thread order cannot move a score.
 A batch of fewer haystacks than the device holds clusters of blocks gives each haystack a whole cluster instead, every block counting into the first one's tally through distributed shared memory.
 A device engine's arena is sized once, by `sz_substrings_engine_init` from `matches_budget` and `haystacks_budget`, so a round carrying more haystacks is refused with `sz_unexpected_dimensions_k` and matches past the budget surface as the report's `shortfall`.

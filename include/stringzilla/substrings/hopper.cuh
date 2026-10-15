@@ -62,7 +62,7 @@ STRINGZILLA_DEVICE void sz_cluster_sync_hopper_(void) {
 
 /**
  *  @brief Scores one haystack per cluster: its blocks walk contiguous chunks into the first
- *      block's tally, which only that block then sums.
+ *      block's tally, then each sums a slice of it, adding into the first block's sum.
  *
  *  Launched only in clusters of @c sz_substrings_bm25_cluster_blocks_cuda_k blocks, each with the
  *  dynamic shared memory @ref sz_substrings_bm25_prepare_simt_ lays out.
@@ -73,11 +73,13 @@ static __global__ void sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t 
                                                          sz_f32_t const *needle_weights, sz_u32_t *overflow_rows,
                                                          sz_f32_t *scores, sz_size_t scores_stride,
                                                          sz_u32_t staged_accepts_words, sz_u32_t staged_count) {
-    sz_substrings_bm25_block_simt_t const block = sz_substrings_bm25_prepare_simt_(&engine, overflow_rows,
-                                                                                   staged_accepts_words, staged_count);
+    sz_u32_t const cluster_rank = sz_cluster_rank_hopper_(), cluster_blocks = sz_cluster_size_hopper_();
+    // Only the first block's tally counts anything, so the others leave theirs untouched.
+    sz_substrings_bm25_block_simt_t const block = sz_substrings_bm25_prepare_simt_(
+        &engine, overflow_rows, staged_accepts_words, staged_count, (sz_bool_t)(cluster_rank == 0));
     sz_size_t const needles_count = engine.needles_count;
     sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(needles_count);
-    sz_u32_t const cluster_rank = sz_cluster_rank_hopper_(), cluster_blocks = sz_cluster_size_hopper_();
+    unsigned long long *const leader_sum = (unsigned long long *)sz_cluster_map_hopper_(block.sum, 0);
     sz_substrings_tally_simt_t leader;
     sz_size_t haystack_index;
     leader.layout = block.tally.layout;
@@ -96,13 +98,22 @@ static __global__ void sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t 
         // The first block's tally is clear before the cluster counts into it, and every count lands
         // before that block reads them.
         sz_cluster_sync_hopper_();
-        sz_substrings_bm25_walk_simt_(&engine, &block.staged, haystack, length, haystack_index,
+        sz_substrings_bm25_walk_simt_(&engine, &block.staged, haystack, length,
                                       (sz_size_t)cluster_rank * blockDim.x + threadIdx.x,
                                       (sz_size_t)cluster_blocks * blockDim.x, &leader);
         sz_cluster_sync_hopper_();
-        if (cluster_rank == 0)
-            sz_substrings_bm25_score_simt_(&block.tally, table_slots, needles_count, &parameters, norm, needle_weights,
-                                           block.sum, scores + haystack_index * scores_stride);
+        {
+            sz_i64_t const mine = sz_substrings_bm25_terms_simt_(
+                &leader, table_slots, needles_count, &parameters, norm, needle_weights,
+                (sz_size_t)cluster_rank * blockDim.x + threadIdx.x, (sz_size_t)cluster_blocks * blockDim.x);
+            if (mine) atomicAdd(leader_sum, (unsigned long long)mine);
+        }
+        // Every block's terms land in the first block's sum before it reads it.
+        sz_cluster_sync_hopper_();
+        if (cluster_rank == 0 && threadIdx.x == 0) {
+            scores[haystack_index * scores_stride] = sz_substrings_bm25_fixed_score_simt_(*block.sum);
+            *block.sum = 0, *block.tally.overflowed = 0;
+        }
     }
     // A block's shared memory outlives every count another block of its cluster sends into it.
     sz_cluster_sync_hopper_();
