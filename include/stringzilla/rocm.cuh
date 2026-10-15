@@ -333,12 +333,22 @@ STRINGZILLA_DEVICE sz_u32_t sz_shuffle_up_rocm_(sz_u32_t value, unsigned delta) 
 /** Lane `lane + delta`'s @p value among this thread's 32 lanes, a lane's own past the last. */
 STRINGZILLA_DEVICE int sz_shuffle_down_rocm_(int value, unsigned delta) { return __shfl_down(value, delta, 32); }
 
+/** Lane @p lane 's @p value among this thread's 32 lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_shuffle_index_rocm_(sz_u32_t value, unsigned lane) {
+    return __shfl(value, (int)lane, 32);
+}
+
 /** Lane zero's @p value across this thread's 32 lanes. */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_rocm_(sz_u32_t value) { return __shfl(value, 0, 32); }
 
 /** Whether @p predicate holds on any of this thread's 32 lanes, from its half of the ballot. */
 STRINGZILLA_DEVICE int sz_lanes_any_rocm_(int predicate) {
     return ((__ballot(predicate) >> (__lane_id() & 32u)) & 0xFFFFFFFFull) != 0;
+}
+
+/** A bit per lane of this thread's 32, set where @p predicate holds, from its half of a ballot. */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_rocm_(int predicate) {
+    return (sz_u32_t)(__ballot(predicate) >> (__lane_id() & 32u));
 }
 
 #pragma endregion Device Primitives

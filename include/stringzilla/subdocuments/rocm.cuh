@@ -2,8 +2,8 @@
  *  @file include/stringzilla/subdocuments/rocm.cuh
  *  @author Ash Vardanian
  *  @date October 13, 2026
- *  @brief ROCm host side of path queries: the round block the walks run out of, the launches, and
- *      the @c _rocm exports, over the kernels of `subdocuments/simt.cuh`.
+ *  @brief ROCm host side of path queries: the warp walk, the round block the walks run out of, the
+ *      launches, and the @c _rocm exports, over the kernels of `subdocuments/simt.cuh`.
  *
  *  Both verbs read back once their counting walks end, which joins the stream: a malformed document
  *  fails the call as it does on the CPU, and the documents needing more frames than the first
@@ -27,9 +27,27 @@
 extern "C" {
 #endif
 
+#pragma region Warp Walks
+
+/** @ref sz_subdocuments_load_window_simt_ over this thread's 32 lanes. */
+STRINGZILLA_DEVICE void sz_subdocuments_load_warp_rocm_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t offset) {
+    sz_subdocuments_load_window_simt_(cursor, offset, sz_lanes_ballot_rocm_, sz_shuffle_index_rocm_);
+}
+
+/** @ref sz_subdocuments_walk_documents_simt_ with 32 lanes walking each JSON document. */
+static __global__ void sz_subdocuments_warp_walk_rocm_kernel_(sz_subdocuments_engine_t engine,
+                                                              sz_strings_view_t documents,
+                                                              sz_subdocuments_round_simt_t round) {
+    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, (sz_bool_t)((thread & 31) == 0),
+                                         sz_subdocuments_load_warp_rocm_);
+}
+
+#pragma endregion Warp Walks
+
 #pragma region Host Plumbing
 
-/** Blocks a walk launches at most, which with the frames of each thread bounds the round block. */
+/** Blocks every launch of the cooperative walk runs. */
 enum { sz_subdocuments_blocks_rocm_k = 256 };
 
 /** Grows the round block to @p bytes, keeping what it holds. */
@@ -59,7 +77,7 @@ STRINGZILLA_INLINE void sz_subdocuments_round_rocm_(sz_subdocuments_engine_t con
     round->stacks = (sz_u64_t *)(block + stacks);
 }
 
-/** Launches one walk over @p round 's items, one thread each. */
+/** Launches one walk over @p round 's items, a warp each for JSON and a thread each for XML. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_rocm_(sz_subdocuments_engine_t const *engine,
                                                             sz_strings_view_t const *documents,
                                                             sz_subdocuments_round_simt_t const *round,
@@ -67,13 +85,17 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_rocm_(sz_subdocuments_engi
     sz_subdocuments_engine_t launched_engine = *engine;
     sz_strings_view_t launched_documents = *documents;
     sz_subdocuments_round_simt_t launched_round = *round;
+    sz_bool_t const warps = (sz_bool_t)(engine->format == sz_subdocuments_json_k);
     void *arguments[3];
     dim3 grid, block;
     arguments[0] = &launched_engine, arguments[1] = &launched_documents, arguments[2] = &launched_round;
-    grid.x = (unsigned)sz_size_divide_round_up(round->threads, sz_subdocuments_threads_per_block_simt_k);
+    grid.x = (unsigned)sz_size_divide_round_up(round->threads * (warps ? 32 : 1),
+                                               sz_subdocuments_threads_per_block_simt_k);
     grid.y = 1, grid.z = 1;
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-    return sz_launch_rocm_((void const *)sz_subdocuments_walk_simt_kernel_, grid, block, arguments, 0, stream);
+    return sz_launch_rocm_(
+        warps ? (void const *)sz_subdocuments_warp_walk_rocm_kernel_ : (void const *)sz_subdocuments_walk_simt_kernel_,
+        grid, block, arguments, 0, stream);
 }
 
 /** Copies the header back to @p header, which joins @p stream. */
@@ -259,8 +281,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_rocm_(sz_subdocuments_engin
                                                            sz_size_t *malformed_index, sz_stream_t stream) {
     sz_size_t const count = documents->count, frame_words = sz_subdocuments_frame_words_simt_(engine);
     sz_size_t const frame_bytes = frame_words * sizeof(sz_u64_t), key_bytes = sz_subdocuments_key_bytes_(engine);
-    sz_size_t const threads = sz_min_of_two(
-        count, (sz_size_t)sz_subdocuments_blocks_rocm_k * sz_subdocuments_threads_per_block_simt_k);
+    // Walkers, each with its own stack: a warp each in JSON, a thread each in XML.
+    sz_size_t const threads = sz_min_of_two(count, sz_device_multiprocessors_rocm_() *
+                                                       sz_device_threads_per_multiprocessor_rocm_() /
+                                                       (engine->format == sz_subdocuments_json_k ? 32 : 1));
     sz_size_t const stacks = sizeof(sz_subdocuments_header_simt_t) + (4 * count + 1) * sizeof(sz_u64_t) +
                              threads * key_bytes;
     sz_size_t const stacks_bytes = threads * sz_subdocuments_frames_simt_k * frame_bytes;
@@ -359,6 +383,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_rocm_(sz_subdo
                                                                         sz_subdocuments_format_t format,
                                                                         sz_size_t *malformed_index,
                                                                         sz_allocator_t *allocator, sz_stream_t stream) {
+    hipPointerAttribute_t attributes;
     sz_allocator_t unified;
     sz_status_t status;
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
@@ -373,6 +398,10 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_rocm_(sz_subdo
         sz_subdocuments_engine_free_(engine, stream);
         return status;
     }
+    // Every call reads the engine on the host too, which would pull a managed engine's pages off
+    // the device for the next kernel to fault back; read-mostly pages keep a copy on each side.
+    if (hipPointerGetAttributes(&attributes, engine->memory) == hipSuccess && attributes.type == hipMemoryTypeManaged)
+        sz_unused_(hipMemAdvise(engine->memory, engine->memory_bytes, hipMemAdviseSetReadMostly, attributes.device));
     return sz_success_k;
 }
 

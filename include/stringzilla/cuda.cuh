@@ -397,11 +397,19 @@ STRINGZILLA_DEVICE int sz_shuffle_down_cuda_(int value, unsigned delta) {
     return __shfl_down_sync(0xFFFFFFFFu, value, delta);
 }
 
+/** Lane @p lane 's @p value, with @c shfl.sync.idx . */
+STRINGZILLA_DEVICE sz_u32_t sz_shuffle_index_cuda_(sz_u32_t value, unsigned lane) {
+    return __shfl_sync(0xFFFFFFFFu, value, lane);
+}
+
 /** Lane zero's @p value across the warp, with @c shfl.sync.idx . */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_cuda_(sz_u32_t value) { return __shfl_sync(0xFFFFFFFFu, value, 0); }
 
 /** Whether @p predicate holds on any lane of the warp, with @c vote.sync.any . */
 STRINGZILLA_DEVICE int sz_lanes_any_cuda_(int predicate) { return __any_sync(0xFFFFFFFFu, predicate) != 0; }
+
+/** A bit per lane of the warp, set where @p predicate holds, with @c vote.sync.ballot . */
+STRINGZILLA_DEVICE sz_u32_t sz_lanes_ballot_cuda_(int predicate) { return __ballot_sync(0xFFFFFFFFu, predicate); }
 
 #pragma endregion Device Primitives
 
