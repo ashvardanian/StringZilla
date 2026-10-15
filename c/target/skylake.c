@@ -4,6 +4,8 @@
  *  @date September 29, 2026
  *  @brief Every family's @c skylake kernels, defined once for the StringZilla library.
  */
+#undef STRINGZILLA_TARGET_HASWELL
+#define STRINGZILLA_TARGET_HASWELL 0
 #undef STRINGZILLA_TARGET_WESTMERE
 #define STRINGZILLA_TARGET_WESTMERE 0
 #include "stringzilla/stringzilla.h"
