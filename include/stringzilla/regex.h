@@ -37,8 +37,9 @@
  *
  *  Beyond RE2, the lookaheads `(?=…)` and `(?!…)` and the lookbehinds `(?<=…)` and `(?<!…)` test
  *  whether their body matches from or up to a position, whatever its width, and nest freely; a body
- *  holds no capturing group, and a vocabulary holds at most 26 of them. Up to four, nested ones
- *  included, become columns of both DFAs; a vocabulary of more walks slower automata instead.
+ *  holds no capturing group, and a vocabulary holds at most 26 of them. Up to six on CPUs and four
+ *  on GPUs, nested ones included, become columns of both DFAs; a vocabulary holding more walks the
+ *  slower automata instead.
  *
  *  Refused with @c sz_invalid_syntax_k: backreferences, a capturing group inside a lookaround or
  *  more lookarounds than that, inline `(?i)`, `\p` and `\P`, possessive and atomic forms, `\Z`,

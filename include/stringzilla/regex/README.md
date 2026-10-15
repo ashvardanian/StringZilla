@@ -40,6 +40,11 @@ A rare live byte can still hold the walk off its idle states for long, like the 
 The search then follows the chain the sequential search takes: the first marked start at or past the cursor, its end from the end-finding walk, and the cursor moved there.
 The cost is one pass over the haystack for starts plus the matched bytes and their lookahead for ends, the same order as RE2's forward pass plus a reverse walk per match.
 
+Where every match starts with a few literal bytes, as keywords do, the search skips the start pass and searches for those bytes instead.
+The end-finding DFA's first steps, from every start state under every lookaround block, give the paths of classes the first bytes of a match follow, up to three bytes deep and eight paths wide, each path one bucket.
+A search jumps to the next position whose bytes keep some bucket at every offset, testing both nibbles of every byte against per-offset bucket tables, and the end walk from there settles whether a match starts there, so a false candidate costs a walk that dies within a step or two.
+The paths must pass few positions, judged with every byte at least a sixteenth as frequent as any, as text is: two literal bytes pass, a single byte or a wide class like `[0-9]` does not, and neither does a vocabulary that can match empty.
+
 An end walk that runs past its match, looking for a longer one, can cover the starts of the next matches: every `a` of a line without a later `z` walks to the line's end under `a[^\n]*z|a`.
 So every 16 bytes a walk leaves its state at a checkpoint, and a later walk holding the same state there stops: it walks the same bytes from there on, so it takes that walk's match if that one ended past the checkpoint, or its own last match before it.
 That keeps such vocabularies linear; it costs walks that never meet 2 to 5%.
@@ -50,6 +55,7 @@ The check stays at checkpoints, as searching after every escape loses where esca
 
 Every CPU tier shares the serial walks and brings its byte-set searches: the reverse one for the start pass's skips, and the forward one for end walks.
 NEON, AVX2 and AVX-512 search 16, 32 and 64 bytes per compare; the serial tier skips the start pass with a byte loop, which still pays for position walks, and does not search ahead in end walks, where a byte loop is no faster than stepping.
+Each tier also brings its search for literal prefixes: the serial one reads a bucket table per offset, a byte at a time, and the vector ones test both nibbles of every byte at every offset with one table lookup each, a superset of the buckets' bytes that the end walk settles.
 
 After a match the search resumes at its end, and an empty match there is refused in favour of the search one byte further, so matches share no bytes and none repeats.
 An empty match is never reported before a UTF-8 continuation byte, so none splits a codepoint, while non-empty matches stand where they are found.
@@ -104,11 +110,13 @@ Lookaheads `(?=X)` and `(?!X)` and lookbehinds `(?<=X)` and `(?<!X)` are regular
 Each body compiles into the forward NFA as a sub-vocabulary of its own, a lookbehind's as written and a lookahead's reversed, and each lookaround owns one look bit.
 Before the walks, every haystack fills a table of those bits per position: a forward pass runs all lookbehind bodies as one unanchored automaton keeping every match and marks where they end, and a backward pass runs the reversed lookahead bodies alike and marks where they start, which is the start-finding construction again; a negated lookaround holds where its body marked nothing.
 Bodies nest, so lookarounds are computed level by level, innermost first, each level's bodies reading the bits below them.
+A body nesting no lookaround gets a DFA of its own, unanchored and keeping every match as the start-finding one, and fills its bits a byte per step; nested bodies and those past the start-finding budget step the PikeVM.
+A cased body of one byte from a set, asserting nothing, needs no walk at all: the byte before a position decides a lookbehind and the byte at it a lookahead, so one table per side fills all of them in one pass.
 The PikeVM adds a position's bits to the assertions it crosses there, and the position automaton tests them beside the boundary kinds of its groups, the loop's follows across a lookaround joining the groups too.
-Both DFAs read the bits as columns: a vocabulary of at most four lookarounds, nested ones included, widens every row to one block per set of them, and a step takes the block of the lookarounds holding at the boundary it crosses, the one before its byte left to right and the one after it right to left.
+Both DFAs read the bits as columns: a vocabulary of at most six lookarounds on CPUs and four on GPUs, nested ones included, widens every row to one block per set of them, and a step takes the block of the lookarounds holding at the boundary it crosses, the one before its byte left to right and the one after it right to left.
 Such a step first closes its state's threads under the assertions the state knows and the block's lookarounds, then consumes the byte, so a lookaround ending a pattern resolves one byte late like `$`, and each block's edge column settles the haystack's edges.
 Steps inside the folds of one codepoint take the first block, as no lookaround holds there.
-Each lookaround halves both state budgets, so the tables keep their bytes, and a vocabulary of more than four walks positions and the PikeVM.
+Each lookaround halves both state budgets, so the tables keep their bytes, and a vocabulary of more walks positions and the PikeVM; GPU kernels stage the first column of sixteen blocks, so they stop at four.
 A body holds no capturing group, and a vocabulary at most 26 lookarounds, the look bits left past the assertions.
 
 ## Case Folding

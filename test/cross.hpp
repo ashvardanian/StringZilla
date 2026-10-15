@@ -4664,6 +4664,52 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
                         cases_t {{0, 0, 0, 7}, {0, 0, 19, 7}}},
                        uncased);
 
+    // One-byte lookarounds, which a table fills, at both edges and beside a multi-byte codepoint,
+    // and StringWars' lookaround vocabulary, whose five lookarounds all become DFA columns on CPUs.
+    check_regex_known_(tier,
+                       {{"(?<!x)abc"}, {"abc", "xabc", "abcabc"}, cases_t {{0, 0, 0, 3}, {2, 0, 0, 3}, {2, 0, 3, 3}}});
+    check_regex_known_(tier, {{"abc(?!x)"}, {"abc", "abcx"}, cases_t {{0, 0, 0, 3}}});
+    check_regex_known_(tier, {{"(?<![a-z])\\d"},
+                              {"\xC3\xA9" "1", "a1"}, // "\xA91" would be one escape
+                              cases_t {{0, 0, 2, 1}}});
+    check_regex_known_(tier, {{"(?<=\\$)[0-9]+(?:\\.[0-9]{2})?", "[0-9]+(?=%)", "[A-Z][a-z]+(?= [A-Z][a-z]+)",
+                               "(?<![A-Za-z])[A-Z]{2,}(?![a-z])"},
+                              {"The US Federal Reserve raised rates 5% to $12.50 at NASA.", "$7", "NASA"},
+                              cases_t {{0, 3, 4, 2},
+                                       {0, 2, 7, 7},
+                                       {0, 1, 36, 1},
+                                       {0, 0, 43, 5},
+                                       {0, 3, 52, 4},
+                                       {1, 0, 1, 1},
+                                       {2, 3, 0, 4}}});
+
+    // Vocabularies whose matches start with a few literal bytes skip to them: candidates straddling
+    // vector blocks or near the haystack's end, overlapping candidates, prefixes past a lookbehind,
+    // a word boundary or a multi-byte codepoint, and vocabularies that cannot skip, as uncased ones
+    // and those matching empty strings.
+    std::string const padding_30(30, ' '), padding_59(59, ' ');
+    check_regex_known_(tier,
+                       {{"government", "minister", "president", "police"},
+                        {padding_59 + "government" + padding_30 + "police", padding_30 + "minister", "polic", "police"},
+                        cases_t {{0, 0, 59, 10}, {0, 3, 99, 6}, {1, 1, 30, 8}, {3, 3, 0, 6}}});
+    check_regex_known_(tier, {{"abcd", "bcde", "cd"}, {"abcde", "xbcdex"}, cases_t {{0, 0, 0, 4}, {1, 1, 1, 4}}});
+    check_regex_known_(tier, {{"aab"}, {"aaab", std::string(70, 'a') + "b"}, cases_t {{0, 0, 1, 3}, {1, 0, 68, 3}}});
+    check_regex_known_(tier, {{"president"}, {"prepresident"}, cases_t {{0, 0, 3, 9}}});
+    check_regex_known_(tier, {{"(?<=a)bc"}, {"bc", "abc"}, cases_t {{1, 0, 1, 2}}});
+    check_regex_known_(tier, {{"\\bgov"}, {"xgov gov"}, cases_t {{0, 0, 5, 3}}});
+    check_regex_known_(
+        tier,
+        {{"\xE2\x82\xACuro"}, {"a\xE2\x82\xACuro\xE2\x82\xAC\xE2\x82\xACuro"}, cases_t {{0, 0, 1, 6}, {0, 0, 10, 6}}});
+    check_regex_known_(tier, {{"government", "police"}, {"GOVERNMENT Police"}, cases_t {{0, 0, 0, 10}, {0, 1, 11, 6}}},
+                       uncased);
+    check_regex_known_(tier,
+                       {{"kelvin"},
+                        {"\xE2\x84\xAA" "elvin"}, // "\xAAe" would be one escape
+                        cases_t {{0, 0, 0, 8}}},
+                       uncased);
+    check_regex_known_(tier, {{"", "abc"}, {"abc"}, cases_t {{0, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 2, 0}, {0, 0, 3, 0}}});
+    check_regex_known_(tier, {{"abc", "x*"}, {"abc"}, cases_t {{0, 0, 0, 3}}});
+
     // Refusals name the first malformed pattern, and an empty vocabulary is refused at zero;
     // a lookaround holds no capturing group, and a vocabulary no more lookarounds than look
     // bits are left.

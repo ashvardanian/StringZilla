@@ -75,11 +75,11 @@ struct rationed_heap_t {
 void test_regex_unit() {
     check_regex_unit_(regex_dispatched, regex_dispatched_rewriting);
 
-    // The password rules of the known answers with a nested fourth lookaround become columns of
-    // both DFAs, and with a fifth leave both, finding the same match either way.
+    // The password rules of the known answers with a nested fourth lookaround and two more become
+    // columns of both DFAs on CPUs, and with a seventh leave both DFAs, matching alike either way.
     using cases_t = std::vector<substrings_case_t>;
-    std::vector<std::string> const rules {"^(?=.*\\d)(?=.*[a-z])(?=.*[A-Z](?!\\s)).{8,}\\z",
-                                          "^(?=.*\\d)(?=.*[a-z])(?=.*[A-Z](?!\\s))(?!.*\\s).{8,}\\z"};
+    std::vector<std::string> const rules {"^(?<!x)(?=.*\\d)(?=.*[a-z])(?=.*[A-Z](?!\\s))(?!.*\\s).{8,}\\z",
+                                          "^(?<!x)(?=.*\\d)(?=.*[a-z])(?=.*[A-Z](?!\\s))(?!.*\\s)(?=.{8}).{8,}\\z"};
     for (std::size_t index = 0; index != rules.size(); ++index) {
         handle_checked_heap_t heap;
         std::vector<std::string> const patterns {rules[index]};
@@ -87,7 +87,7 @@ void test_regex_unit() {
         sz_strings_view_t const strings = strings_over_(patterns, views);
         sz_regex_engine_t engine;
         verify(regex_dispatched.init(&engine, &strings, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
-        verify(engine.lookarounds_count == sz_regex_columned_lookarounds_k + index);
+        verify(engine.lookarounds_count == sz_regex_columned_lookarounds_cpu_k + index);
         verify((engine.forward_rows != nullptr) == (index == 0) && (engine.reverse_rows != nullptr) == (index == 0));
         verify(regex_matches_(regex_dispatched, &engine, {"Passw0rdX", "password1", "Sh0rt", "NODIGITS"}) ==
                cases_t({{0, 0, 0, 9}}));

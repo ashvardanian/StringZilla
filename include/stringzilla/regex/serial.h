@@ -10,7 +10,8 @@
  *  position some match starts at. The end-finding one is the patterns anchored and leftmost-first:
  *  walked from one start until it dies, its last accepting state names the match's end and pattern.
  *  A search marks one window's starts, then follows the chain the sequential search takes: the
- *  first start at or past the cursor, its end, and the cursor moved there.
+ *  first start at or past the cursor, its end, and the cursor moved there. Where every match starts
+ *  with a few literal bytes, a search for them replaces the marking.
  *
  *  Both are built the way `regex-automata` builds its dense DFAs, so leftmost-first priority,
  *  look-around and empty matches come out exactly as Rust's @c regex reports them: the NFA follows
@@ -26,9 +27,9 @@
  *  A lookaround compiles its body into the forward NFA as a sub-vocabulary of its own, and its look
  *  state tests one bit of a table every walk fills first: per haystack position, the lookarounds
  *  that hold there, found by a forward pass of the lookbehind bodies, unanchored and keeping every
- *  match, and a backward pass of the reversed lookahead bodies. Up to four lookarounds become DFA
- *  columns: each set of them that may hold at a boundary takes a block of the row, which a step
- *  picks from the table; a vocabulary with more walks positions and the PikeVM.
+ *  match, and a backward pass of the reversed lookahead bodies. Up to six lookarounds, four on
+ *  GPUs, become DFA columns: each set of them that may hold at a boundary takes a block of the row,
+ *  which a step picks from the table; a vocabulary with more walks positions and the PikeVM.
  *
  *  @sa include/stringzilla/regex.h
  */
@@ -127,6 +128,23 @@ typedef struct sz_regex_lookaround_t {
     sz_u32_t level;
 } sz_regex_lookaround_t;
 
+/** One lookaround body's DFA, unanchored and keeping every match, which fills the table of where
+ *  its lookaround holds a byte per step instead of the PikeVM. */
+typedef struct sz_regex_body_t {
+
+    /** Rows of `classes_count + 1` next states, the last column taken at the far edge of a
+     *  haystack, ids being row offsets; null for a body over other lookarounds, of one byte, or
+     *  past its budget. */
+    sz_u32_t const *rows;
+
+    /** The state a pass starts from at the haystack's edge it walks from. */
+    sz_u32_t start;
+
+    /** Ids at or above this one accept, which the step over the unit after a match of the body
+     *  lands on. */
+    sz_u32_t accepts_begin;
+} sz_regex_body_t;
+
 /** One outgoing edge, chained per state. */
 typedef struct sz_regex_nfa_link_t {
 
@@ -142,6 +160,34 @@ typedef struct sz_regex_nfa_link_t {
     /** The highest byte a ranges state's link consumes. */
     sz_u8_t high;
 } sz_regex_nfa_link_t;
+
+/** Bytes from a candidate start that the literal prefilter tests. */
+enum { sz_regex_prefixes_depth_k = 3 };
+
+/** Paths of byte sets the literal prefilter tells apart, one bucket bit each. */
+enum { sz_regex_prefixes_paths_k = 8 };
+
+/**
+ *  @brief The paths of byte sets the first bytes of every match follow, as the end-finding DFA's
+ *      first steps allow them under any lookaround, each path one bucket bit.
+ *
+ *  A search skips to the next position whose bytes keep some bucket at every offset, and the end
+ *  walk from there settles whether a match starts there, so a superset of the paths stays exact.
+ *  A path shorter than the deepest holds every byte past its end. Vector tiers test a byte's two
+ *  nibbles apart, which holds a superset of its bucket's bytes where a path's set has several.
+ */
+typedef struct sz_regex_prefixes_t {
+
+    /** Per offset from a candidate start, per byte, the buckets whose paths hold the byte there. */
+    sz_u8_t buckets[sz_regex_prefixes_depth_k][256];
+
+    /** Per offset, the buckets holding some byte of each low nibble, then of each high nibble;
+     *  every bucket at offsets past @c depth. */
+    sz_u8_t nibbles[sz_regex_prefixes_depth_k][32];
+
+    /** Offsets of the deepest path. */
+    sz_u32_t depth;
+} sz_regex_prefixes_t;
 
 /**
  *  @brief A compiled vocabulary of regular expressions: two automata over one byte-class map.
@@ -180,8 +226,8 @@ typedef struct sz_regex_engine_t {
     /** End-finding automaton: the patterns anchored and leftmost-first, walked left to right from
      *  one start and laid out the same, a step over the byte at @c i taking the block of the
      *  lookarounds holding at @c i. The last accepting state before it dies names the match's end
-     *  and pattern. Null past its state budget or past @c sz_regex_columned_lookarounds_k
-     *  lookarounds, where end walks run a PikeVM over @c nfa_states. */
+     *  and pattern. Null past its state budget or past the lookarounds its capability takes as
+     *  columns, where end walks run a PikeVM over @c nfa_states. */
     sz_u32_t const *forward_rows;
 
     /** Per forward accepting state, in id order, the pattern leftmost-first priority picks. */
@@ -191,6 +237,11 @@ typedef struct sz_regex_engine_t {
      *  end walk searches ahead for where the state stays put on all but a few printable ASCII
      *  bytes; every byte for other states. */
     sz_byteset_t const *forward_escapes;
+
+    /** The paths every match's first bytes follow, which a search skips to instead of marking
+     *  starts; null where they would pass too many positions, where some match is empty, for an
+     *  uncased engine, and where end walks run the PikeVM. */
+    sz_regex_prefixes_t const *prefixes;
 
     /** Forward start by the byte before a match: none, a line feed, a word byte, or another. */
     sz_u32_t forward_starts[4];
@@ -293,9 +344,20 @@ typedef struct sz_regex_engine_t {
      *  @c nfa_states and its kind. */
     sz_regex_lookaround_t const *lookarounds;
 
+    /** Per lookaround, its body's DFA, which fills the table where it is built; null without
+     *  lookarounds. */
+    sz_regex_body_t const *bodies;
+
+    /** The lookarounds whose bodies match one byte of a set and assert nothing, so the byte beside
+     *  a position alone decides whether they hold; then per byte, those holding right after it;
+     *  then per byte, those holding right before it. Null where no body is one byte, as in an
+     *  uncased engine, whose lookarounds hold between whole codepoints only. */
+    sz_u32_t const *looks_bytes;
+
     /** Lookarounds the vocabulary holds, nested ones included; up to
-     *  @c sz_regex_columned_lookarounds_k of them widen both DFAs' rows to a block per set, and
-     *  more leave walks on positions and the PikeVM. */
+     *  @c sz_regex_columned_lookarounds_cpu_k of them on CPUs and
+     *  @c sz_regex_columned_lookarounds_gpu_k on GPUs widen the rows of both DFAs to a block per
+     *  set, and more leave walks on positions and the PikeVM. */
     sz_u32_t lookarounds_count;
 
     /** Every capturing group's name, in the order @c patterns_groups numbers them,
@@ -398,9 +460,17 @@ typedef enum sz_regex_look_t {
 /** Lookarounds one vocabulary may hold, as many as the look bits past the assertions. */
 enum { sz_regex_lookarounds_limit_k = 26 };
 
-/** Lookarounds the DFAs test through their columns; a vocabulary with more walks positions
- *  and the PikeVM. */
-enum { sz_regex_columned_lookarounds_k = 4 };
+/** Lookarounds the DFAs of GPU kernels test through their columns, which stage the first column of
+ *  each of sixteen blocks; a vocabulary with more walks positions and the PikeVM. */
+enum { sz_regex_columned_lookarounds_gpu_k = 4 };
+
+/** Lookarounds the DFAs of CPU tiers test through their columns, where a wider row costs only
+ *  cache, as the halved budgets keep the tables' bytes. */
+enum { sz_regex_columned_lookarounds_cpu_k = 6 };
+
+/** Words of @ref sz_regex_engine_t::looks_bytes: the mask of one-byte lookarounds, then two rows of
+ *  256. */
+enum { sz_regex_singles_k = 513 };
 
 /** Cells of a row of either DFA: a column per class and the haystack-edge column, a block of them
  *  per set of the lookarounds that may hold at the boundary a step crosses. */
@@ -770,6 +840,16 @@ typedef struct sz_regex_builder_t {
     sz_u32_t *published;
     sz_size_t published_capacity;
 
+    /** Per lookaround, three words: where its body's DFA starts in @c bodies_rows plus one, its
+     *  start state, and its first accepting state, zeros for a body of one byte or one the PikeVM
+     *  walks; then the @c sz_regex_singles_k words of @ref sz_regex_engine_t::looks_bytes. */
+    sz_u32_t *bodies;
+
+    /** Rows of every body's DFA, `classes_count + 1` columns each, and how many words there are
+     *  and fit. */
+    sz_u32_t *bodies_rows;
+    sz_size_t bodies_rows_count, bodies_rows_capacity;
+
     /** Positions of the start pass: the loop, the match, then every class of the reversed NFA
      *  in walk order. */
     sz_regex_position_t *positions;
@@ -894,6 +974,12 @@ STRINGZILLA_INLINE void sz_regex_builder_free_(sz_regex_builder_t *builder) {
                         allocator->handle, stream);
     if (builder->published)
         allocator->free(builder->published, builder->published_capacity * sizeof(sz_u32_t), allocator->handle, stream);
+    if (builder->bodies)
+        allocator->free(builder->bodies, (3 * builder->lookarounds_count + sz_regex_singles_k) * sizeof(sz_u32_t),
+                        allocator->handle, stream);
+    if (builder->bodies_rows)
+        allocator->free(builder->bodies_rows, builder->bodies_rows_capacity * sizeof(sz_u32_t), allocator->handle,
+                        stream);
     if (builder->positions)
         allocator->free(builder->positions, builder->positions_capacity * sizeof(sz_regex_position_t),
                         allocator->handle, stream);
@@ -2493,6 +2579,135 @@ STRINGZILLA_INLINE sz_size_t sz_regex_publish_rows_(sz_regex_builder_t *builder,
     return accepting;
 }
 
+/** States past which a body's DFA is not checked for matching one byte, as one that does needs a
+ *  handful. */
+enum { sz_regex_single_states_k = 16 };
+
+/**
+ *  @brief Whether a body's published DFA matches exactly one byte of a set and asserts nothing, so
+ *      a match ends right past each byte of the set; per class, whether the set holds it goes to
+ *      @p held.
+ *
+ *  Every state a walk reaches over bytes must land on an accepting one exactly when the step before
+ *  took a class of the set, whatever unit follows, the edge of the haystack included, and the start
+ *  state, before any byte, never. States entered over the edge column end the walk, so no check
+ *  reads their rows.
+ */
+STRINGZILLA_INLINE sz_bool_t sz_regex_body_single_(sz_u32_t const *rows, sz_u32_t start, sz_u32_t accepts,
+                                                   sz_size_t columns, sz_size_t states_count, sz_u8_t *held) {
+    sz_u32_t reached[sz_regex_single_states_k];
+    sz_size_t reached_count = 1;
+    if (states_count > sz_regex_single_states_k) return sz_false_k;
+    for (sz_size_t column = 0; column != columns; ++column)
+        if (rows[start + column] >= accepts) return sz_false_k;
+    for (sz_size_t unit_class = 0; unit_class + 1 != columns; ++unit_class)
+        held[unit_class] = (sz_u8_t)(rows[rows[start + unit_class]] >= accepts);
+    reached[0] = start;
+    for (sz_size_t visited = 0; visited != reached_count; ++visited)
+        for (sz_size_t unit_class = 0; unit_class + 1 != columns; ++unit_class) {
+            sz_u32_t const next = rows[reached[visited] + unit_class];
+            sz_size_t known = 0;
+            for (sz_size_t column = 0; column != columns; ++column)
+                if ((rows[next + column] >= accepts) != held[unit_class]) return sz_false_k;
+            while (known != reached_count && reached[known] != next) ++known;
+            if (known == reached_count) reached[reached_count++] = next;
+        }
+    return sz_true_k;
+}
+
+/**
+ *  @brief Builds the DFA of every lookaround body that nests no other, unanchored and keeping every
+ *      match as the start-finding one is, into @c bodies_rows, numbered the way published rows are.
+ *
+ *  Each body is entered through a loop over any byte, appended to the forward NFA for the build and
+ *  dropped after it, so the published NFA still ends with the bodies. Its rows hold one block, as
+ *  no lookaround nests in it, and a body past the start-finding budget stays on the PikeVM. A cased
+ *  body of one byte from a set keeps no rows, as the byte beside a position decides it.
+ */
+STRINGZILLA_INLINE sz_status_t sz_regex_build_bodies_(sz_regex_builder_t *builder) {
+    sz_allocator_t *const allocator = builder->allocator;
+    sz_regex_nfa_t *const nfa = &builder->forward;
+    sz_size_t const count = builder->lookarounds_count, columns = builder->classes_count + 1;
+    sz_size_t const states_count = nfa->states_count, links_count = nfa->links_count;
+    sz_status_t status = sz_success_k;
+    if (!count) return sz_success_k;
+    builder->bodies = (sz_u32_t *)allocator->allocate((3 * count + sz_regex_singles_k) * sizeof(sz_u32_t),
+                                                      allocator->handle, builder->stream);
+    if (!builder->bodies) return sz_bad_alloc_k;
+    memset(builder->bodies, 0, (3 * count + sz_regex_singles_k) * sizeof(sz_u32_t));
+    // The strides below follow the count, and no body steps under a lookaround.
+    builder->lookarounds_count = 0;
+    for (sz_size_t index = 0; index != count && status == sz_success_k; ++index) {
+        sz_regex_dfa_t dfa;
+        sz_regex_nfa_t view;
+        sz_u32_t loop, any, *ranks = STRINGZILLA_NULL, *rows;
+        sz_size_t accepting = 0, accepted = 0, rejected = 0;
+        if (builder->lookarounds[index].level != 1) continue;
+        nfa->states_count = states_count, nfa->links_count = links_count;
+        if ((status = sz_regex_nfa_add_(builder, nfa, sz_regex_nfa_union_k, &loop)) != sz_success_k ||
+            (status = sz_regex_nfa_add_(builder, nfa, sz_regex_nfa_ranges_k, &any)) != sz_success_k ||
+            (status = sz_regex_nfa_patch_(builder, nfa, loop, builder->lookarounds[index].start)) != sz_success_k ||
+            (status = sz_regex_nfa_patch_(builder, nfa, loop, any)) != sz_success_k ||
+            (status = sz_regex_nfa_link_(builder, nfa, any, loop, 0x00, 0xFF)) != sz_success_k)
+            break;
+        view = *nfa, view.start = loop;
+        sz_regex_nfa_prefix_(builder, &view);
+        memset(&dfa, 0, sizeof(dfa));
+        dfa.states_budget = sz_regex_reverse_budget_k;
+        status = sz_regex_determinize_(builder, &view, &dfa, sz_regex_all_matches_k);
+        if (status == sz_success_k) {
+            ranks = (sz_u32_t *)allocator->allocate(dfa.states_count * sizeof(sz_u32_t), allocator->handle,
+                                                    builder->stream);
+            rows = (sz_u32_t *)sz_regex_grow_(builder, builder->bodies_rows, &builder->bodies_rows_capacity,
+                                              builder->bodies_rows_count + dfa.states_count * columns,
+                                              sizeof(sz_u32_t));
+            if (rows) builder->bodies_rows = rows;
+            if (!ranks || !rows) status = sz_bad_alloc_k;
+        }
+        if (status == sz_success_k) {
+            sz_u32_t *const published = builder->bodies_rows + builder->bodies_rows_count;
+            for (sz_size_t state = 0; state != dfa.states_count; ++state) accepting += dfa.keys[dfa.offsets[state]] & 1;
+            for (sz_size_t state = 0; state != dfa.states_count; ++state) {
+                sz_size_t const rank = dfa.keys[dfa.offsets[state]] & 1 ? dfa.states_count - accepting + accepted++
+                                                                        : rejected++;
+                ranks[state] = (sz_u32_t)(rank * columns);
+            }
+            sz_u32_t const start = ranks[dfa.starts[0]], accepts = (sz_u32_t)((dfa.states_count - accepting) * columns);
+            sz_u8_t held[256];
+            for (sz_size_t state = 0; state != dfa.states_count; ++state)
+                for (sz_size_t column = 0; column != columns; ++column)
+                    published[ranks[state] + column] = ranks[dfa.rows[state * columns + column]];
+            if (builder->case_sensitivity == sz_cased_k &&
+                sz_regex_body_single_(published, start, accepts, columns, dfa.states_count, held)) {
+                sz_u32_t *const singles = builder->bodies + 3 * count;
+                sz_u32_t const bit = (sz_u32_t)sz_regex_look_lookaround_k << index;
+                sz_size_t const side = builder->lookarounds[index].kind >= sz_regex_lookbehind_k ? 1 : 257;
+                singles[0] |= bit;
+                for (sz_size_t byte = 0; byte != 256; ++byte)
+                    if (held[builder->byte_to_class[byte]]) singles[side + byte] |= bit;
+            }
+            else {
+                builder->bodies[3 * index] = (sz_u32_t)builder->bodies_rows_count + 1;
+                builder->bodies[3 * index + 1] = start, builder->bodies[3 * index + 2] = accepts;
+                builder->bodies_rows_count += dfa.states_count * columns;
+            }
+        }
+        if (status == sz_overflow_risk_k) status = sz_success_k;
+        if (ranks) allocator->free(ranks, dfa.states_count * sizeof(sz_u32_t), allocator->handle, builder->stream);
+        if (dfa.keys)
+            allocator->free(dfa.keys, dfa.keys_capacity * sizeof(sz_u32_t), allocator->handle, builder->stream);
+        if (dfa.offsets)
+            allocator->free(dfa.offsets, dfa.offsets_capacity * sizeof(sz_size_t), allocator->handle, builder->stream);
+        if (dfa.rows)
+            allocator->free(dfa.rows, dfa.rows_capacity * sizeof(sz_u32_t), allocator->handle, builder->stream);
+        if (dfa.slots)
+            allocator->free(dfa.slots, dfa.slots_count * sizeof(sz_u32_t), allocator->handle, builder->stream);
+    }
+    builder->lookarounds_count = count;
+    nfa->states_count = states_count, nfa->links_count = links_count;
+    return status;
+}
+
 #pragma endregion Determinization
 
 #pragma region Positions
@@ -2930,7 +3145,7 @@ STRINGZILLA_INLINE void sz_regex_engine_free_(sz_regex_engine_t *engine, sz_stre
     engine->scratch = STRINGZILLA_NULL, engine->scratch_bytes = 0;
     engine->byte_to_class = STRINGZILLA_NULL, engine->reverse_rows = STRINGZILLA_NULL;
     engine->forward_rows = STRINGZILLA_NULL, engine->forward_patterns = STRINGZILLA_NULL;
-    engine->forward_escapes = STRINGZILLA_NULL;
+    engine->forward_escapes = STRINGZILLA_NULL, engine->prefixes = STRINGZILLA_NULL;
     engine->classes_count = 0, engine->forward_states_count = 0, engine->reverse_states_count = 0;
     engine->patterns_count = 0, engine->capability = sz_cap_serial_k;
     engine->positions_words = 0, engine->positions_shifts_count = 0, engine->positions_groups_count = 0;
@@ -2942,7 +3157,8 @@ STRINGZILLA_INLINE void sz_regex_engine_free_(sz_regex_engine_t *engine, sz_stre
     engine->nfa_states = STRINGZILLA_NULL, engine->nfa_links = STRINGZILLA_NULL;
     engine->nfa_states_count = 0, engine->nfa_links_count = 0, engine->nfa_start = 0;
     engine->patterns_starts = STRINGZILLA_NULL, engine->patterns_groups = STRINGZILLA_NULL;
-    engine->lookarounds = STRINGZILLA_NULL, engine->lookarounds_count = 0;
+    engine->lookarounds = STRINGZILLA_NULL, engine->bodies = STRINGZILLA_NULL, engine->lookarounds_count = 0;
+    engine->looks_bytes = STRINGZILLA_NULL;
     engine->groups_names.layout = sz_strings_u32_tape_k, engine->groups_names.count = 0;
     engine->groups_names.data.u32_tape.data = STRINGZILLA_NULL,
     engine->groups_names.data.u32_tape.offsets = STRINGZILLA_NULL;
@@ -2988,12 +3204,14 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_parse_(sz_regex_builder_t *build
     return sz_success_k;
 }
 
-/** Sizes the closure scratch for the larger NFA, zeroing the sparse halves so every
- *  read is defined. */
+/** Sizes the closure scratch for the larger NFA, the forward one with room for the loops its
+ *  lookaround bodies' DFAs enter through, zeroing the sparse halves so every read is defined. */
 STRINGZILLA_INLINE sz_status_t sz_regex_builder_scratch_(sz_regex_builder_t *builder) {
     sz_allocator_t *const allocator = builder->allocator;
-    sz_size_t const states = sz_max_of_two(builder->forward.states_count, builder->reverse.states_count);
-    sz_size_t const links = sz_max_of_two(builder->forward.links_count, builder->reverse.links_count);
+    sz_size_t const states = sz_max_of_two(builder->forward.states_count + 2 * builder->lookarounds_count,
+                                           builder->reverse.states_count);
+    sz_size_t const links = sz_max_of_two(builder->forward.links_count + 3 * builder->lookarounds_count,
+                                          builder->reverse.links_count);
     builder->set_capacity = states + 1;
     builder->stack_capacity = states + links + 1;
     for (sz_size_t index = 0; index != 2; ++index) {
@@ -3010,6 +3228,121 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_scratch_(sz_regex_builder_t *bui
     builder->key = (sz_u32_t *)allocator->allocate((builder->set_capacity + sz_regex_key_header_k) * sizeof(sz_u32_t),
                                                    allocator->handle, builder->stream);
     return builder->stack && builder->key ? sz_success_k : sz_bad_alloc_k;
+}
+
+/** DFA states one path of the literal prefilter's derivation may hold before it gives up. */
+enum { sz_regex_prefixes_states_k = 16 };
+
+/** A path the literal prefilter's derivation follows: the end-finding states it holds, the classes
+ *  it took, and whether a match can end where it stands. */
+typedef struct sz_regex_prefix_path_t {
+    sz_u32_t states[sz_regex_prefixes_states_k];
+    sz_u32_t states_count;
+    sz_u8_t classes[sz_regex_prefixes_depth_k];
+    sz_u32_t length;
+    sz_bool_t ended;
+} sz_regex_prefix_path_t;
+
+/**
+ *  @brief Derives from the end-finding DFA the paths of classes the first bytes of every match
+ *      follow, into @p prefixes, answering whether a search should skip to them.
+ *
+ *  Paths grow class by class from every start state, under every lookaround block, until a match
+ *  can end where they stand, they reach @c sz_regex_prefixes_depth_k classes, or the next step
+ *  would hold more than @c sz_regex_prefixes_paths_k paths. A match that can be empty leaves none.
+ *  The paths must also pass few positions, judged with every byte at least a sixteenth as frequent
+ *  as any, as text is: two literal bytes pass, one or a wide class does not.
+ */
+STRINGZILLA_INLINE sz_bool_t sz_regex_prefixes_derive_(sz_regex_engine_t const *engine, sz_regex_prefixes_t *prefixes) {
+    sz_u32_t const *const rows = engine->forward_rows;
+    sz_size_t const classes_count = engine->classes_count, columns = classes_count + 1;
+    sz_size_t const stride = sz_regex_stride_(engine->classes_count, engine->lookarounds_count);
+    sz_regex_prefix_path_t paths[2][sz_regex_prefixes_paths_k];
+    sz_regex_prefix_path_t *current = paths[0], *next = paths[1];
+    sz_size_t current_count = 1, depth = 0, estimate = 0, class_bytes[256];
+    current[0].states_count = 0, current[0].length = 0, current[0].ended = sz_false_k;
+    for (sz_size_t kind = 0; kind != 4; ++kind) {
+        sz_u32_t const start = engine->forward_starts[kind];
+        sz_size_t held = 0;
+        while (held != current[0].states_count && current[0].states[held] != start) ++held;
+        if (start && held == current[0].states_count) current[0].states[current[0].states_count++] = start;
+    }
+    for (;;) {
+        sz_size_t next_count = 0;
+        sz_bool_t crowded = sz_false_k;
+        for (sz_size_t path = 0; path != current_count; ++path)
+            for (sz_size_t held = 0; held != current[path].states_count && !current[path].ended; ++held)
+                for (sz_size_t column = 0; column != stride; ++column)
+                    if (rows[current[path].states[held] + column] >= engine->forward_accepts_begin) {
+                        if (depth == 0) return sz_false_k;
+                        current[path].ended = sz_true_k;
+                        break;
+                    }
+        if (depth == sz_regex_prefixes_depth_k) break;
+        for (sz_size_t path = 0; path != current_count && !crowded; ++path) {
+            if (current[path].ended) {
+                if (next_count == sz_regex_prefixes_paths_k) crowded = sz_true_k;
+                else next[next_count++] = current[path];
+                continue;
+            }
+            for (sz_size_t unit_class = 0; unit_class != classes_count && !crowded; ++unit_class) {
+                sz_regex_prefix_path_t *const grown = next + next_count;
+                if (next_count == sz_regex_prefixes_paths_k) {
+                    // A step that dies everywhere takes no bucket, so only a live one crowds.
+                    for (sz_size_t held = 0; held != current[path].states_count && !crowded; ++held)
+                        for (sz_size_t block = 0; block < stride && !crowded; block += columns)
+                            crowded = (sz_bool_t)(rows[current[path].states[held] + block + unit_class] != 0);
+                    continue;
+                }
+                grown->states_count = 0;
+                for (sz_size_t held = 0; held != current[path].states_count && !crowded; ++held)
+                    for (sz_size_t block = 0; block < stride && !crowded; block += columns) {
+                        sz_u32_t const target = rows[current[path].states[held] + block + unit_class];
+                        sz_size_t known = 0;
+                        while (known != grown->states_count && grown->states[known] != target) ++known;
+                        if (!target || known != grown->states_count) continue;
+                        if (grown->states_count == sz_regex_prefixes_states_k) crowded = sz_true_k;
+                        else grown->states[grown->states_count++] = target;
+                    }
+                if (!grown->states_count || crowded) continue;
+                memcpy(grown->classes, current[path].classes, sizeof(grown->classes));
+                grown->classes[depth] = (sz_u8_t)unit_class;
+                grown->length = (sz_u32_t)depth + 1, grown->ended = sz_false_k;
+                ++next_count;
+            }
+        }
+        if (crowded) break;
+        {
+            sz_regex_prefix_path_t *const swapped = current;
+            current = next, next = swapped, current_count = next_count, ++depth;
+        }
+    }
+    if (depth == 0) return sz_false_k;
+    memset(prefixes, 0, sizeof(*prefixes));
+    memset(class_bytes, 0, sizeof(class_bytes));
+    for (sz_size_t byte = 0; byte != 256; ++byte) ++class_bytes[engine->byte_to_class[byte]];
+    for (sz_size_t path = 0; path != current_count; ++path) {
+        sz_u8_t const bucket = (sz_u8_t)(1u << path);
+        sz_size_t rate = 1;
+        for (sz_size_t offset = 0; offset != sz_regex_prefixes_depth_k; ++offset) {
+            sz_bool_t const bound = (sz_bool_t)(offset < current[path].length);
+            rate *= bound ? sz_max_of_two(class_bytes[current[path].classes[offset]], (sz_size_t)16) : 256;
+            for (sz_size_t byte = 0; byte != 256 && offset < depth; ++byte)
+                if (!bound || engine->byte_to_class[byte] == current[path].classes[offset])
+                    prefixes->buckets[offset][byte] |= bucket;
+        }
+        estimate += rate;
+    }
+    // The rates are in units of one in the cube of the alphabet; past one position in 128, end
+    // walks from false candidates would cost more than the start pass they replace.
+    if (estimate > ((sz_size_t)1 << 24) / 128) return sz_false_k;
+    for (sz_size_t offset = 0; offset != sz_regex_prefixes_depth_k; ++offset)
+        for (sz_size_t byte = 0; byte != 256; ++byte) {
+            sz_u8_t const buckets = offset < depth ? prefixes->buckets[offset][byte] : (sz_u8_t)0xFF;
+            prefixes->nibbles[offset][byte & 15] |= buckets, prefixes->nibbles[offset][16 + (byte >> 4)] |= buckets;
+        }
+    prefixes->depth = (sz_u32_t)depth;
+    return sz_true_k;
 }
 
 /** Publishes both automata into the engine's one block: the start pass's records when it runs on
@@ -3035,6 +3368,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     sz_regex_nfa_state_t *states;
     sz_regex_nfa_link_t *links;
     sz_byteset_t *escapes;
+    sz_regex_body_t *bodies;
+    sz_regex_prefixes_t *prefixes;
+    sz_u32_t *bodies_rows, *looks_bytes;
     sz_u8_t *byte_to_class;
     for (sz_size_t index = 0; index != builder->forward_dfa.states_count; ++index)
         forward_accepting += builder->forward_dfa.keys[builder->forward_dfa.offsets[index]] & 1;
@@ -3043,16 +3379,23 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
                                                          allocator->handle, builder->stream);
     if (!builder->published) return sz_bad_alloc_k;
     total = program_words * sizeof(sz_u64_t) + builder->forward_dfa.states_count * sizeof(sz_byteset_t) +
-            (forward_cells + reverse_cells + forward_accepting + ascii_count + ranges_count) * sizeof(sz_u32_t) +
+            lookarounds_count * sizeof(sz_regex_body_t) + sizeof(sz_regex_prefixes_t) +
+            (builder->bodies_rows_count + (lookarounds_count ? sz_regex_singles_k : 0) + forward_cells + reverse_cells +
+             forward_accepting + ascii_count + ranges_count) *
+                sizeof(sz_u32_t) +
             nfa_states * sizeof(sz_regex_nfa_state_t) + nfa_links * sizeof(sz_regex_nfa_link_t) +
             lookarounds_count * sizeof(sz_regex_lookaround_t) +
             (2 * patterns_count + groups_count + 2) * sizeof(sz_u32_t) + 256 + builder->groups_names_count;
     program = (sz_u64_t *)allocator->allocate(total, allocator->handle, builder->stream);
     if (!program) return sz_bad_alloc_k;
     escapes = (sz_byteset_t *)(program + program_words);
-    forward_rows = (sz_u32_t *)(escapes + builder->forward_dfa.states_count);
+    bodies = (sz_regex_body_t *)(escapes + builder->forward_dfa.states_count);
+    prefixes = (sz_regex_prefixes_t *)(bodies + lookarounds_count);
+    forward_rows = (sz_u32_t *)(prefixes + 1);
     reverse_rows = forward_rows + forward_cells;
-    forward_patterns = reverse_rows + reverse_cells;
+    bodies_rows = reverse_rows + reverse_cells;
+    looks_bytes = bodies_rows + builder->bodies_rows_count;
+    forward_patterns = looks_bytes + (lookarounds_count ? sz_regex_singles_k : 0);
     ascii = forward_patterns + forward_accepting;
     states = (sz_regex_nfa_state_t *)(ascii + ascii_count + ranges_count);
     links = (sz_regex_nfa_link_t *)(states + nfa_states);
@@ -3065,6 +3408,15 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     memcpy(states, builder->forward.states, nfa_states * sizeof(sz_regex_nfa_state_t));
     memcpy(links, builder->forward.links, nfa_links * sizeof(sz_regex_nfa_link_t));
     if (lookarounds_count) memcpy(lookarounds, builder->lookarounds, lookarounds_count * sizeof(sz_regex_lookaround_t));
+    if (builder->bodies_rows_count)
+        memcpy(bodies_rows, builder->bodies_rows, builder->bodies_rows_count * sizeof(sz_u32_t));
+    if (lookarounds_count)
+        memcpy(looks_bytes, builder->bodies + 3 * lookarounds_count, sz_regex_singles_k * sizeof(sz_u32_t));
+    for (sz_size_t index = 0; index != lookarounds_count; ++index) {
+        sz_u32_t const *const body = builder->bodies + 3 * index;
+        bodies[index].rows = body[0] ? bodies_rows + body[0] - 1 : STRINGZILLA_NULL;
+        bodies[index].start = body[1], bodies[index].accepts_begin = body[2];
+    }
     memcpy(patterns_starts, builder->patterns_starts, patterns_count * sizeof(sz_u32_t));
     memcpy(patterns_groups, builder->patterns_groups, (patterns_count + 1) * sizeof(sz_u32_t));
     memcpy(groups_ends, builder->groups_ends, (groups_count + 1) * sizeof(sz_u32_t));
@@ -3103,6 +3455,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     engine->nfa_start = builder->forward.start;
     engine->patterns_starts = patterns_starts, engine->patterns_groups = patterns_groups;
     engine->lookarounds = lookarounds_count ? lookarounds : STRINGZILLA_NULL;
+    engine->bodies = lookarounds_count ? bodies : STRINGZILLA_NULL;
+    engine->looks_bytes = lookarounds_count && looks_bytes[0] ? looks_bytes : STRINGZILLA_NULL;
     engine->lookarounds_count = (sz_u32_t)lookarounds_count;
     engine->groups_names.layout = sz_strings_u32_tape_k, engine->groups_names.count = groups_count;
     engine->groups_names.data.u32_tape.data = (sz_cptr_t)(byte_to_class + 256);
@@ -3126,6 +3480,10 @@ STRINGZILLA_INLINE sz_status_t sz_regex_builder_publish_(sz_regex_builder_t *bui
     engine->positions_ascii = words ? ascii : STRINGZILLA_NULL;
     engine->positions_ranges = words ? ascii + ascii_count : STRINGZILLA_NULL;
     engine->memory = program, engine->memory_bytes = total;
+    engine->prefixes = forward_cells && builder->case_sensitivity == sz_cased_k &&
+                               sz_regex_prefixes_derive_(engine, prefixes)
+                           ? prefixes
+                           : STRINGZILLA_NULL;
     sz_byteset_init(&engine->reverse_live);
     if (!words)
         for (sz_size_t byte = 0; byte != 256; ++byte) {
@@ -3223,7 +3581,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_engine_compile_(sz_regex_engine_t *engin
         sz_regex_builder_classify_(&builder);
         // Each set of lookarounds that may hold takes a block of columns, so the budgets shrink to
         // keep the tables' bytes.
-        if (builder.lookarounds_count > sz_regex_columned_lookarounds_k) forward_budget = 0, reverse_budget = 0;
+        if (builder.lookarounds_count > (capability & sz_cap_gpus_k ? (sz_size_t)sz_regex_columned_lookarounds_gpu_k
+                                                                    : (sz_size_t)sz_regex_columned_lookarounds_cpu_k))
+            forward_budget = 0, reverse_budget = 0;
         else forward_budget >>= builder.lookarounds_count, reverse_budget >>= builder.lookarounds_count;
         builder.forward_dfa.states_budget = forward_budget, builder.reverse_dfa.states_budget = reverse_budget;
         status = sz_regex_determinize_(&builder, &builder.forward, &builder.forward_dfa, sz_regex_leftmost_first_k);
@@ -3237,6 +3597,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_engine_compile_(sz_regex_engine_t *engin
                 if (status == sz_success_k) status = sz_regex_build_records_(&builder);
             }
         }
+        if (status == sz_success_k) status = sz_regex_build_bodies_(&builder);
         if (status == sz_success_k) status = sz_regex_builder_publish_(&builder, engine);
     }
     sz_regex_builder_free_(&builder);
@@ -3390,10 +3751,29 @@ typedef struct sz_regex_walk_t {
      *  state, or none where a byte loop would be no faster than stepping, as on the serial tier. */
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *);
 
+    /** The tier's search for the prefixes of the engine, which replaces the start pass where they
+     *  exist. */
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *);
+
     /** The PikeVM that end walks run without forward rows and groups are read with, empty unless
      *  one of them is. */
     sz_regex_pike_t pike;
 } sz_regex_walk_t;
+
+/** Finds the first position of @p text whose bytes keep some bucket of @p prefixes at every offset
+ *  inside it, a byte at a time. */
+STRINGZILLA_INLINE sz_cptr_t sz_regex_find_prefixes_serial_(sz_cptr_t text, sz_size_t length,
+                                                            sz_regex_prefixes_t const *prefixes) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)text;
+    sz_size_t const depth = prefixes->depth;
+    for (sz_size_t position = 0; position != length; ++position) {
+        sz_u8_t buckets = prefixes->buckets[0][bytes[position]];
+        for (sz_size_t offset = 1; buckets && offset != depth && position + offset != length; ++offset)
+            buckets &= prefixes->buckets[offset][bytes[position + offset]];
+        if (buckets) return text + position;
+    }
+    return STRINGZILLA_NULL;
+}
 
 /** The first unit boundary at or past @p position: a byte that does not continue a codepoint
  *  begun before it. */
@@ -3483,12 +3863,12 @@ STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engin
  *  vocabulary with lookarounds runs it to fill the table of where they hold, which happens here,
  *  before any walk reads it.
  */
-STRINGZILLA_INLINE sz_status_t sz_regex_walk_scratch_(sz_regex_engine_t *engine, sz_cptr_t haystack, sz_size_t length,
-                                                      sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t,
-                                                                              sz_byteset_t const *),
-                                                      sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t,
-                                                                               sz_byteset_t const *),
-                                                      sz_size_t slots_count, sz_regex_walk_t *walk) {
+STRINGZILLA_INLINE sz_status_t sz_regex_walk_scratch_(
+    sz_regex_engine_t *engine, sz_cptr_t haystack, sz_size_t length,
+    sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *), sz_size_t slots_count,
+    sz_regex_walk_t *walk) {
     sz_size_t const batch_bytes = (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_serial_k;
     sz_size_t const batches = sz_size_divide_round_up(length, batch_bytes);
     sz_size_t const chained = length >= (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_minimum_k;
@@ -3540,6 +3920,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_walk_scratch_(sz_regex_engine_t *engine,
     walk->windows = windows, walk->window_bytes = window_bytes, walk->window_words = window_words, walk->window = 0;
     walk->batch = 0, walk->batch_count = 0, walk->serial = ++*served;
     walk->skip_cost = 0, walk->skip_spanned = 0, walk->rfind_live = rfind_live, walk->find_escape = find_escape;
+    walk->find_prefixes = find_prefixes;
     memset(walk->edges, 0, (windows + 1) * stride * sizeof(sz_u64_t));
     memset(walk->seen, 0, priming);
     walk->bounds[0] = 0, walk->bounds[windows] = length;
@@ -4614,38 +4995,99 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_looks_step_(sz_regex_engine_t const *engine
 }
 
 /**
+ *  @brief Marks where the lookarounds of @p members hold, stepping their bodies' DFAs one after
+ *      another over the haystack, forward for lookbehinds and backward for lookaheads, as
+ *      @ref sz_regex_looks_serial_ steps the PikeVM.
+ *
+ *  A step landing on an accepting state marks the boundary it crossed, one unit late as both
+ *  automata report, so the haystack's far edge takes the edge column. Steps inside the folds of one
+ *  codepoint mark the codepoint's edge they snap out to.
+ */
+STRINGZILLA_INLINE void sz_regex_looks_bodies_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
+                                               sz_u32_t members, sz_u32_t negated, sz_bool_t behind, sz_u32_t *looks) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack, *const byte_to_class = engine->byte_to_class;
+    sz_size_t const edge = engine->classes_count, stop = behind ? length : 0;
+    sz_regex_image_t image;
+    for (sz_u32_t index = 0; index != engine->lookarounds_count; ++index) {
+        sz_u32_t const bit = (sz_u32_t)sz_regex_look_lookaround_k << index;
+        sz_u32_t const *const rows = engine->bodies[index].rows, accepts = engine->bodies[index].accepts_begin;
+        sz_u32_t const flip = negated & bit;
+        sz_u32_t state = engine->bodies[index].start, pending = 0;
+        sz_size_t position = behind ? 0 : length;
+        if (!(members & bit)) continue;
+        if (engine->case_sensitivity == sz_cased_k)
+            for (; position != stop; behind ? ++position : --position) {
+                state = rows[state + byte_to_class[bytes[behind ? position : position - 1]]];
+                looks[position] |= (state >= accepts ? bit : 0) ^ flip;
+            }
+        else
+            while (position != stop) {
+                sz_size_t const next = behind ? sz_regex_image_after_(haystack, length, position, &image)
+                                              : sz_regex_image_before_(haystack, position, &image);
+                for (sz_size_t byte = 0; byte != image.length; ++byte) {
+                    sz_u32_t held;
+                    state = rows[state + byte_to_class[image.bytes[behind ? byte : image.length - 1 - byte]]];
+                    held = state >= accepts ? bit : 0;
+                    if (byte) pending |= held;
+                    else looks[position] |= (held | pending) ^ flip, pending = 0;
+                }
+                position = next;
+            }
+        looks[stop] |= ((rows[state + edge] >= accepts ? bit : 0) | pending) ^ flip;
+    }
+}
+
+/**
  *  @brief Fills the walk's table of the lookarounds holding at every position, level by level, as
  *      the bodies of a level test the bits of the levels below.
  *
  *  Per level, a forward pass runs every lookbehind body as one unanchored automaton keeping every
  *  match and marks where they end, and a backward pass runs the reversed lookahead bodies alike and
- *  marks where they start; a negated lookaround holds where its body marked nothing. Steps inside
- *  the folds of one codepoint see no lookaround hold, and a body ending or starting there marks the
- *  codepoint's edge it snaps out to.
+ *  marks where they start; a negated lookaround holds where its body marked nothing. Bodies with a
+ *  DFA of their own step it, a byte per step, and the rest step a PikeVM. Steps inside the folds of
+ *  one codepoint see no lookaround hold, and a body ending or starting there marks the codepoint's
+ *  edge it snaps out to.
  */
 STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
                                                   sz_regex_walk_t *walk) {
     sz_regex_pike_t *const pike = &walk->pike;
     sz_u32_t *const looks = walk->looks;
     sz_size_t const slots_count = pike->slots_count;
-    sz_u32_t levels = 0;
+    sz_u32_t const singles = engine->looks_bytes ? engine->looks_bytes[0] : 0;
+    sz_u32_t levels = 0, negated_singles = 0;
     sz_regex_image_t image;
-    memset(looks, 0, (length + 1) * sizeof(sz_u32_t));
-    for (sz_size_t index = 0; index != engine->lookarounds_count; ++index)
+    for (sz_size_t index = 0; index != engine->lookarounds_count; ++index) {
         levels = sz_max_of_two(levels, engine->lookarounds[index].level);
+        if (engine->lookarounds[index].kind & 1) negated_singles |= (sz_u32_t)sz_regex_look_lookaround_k << index;
+    }
+    negated_singles &= singles;
+    if (singles) {
+        // One-byte lookarounds hold by the byte before a position or at it, and none at an edge.
+        sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+        sz_u32_t const *const after = engine->looks_bytes + 1, *const before = after + 256;
+        sz_u32_t previous = 0;
+        for (sz_size_t position = 0; position != length; ++position)
+            looks[position] = (previous | before[bytes[position]]) ^ negated_singles, previous = after[bytes[position]];
+        looks[length] = previous ^ negated_singles;
+    }
+    else memset(looks, 0, (length + 1) * sizeof(sz_u32_t));
     // The bodies hold no groups, so their threads carry no slots.
     pike->slots_count = 0;
     for (sz_u32_t pass = 0; pass != 2 * levels; ++pass) {
         sz_u32_t const behind = pass % 2 == 0, level = pass / 2 + 1;
         sz_size_t const stop = behind ? length : 0;
         sz_size_t position = behind ? 0 : length;
-        sz_u32_t members = 0, negated = 0, before = sz_regex_end_of_input_k, pending = 0;
+        sz_u32_t members = 0, negated = 0, walked = 0, before = sz_regex_end_of_input_k, pending = 0;
         for (sz_u32_t index = 0; index != engine->lookarounds_count; ++index) {
             sz_regex_lookaround_t const lookaround = engine->lookarounds[index];
             if (lookaround.level != level || (sz_u32_t)(lookaround.kind >= sz_regex_lookbehind_k) != behind) continue;
             members |= (sz_u32_t)sz_regex_look_lookaround_k << index;
             if (lookaround.kind & 1) negated |= (sz_u32_t)sz_regex_look_lookaround_k << index;
+            if (engine->bodies[index].rows) walked |= (sz_u32_t)sz_regex_look_lookaround_k << index;
         }
+        if (walked)
+            sz_regex_looks_bodies_(engine, haystack, length, walked, negated & walked, (sz_bool_t)behind, looks);
+        members &= ~walked & ~singles, negated &= ~walked & ~singles;
         if (!members) continue;
         pike->entered_count = 0;
         for (;;) {
@@ -4688,21 +5130,29 @@ STRINGZILLA_INLINE sz_bool_t sz_regex_search_serial_(sz_regex_engine_t const *en
     for (;;) {
         sz_size_t candidate = STRINGZILLA_SIZE_MAX;
         sz_regex_image_t image;
-        while (from <= length) {
-            sz_size_t window = walk->window, base, edge;
-            if (from < walk->bounds[window] || (from >= walk->bounds[window + 1] && window + 1 != walk->windows)) {
-                window = sz_min_of_two(from / walk->window_bytes, walk->windows - 1);
-                if (from < walk->bounds[window]) --window;
-                walk->window = window;
-            }
-            base = walk->bounds[window], edge = walk->bounds[window + 1];
-            if (window < walk->batch || window >= walk->batch + walk->batch_count)
-                sz_regex_mark_batch_serial_(engine, haystack, length, walk, window);
-            candidate = sz_regex_next_start_(walk->starts + (window - walk->batch) * walk->window_words, base, from,
-                                             edge == length ? edge : edge - 1);
-            if (candidate != STRINGZILLA_SIZE_MAX || edge == length) break;
-            from = edge;
+        // No match is empty where prefixes exist, so none starts at the haystack's end.
+        if (engine->prefixes) {
+            sz_cptr_t const found = from < length
+                                        ? walk->find_prefixes(haystack + from, length - from, engine->prefixes)
+                                        : STRINGZILLA_NULL;
+            if (found) candidate = (sz_size_t)(found - haystack);
         }
+        else
+            while (from <= length) {
+                sz_size_t window = walk->window, base, edge;
+                if (from < walk->bounds[window] || (from >= walk->bounds[window + 1] && window + 1 != walk->windows)) {
+                    window = sz_min_of_two(from / walk->window_bytes, walk->windows - 1);
+                    if (from < walk->bounds[window]) --window;
+                    walk->window = window;
+                }
+                base = walk->bounds[window], edge = walk->bounds[window + 1];
+                if (window < walk->batch || window >= walk->batch + walk->batch_count)
+                    sz_regex_mark_batch_serial_(engine, haystack, length, walk, window);
+                candidate = sz_regex_next_start_(walk->starts + (window - walk->batch) * walk->window_words, base, from,
+                                                 edge == length ? edge : edge - 1);
+                if (candidate != STRINGZILLA_SIZE_MAX || edge == length) break;
+                from = edge;
+            }
         if (candidate == STRINGZILLA_SIZE_MAX) return sz_false_k;
         image.runes_count = 1, image.rune_starts[0] = 0;
         if (engine->case_sensitivity != sz_cased_k && candidate != length)
@@ -4772,7 +5222,8 @@ STRINGZILLA_INLINE sz_size_t sz_regex_walk_serial_(sz_regex_engine_t const *engi
 STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_size_t *counts, sz_size_t counts_stride,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *)) {
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
     sz_string_view_t views[64];
     sz_size_t matches_count = 0;
     if (counts_stride == 0) return sz_unexpected_dimensions_k;
@@ -4782,7 +5233,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
-                                        rfind_live, find_escape, 0, &walk);
+                                        rfind_live, find_escape, find_prefixes, 0, &walk);
         if (status != sz_success_k) return status;
         counts[haystack_index * counts_stride] = sz_regex_walk_serial_(
             engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk, haystack_index,
@@ -4796,7 +5247,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
 STRINGZILLA_INLINE sz_status_t sz_regex_find_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_match_t *matches, sz_size_t matches_capacity,
     sz_size_t *matches_offsets, sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *)) {
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
     sz_string_view_t views[64];
     sz_size_t matches_count = 0;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -4805,7 +5257,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_find_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
-                                        rfind_live, find_escape, 0, &walk);
+                                        rfind_live, find_escape, find_prefixes, 0, &walk);
         if (status != sz_success_k) return status;
         matches_offsets[haystack_index] = matches_count;
         sz_regex_walk_serial_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk,
@@ -4913,7 +5365,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_replace_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_strings_view_t const *replacements,
     sz_ptr_t target, sz_size_t target_capacity, sz_size_t *offsets,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *)) {
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
     sz_string_view_t views[64];
     sz_size_t written = 0, slots_count;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -4927,7 +5380,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_replace_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         haystack = views[haystack_index % 64].start, length = views[haystack_index % 64].length;
-        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, slots_count, &walk);
+        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes, slots_count,
+                                        &walk);
         if (status != sz_success_k) return status;
         offsets[haystack_index] = written;
         while (sz_regex_next_(engine, haystack, length, &walk, cursor, found, &start, &end, &pattern, &offset)) {
@@ -4958,7 +5412,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_size_t pattern_index, sz_match_t *groups,
     sz_size_t groups_capacity, sz_size_t *groups_offsets,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *)) {
+    sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
     sz_string_view_t views[64];
     sz_size_t groups_count, rows_count = 0;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -4973,7 +5428,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         haystack = views[haystack_index % 64].start, length = views[haystack_index % 64].length;
-        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, 2 * groups_count + 2, &walk);
+        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes,
+                                        2 * groups_count + 2, &walk);
         if (status != sz_success_k) return status;
         groups_offsets[haystack_index] = rows_count;
         while (!matched &&
@@ -5017,7 +5473,8 @@ STRINGZILLA_API sz_status_t sz_regex_engine_init_serial(sz_regex_engine_t *engin
 STRINGZILLA_API sz_status_t sz_regex_counts_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
                                                    sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
-    return sz_regex_counts_with_(engine, haystacks, counts, counts_stride, &sz_rfind_byteset_serial_, STRINGZILLA_NULL);
+    return sz_regex_counts_with_(engine, haystacks, counts, counts_stride, &sz_rfind_byteset_serial_, STRINGZILLA_NULL,
+                                 &sz_regex_find_prefixes_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_find_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5025,7 +5482,7 @@ STRINGZILLA_API sz_status_t sz_regex_find_serial(sz_regex_engine_t *engine, sz_s
                                                  sz_size_t *matches_offsets, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_find_with_(engine, haystacks, matches, matches_capacity, matches_offsets, &sz_rfind_byteset_serial_,
-                               STRINGZILLA_NULL);
+                               STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_replace_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5033,7 +5490,7 @@ STRINGZILLA_API sz_status_t sz_regex_replace_serial(sz_regex_engine_t *engine, s
                                                     sz_size_t target_capacity, sz_size_t *offsets, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_replace_with_(engine, haystacks, replacements, target, target_capacity, offsets,
-                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL);
+                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_extract_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5042,7 +5499,7 @@ STRINGZILLA_API sz_status_t sz_regex_extract_serial(sz_regex_engine_t *engine, s
                                                     sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_extract_with_(engine, haystacks, pattern_index, groups, groups_capacity, groups_offsets,
-                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL);
+                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
 }
 
 #endif // STRINGZILLA_TARGET_SERIAL
