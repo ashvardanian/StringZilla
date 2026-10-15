@@ -237,14 +237,15 @@ typedef struct sz_regex_round_simt_t {
 
 #pragma region Device Helpers
 
-/** One automaton's transitions as a walk reads them: the class map, the first column of each
- *  block of lookarounds and the rows' head staged in shared memory, the rest of the rows in
- *  global memory, and the round's lookaround table whose entries pick the blocks, null
- *  without lookarounds. */
+/** One automaton's transitions as a walk reads them: the class map, the first column of each block
+ *  of lookarounds and the rows' head staged in shared memory, the rest of the rows in global
+ *  memory, and the round's lookaround table whose entries pick the blocks, null without
+ *  lookarounds. The table is reached through the round, as NVVM takes the pointers of a copy held
+ *  beside staged ones for shared memory. */
 typedef struct sz_regex_table_simt_t {
     sz_u8_t const *classes;
     sz_u32_t const *blocks, *head, *rows;
-    sz_regex_looks_simt_t looks;
+    sz_regex_looks_simt_t const *looks;
     sz_u32_t head_cells, edge_column;
 } sz_regex_table_simt_t;
 
@@ -264,7 +265,7 @@ STRINGZILLA_DEVICE sz_regex_table_simt_t sz_regex_stage_simt_(sz_regex_engine_t 
     sz_u32_t index;
     table.classes = sz_regex_staged_simt_, table.blocks = blocks, table.head = head;
     table.rows = rows, table.head_cells = sz_min_of_two(cells, round->staged_cells);
-    table.looks = round->looks, table.edge_column = engine->classes_count;
+    table.looks = &round->looks, table.edge_column = engine->classes_count;
     for (index = threadIdx.x; index < 256; index += blockDim.x)
         sz_regex_staged_simt_[index] = engine->byte_to_class[index];
     for (index = threadIdx.x; index < 16; index += blockDim.x)
@@ -290,8 +291,8 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_move_simt_(sz_regex_table_simt_t const *tab
 
 /** The first column of the block the lookarounds at @p slot select, zero without lookarounds. */
 STRINGZILLA_DEVICE sz_u32_t sz_regex_block_at_simt_(sz_regex_table_simt_t const *table, sz_size_t slot) {
-    return table->looks.table
-               ? table->blocks[table->looks.table[slot & table->looks.mask] / sz_regex_look_lookaround_k % 16]
+    return table->looks->table
+               ? table->blocks[table->looks->table[slot & table->looks->mask] / sz_regex_look_lookaround_k % 16]
                : 0;
 }
 
@@ -749,8 +750,8 @@ STRINGZILLA_DEVICE sz_bool_t sz_regex_walk_folded_simt_(sz_regex_engine_t const 
     state = engine->forward_starts[kind];
     while (state != 0) {
         sz_u32_t block = 0;
-        if (byte == 0 && sz_regex_past_simt_(&table->looks, haystack->first + position)) {
-            *table->looks.refused = 1;
+        if (byte == 0 && sz_regex_past_simt_(table->looks, haystack->first + position)) {
+            *table->looks->refused = 1;
             return sz_false_k;
         }
         if (byte == 0) block = sz_regex_block_at_simt_(table, haystack->first + position);
@@ -913,7 +914,7 @@ typedef struct sz_regex_pike_simt_t {
     sz_u32_t *dense, *sparse, *entered;
     sz_size_t *dense_slots, *entered_slots, *current, *matched, *frames;
     sz_size_t count, entered_count, slots_count, end, first;
-    sz_regex_looks_simt_t looks;
+    sz_regex_looks_simt_t const *looks;
     sz_u32_t pattern;
     sz_bool_t found;
 } sz_regex_pike_simt_t;
@@ -943,7 +944,7 @@ STRINGZILLA_DEVICE sz_regex_pike_simt_t sz_regex_pike_carve_simt_(sz_regex_round
     pike.sparse = pike.dense + states;
     pike.entered = pike.sparse + states;
     pike.count = 0, pike.entered_count = 0, pike.slots_count = slots_count, pike.end = 0, pike.first = 0;
-    pike.looks = round->looks, pike.pattern = 0, pike.found = sz_false_k;
+    pike.looks = &round->looks, pike.pattern = 0, pike.found = sz_false_k;
     return pike;
 }
 
@@ -1083,11 +1084,11 @@ STRINGZILLA_DEVICE sz_bool_t sz_regex_walk_pike_simt_(sz_regex_engine_t const *e
                                                   : sz_regex_image_byte_simt_(&image, (sz_u32_t)byte);
         sz_u32_t held;
         sz_bool_t alive;
-        if (byte == 0 && sz_regex_past_simt_(&pike->looks, pike->first + position)) {
-            *pike->looks.refused = 1;
+        if (byte == 0 && sz_regex_past_simt_(pike->looks, pike->first + position)) {
+            *pike->looks->refused = 1;
             return sz_false_k;
         }
-        held = byte ? 0 : sz_regex_looks_at_simt_(&pike->looks, pike->first + position);
+        held = byte ? 0 : sz_regex_looks_at_simt_(pike->looks, pike->first + position);
         alive = sz_regex_pike_step_simt_(engine, pike, before, after, held, position, byte ? unit_end : position);
         if (pike->found) matched = sz_true_k, last_step = step;
         if (!alive || (position == bound && byte == 0)) break;
@@ -2590,7 +2591,7 @@ STRINGZILLA_DEVICE void sz_regex_link_walk_simt_(sz_regex_engine_t const *engine
                                                  sz_u32_t state, sz_regex_haystack_simt_t const *haystack,
                                                  sz_size_t at) {
     sz_size_t const begin = round->segment_begin, end = round->segment_end, edge = haystack->first + 1 + at;
-    sz_size_t const stop = table->looks.table ? table->looks.end - haystack->first : haystack->length;
+    sz_size_t const stop = table->looks->table ? table->looks->end - haystack->first : haystack->length;
     sz_size_t const handover = at + sz_regex_link_bytes_simt_k;
     sz_u32_t const accepts = engine->forward_accepts_begin;
     sz_u32_t last = 0, inherited = sz_regex_none_simt_k;
@@ -2599,7 +2600,7 @@ STRINGZILLA_DEVICE void sz_regex_link_walk_simt_(sz_regex_engine_t const *engine
     result.link = sz_regex_none_simt_k, result.pattern = sz_regex_none_simt_k, result.end = 0;
     while (state != 0) {
         sz_size_t due;
-        if (sz_regex_past_simt_(&table->looks, haystack->first + at)) {
+        if (sz_regex_past_simt_(table->looks, haystack->first + at)) {
             sz_regex_hand_simt_(round, id, state, haystack->first + at);
             break;
         }
@@ -2709,9 +2710,9 @@ STRINGZILLA_DEVICE void sz_regex_continue_simt_(sz_regex_engine_t const *engine,
         sz_u8_t const *const text = haystack.text;
         sz_size_t const length = haystack.length;
         // The pieces end where the window does, at the first unit boundary at or past it.
-        sz_size_t const stop = !sz_regex_past_simt_(&table.looks, haystack.first + length) ? length
-                               : folded ? sz_regex_boundary_simt_(text, length, table.looks.end - haystack.first)
-                                        : table.looks.end - haystack.first;
+        sz_size_t const stop = !sz_regex_past_simt_(table.looks, haystack.first + length) ? length
+                               : folded ? sz_regex_boundary_simt_(text, length, table.looks->end - haystack.first)
+                                        : table.looks->end - haystack.first;
         sz_u32_t state = continuation.state, last = 0;
         sz_size_t at = continuation.slot - haystack.first, last_end = 0, last_at, stepped;
         sz_bool_t paused = sz_false_k;
@@ -2722,7 +2723,7 @@ STRINGZILLA_DEVICE void sz_regex_continue_simt_(sz_regex_engine_t const *engine,
             sz_size_t piece, piece_end, position, unit_end, round_at;
             sz_utf8_folded_image_t image;
             int wide = 0;
-            if (sz_regex_past_simt_(&table.looks, haystack.first + at)) {
+            if (sz_regex_past_simt_(table.looks, haystack.first + at)) {
                 paused = sz_true_k;
                 break;
             }
