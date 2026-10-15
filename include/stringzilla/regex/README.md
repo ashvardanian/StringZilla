@@ -83,6 +83,11 @@ Most vocabularies collapse within a few bytes.
 A pattern that carries state across lines or quotes, like `.*error.*` or `"[^"]*"`, collapses at the next line feed or quote, which can be tens of kilobytes away.
 The alternative, a restarting forward search that guesses its entry state, never re-synchronizes on `"[^"]*"`, as the quote parity it would need is exactly what it lost.
 
+A guess was measured on the GPU backends anyway, where priming takes launches of its own.
+Each chunk walked its own bytes from the idle state after the byte at its edge and, beside it, the set priming walks, so once that set narrowed to one state the marks and the state handed left were exact, and only the bytes before that point waited for the neighbour's state.
+Where nearly every pair of bytes collapses the start-finding states, as for keywords and everyday patterns, that gained a few percent: the priming it saves is a fraction of a pass, while the chunks it leaves unsettled, at least one per block, still take priming's launches.
+Where no pair does, as for `"[^"]*"`, every chunk fell back to priming, and the guess cost a quarter more.
+
 ## Rewriting and Groups
 
 `sz_regex_replace` substitutes every match with its pattern's replacement, and `sz_regex_extract` locates the groups of each haystack's first match of one pattern, as Pandas `str.extract` reads them.

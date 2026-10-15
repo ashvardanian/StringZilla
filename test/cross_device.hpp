@@ -1526,8 +1526,8 @@ inline void check_regex_against_serial_(auto const &backend, std::vector<std::st
         verify(device_counts[index] == serial_offsets[index + 1] - serial_offsets[index] &&
                dispatched_counts[index] == device_counts[index]);
 
-    // Every match rewritten, the groups a replacement names read from its own span, under a target
-    // holding the whole rewrite and one holding a third of it.
+    // Every match rewritten, the groups a replacement names read from its own span: sized first
+    // with no target, as a caller sizes one, then under targets holding all of it and a third.
     std::vector<std::string> templates;
     for (std::size_t index = 0; index != patterns.size(); ++index)
         templates.push_back(index % 3 == 0 ? "<$0|$1>" : index % 3 == 1 ? "${2}~$$" : "${rest}$1x");
@@ -1540,12 +1540,12 @@ inline void check_regex_against_serial_(auto const &backend, std::vector<std::st
     std::string serial_target(bytes, '\0');
     verify(sz_regex_replace_serial(&engines.host, &tape, &replacements_tape, serial_target.data(), bytes,
                                    serial_rewritten.data(), nullptr) == sz_success_k);
-    for (std::size_t const capacity : {bytes, bytes / 3}) {
+    for (std::size_t const capacity : {std::size_t(0), bytes, bytes / 3}) {
         unified_vector<sz_size_t> offsets(count + 1, STRINGZILLA_SIZE_MAX,
                                           unified_alloc<sz_size_t>(backend.runtime.unified, stream));
         unified_vector<char> target(bytes + 1, '\x01', unified_alloc<char>(backend.runtime.unified, stream));
-        verify(backend.regex_replace(&engines.device, &tape, &replacements_tape, target.data(), capacity,
-                                     offsets.data(), stream) == sz_success_k);
+        verify(backend.regex_replace(&engines.device, &tape, &replacements_tape, capacity ? target.data() : nullptr,
+                                     capacity, offsets.data(), stream) == sz_success_k);
         join_(backend.runtime, stream);
         for (std::size_t index = 0; index <= count; ++index) verify(offsets[index] == serial_rewritten[index]);
         verify(std::equal(target.begin(), target.begin() + capacity, serial_target.begin()));
@@ -1610,6 +1610,12 @@ inline void test_regex_device_unit(auto const &backend) {
                                 {"", "a", "baaab", "\xD0\xB6" "a\xD0\xB6", "\xFF\x80"}, // "\xB6a" is one escape
                                 {"a*", "b|"});
     check_regex_against_serial_(backend, {"one\ntwo\n", "x", "  word  "}, {"(?m)^\\w+$", "\\b", "\\z"});
+
+    // A rewrite shrinking long matches over many scan tiles drifts below zero, which the scans
+    // of the rewritten boundaries carry as exactly as they carry counts.
+    std::string shrinking;
+    for (std::size_t index = 0; index != 2000; ++index) shrinking += "government minister president police ";
+    check_regex_against_serial_(backend, {shrinking, "", shrinking.substr(0, 999)}, {"x", "[a-z]{6,}"});
 
     // A quoted span much wider than a chunk leaves end walks reaching chunk edges, and a long line
     // keeps the start-finding walk from collapsing within one.

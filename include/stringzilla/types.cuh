@@ -209,6 +209,32 @@ STRINGZILLA_DEVICE sz_size_t sz_chain_offset_simt_(sz_size_t *slot, sz_size_t ti
     return offset;
 }
 
+/** Where tile @p ticket writes, summing the tiles before it by decoupled look-back over @p states,
+ *  one cleared word per tile, where it publishes its own @p total first; every thread calls it, and
+ *  it ends in a barrier. A word carries its total in 62 bits, read back sign-extended, so totals of
+ *  signed deltas that wrap below zero scan as exactly as counts do. */
+STRINGZILLA_DEVICE sz_size_t sz_chain_look_back_simt_(sz_u64_t *states, sz_size_t ticket, sz_size_t total) {
+    __shared__ sz_size_t offset;
+    if (threadIdx.x == 0) {
+        // Bit 62 marks a word holding its tile's own total, bit 63 one holding the sum up to it.
+        sz_u64_t const own = 1ull << 62, inclusive = 1ull << 63, value = own - 1;
+        sz_u64_t volatile *const published = (sz_u64_t volatile *)states;
+        sz_size_t prefix = 0, look = ticket;
+        published[ticket] = (ticket ? own : inclusive) | (total & value);
+        while (look-- != 0) {
+            sz_u64_t state;
+            do state = published[look];
+            while (!state);
+            prefix += (sz_size_t)((sz_i64_t)(state << 2) >> 2);
+            if (state & inclusive) break;
+        }
+        if (ticket) published[ticket] = inclusive | ((prefix + total) & value);
+        offset = prefix;
+    }
+    __syncthreads();
+    return offset;
+}
+
 /** The first place at or after @p position a serial walk over UTF-8 steps on, which is where both
  *  neighbours of a cut agree to split. */
 STRINGZILLA_DEVICE sz_size_t sz_chain_utf8_cut_simt_(sz_u8_t const *text, sz_size_t length, sz_size_t position) {

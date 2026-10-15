@@ -86,8 +86,9 @@ enum { sz_regex_link_bytes_simt_k = 1024 };
 /** Bytes each lane of a warp walking a link together takes per round. */
 enum { sz_regex_piece_bytes_simt_k = 128 };
 
-/** Hops per round of pointer doubling, so each round reaches this many times as far as the last. */
-enum { sz_regex_round_hops_simt_k = 8 };
+/** Hops per round of pointer doubling, so each round reaches this many times as far as the last;
+ *  many, as each round costs a launch while most chains end within a few hops. */
+enum { sz_regex_round_hops_simt_k = 32 };
 
 /** Slots between the checkpoints where end walks leave their state for later walks to stop at. */
 enum { sz_regex_checkpoint_slots_simt_k = 16 };
@@ -207,6 +208,7 @@ typedef struct sz_regex_round_simt_t {
     sz_u32_t *entries, *edges, *counters, *flags, *leaders;
     sz_regex_carry_simt_t *carry;
     sz_size_t *scan_chain, *chunk_offsets, *chunk_kept, *chunk_sums, *chunk_covers, *chunk_haystacks;
+    sz_u64_t *scan_states;
     sz_regex_frontier_simt_t *frontiers;
     sz_regex_composition_simt_t *compositions, *compositions_next;
     sz_u64_t *starts, *handoffs, *handoff_edges;
@@ -228,7 +230,7 @@ typedef struct sz_regex_round_simt_t {
     sz_size_t set_words, bodies_begin, bodies_count;
     sz_u32_t forward_cells, reverse_cells, staged_cells, storing;
     sz_u32_t flow, members, negated;
-    sz_u32_t groups_begin, groups_capacity;
+    sz_u32_t groups_begin, groups_capacity, scans;
 } sz_regex_round_simt_t;
 
 #pragma endregion Shapes
@@ -330,6 +332,22 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_run_simt_(sz_regex_table_simt_t const *tabl
 }
 
 /**
+ *  @brief Steps @p state over the first @p count of a run's @p columns, taken right to left.
+ *  @return A bit per column whose step left the walk at or past @p accepts, bit 0 the last.
+ */
+STRINGZILLA_DEVICE sz_u32_t sz_regex_steps_back_simt_(sz_regex_table_simt_t const *table, sz_u32_t *state,
+                                                      sz_u32_t const *columns, sz_u32_t count, sz_u32_t accepts) {
+    sz_u32_t mask = 0, index;
+#pragma unroll
+    for (index = 0; index != sz_regex_run_bytes_simt_k; ++index) {
+        if (index == count) break;
+        *state = sz_regex_move_simt_(table, *state, columns[index]);
+        if (*state >= accepts) mask |= 1u << (count - 1 - index);
+    }
+    return mask;
+}
+
+/**
  *  @brief Walks @p state right to left over the @p count bytes before @p text_end, at most a run,
  *      the last of them crossing the boundary in @p slot.
  *  @return A bit per byte whose step left the walk at or past @p accepts, bit 0 the leftmost byte.
@@ -338,19 +356,65 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_run_back_simt_(sz_regex_table_simt_t const 
                                                     sz_u8_t const *text_end, sz_size_t slot, sz_u32_t count,
                                                     sz_u32_t accepts) {
     sz_u32_t columns[sz_regex_run_bytes_simt_k];
-    sz_u32_t mask = 0, index;
+    sz_u32_t index;
 #pragma unroll
     for (index = 0; index != sz_regex_run_bytes_simt_k; ++index)
         columns[index] = index < count
                              ? table->classes[text_end[-1 - (int)index]] + sz_regex_block_at_simt_(table, slot - index)
                              : 0;
-#pragma unroll
-    for (index = 0; index != sz_regex_run_bytes_simt_k; ++index) {
-        if (index == count) break;
-        *state = sz_regex_move_simt_(table, *state, columns[index]);
-        if (*state >= accepts) mask |= 1u << (count - 1 - index);
+    return sz_regex_steps_back_simt_(table, state, columns, count, accepts);
+}
+
+/** Bytes of text a block stages for one tile of chunks: the slots of its chunks, a byte before them
+ *  and the alignment of its first granule, in rows of 64 bytes padded by one word, so lanes a chunk
+ *  apart read distinct banks. */
+enum {
+    sz_regex_tile_bytes_simt_k = (int)sz_regex_threads_per_block_simt_k * (int)sz_regex_chunk_slots_simt_k + 17,
+    sz_regex_staged_text_bytes_simt_k = (sz_regex_tile_bytes_simt_k + 63) / 64 * 68,
+};
+
+/** Byte @p position of the text @ref sz_regex_stage_text_simt_ staged. */
+STRINGZILLA_DEVICE sz_u8_t sz_regex_staged_byte_simt_(sz_u8_t const *staged, sz_size_t position) {
+    return staged[position + position / 64 * 4];
+}
+
+/**
+ *  @brief Copies the bytes from @p begin to @p end of a tape spanning @p tape to @p tape_end into
+ *      @p staged, every thread of the block taking 16-byte granules in turn, so loads coalesce.
+ *  @return The address staged position zero stands for, @p begin rounded down to a granule.
+ */
+STRINGZILLA_DEVICE sz_u8_t const *sz_regex_stage_text_simt_(sz_u8_t *staged, sz_u8_t const *begin, sz_u8_t const *end,
+                                                            sz_u8_t const *tape, sz_u8_t const *tape_end) {
+    sz_u8_t const *const origin = (sz_u8_t const *)((sz_size_t)begin & ~(sz_size_t)15);
+    sz_size_t const bytes = (sz_size_t)(end - origin);
+    sz_size_t granule, byte;
+    for (granule = (sz_size_t)threadIdx.x * 16; granule < bytes; granule += (sz_size_t)blockDim.x * 16) {
+        sz_u32_t *const target = (sz_u32_t *)(staged + granule + granule / 64 * 4);
+        if (origin + granule >= tape && origin + granule + 16 <= tape_end) {
+            uint4 const loaded = *(uint4 const *)(origin + granule);
+            target[0] = loaded.x, target[1] = loaded.y, target[2] = loaded.z, target[3] = loaded.w;
+        }
+        else
+            for (byte = 0; byte != 16; ++byte)
+                if (origin + granule + byte >= tape && origin + granule + byte < tape_end)
+                    staged[granule + granule / 64 * 4 + byte] = origin[granule + byte];
     }
-    return mask;
+    return origin;
+}
+
+/** @ref sz_regex_run_back_simt_ over text @ref sz_regex_stage_text_simt_ staged, @p end being the
+ *  staged position of the byte past the run. */
+STRINGZILLA_DEVICE sz_u32_t sz_regex_run_back_staged_simt_(sz_regex_table_simt_t const *table, sz_u32_t *state,
+                                                           sz_u8_t const *staged, sz_size_t end, sz_size_t slot,
+                                                           sz_u32_t count, sz_u32_t accepts) {
+    sz_u32_t columns[sz_regex_run_bytes_simt_k];
+    sz_u32_t index;
+#pragma unroll
+    for (index = 0; index != sz_regex_run_bytes_simt_k; ++index)
+        columns[index] = index < count ? table->classes[sz_regex_staged_byte_simt_(staged, end - 1 - index)] +
+                                             sz_regex_block_at_simt_(table, slot - index)
+                                       : 0;
+    return sz_regex_steps_back_simt_(table, state, columns, count, accepts);
 }
 
 /** The pattern a forward accepting @p state reports, as @c sz_regex_walk_end_serial_ finds it. */
@@ -1421,11 +1485,11 @@ STRINGZILLA_DEVICE sz_u64_t *sz_regex_ahead_walk_simt_(sz_regex_engine_t const *
 
 #pragma region Scan Kernels
 
-/** Scans one ticket's own tile of @p values in place, as @c sz_substrings_scan_tile_simt_
- *  does, seeded by the totals the tiles before it chained through @p chain, so one launch
- *  makes a whole scan. */
+/** Scans one ticket's own tile of @p values in place, as @c sz_substrings_scan_tile_simt_ does,
+ *  seeded by the totals the tiles before it publish in @p states, so one launch makes a whole scan;
+ *  it clears @p stale, the states the next scan takes. */
 static __global__ void sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
-                                                  sz_size_t *chain) {
+                                                  sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
     __shared__ sz_size_t shared[sz_regex_threads_per_block_simt_k];
     sz_size_t const tiles = sz_size_divide_round_up(count, elements_per_tile);
     sz_size_t tile, begin, end, running = 0, first;
@@ -1433,6 +1497,8 @@ static __global__ void sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t c
     tile = sz_chain_ticket_simt_(chain);
     begin = tile * elements_per_tile;
     end = sz_min_of_two(begin + elements_per_tile, count);
+    for (first = tile * blockDim.x + threadIdx.x; first < sz_chain_tiles_max_k; first += tiles * blockDim.x)
+        stale[first] = 0;
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
         sz_size_t total = 0;
@@ -1440,7 +1506,7 @@ static __global__ void sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t c
         running += total;
         __syncthreads();
     }
-    running = sz_chain_offset_simt_(chain, tile, tiles, running);
+    running = sz_chain_look_back_simt_(states, tile, running);
     if (tile + 1 == tiles && threadIdx.x == 0) *chain = 0;
     for (first = begin; first < end; first += blockDim.x) {
         sz_size_t const index = first + threadIdx.x;
@@ -2106,22 +2172,43 @@ static __global__ void sz_regex_compose_double_simt_kernel_(sz_regex_round_simt_
 
 #pragma region Walk Kernels
 
-/** Marks every slot of one chunk where a match starts, one thread per chunk,
- *  as the Metal kernel does. */
+/** Marks every slot of one chunk where a match starts, one thread per chunk, as the Metal kernel
+ *  does, each block first staging its tile's text, which its threads read a chunk apart. */
 static __global__ void sz_regex_mark_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
                                                   sz_regex_round_simt_t round) {
+    extern __shared__ sz_u8_t sz_regex_staged_simt_[];
+    __shared__ sz_size_t tile_haystack;
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
-    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
+    sz_u8_t *const staged = sz_regex_staged_simt_ + sz_regex_staged_bytes_simt_k +
+                            round.staged_cells * sizeof(sz_u32_t);
+    sz_u8_t const *const tape = (sz_u8_t const *)sz_strings_start_simt_(haystacks, 0);
+    sz_u8_t const *const tape_end = (sz_u8_t const *)sz_strings_start_simt_(haystacks, haystacks.count);
+    sz_size_t const width = (sz_size_t)1 << round.chunk_shift, tile_slots = width * blockDim.x;
     sz_u32_t const accepts = engine.reverse_accepts_begin;
-    sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_size_t tile;
     // The scan reads one entry past the chunks, which ends up holding the candidates' total.
-    if (chunk == 0) round.chunk_offsets[round.chunks_count] = 0;
-    for (; chunk < round.chunks_count; chunk += stride) {
+    if (blockIdx.x == 0 && threadIdx.x == 0) round.chunk_offsets[round.chunks_count] = 0;
+    for (tile = blockIdx.x; tile * blockDim.x < round.chunks_count; tile += gridDim.x) {
+        sz_size_t const chunk = tile * blockDim.x + threadIdx.x, tile_low = round.segment_begin + tile * tile_slots;
         sz_size_t const low = round.segment_begin + chunk * width;
         sz_size_t const high = sz_min_of_two(low + width, round.segment_end);
-        sz_size_t index = sz_regex_haystack_at_simt_(haystacks, low, 0), word;
+        sz_size_t index, word, first_byte;
         sz_u64_t *const words = round.starts + (low - round.segment_begin) / 64;
+        sz_u8_t const *origin;
         sz_u32_t marked = 0;
+        // The last tile's walks are done with its text and its haystack before either is replaced.
+        __syncthreads();
+        if (threadIdx.x == 0) tile_haystack = sz_regex_haystack_at_simt_(haystacks, tile_low, 0);
+        __syncthreads();
+        // A tile's bytes run from the byte before its first slot, as each slot past the first of a
+        // haystack stands for the byte before it, and span at most its slots.
+        first_byte = tile_low > tile_haystack ? tile_low - tile_haystack - 1 : 0;
+        origin = sz_regex_stage_text_simt_(
+            staged, tape + first_byte, tape + sz_min_of_two(first_byte + tile_slots + 1, (sz_size_t)(tape_end - tape)),
+            tape, tape_end);
+        __syncthreads();
+        if (chunk >= round.chunks_count) continue;
+        index = sz_regex_haystack_at_simt_(haystacks, low, tile_haystack);
         round.chunk_haystacks[chunk] = index;
         for (word = 0; word != width / 64; ++word) words[word] = 0;
         for (; index < haystacks.count; ++index) {
@@ -2134,8 +2221,9 @@ static __global__ void sz_regex_mark_simt_kernel_(sz_regex_engine_t engine, sz_s
             state = end_byte == haystack.length ? engine.reverse_starts[0] : round.entries[chunk];
             for (at = end_byte; at != begin_byte;) {
                 sz_u32_t const count = (sz_u32_t)sz_min_of_two(at - begin_byte, (sz_size_t)sz_regex_run_bytes_simt_k);
-                sz_u32_t const mask = sz_regex_run_back_simt_(&table, &state, haystack.text + at, haystack.first + at,
-                                                              count, accepts);
+                sz_u32_t const mask = sz_regex_run_back_staged_simt_(&table, &state, staged,
+                                                                     (sz_size_t)(haystack.text + at - origin),
+                                                                     haystack.first + at, count, accepts);
                 at -= count;
                 if (!mask) continue;
                 // A byte's own slot marks the match starting right after it.
