@@ -78,6 +78,9 @@ enum { sz_regex_walk_slot_bytes_metal_k = 16 };
  *  past which it reads device memory. */
 enum { sz_regex_staged_cells_metal_k = 4096 };
 
+/** States a body's DFA flow tells apart at most, as in the kernels. */
+enum { sz_regex_body_states_metal_k = 256 };
+
 /** Hops one round of pointer doubling follows, as in the kernels. */
 enum { sz_regex_round_hops_metal_k = 8 };
 
@@ -86,7 +89,7 @@ enum { sz_regex_scan_tiles_metal_k = 1024 };
 
 /** Bytes of threadgroup memory the class map and the first column of each block of lookarounds take
  *  ahead of the staged rows, as in the kernels. */
-enum { sz_regex_staged_bytes_metal_k = 256 + 16 * sizeof(sz_u32_t) };
+enum { sz_regex_staged_bytes_metal_k = 256 + ((sz_size_t)1 << sz_regex_columned_lookarounds_k) * sizeof(sz_u32_t) };
 
 /** The round's counters, as the kernels number them: links listed, groups of paused walks opened,
  *  walks handed to SIMD groups, walks paused at the lookaround table's end, and the flag a walk
@@ -141,11 +144,13 @@ static char const *const sz_regex_kernels_metal_[] = {
     "sz_regex_affine_metal_kernel_",
     "sz_regex_affine_double_metal_kernel_",
     "sz_regex_looks_metal_kernel_",
+    "sz_regex_singles_metal_kernel_",
     "sz_regex_prime_metal_kernel_",
     "sz_regex_prime_pieces_metal_kernel_",
     "sz_regex_compose_metal_kernel_",
     "sz_regex_compose_double_metal_kernel_",
     "sz_regex_mark_metal_kernel_",
+    "sz_regex_mark_prefixes_metal_kernel_",
     "sz_regex_mark_folded_metal_kernel_",
     "sz_regex_mark_positions_metal_kernel_",
     "sz_regex_mark_positions_folded_metal_kernel_",
@@ -200,12 +205,15 @@ typedef struct {
     sz_u64_t walks_count, walk_bytes, walk_sets, pike_slots, scan_count, scan_tiles, target, clear_words;
     sz_u64_t looks_begin, looks_end, looks_mask, set_words, bodies_begin, bodies_count;
     sz_u64_t groups_first, groups_capacity;
+    sz_u64_t prefixes, looks_bytes, body_rows;
+    sz_u64_t body_reach[sz_regex_body_states_metal_k / 64];
     sz_u32_t forward_starts[4], reverse_starts[4];
     sz_u32_t forward_accepts_begin, reverse_accepts_begin, classes_count, case_sensitivity;
     sz_u32_t forward_cells, reverse_cells, staged_cells, nfa_states_count;
     sz_u32_t nfa_links_count, nfa_start, positions_words, positions_shifts_count;
     sz_u32_t positions_groups_count, positions_ranges_count, patterns_count, lookarounds_count;
     sz_u32_t flow, members, negated, stride;
+    sz_u32_t body, body_states, body_start, body_accepts;
 } sz_regex_arguments_metal_t;
 
 /** Bytes of a chunk's uncollapsed priming set and its exits, as the kernels lay them out. */
@@ -311,6 +319,52 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_members_metal_(sz_regex_engine_t const *eng
     return members;
 }
 
+/** The look bits of the lookarounds the byte beside a position decides, which the singles kernel
+ *  writes before any pass and no pass walks. */
+STRINGZILLA_INLINE sz_u32_t sz_regex_singles_metal_(sz_regex_engine_t const *engine) {
+    return engine->looks_bytes ? engine->looks_bytes[0] : 0;
+}
+
+/**
+ *  @brief The states the body DFA of lookaround @p index holds over bytes, from its start on, as
+ *      @c sz_regex_body_reach_simt_ finds them.
+ *  @param[out] reach A bit per such state, or null.
+ *  @return One past the highest, or zero where flows step the NFA instead.
+ */
+STRINGZILLA_INLINE sz_u32_t sz_regex_body_reach_metal_(sz_regex_engine_t const *engine, sz_u32_t index,
+                                                       sz_u64_t *reach) {
+    sz_regex_body_t const *const body = engine->bodies ? engine->bodies + index : STRINGZILLA_NULL;
+    sz_u32_t const columns = engine->classes_count + 1;
+    sz_u64_t reached[sz_regex_body_states_metal_k / 64] = {0};
+    sz_u32_t stack[sz_regex_body_states_metal_k];
+    sz_u32_t top = 0, highest = 0;
+    if (!body || !body->rows || engine->case_sensitivity != sz_cased_k) return 0;
+    stack[top++] = body->start / columns,
+    reached[body->start / columns / 64] |= (sz_u64_t)1 << (body->start / columns % 64);
+    // The edge column ends a walk, so the states past it are never stepped on.
+    while (top) {
+        sz_u32_t const state = stack[--top];
+        highest = sz_max_of_two(highest, state);
+        for (sz_u32_t column = 0; column + 1 != columns; ++column) {
+            sz_u32_t const next = body->rows[state * columns + column] / columns;
+            if (next >= sz_regex_body_states_metal_k) return 0;
+            if (reached[next / 64] >> (next % 64) & 1) continue;
+            reached[next / 64] |= (sz_u64_t)1 << (next % 64), stack[top++] = next;
+        }
+    }
+    for (sz_u32_t word = 0; reach && word != sz_regex_body_states_metal_k / 64; ++word) reach[word] = reached[word];
+    return highest + 1;
+}
+
+/** The look bits of the lookarounds whose bodies flows step as DFAs. */
+STRINGZILLA_INLINE sz_u32_t sz_regex_body_dfas_metal_(sz_regex_engine_t const *engine) {
+    sz_u32_t dfas = 0;
+    for (sz_u32_t index = 0; index != engine->lookarounds_count; ++index)
+        if (sz_regex_body_reach_metal_(engine, index, STRINGZILLA_NULL))
+            dfas |= (sz_u32_t)sz_regex_look_lookaround_k << index;
+    return dfas;
+}
+
 /**
  *  @brief Lays the round block of @p engine out, after the column images.
  *
@@ -318,15 +372,21 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_members_metal_(sz_regex_engine_t const *eng
  *  or a PikeVM and two lookaround sets per thread of a dispatch, at least a threadgroup's worth.
  *  Each segment's edge, the entry of its first chunk, has a slot of its own, so a call spans at
  *  most as many segments as a segment has chunks; so does every set handed across it, per flow:
- *  positions, then each level behind and ahead. The lookaround table is a ring whose two halves
- *  each hold a segment.
+ *  positions, then each level behind and ahead, then each body a DFA walks. The lookaround table is
+ *  a ring whose two halves each hold a segment.
  */
 STRINGZILLA_INLINE sz_regex_arena_metal_t sz_regex_arena_metal_(sz_regex_engine_t const *engine) {
     sz_size_t const chunks = sz_regex_chunks_metal_k, slots = chunks * sz_regex_chunk_slots_metal_k;
     sz_size_t const looks_words = sz_regex_looks_words_metal_(engine);
-    sz_size_t const set_words = sz_max_of_two((sz_size_t)engine->positions_words, looks_words);
-    sz_size_t const sets = set_words ? chunks : 0, flows = 1 + 2 * (sz_size_t)sz_regex_levels_metal_(engine);
+    sz_u32_t const dfas = sz_regex_body_dfas_metal_(engine);
+    sz_size_t set_words = sz_max_of_two((sz_size_t)engine->positions_words, looks_words), sets, flows;
     sz_regex_arena_metal_t arena;
+    for (sz_u32_t index = 0; index != engine->lookarounds_count; ++index)
+        if (dfas & (sz_u32_t)sz_regex_look_lookaround_k << index)
+            set_words = sz_max_of_two(
+                set_words, (sz_size_t)(sz_regex_body_reach_metal_(engine, index, STRINGZILLA_NULL) + 63) / 64);
+    sets = set_words ? chunks : 0;
+    flows = 1 + 2 * (sz_size_t)sz_regex_levels_metal_(engine) + (sz_size_t)sz_u32_popcount(dfas);
     arena.segment_slots = slots, arena.set_words = set_words;
     arena.pike_slots = 2 * sz_regex_groups_most_(engine) + 2;
     arena.pike_bytes = sz_regex_pike_bytes_metal_(engine, arena.pike_slots);
@@ -499,6 +559,8 @@ STRINGZILLA_INLINE void sz_regex_arguments_metal_(sz_regex_engine_t const *engin
     arguments->names = (sz_u64_t)engine->groups_names.data.u32_tape.data;
     arguments->names_offsets = (sz_u64_t)engine->groups_names.data.u32_tape.offsets;
     arguments->lookarounds = (sz_u64_t)engine->lookarounds;
+    arguments->prefixes = (sz_u64_t)engine->prefixes, arguments->looks_bytes = (sz_u64_t)engine->looks_bytes;
+    arguments->body = sz_regex_none_k;
     arguments->positions_reach = (sz_u64_t)engine->positions_reach;
     arguments->positions_shifts = (sz_u64_t)engine->positions_shifts;
     arguments->positions_groups = (sz_u64_t)engine->positions_groups;
@@ -571,24 +633,42 @@ STRINGZILLA_INLINE void sz_regex_segment_metal_(sz_regex_arguments_metal_t *argu
  *  that records where the lookarounds of the pass hold.
  *
  *  @param[in] level The pass's level, for a lookaround pass.
+ *  @param[in] body The lookaround whose body's DFA the flow steps, or none for the pass's NFA over
+ *      the members no table fills and no DFA steps.
  */
 STRINGZILLA_INLINE sz_status_t sz_regex_flow_metal_(sz_regex_engine_t const *engine, sz_metal_call_t *call,
                                                     sz_metal_bound_t const *buffers,
                                                     sz_regex_arguments_metal_t *arguments,
                                                     sz_regex_arena_metal_t const *arena, sz_regex_flow_metal_t flow,
-                                                    sz_u32_t level, sz_bool_t recording) {
+                                                    sz_u32_t level, sz_u32_t body, sz_bool_t recording) {
     sz_bool_t const positions = (sz_bool_t)(flow == sz_regex_flow_positions_metal_k);
-    sz_size_t const set = positions ? 0 : 2 * level - (flow == sz_regex_flow_behind_metal_k);
+    sz_bool_t const dfa = (sz_bool_t)(body != sz_regex_none_k);
+    sz_u32_t const dfas = sz_regex_body_dfas_metal_(engine);
+    sz_size_t set = positions ? 0 : 2 * level - (flow == sz_regex_flow_behind_metal_k);
     sz_status_t status;
-    arguments->flow = flow, arguments->negated = 0;
+    arguments->flow = flow, arguments->negated = 0, arguments->body = body, arguments->body_states = 0;
     arguments->members = positions
                              ? 0
                              : sz_regex_members_metal_(engine, level, (sz_bool_t)(flow == sz_regex_flow_behind_metal_k),
                                                        &arguments->negated);
+    if (dfa) {
+        arguments->members = (sz_u32_t)sz_regex_look_lookaround_k << body;
+        arguments->body_states = sz_regex_body_reach_metal_(engine, body, arguments->body_reach);
+        arguments->body_rows = (sz_u64_t)engine->bodies[body].rows;
+        arguments->body_start = engine->bodies[body].start,
+        arguments->body_accepts = engine->bodies[body].accepts_begin;
+        set = 1 + 2 * (sz_size_t)sz_regex_levels_metal_(engine) +
+              (sz_size_t)sz_u32_popcount(dfas & (arguments->members - 1));
+    }
+    else arguments->members &= ~dfas & ~sz_regex_singles_metal_(engine);
+    arguments->negated &= arguments->members;
     arguments->handoff_edges = arguments->scratch_host + arena->handoff_edges +
                                set * (sz_regex_chunks_metal_k + 1) * arena->set_words * sizeof(sz_u64_t);
-    arguments->walk_bytes = positions ? arena->positions_bytes : arena->passes_bytes;
-    arguments->walk_sets = positions ? 0 : arena->pike_bytes;
+    // A body's DFA steps no PikeVM, so its shares hold two sets alone.
+    arguments->walk_bytes = positions ? arena->positions_bytes
+                            : dfa     ? 2 * arena->set_words * sizeof(sz_u64_t)
+                                      : arena->passes_bytes;
+    arguments->walk_sets = positions || dfa ? 0 : arena->pike_bytes;
     arguments->walks_count = sz_min_of_two((arena->total - arena->walks) / arguments->walk_bytes,
                                            (sz_size_t)sz_regex_chunks_metal_k);
     status = sz_regex_encode_walks_metal_(call, buffers, "sz_regex_bound_metal_kernel_", arguments);
@@ -606,6 +686,25 @@ STRINGZILLA_INLINE sz_status_t sz_regex_flow_metal_(sz_regex_engine_t const *eng
     return status;
 }
 
+/** Encodes one level's lookbehind or lookahead pass over the segment @p arguments points at: the
+ *  NFA flow over the members no table fills and no DFA steps, then a flow per body DFA. */
+STRINGZILLA_INLINE sz_status_t sz_regex_passes_metal_(sz_regex_engine_t const *engine, sz_metal_call_t *call,
+                                                      sz_metal_bound_t const *buffers,
+                                                      sz_regex_arguments_metal_t *arguments,
+                                                      sz_regex_arena_metal_t const *arena, sz_u32_t level,
+                                                      sz_bool_t behind, sz_bool_t recording) {
+    sz_regex_flow_metal_t const flow = behind ? sz_regex_flow_behind_metal_k : sz_regex_flow_ahead_metal_k;
+    sz_u32_t negated, members = sz_regex_members_metal_(engine, level, behind, &negated);
+    sz_u32_t const dfas = members & sz_regex_body_dfas_metal_(engine);
+    sz_status_t status = sz_success_k;
+    if (members & ~dfas & ~sz_regex_singles_metal_(engine))
+        status = sz_regex_flow_metal_(engine, call, buffers, arguments, arena, flow, level, sz_regex_none_k, recording);
+    for (sz_u32_t index = 0; status == sz_success_k && index != engine->lookarounds_count; ++index)
+        if (dfas & (sz_u32_t)sz_regex_look_lookaround_k << index)
+            status = sz_regex_flow_metal_(engine, call, buffers, arguments, arena, flow, level, index, recording);
+    return status;
+}
+
 /** Encodes filling segment @p segment 's half of the lookaround ring, the window then starting at
  *  segment @p first, with every level's passes up to @p levels, each level over the ones below
  *  it: the lookbehinds left to right and the lookaheads right to left, handed the sets kept at
@@ -617,20 +716,21 @@ STRINGZILLA_INLINE sz_status_t sz_regex_looks_metal_(sz_regex_engine_t const *en
                                                      sz_size_t first, sz_u32_t levels) {
     sz_size_t const slots = arena->segment_slots;
     sz_size_t const entries = sz_min_of_two(slots, arguments->slots_count - segment * slots);
-    sz_u32_t negated;
     sz_status_t status;
     arguments->looks_begin = first * slots, arguments->looks_end = arguments->looks_begin + 2 * slots;
-    // Clearing takes whole words, an odd entry count clearing one more of the half's own.
-    status = sz_regex_clear_metal_(call, buffers, arguments, arena->looks + segment % 2 * slots * sizeof(sz_u32_t),
-                                   (entries + 1) / 2 * sizeof(sz_u64_t));
     sz_regex_segment_metal_(arguments, segment, slots);
+    // The one-byte lookarounds fill the half outright, which the passes then add to; clearing takes
+    // whole words, an odd entry count clearing one more of the half's own.
+    if (sz_regex_singles_metal_(engine))
+        status = sz_regex_encode_metal_(call, buffers, "sz_regex_singles_metal_kernel_", arguments,
+                                        sz_regex_groups_metal_(arguments->chunks_count));
+    else
+        status = sz_regex_clear_metal_(call, buffers, arguments, arena->looks + segment % 2 * slots * sizeof(sz_u32_t),
+                                       (entries + 1) / 2 * sizeof(sz_u64_t));
     for (sz_u32_t level = 1; status == sz_success_k && level <= levels; ++level) {
-        if (sz_regex_members_metal_(engine, level, sz_true_k, &negated))
-            status = sz_regex_flow_metal_(engine, call, buffers, arguments, arena, sz_regex_flow_behind_metal_k, level,
-                                          sz_true_k);
-        if (status == sz_success_k && sz_regex_members_metal_(engine, level, sz_false_k, &negated))
-            status = sz_regex_flow_metal_(engine, call, buffers, arguments, arena, sz_regex_flow_ahead_metal_k, level,
-                                          sz_true_k);
+        status = sz_regex_passes_metal_(engine, call, buffers, arguments, arena, level, sz_true_k, sz_true_k);
+        if (status == sz_success_k)
+            status = sz_regex_passes_metal_(engine, call, buffers, arguments, arena, level, sz_false_k, sz_true_k);
     }
     return status;
 }
@@ -646,7 +746,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_metal_(sz_regex_engine_t c
     sz_status_t status;
     if (!engine->reverse_rows)
         return sz_regex_flow_metal_(engine, call, buffers, arguments, arena, sz_regex_flow_positions_metal_k, 0,
-                                    sz_false_k);
+                                    sz_regex_none_k, sz_false_k);
     status = sz_regex_encode_metal_(call, buffers, "sz_regex_prime_metal_kernel_", arguments, groups);
     if (status == sz_success_k)
         status = sz_regex_encode_metal_(call, buffers, "sz_regex_prime_pieces_metal_kernel_", arguments, groups);
@@ -792,25 +892,26 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_metal_(sz_regex_engine_t const *e
 
     // Each level's passes hand sets across segments over lower levels' tables, so they sweep first.
     for (sz_u32_t level = 1; status == sz_success_k && segments > 1 && level <= levels; ++level) {
-        if (sz_regex_members_metal_(engine, level, sz_true_k, &negated))
+        if (sz_regex_members_metal_(engine, level, sz_true_k, &negated) & ~sz_regex_singles_metal_(engine))
             for (sz_size_t segment = 0; status == sz_success_k && segment != segments; ++segment) {
                 status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, segment, segment, level - 1);
                 if (status == sz_success_k)
-                    status = sz_regex_flow_metal_(engine, call, buffers, arguments, &arena,
-                                                  sz_regex_flow_behind_metal_k, level, sz_false_k);
+                    status = sz_regex_passes_metal_(engine, call, buffers, arguments, &arena, level, sz_true_k,
+                                                    sz_false_k);
             }
-        if (sz_regex_members_metal_(engine, level, sz_false_k, &negated))
+        if (sz_regex_members_metal_(engine, level, sz_false_k, &negated) & ~sz_regex_singles_metal_(engine))
             for (sz_size_t segment = segments; status == sz_success_k && segment-- != 0;) {
                 status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, segment, segment, level - 1);
                 if (status == sz_success_k)
-                    status = sz_regex_flow_metal_(engine, call, buffers, arguments, &arena, sz_regex_flow_ahead_metal_k,
-                                                  level, sz_false_k);
+                    status = sz_regex_passes_metal_(engine, call, buffers, arguments, &arena, level, sz_false_k,
+                                                    sz_false_k);
             }
     }
 
     // Priming reads each segment's right neighbour, so the segments past the first prime right to
-    // left first, each filling its own half of the ring beside its neighbour's.
-    for (sz_size_t segment = segments; status == sz_success_k && segment-- > 1;) {
+    // left first, each filling its own half of the ring beside its neighbour's; literal prefixes
+    // mark candidates without priming.
+    for (sz_size_t segment = segments; status == sz_success_k && !engine->prefixes && segment-- > 1;) {
         if (levels) status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, segment, segment, levels);
         sz_regex_segment_metal_(arguments, segment, slots);
         if (status == sz_success_k) status = sz_regex_prime_segment_metal_(engine, call, buffers, arguments, &arena);
@@ -819,8 +920,11 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_metal_(sz_regex_engine_t const *e
         sz_size_t chunks;
         sz_bool_t past;
         // The walks read the table as far as the next segment, whose half alone is new; the priming
-        // sweep ended filling the second segment's half, so the first segment fills only its own.
-        if (levels && segment == 0)
+        // sweep ended filling the second segment's half, so the first segment fills only its own,
+        // unless no priming ran.
+        if (levels && segment == 0 && engine->prefixes && segments > 1)
+            status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, 1, 0, levels);
+        if (status == sz_success_k && levels && segment == 0)
             status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, segment, segment, levels);
         else if (levels && segment + 1 < segments)
             status = sz_regex_looks_metal_(engine, call, buffers, arguments, &arena, segment + 1, segment, levels);
@@ -829,7 +933,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_metal_(sz_regex_engine_t const *e
         past = (sz_bool_t)(levels && sz_regex_runs_past_metal_(haystacks, arguments));
         if (status == sz_success_k && segment == 0)
             status = sz_regex_clear_metal_(call, buffers, arguments, arena.carry, sz_regex_carry_bytes_metal_k);
-        if (status == sz_success_k) status = sz_regex_prime_segment_metal_(engine, call, buffers, arguments, &arena);
+        if (status == sz_success_k && !engine->prefixes)
+            status = sz_regex_prime_segment_metal_(engine, call, buffers, arguments, &arena);
 
         // The counters and the doubling flags, which a segment reads before writing.
         if (status == sz_success_k)
@@ -841,6 +946,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_metal_(sz_regex_engine_t const *e
                 folded ? "sz_regex_mark_positions_folded_metal_kernel_" : "sz_regex_mark_positions_metal_kernel_",
                 arguments);
         }
+        else if (status == sz_success_k && engine->prefixes)
+            status = sz_regex_encode_metal_(call, buffers, "sz_regex_mark_prefixes_metal_kernel_", arguments,
+                                            sz_regex_groups_metal_(chunks));
         else if (status == sz_success_k)
             status = sz_regex_encode_metal_(
                 call, buffers, folded ? "sz_regex_mark_folded_metal_kernel_" : "sz_regex_mark_metal_kernel_", arguments,

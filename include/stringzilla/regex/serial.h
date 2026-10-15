@@ -27,9 +27,9 @@
  *  A lookaround compiles its body into the forward NFA as a sub-vocabulary of its own, and its look
  *  state tests one bit of a table every walk fills first: per haystack position, the lookarounds
  *  that hold there, found by a forward pass of the lookbehind bodies, unanchored and keeping every
- *  match, and a backward pass of the reversed lookahead bodies. Up to six lookarounds, four on
- *  GPUs, become DFA columns: each set of them that may hold at a boundary takes a block of the row,
- *  which a step picks from the table; a vocabulary with more walks positions and the PikeVM.
+ *  match, and a backward pass of the reversed lookahead bodies. Up to six lookarounds become DFA
+ *  columns: each set of them that may hold at a boundary takes a block of the row, which a step
+ *  picks from the table; a vocabulary with more walks positions and the PikeVM.
  *
  *  @sa include/stringzilla/regex.h
  */
@@ -355,9 +355,8 @@ typedef struct sz_regex_engine_t {
     sz_u32_t const *looks_bytes;
 
     /** Lookarounds the vocabulary holds, nested ones included; up to
-     *  @c sz_regex_columned_lookarounds_cpu_k of them on CPUs and
-     *  @c sz_regex_columned_lookarounds_gpu_k on GPUs widen the rows of both DFAs to a block per
-     *  set, and more leave walks on positions and the PikeVM. */
+     *  @c sz_regex_columned_lookarounds_k of them widen the rows of both DFAs to a block per set,
+     *  and more leave walks on positions and the PikeVM. */
     sz_u32_t lookarounds_count;
 
     /** Every capturing group's name, in the order @c patterns_groups numbers them,
@@ -464,13 +463,9 @@ typedef enum sz_regex_look_t {
 /** Lookarounds one vocabulary may hold, as many as the look bits past the assertions. */
 enum { sz_regex_lookarounds_limit_k = 26 };
 
-/** Lookarounds the DFAs of GPU kernels test through their columns, which stage the first column of
- *  each of sixteen blocks; a vocabulary with more walks positions and the PikeVM. */
-enum { sz_regex_columned_lookarounds_gpu_k = 4 };
-
-/** Lookarounds the DFAs of CPU tiers test through their columns, where a wider row costs only
- *  cache, as the halved budgets keep the tables' bytes. */
-enum { sz_regex_columned_lookarounds_cpu_k = 6 };
+/** Lookarounds the DFAs test through their columns, where a wider row costs only cache, as the
+ *  halved budgets keep the tables' bytes; a vocabulary with more walks positions and the PikeVM. */
+enum { sz_regex_columned_lookarounds_k = 6 };
 
 /** Words of @ref sz_regex_engine_t::looks_bytes: the mask of one-byte lookarounds, then two rows of
  *  256. */
@@ -3585,9 +3580,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_engine_compile_(sz_regex_engine_t *engin
         sz_regex_builder_classify_(&builder);
         // Each set of lookarounds that may hold takes a block of columns, so the budgets shrink to
         // keep the tables' bytes.
-        if (builder.lookarounds_count > (capability & sz_cap_gpus_k ? (sz_size_t)sz_regex_columned_lookarounds_gpu_k
-                                                                    : (sz_size_t)sz_regex_columned_lookarounds_cpu_k))
-            forward_budget = 0, reverse_budget = 0;
+        if (builder.lookarounds_count > sz_regex_columned_lookarounds_k) forward_budget = 0, reverse_budget = 0;
         else forward_budget >>= builder.lookarounds_count, reverse_budget >>= builder.lookarounds_count;
         builder.forward_dfa.states_budget = forward_budget, builder.reverse_dfa.states_budget = reverse_budget;
         status = sz_regex_determinize_(&builder, &builder.forward, &builder.forward_dfa, sz_regex_leftmost_first_k);

@@ -27,7 +27,7 @@
  *  without links instead. A chunk whose priming or flow stays wide past a few kilobytes is settled
  *  by one walk from the nearest exact state upstream, never past its segment.
  *
- *  Up to four lookarounds become columns of both DFAs, a block of columns per set of them that may
+ *  Up to six lookarounds become columns of both DFAs, a block of columns per set of them that may
  *  hold, picked from a table of what holds at every slot. The table is a ring over a window of two
  *  segments; DFA walks reaching its end pause there, grouped by state, and resume once the host has
  *  slid the window on, while walks that cannot pause flag the call refused.
@@ -68,6 +68,10 @@ constant ulong sz_regex_checkpoint_slots_metal_k = 16;
 
 /** Bytes a run loads ahead together, so their latency overlaps the walk over the ones before. */
 constant uint sz_regex_run_bytes_metal_k = 16;
+
+/** Words of the sets a body's DFA flow holds, a bit per state, as @c sz_regex_body_states_simt_k
+ *  bounds them. */
+constant uint sz_regex_body_words_metal_k = 4;
 
 /** The pattern, link, candidate and chunk id nothing takes. */
 constant uint sz_regex_none_metal_k = 0xFFFFFFFFu;
@@ -227,12 +231,15 @@ struct sz_regex_arguments_metal_t {
     ulong walks_count, walk_bytes, walk_sets, pike_slots, scan_count, scan_tiles, target, clear_words;
     ulong looks_begin, looks_end, looks_mask, set_words, bodies_begin, bodies_count;
     ulong groups_first, groups_capacity;
+    ulong prefixes, looks_bytes, body_rows;
+    ulong body_reach[sz_regex_body_words_metal_k];
     uint forward_starts[4], reverse_starts[4];
     uint forward_accepts_begin, reverse_accepts_begin, classes_count, case_sensitivity;
     uint forward_cells, reverse_cells, staged_cells, nfa_states_count;
     uint nfa_links_count, nfa_start, positions_words, positions_shifts_count;
     uint positions_groups_count, positions_ranges_count, patterns_count, lookarounds_count;
     uint flow, members, negated, stride;
+    uint body, body_states, body_start, body_accepts;
 };
 
 /** The engine's arrays a kernel reads beyond its transition tables,
@@ -245,6 +252,7 @@ struct sz_regex_automata_metal_t {
     device sz_regex_nfa_state_metal_t const *states;
     device sz_regex_nfa_link_metal_t const *links;
     device sz_regex_lookaround_metal_t const *lookarounds;
+    device uint const *body_rows;
 };
 
 inline sz_regex_automata_metal_t sz_regex_automata_metal_(device uchar *engine,
@@ -267,6 +275,7 @@ inline sz_regex_automata_metal_t sz_regex_automata_metal_(device uchar *engine,
     automata.states = sz_reach_metal_<sz_regex_nfa_state_metal_t>(engine, host, arguments.nfa_states);
     automata.links = sz_reach_metal_<sz_regex_nfa_link_metal_t>(engine, host, arguments.nfa_links);
     automata.lookarounds = sz_reach_metal_<sz_regex_lookaround_metal_t>(engine, host, arguments.lookarounds);
+    automata.body_rows = sz_reach_metal_<uint>(engine, host, arguments.body_rows);
     return automata;
 }
 
@@ -350,9 +359,13 @@ struct sz_regex_table_metal_t {
     uint head_cells, edge_column;
 };
 
+/** Blocks of lookaround columns a row holds at most, one per set of the six columned lookarounds,
+ *  as @c sz_regex_columned_lookarounds_k bounds them, each staged by its first column. */
+constant uint sz_regex_blocks_metal_k = 64;
+
 /** Bytes of threadgroup memory the class map and the blocks take ahead of the staged rows,
  *  as the host sizes it. */
-constant uint sz_regex_staged_bytes_metal_k = 256 + 16 * sizeof(uint);
+constant uint sz_regex_staged_bytes_metal_k = 256 + sz_regex_blocks_metal_k * sizeof(uint);
 
 /** The first column of the block a lookaround table entry's @p looks select,
  *  as @c sz_regex_looks_block_ finds it. */
@@ -379,7 +392,7 @@ inline sz_regex_table_metal_t sz_regex_stage_metal_(device uchar *engine, device
     table.classes = staged, table.blocks = blocks, table.head = head;
     table.head_cells = min(cells, arguments.staged_cells), table.edge_column = arguments.classes_count;
     for (uint index = lane; index < 256; index += width) staged[index] = byte_to_class[index];
-    for (uint index = lane; index < 16; index += width)
+    for (uint index = lane; index < sz_regex_blocks_metal_k; index += width)
         blocks[index] = sz_regex_looks_block_metal_(arguments, index * sz_regex_look_lookaround_metal_k);
     for (uint index = lane; index < table.head_cells; index += width) head[index] = table.rows[index];
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -395,7 +408,9 @@ inline uint sz_regex_move_metal_(thread sz_regex_table_metal_t const &table, uin
 /** The first column of the block the lookarounds holding at @p slot select,
  *  zero without lookarounds. */
 inline uint sz_regex_block_at_metal_(thread sz_regex_table_metal_t const &table, ulong slot) {
-    return table.looks ? table.blocks[table.looks[slot & table.looks_mask] / sz_regex_look_lookaround_metal_k % 16] : 0;
+    return table.looks ? table.blocks[table.looks[slot & table.looks_mask] / sz_regex_look_lookaround_metal_k %
+                                      sz_regex_blocks_metal_k]
+                       : 0;
 }
 
 /** Whether a walk would read the lookarounds at @p slot past the table's window,
@@ -1433,6 +1448,7 @@ inline device ulong *sz_regex_ahead_walk_metal_(thread sz_regex_automata_metal_t
 /** Words of the sets the round's flow walks. */
 inline ulong sz_regex_flow_words_metal_(constant sz_regex_arguments_metal_t &arguments) {
     if (arguments.flow == sz_regex_flow_positions_metal_k) return arguments.positions_words;
+    if (arguments.body != sz_regex_none_metal_k) return (arguments.body_states + 63) / 64;
     return (arguments.bodies_count + arguments.lookarounds_count + 63) / 64;
 }
 
@@ -1462,12 +1478,26 @@ inline void sz_regex_flow_least_metal_(constant sz_regex_arguments_metal_t &argu
     if (arguments.flow == sz_regex_flow_positions_metal_k) set[0] = 1;
 }
 
+/** Fills @p set with what the round's flow holds at a haystack's edge, as
+ *  @c sz_regex_flow_start_simt_ does. */
+inline void sz_regex_flow_start_metal_(constant sz_regex_arguments_metal_t &arguments, device ulong *set) {
+    sz_regex_flow_least_metal_(arguments, set);
+    if (arguments.body != sz_regex_none_metal_k) {
+        uint const start = arguments.body_start / (arguments.classes_count + 1);
+        set[start / 64] |= 1ul << (start % 64);
+    }
+}
+
 /** Fills @p set with everything the round's flow may hold, as @c sz_regex_flow_every_simt_ does. */
 inline void sz_regex_flow_every_metal_(thread sz_regex_automata_metal_t const &automata,
                                        constant sz_regex_arguments_metal_t &arguments, device ulong *set) {
     ulong const words = sz_regex_flow_words_metal_(arguments);
     if (arguments.flow == sz_regex_flow_positions_metal_k) {
         for (ulong word = 0; word != words; ++word) set[word] = automata.positions_all[word];
+        return;
+    }
+    if (arguments.body != sz_regex_none_metal_k) {
+        for (ulong word = 0; word != words; ++word) set[word] = arguments.body_reach[word];
         return;
     }
     for (ulong word = 0; word != words; ++word) set[word] = 0;
@@ -1486,6 +1516,51 @@ inline void sz_regex_flow_every_metal_(thread sz_regex_automata_metal_t const &a
         }
 }
 
+/** Walks the DFA of the body the round's flow names over @p haystack, a set of its states at a
+ *  time, from the set handed across @p from to the one it hands across @p to, as
+ *  @c sz_regex_body_walk_simt_ does. @return @p state, holding the set handed on. */
+inline device ulong *sz_regex_body_walk_metal_(thread sz_regex_automata_metal_t const &automata,
+                                               constant sz_regex_arguments_metal_t &arguments, device uint *looks,
+                                               thread sz_regex_haystack_metal_t const &haystack, ulong from, ulong to,
+                                               device ulong *state, sz_regex_recording_metal_t recording) {
+    uint const columns = arguments.classes_count + 1, words = (arguments.body_states + 63) / 64;
+    bool const behind = arguments.flow == sz_regex_flow_behind_metal_k;
+    device uchar const *text = haystack.text;
+    ulong const length = haystack.length;
+    ulong held[sz_regex_body_words_metal_k], next[sz_regex_body_words_metal_k], any = 0;
+    ulong position = from;
+    for (uint word = 0; word != sz_regex_body_words_metal_k; ++word)
+        held[word] = word < words ? state[word] : 0, any |= held[word];
+    // A walk holding no state stays empty, and only one that records reads anything on the way.
+    if (recording == sz_regex_unrecorded_metal_k && !any) return state;
+    if (!behind && from <= length) {
+        if (!from) return state;
+        position = from - 1;
+    }
+    else if (!behind) position = length;
+    while (behind ? position < to && position <= length : position >= to) {
+        uint const column = behind ? (position == length ? columns - 1 : uint(automata.byte_to_class[text[position]]))
+                                   : (position ? uint(automata.byte_to_class[text[position - 1]]) : columns - 1);
+        bool accepted = false;
+        for (uint word = 0; word != sz_regex_body_words_metal_k; ++word) next[word] = 0;
+        for (uint word = 0; word != words; ++word)
+            for (ulong bits = held[word]; bits; bits &= bits - 1) {
+                uint const target = automata.body_rows[(word * 64 + uint(ctz(bits))) * columns + column];
+                uint const index = target / columns;
+                next[index / 64] |= 1ul << (index % 64);
+                accepted = accepted || target >= arguments.body_accepts;
+            }
+        if (recording == sz_regex_recorded_metal_k)
+            sz_regex_looks_record_metal_(looks, arguments, haystack.first + position, accepted ? arguments.members : 0);
+        for (uint word = 0; word != sz_regex_body_words_metal_k; ++word) held[word] = next[word];
+        if (behind) ++position;
+        else if (position) --position;
+        else break;
+    }
+    for (uint word = 0; word != words; ++word) state[word] = held[word];
+    return state;
+}
+
 /** Walks the round's flow over @p haystack from the set at @p state handed across @p from to
  *  the set it hands across @p to, as @c sz_regex_flow_walk_simt_ does. @return The set
  *  holding the result. */
@@ -1495,6 +1570,8 @@ inline device ulong *sz_regex_flow_walk_metal_(thread sz_regex_automata_metal_t 
                                                thread sz_regex_haystack_metal_t const &haystack, ulong from, ulong to,
                                                device ulong *state, device ulong *next,
                                                sz_regex_recording_metal_t recording) {
+    if (arguments.body != sz_regex_none_metal_k)
+        return sz_regex_body_walk_metal_(automata, arguments, looks, haystack, from, to, state, recording);
     if (arguments.flow == sz_regex_flow_behind_metal_k)
         return sz_regex_behind_walk_metal_(automata, arguments, looks, pike, haystack, from, to, state, next,
                                            recording);
@@ -1680,6 +1757,7 @@ kernel void sz_regex_bound_metal_kernel_(device uchar *engine [[buffer(0)]], dev
         for (ulong span = width;; span *= 2) {
             if (from == edge && kept)
                 for (ulong word = 0; word != words; ++word) sets[word] = kept[word];
+            else if (from == edge) sz_regex_flow_start_metal_(arguments, sets);
             else sz_regex_flow_least_metal_(arguments, sets);
             device ulong *result = sz_regex_flow_walk_metal_(automata, arguments, round.looks, pike, haystack, from, to,
                                                              sets, sets + stride, sz_regex_unrecorded_metal_k);
@@ -1694,6 +1772,11 @@ kernel void sz_regex_bound_metal_kernel_(device uchar *engine [[buffer(0)]], dev
                                                sets + stride, sz_regex_unrecorded_metal_k);
             ulong count = 0;
             for (ulong word = 0; word != words; ++word) count += popcount(result[word] & ~handoff[word]);
+            // A body's DFA holds one state, so one it reaches from every state is the answer.
+            if (arguments.body != sz_regex_none_metal_k && count == 1) {
+                for (ulong word = 0; word != words; ++word) handoff[word] = result[word];
+                break;
+            }
             if (count <= sz_regex_undecided_metal_k) {
                 count = 0;
                 for (ulong word = 0; word != words; ++word)
@@ -1917,9 +2000,42 @@ kernel void sz_regex_looks_metal_kernel_(device uchar *engine [[buffer(0)]], dev
                                     : round.handoffs + (chunk - 1) * stride;
             if (handed)
                 for (ulong word = 0; word != words; ++word) sets[word] = handed[word];
-            else sz_regex_flow_least_metal_(arguments, sets);
+            else sz_regex_flow_start_metal_(arguments, sets);
             sz_regex_flow_walk_metal_(automata, arguments, round.looks, pike, haystack, backward ? end : begin,
                                       backward ? begin : end, sets, sets + stride, sz_regex_recorded_metal_k);
+        }
+    }
+}
+
+/** Writes the one-byte lookarounds holding at every slot of one chunk into the segment's half of
+ *  the table, negated ones flipped, one thread per chunk, as @c sz_regex_singles_simt_kernel_
+ *  does, for the passes to add to. */
+kernel void sz_regex_singles_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
+                                           device uchar const *haystacks [[buffer(2)]],
+                                           device uchar const *haystacks_offsets [[buffer(3)]],
+                                           constant sz_regex_arguments_metal_t &arguments [[buffer(10)]],
+                                           uint position [[thread_position_in_grid]],
+                                           uint threads [[threads_per_grid]]) {
+    sz_regex_automata_metal_t const automata = sz_regex_automata_metal_(engine, arguments);
+    sz_regex_corpus_metal_t const corpus = sz_regex_corpus_metal_(haystacks, haystacks_offsets, arguments);
+    sz_regex_round_metal_t const round = sz_regex_round_metal_(scratch, arguments);
+    device uint const *singles = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.looks_bytes);
+    device uint const *after = singles + 1, *before = singles + 257;
+    uint flipped = 0;
+    for (uint index = 0; index != arguments.lookarounds_count; ++index)
+        if (automata.lookarounds[index].kind & 1) flipped |= sz_regex_look_lookaround_metal_k << index;
+    flipped &= singles[0];
+    for (ulong chunk = position; chunk < arguments.chunks_count; chunk += threads) {
+        ulong const low = arguments.segment_begin + chunk * arguments.chunk_width;
+        ulong const high = min(low + arguments.chunk_width, arguments.segment_end);
+        ulong index = sz_regex_haystack_at_metal_(corpus, low, 0);
+        sz_regex_haystack_metal_t haystack = sz_regex_haystack_metal_(corpus, index);
+        for (ulong slot = low; slot != high; ++slot) {
+            if (slot > haystack.first + haystack.length) haystack = sz_regex_haystack_metal_(corpus, ++index);
+            ulong const at = slot - haystack.first;
+            uint const held = (at ? after[haystack.text[at - 1]] : 0) |
+                              (at != haystack.length ? before[haystack.text[at]] : 0);
+            round.looks[slot & arguments.looks_mask] = held ^ flipped;
         }
     }
 }
@@ -2223,6 +2339,45 @@ kernel void sz_regex_mark_metal_kernel_(device uchar *engine [[buffer(0)]], devi
             words[bit / 64] |= 1ul << (bit % 64), ++marked;
         }
         round.chunk_offsets[chunk] = marked;
+    }
+}
+
+/** Bytes from a candidate start the literal prefilter tests, as @c sz_regex_prefixes_depth_k. */
+constant uint sz_regex_prefixes_depth_metal_k = 3;
+
+/** Marks every slot of one chunk whose bytes keep some bucket of the engine's prefixes at every
+ *  offset inside its haystack, one thread per chunk, as @c sz_regex_mark_prefixes_simt_kernel_
+ *  does, in place of the start-finding walk and its priming; a haystack's last slot never is. */
+kernel void sz_regex_mark_prefixes_metal_kernel_(device uchar *engine [[buffer(0)]],
+                                                 device uchar *scratch [[buffer(1)]],
+                                                 device uchar const *haystacks [[buffer(2)]],
+                                                 device uchar const *haystacks_offsets [[buffer(3)]],
+                                                 constant sz_regex_arguments_metal_t &arguments [[buffer(10)]],
+                                                 uint position [[thread_position_in_grid]],
+                                                 uint threads [[threads_per_grid]]) {
+    sz_regex_corpus_metal_t const corpus = sz_regex_corpus_metal_(haystacks, haystacks_offsets, arguments);
+    sz_regex_round_metal_t const round = sz_regex_round_metal_(scratch, arguments);
+    // The bucket tables, the nibble tables, then the depth, as `sz_regex_prefixes_t` lays them out.
+    device uchar const *buckets = sz_reach_metal_<uchar>(engine, arguments.engine_host, arguments.prefixes);
+    uint const depth = *(device uint const *)(buckets + sz_regex_prefixes_depth_metal_k * (256 + 32));
+    if (position == 0) round.chunk_offsets[arguments.chunks_count] = 0;
+    for (ulong chunk = position; chunk < arguments.chunks_count; chunk += threads) {
+        ulong const low = arguments.segment_begin + chunk * arguments.chunk_width;
+        ulong const high = min(low + arguments.chunk_width, arguments.segment_end);
+        ulong index = sz_regex_haystack_at_metal_(corpus, low, 0);
+        sz_regex_haystack_metal_t haystack = sz_regex_haystack_metal_(corpus, index);
+        ulong marks = 0;
+        round.chunk_haystacks[chunk] = index;
+        for (ulong slot = low; slot != high; ++slot) {
+            if (slot > haystack.first + haystack.length) haystack = sz_regex_haystack_metal_(corpus, ++index);
+            ulong const at = slot - haystack.first;
+            uchar held = at != haystack.length ? buckets[haystack.text[at]] : 0;
+            for (ulong offset = 1; held && offset != depth && at + offset != haystack.length; ++offset)
+                held &= buckets[offset * 256 + haystack.text[at + offset]];
+            marks |= ulong(held != 0) << (slot - low);
+        }
+        round.starts[(low - arguments.segment_begin) / 64] = marks;
+        round.chunk_offsets[chunk] = popcount(marks);
     }
 }
 

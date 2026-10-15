@@ -91,15 +91,21 @@ STRINGZILLA_INLINE sz_size_t sz_regex_rounds_count_rocm_(sz_size_t chunks) {
  *  or a PikeVM and two lookaround sets per thread of a launch, at least a block's worth. Each
  *  segment's edge, the entry of its first chunk, has a slot of its own, so a call spans at most as
  *  many segments as a segment has chunks; so does every set handed across it, per flow: positions,
- *  then each level behind and ahead. The lookaround table is a ring of two segments. The leaders of
- *  paused walks' groups live in the frontiers and the groups in the checkpoints, which priming and
- *  the links kernel are done with by then.
+ *  then each level behind and ahead, then each body a DFA walks. The lookaround table is a ring of
+ *  two segments. The leaders of paused walks' groups live in the frontiers and the groups in the
+ *  checkpoints, which priming and the links kernel are done with by then.
  */
 STRINGZILLA_INLINE sz_regex_arena_rocm_t sz_regex_arena_rocm_(sz_regex_engine_t const *engine, sz_size_t chunks) {
     sz_size_t const slots = chunks * sz_regex_chunk_slots_simt_k, looks_words = sz_regex_looks_words_simt_(engine);
-    sz_size_t const set_words = sz_max_of_two((sz_size_t)engine->positions_words, looks_words);
-    sz_size_t const sets = set_words ? chunks : 0, flows = 1 + 2 * (sz_size_t)sz_regex_levels_simt_(engine);
+    sz_u32_t const dfas = sz_regex_body_dfas_simt_(engine);
+    sz_size_t set_words = sz_max_of_two((sz_size_t)engine->positions_words, looks_words), sets, flows, index;
     sz_regex_arena_rocm_t arena;
+    for (index = 0; index != engine->lookarounds_count; ++index)
+        if (dfas & (sz_u32_t)sz_regex_look_lookaround_k << index)
+            set_words = sz_max_of_two(
+                set_words, (sz_size_t)(sz_regex_body_reach_simt_(engine, (sz_u32_t)index, STRINGZILLA_NULL) + 63) / 64);
+    sets = set_words ? chunks : 0;
+    flows = 1 + 2 * (sz_size_t)sz_regex_levels_simt_(engine) + (sz_size_t)sz_u32_popcount(dfas);
     arena.chunks = chunks, arena.segment_slots = slots, arena.set_words = set_words;
     arena.images_bytes = sz_regex_images_bytes_rocm_(engine);
     arena.pike_slots = 2 * sz_regex_groups_most_(engine) + 2;
@@ -283,46 +289,88 @@ STRINGZILLA_INLINE void sz_regex_segment_rocm_(sz_regex_round_simt_t *round, sz_
  *  where the lookarounds of the pass hold.
  *
  *  @param[in] level The pass's level, for a lookaround pass.
+ *  @param[in] body The lookaround whose body's DFA the flow steps, or none for the pass's NFA over
+ *      the members no table fills and no DFA steps.
  */
 STRINGZILLA_INLINE sz_status_t sz_regex_flow_rocm_(sz_regex_engine_t const *engine, sz_strings_view_t const *haystacks,
                                                    sz_regex_round_simt_t *round, sz_regex_arena_rocm_t const *arena,
-                                                   sz_regex_flow_simt_t flow, sz_u32_t level, sz_bool_t recording,
-                                                   sz_stream_t stream) {
+                                                   sz_regex_flow_simt_t flow, sz_u32_t level, sz_u32_t body,
+                                                   sz_bool_t recording, sz_stream_t stream) {
     sz_bool_t const positions = (sz_bool_t)(flow == sz_regex_flow_positions_simt_k);
-    sz_size_t const set = positions ? 0 : 2 * level - (flow == sz_regex_flow_behind_simt_k);
+    sz_bool_t const dfa = (sz_bool_t)(body != sz_regex_none_simt_k);
+    sz_u32_t const dfas = sz_regex_body_dfas_simt_(engine);
+    // A body's DFA steps rows staged as the automata's are.
+    sz_size_t const shared_bytes =
+        dfa ? sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t) : 0;
+    sz_size_t set = positions ? 0 : 2 * level - (flow == sz_regex_flow_behind_simt_k);
     sz_regex_engine_t launched_engine = *engine;
     sz_strings_view_t launched_haystacks = *haystacks;
     void *walk_arguments[3], *round_arguments[1];
     sz_status_t status;
     sz_size_t step;
     unsigned walks_grid;
-    round->flow = flow, round->negated = 0;
+    round->flow = flow, round->negated = 0, round->body = body, round->body_states = 0;
     round->members = positions ? 0
                                : sz_regex_members_simt_(engine, level, (sz_bool_t)(flow == sz_regex_flow_behind_simt_k),
                                                         &round->negated);
+    if (dfa) {
+        round->members = (sz_u32_t)sz_regex_look_lookaround_k << body;
+        round->body_states = sz_regex_body_reach_simt_(engine, body, round->body_reach);
+        set = 1 + 2 * (sz_size_t)sz_regex_levels_simt_(engine) +
+              (sz_size_t)sz_u32_popcount(dfas & (round->members - 1));
+    }
+    else round->members &= ~dfas & ~sz_regex_singles_simt_(engine);
+    round->negated &= round->members;
     round->handoff_edges = (sz_u64_t *)((sz_ptr_t)engine->scratch + arena->handoff_edges) +
                            set * (arena->chunks + 1) * arena->set_words;
-    round->walk_bytes = positions ? arena->positions_bytes : arena->passes_bytes;
-    round->walk_sets = positions ? 0 : arena->pike_bytes;
+    // A body's DFA holds its sets in registers and steps no PikeVM, so its shares hold two sets.
+    round->walk_bytes = positions ? arena->positions_bytes
+                        : dfa     ? 2 * arena->set_words * sizeof(sz_u64_t)
+                                  : arena->passes_bytes;
+    round->walk_sets = positions || dfa ? 0 : arena->pike_bytes;
     round->walks_count = sz_min_of_two((arena->total - arena->walks) / round->walk_bytes, arena->chunks);
     walks_grid = (unsigned)sz_size_divide_round_up(round->walks_count, sz_regex_threads_per_block_simt_k);
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
-    status = sz_regex_launch_rocm_((void const *)sz_regex_bound_simt_kernel_, walks_grid, walk_arguments, 0, stream);
+    status = sz_regex_launch_rocm_(
+        dfa ? (void const *)sz_regex_bound_dfa_simt_kernel_ : (void const *)sz_regex_bound_simt_kernel_, walks_grid,
+        walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_bound_pieces_simt_kernel_, walks_grid, walk_arguments, 0,
-                                       stream);
+        status = sz_regex_launch_rocm_(dfa ? (void const *)sz_regex_bound_pieces_dfa_simt_kernel_
+                                           : (void const *)sz_regex_bound_pieces_simt_kernel_,
+                                       walks_grid, walk_arguments, shared_bytes, stream);
     if (status == sz_success_k)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_affine_simt_kernel_, walks_grid, walk_arguments, 0,
-                                       stream);
+        status = sz_regex_launch_rocm_(
+            dfa ? (void const *)sz_regex_affine_dfa_simt_kernel_ : (void const *)sz_regex_affine_simt_kernel_,
+            walks_grid, walk_arguments, shared_bytes, stream);
     for (step = 0; status == sz_success_k && step != round->rounds; ++step) {
         round->round = step;
         status = sz_regex_launch_rocm_((void const *)sz_regex_affine_double_simt_kernel_,
                                        sz_regex_grid_rocm_(round->chunks_count), round_arguments, 0, stream);
     }
     if (status == sz_success_k && recording)
-        status = sz_regex_launch_rocm_((void const *)sz_regex_looks_simt_kernel_, walks_grid, walk_arguments, 0,
-                                       stream);
+        status = sz_regex_launch_rocm_(
+            dfa ? (void const *)sz_regex_looks_dfa_simt_kernel_ : (void const *)sz_regex_looks_simt_kernel_, walks_grid,
+            walk_arguments, shared_bytes, stream);
+    return status;
+}
+
+/** Launches one level's lookbehind or lookahead pass over the segment @p round points at: the NFA
+ *  flow over the members no table fills and no DFA steps, then a flow per body DFA. */
+STRINGZILLA_INLINE sz_status_t sz_regex_passes_rocm_(sz_regex_engine_t const *engine,
+                                                     sz_strings_view_t const *haystacks, sz_regex_round_simt_t *round,
+                                                     sz_regex_arena_rocm_t const *arena, sz_u32_t level,
+                                                     sz_bool_t behind, sz_bool_t recording, sz_stream_t stream) {
+    sz_regex_flow_simt_t const flow = behind ? sz_regex_flow_behind_simt_k : sz_regex_flow_ahead_simt_k;
+    sz_u32_t negated, members = sz_regex_members_simt_(engine, level, behind, &negated), index;
+    sz_u32_t const dfas = members & sz_regex_body_dfas_simt_(engine);
+    sz_status_t status = sz_success_k;
+    if (members & ~dfas & ~sz_regex_singles_simt_(engine))
+        status = sz_regex_flow_rocm_(engine, haystacks, round, arena, flow, level, sz_regex_none_simt_k, recording,
+                                     stream);
+    for (index = 0; status == sz_success_k && index != engine->lookarounds_count; ++index)
+        if (dfas & (sz_u32_t)sz_regex_look_lookaround_k << index)
+            status = sz_regex_flow_rocm_(engine, haystacks, round, arena, flow, level, index, recording, stream);
     return status;
 }
 
@@ -335,20 +383,27 @@ STRINGZILLA_INLINE sz_status_t sz_regex_looks_rocm_(sz_regex_engine_t const *eng
                                                     sz_size_t segment, sz_size_t first, sz_u32_t levels,
                                                     sz_stream_t stream) {
     sz_size_t const slots = arena->segment_slots, begin = segment * slots;
-    sz_u32_t level, negated;
+    sz_regex_engine_t launched_engine = *engine;
+    sz_strings_view_t launched_haystacks = *haystacks;
+    void *arguments[3];
+    sz_u32_t level;
     sz_status_t status;
     round->looks.begin = first * slots, round->looks.end = round->looks.begin + 2 * slots;
     if (begin >= round->slots_count) return sz_success_k;
-    status = sz_fill_rocm_(round->looks.table + (begin & round->looks.mask),
-                           sz_min_of_two(slots, round->slots_count - begin) * sizeof(sz_u32_t), 0, stream);
     sz_regex_segment_rocm_(round, segment, slots);
+    arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = round;
+    // The one-byte lookarounds fill the half outright, which the passes then add to.
+    if (sz_regex_singles_simt_(engine))
+        status = sz_regex_launch_rocm_((void const *)sz_regex_singles_simt_kernel_,
+                                       sz_regex_grid_rocm_(round->segment_end - round->segment_begin), arguments, 0,
+                                       stream);
+    else
+        status = sz_fill_rocm_(round->looks.table + (begin & round->looks.mask),
+                               (round->segment_end - round->segment_begin) * sizeof(sz_u32_t), 0, stream);
     for (level = 1; status == sz_success_k && level <= levels; ++level) {
-        if (sz_regex_members_simt_(engine, level, sz_true_k, &negated))
-            status = sz_regex_flow_rocm_(engine, haystacks, round, arena, sz_regex_flow_behind_simt_k, level, sz_true_k,
-                                         stream);
-        if (status == sz_success_k && sz_regex_members_simt_(engine, level, sz_false_k, &negated))
-            status = sz_regex_flow_rocm_(engine, haystacks, round, arena, sz_regex_flow_ahead_simt_k, level, sz_true_k,
-                                         stream);
+        status = sz_regex_passes_rocm_(engine, haystacks, round, arena, level, sz_true_k, sz_true_k, stream);
+        if (status == sz_success_k)
+            status = sz_regex_passes_rocm_(engine, haystacks, round, arena, level, sz_false_k, sz_true_k, stream);
     }
     return status;
 }
@@ -368,8 +423,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_prime_segment_rocm_(sz_regex_engine_t co
     sz_status_t status;
     sz_size_t step;
     if (!engine->reverse_rows)
-        return sz_regex_flow_rocm_(engine, haystacks, round, arena, sz_regex_flow_positions_simt_k, 0, sz_false_k,
-                                   stream);
+        return sz_regex_flow_rocm_(engine, haystacks, round, arena, sz_regex_flow_positions_simt_k, 0,
+                                   sz_regex_none_simt_k, sz_false_k, stream);
     walk_arguments[0] = &launched_engine, walk_arguments[1] = &launched_haystacks, walk_arguments[2] = round;
     round_arguments[0] = round;
     status = sz_regex_launch_rocm_((void const *)sz_regex_prime_simt_kernel_, grid, walk_arguments, shared_bytes,
@@ -496,7 +551,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
     sz_strings_view_t launched_haystacks = *haystacks;
     sz_size_t segment, step, shared_bytes, *chunk_offsets, *chunk_kept, *chunk_sums, *chunk_covers;
     void *round_arguments[1], *walk_arguments[3], *chain_arguments[2];
-    sz_u32_t level, negated, counters[sz_regex_refused_counter_simt_k + 1];
+    sz_u32_t level, lookaround, negated, counters[sz_regex_refused_counter_simt_k + 1];
     sz_status_t status = sz_success_k;
     if (segments > arena.chunks) return sz_unexpected_dimensions_k;
 
@@ -522,7 +577,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
     round->affines_next = (sz_regex_affine_simt_t *)(block + arena.affines_next);
     round->looks.table = engine->lookarounds_count ? (sz_u32_t *)(block + arena.looks) : STRINGZILLA_NULL;
     round->looks.refused = round->counters + sz_regex_refused_counter_simt_k, round->looks.mask = 2 * slots - 1;
-    round->looks.begin = 0, round->looks.end = 0, round->set_words = arena.set_words;
+    round->looks.begin = 0, round->looks.end = 0, round->set_words = arena.set_words,
+    round->body = sz_regex_none_simt_k;
     round->bodies_begin = sz_regex_bodies_begin_simt_(engine);
     round->bodies_count = engine->nfa_states_count - round->bodies_begin;
     round->checkpoints = (sz_regex_checkpoint_simt_t *)(block + arena.checkpoints);
@@ -545,8 +601,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                            (sz_u32_t)sz_regex_stride_(engine->classes_count, engine->lookarounds_count);
     round->reverse_cells = engine->reverse_states_count *
                            (sz_u32_t)sz_regex_stride_(engine->classes_count, engine->lookarounds_count);
-    round->staged_cells = (sz_u32_t)sz_min_of_two(sz_max_of_two(round->forward_cells, round->reverse_cells),
-                                                  (sz_u32_t)sz_regex_staged_cells_simt_k);
+    round->staged_cells = sz_max_of_two(round->forward_cells, round->reverse_cells);
+    for (lookaround = 0; lookaround != engine->lookarounds_count; ++lookaround)
+        round->staged_cells = sz_max_of_two(
+            round->staged_cells,
+            sz_regex_body_reach_simt_(engine, lookaround, STRINGZILLA_NULL) * (engine->classes_count + 1));
+    round->staged_cells = sz_min_of_two(round->staged_cells, (sz_u32_t)sz_regex_staged_cells_simt_k);
     shared_bytes = sz_regex_staged_bytes_simt_k + (sz_size_t)round->staged_cells * sizeof(sz_u32_t);
     chunk_offsets = round->chunk_offsets, chunk_kept = round->chunk_kept;
     chunk_sums = round->chunk_sums, chunk_covers = round->chunk_covers;
@@ -559,27 +619,28 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
 
     // Each level's passes hand sets across segments over lower levels' tables, so they sweep first.
     for (level = 1; status == sz_success_k && segments > 1 && level <= levels; ++level) {
-        if (sz_regex_members_simt_(engine, level, sz_true_k, &negated))
+        if (sz_regex_members_simt_(engine, level, sz_true_k, &negated) & ~sz_regex_singles_simt_(engine))
             for (segment = 0; status == sz_success_k && segment != segments; ++segment) {
                 status = sz_regex_looks_rocm_(engine, haystacks, round, &arena, segment, segment, level - 1, stream);
                 sz_regex_segment_rocm_(round, segment, slots);
                 if (status == sz_success_k)
-                    status = sz_regex_flow_rocm_(engine, haystacks, round, &arena, sz_regex_flow_behind_simt_k, level,
-                                                 sz_false_k, stream);
+                    status = sz_regex_passes_rocm_(engine, haystacks, round, &arena, level, sz_true_k, sz_false_k,
+                                                   stream);
             }
-        if (sz_regex_members_simt_(engine, level, sz_false_k, &negated))
+        if (sz_regex_members_simt_(engine, level, sz_false_k, &negated) & ~sz_regex_singles_simt_(engine))
             for (segment = segments; status == sz_success_k && segment-- != 0;) {
                 status = sz_regex_looks_rocm_(engine, haystacks, round, &arena, segment, segment, level - 1, stream);
                 sz_regex_segment_rocm_(round, segment, slots);
                 if (status == sz_success_k)
-                    status = sz_regex_flow_rocm_(engine, haystacks, round, &arena, sz_regex_flow_ahead_simt_k, level,
-                                                 sz_false_k, stream);
+                    status = sz_regex_passes_rocm_(engine, haystacks, round, &arena, level, sz_false_k, sz_false_k,
+                                                   stream);
             }
     }
 
     // Priming reads each segment's right neighbour, so the segments past the first prime right to
-    // left first, each filling its own half of the table beside the half its neighbour filled.
-    for (segment = segments; status == sz_success_k && segment-- > 1;) {
+    // left first, each filling its own half of the table beside the half its neighbour filled;
+    // literal prefixes mark candidates without priming.
+    for (segment = segments; status == sz_success_k && !engine->prefixes && segment-- > 1;) {
         if (levels) status = sz_regex_looks_rocm_(engine, haystacks, round, &arena, segment, segment, levels, stream);
         sz_regex_segment_rocm_(round, segment, slots);
         if (status == sz_success_k) status = sz_regex_prime_segment_rocm_(engine, haystacks, round, &arena, stream);
@@ -587,8 +648,11 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
     for (segment = 0; status == sz_success_k && segment != segments; ++segment) {
         sz_bool_t past;
         unsigned grid;
-        // The walks read the table up to the next segment, whose half alone is new past the first.
-        if (levels)
+        // The walks read the table up to the next segment, whose half alone is new past the first,
+        // unless no priming filled it.
+        if (levels && engine->prefixes && !segment)
+            status = sz_regex_looks_rocm_(engine, haystacks, round, &arena, 1, 0, levels, stream);
+        if (status == sz_success_k && levels)
             status = sz_regex_looks_rocm_(engine, haystacks, round, &arena, segment ? segment + 1 : 0, segment, levels,
                                           stream);
         sz_regex_segment_rocm_(round, segment, slots);
@@ -596,7 +660,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         past = (sz_bool_t)(levels && sz_regex_runs_past_rocm_(haystacks, round));
         if (status == sz_success_k && segment == 0)
             status = sz_fill_rocm_(round->carry, sizeof(sz_regex_carry_simt_t), 0, stream);
-        if (status == sz_success_k) status = sz_regex_prime_segment_rocm_(engine, haystacks, round, &arena, stream);
+        if (status == sz_success_k && !engine->prefixes)
+            status = sz_regex_prime_segment_rocm_(engine, haystacks, round, &arena, stream);
 
         // The links' counters and doubling flags, the two things a segment reads before writing.
         if (status == sz_success_k)
@@ -609,6 +674,9 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
                 (unsigned)sz_size_divide_round_up(positions_walks, sz_regex_threads_per_block_simt_k), walk_arguments,
                 0, stream);
         }
+        else if (status == sz_success_k && engine->prefixes)
+            status = sz_regex_launch_rocm_((void const *)sz_regex_mark_prefixes_simt_kernel_, grid, walk_arguments, 0,
+                                           stream);
         else if (status == sz_success_k)
             status = sz_regex_launch_rocm_(
                 folded ? (void const *)sz_regex_mark_folded_simt_kernel_ : (void const *)sz_regex_mark_simt_kernel_,

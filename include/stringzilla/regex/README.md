@@ -48,6 +48,7 @@ Where every match starts with a few literal bytes, as keywords do, the search sk
 The end-finding DFA's first steps, from every start state under every lookaround block, give the paths of classes the first bytes of a match follow, up to three bytes deep and eight paths wide, each path one bucket.
 A search jumps to the next position whose bytes keep some bucket at every offset, testing both nibbles of every byte against per-offset bucket tables, and the end walk from there settles whether a match starts there, so a false candidate costs a walk that dies within a step or two.
 The paths must pass few positions, judged with every byte at least a sixteenth as frequent as any, as text is: two literal bytes pass, a single byte or a wide class like `[0-9]` does not, and neither does a vocabulary that can match empty.
+GPUs mark such candidates a slot per thread from the bucket tables, in place of the start-finding walk and its priming, and their end walks settle them as they settle any start.
 
 An end walk that runs past its match, looking for a longer one, can cover the starts of the next matches: every `a` of a line without a later `z` walks to the line's end under `a[^\n]*z|a`.
 So every 16 bytes a walk leaves its state at a checkpoint, and a later walk holding the same state there stops: it walks the same bytes from there on, so it takes that walk's match if that one ended past the checkpoint, or its own last match before it.
@@ -125,11 +126,12 @@ Bodies nest, so lookarounds are computed level by level, innermost first, each l
 A body nesting no lookaround gets a DFA of its own, unanchored and keeping every match as the start-finding one, and fills its bits a byte per step; nested bodies and those past the start-finding budget step the PikeVM.
 Over a cased haystack of a kilobyte or more, a body's DFA walks four stretches in lockstep, each guessing its entry from the 16 bytes before it and settled against the stretch before it as the start pass's windows are.
 A cased body of one byte from a set, asserting nothing, needs no walk at all: the byte before a position decides a lookbehind and the byte at it a lookahead, so one table per side fills all of them in one pass, which also marks every negated lookaround a DFA walks as holding until its body flips it.
+GPUs fill the same tables a slot per thread, and step a body's DFA over each chunk as a set of its states, which crosses chunk edges the way the position sets do; a chunk that every state leaves in one state hands that one on.
 The PikeVM adds a position's bits to the assertions it crosses there, and the position automaton tests them beside the boundary kinds of its groups, the loop's follows across a lookaround joining the groups too.
-Both DFAs read the bits as columns: a vocabulary of at most six lookarounds on CPUs and four on GPUs, nested ones included, widens every row to one block per set of them, and a step takes the block of the lookarounds holding at the boundary it crosses, the one before its byte left to right and the one after it right to left.
+Both DFAs read the bits as columns: a vocabulary of at most six lookarounds, nested ones included, widens every row to one block per set of them, and a step takes the block of the lookarounds holding at the boundary it crosses, the one before its byte left to right and the one after it right to left.
 Such a step first closes its state's threads under the assertions the state knows and the block's lookarounds, then consumes the byte, so a lookaround ending a pattern resolves one byte late like `$`, and each block's edge column settles the haystack's edges.
 Steps inside the folds of one codepoint take the first block, as no lookaround holds there.
-Each lookaround halves both state budgets, so the tables keep their bytes, and a vocabulary of more walks positions and the PikeVM; GPU kernels stage the first column of sixteen blocks, so they stop at four.
+Each lookaround halves both state budgets, so the tables keep their bytes, and a vocabulary of more walks positions and the PikeVM.
 A body holds no capturing group, and a vocabulary at most 26 lookarounds, the look bits left past the assertions.
 
 ## Case Folding

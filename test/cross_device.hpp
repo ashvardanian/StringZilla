@@ -1643,6 +1643,23 @@ inline void test_regex_device_unit(auto const &backend) {
         check_regex_against_serial_(backend, {spans, line, quoted},
                                     {"(?<=\"[^\"]*)q+", "x(?=[^\"]*\")", "(?<=error.*)b{3}", "(?<!\"[^\"]*)y"},
                                     sensitivity);
+
+    // Literal prefixes mark candidates without the start-finding walk: keywords every 61 bytes take
+    // every offset into a chunk and cross tiles, and one its haystack's end cuts short is no match.
+    std::string keywords(9000, '.');
+    for (std::size_t offset = 1; offset + 6 < keywords.size(); offset += 61)
+        keywords.replace(offset, 6, offset % 3 ? "quokka" : "zebras");
+    check_regex_against_serial_(backend, {"quo", "kka", "quokk", "aquokkaa", keywords, "zebrazebras quokkquokka", ""},
+                                {"quokka", "zebras?"});
+
+    // One-byte lookarounds read the bytes beside each slot and the multi-byte bodies walk DFAs, at
+    // haystack edges and at every offset into a chunk, five of them as columns of both DFAs.
+    std::string seams;
+    for (std::size_t index = 0; index != 400; ++index) seams += index % 7 ? "Ab " : "$12% CD Ef Gh abc";
+    check_regex_against_serial_(
+        backend, {"$5", "7%", "AB", "Ab Cd", "Ab Cd ", "Ab C", seams, "abc", "c", ""},
+        {"(?<=\\$)[0-9]+", "[0-9]+(?=%)", "[A-Z][a-z]+(?= [A-Z][a-z]+)", "(?<![A-Za-z])[A-Z]{2,}(?![a-z])"});
+    check_regex_against_serial_(backend, {"abc", "c", "bc", "ab", seams}, {"(?<=ab)c", "(?<!ab)c", "b(?=c\\s)"});
 }
 
 /** Random vocabularies over corpora of short haystacks among long ones, and a corpus past a segment

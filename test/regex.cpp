@@ -87,7 +87,7 @@ void test_regex_unit() {
         sz_strings_view_t const strings = strings_over_(patterns, views);
         sz_regex_engine_t engine;
         verify(regex_dispatched.init(&engine, &strings, sz_cased_k, nullptr, &heap.allocator, nullptr) == sz_success_k);
-        verify(engine.lookarounds_count == sz_regex_columned_lookarounds_cpu_k + index);
+        verify(engine.lookarounds_count == sz_regex_columned_lookarounds_k + index);
         verify((engine.forward_rows != nullptr) == (index == 0) && (engine.reverse_rows != nullptr) == (index == 0));
         verify(regex_matches_(regex_dispatched, &engine, {"Passw0rdX", "password1", "Sh0rt", "NODIGITS"}) ==
                cases_t({{0, 0, 0, 9}}));
