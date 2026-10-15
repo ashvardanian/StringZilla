@@ -1094,6 +1094,28 @@ inline void check_strings_unit_(strings_backend_t const &backend) {
         verify(tape.data.u32_tape.data == data && tape.data.u32_tape.offsets == offsets);
         verify(strings_in_(tape) == shouted);
         sz_strings_span_free(&tape, &heap.allocator, nullptr);
+
+        // One string at a time, as bindings map a buffer: in place, and into a borrowed span of its
+        // size, from empty through lengths on both sides of every vector width.
+        for (sz_size_t const length : {0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129}) {
+            std::string text(length, '\0'), expected(length, '\0'), mapped(length, '\0');
+            for (sz_size_t index = 0; index != length; ++index) {
+                text[index] = "Hello, dear World!"[index % 18];
+                expected[index] = upper_table[(unsigned char)text[index]];
+            }
+            sz_u32_t const source_offsets[2] = {0, (sz_u32_t)length};
+            sz_u32_t target_offsets[2] = {0, (sz_u32_t)length};
+            sz_strings_view_t const source = strings_tape_over_(text.data(), source_offsets);
+            sz_strings_span_t borrowed {};
+            borrowed.layout = sz_strings_u32_tape_k, borrowed.count = 1;
+            borrowed.data.u32_tape.data = mapped.data(), borrowed.data.u32_tape.offsets = target_offsets;
+            verify(backend.lookup(&source, nullptr, 1, upper_table, nullptr, &borrowed, nullptr) == sz_success_k);
+            verify(mapped == expected && borrowed.data.u32_tape.data == mapped.data());
+            borrowed.data.u32_tape.data = text.data();
+            sz_strings_from_span(&borrowed, &own);
+            verify(backend.lookup(&own, nullptr, 1, upper_table, nullptr, &borrowed, nullptr) == sz_success_k);
+            verify(text == expected);
+        }
     }
 
     // UAX #15: NFD and NFKD split precomposed letters and Hangul syllables, NFC and NFKC put them
@@ -1425,6 +1447,32 @@ inline void check_strings_borrowed_exactly_(strings_backend_t const &backend, st
     });
 }
 
+/** Maps one string of every ladder length in place at every alignment, as bindings map a buffer,
+ *  changing its bytes and none of the 64 on either side. */
+inline void check_strings_lookup_in_place_(strings_backend_t const &backend) {
+    char table[256];
+    for (std::size_t index = 0; index != 256; ++index) table[index] = static_cast<char>(index ^ 0x5A);
+    for (sz_size_t const length : span_over(backend_ladder_lengths_))
+        with_guarded_buffer_(length + 63, [&](sz_ptr_t buffer, std::size_t usable_length) {
+            for (sz_size_t alignment = 0; alignment != 64; ++alignment) {
+                std::memset(buffer, '#', usable_length);
+                sz_ptr_t const data = buffer + alignment;
+                for (sz_size_t index = 0; index != length; ++index) data[index] = static_cast<char>(index * 7);
+                sz_u32_t offsets[2] = {0, static_cast<sz_u32_t>(length)};
+                sz_strings_span_t span {};
+                span.layout = sz_strings_u32_tape_k, span.count = 1;
+                span.data.u32_tape.data = data, span.data.u32_tape.offsets = offsets;
+                sz_strings_view_t own;
+                sz_strings_from_span(&span, &own);
+                verify(backend.lookup(&own, nullptr, 1, table, nullptr, &span, nullptr) == sz_success_k);
+                for (sz_size_t index = 0; index != usable_length; ++index)
+                    verify(buffer[index] == (index < alignment || index >= alignment + length
+                                                 ? '#'
+                                                 : table[static_cast<sz_u8_t>((index - alignment) * 7)]));
+            }
+        });
+}
+
 /** Writes two copies of a string of every ladder length into rows a byte narrower and a byte wider,
  *  leaving the gaps between the rows untouched. */
 inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
@@ -1615,6 +1663,7 @@ inline void check_strings_safety_(strings_backend_t const &backend) {
     }
     verify(heap.mismatches == 0 && heap.blocks.empty());
     check_strings_empty_(backend);
+    check_strings_lookup_in_place_(backend);
     check_strings_rows_gaps_(backend);
     check_strings_arena_refusals_(backend);
     check_strings_rationed_growths_(backend);

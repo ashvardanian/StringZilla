@@ -233,16 +233,17 @@ STRINGZILLA_INLINE sz_bool_t sz_strings_relayout_(sz_strings_span_t *span, sz_si
     return sz_true_k;
 }
 
-/** Gathers strings into a tape, mapping every byte through a non-null @p lut. */
+/** Gathers strings into a tape, mapping every byte through a non-null @p lut. A tape read in its
+ *  own order is one run of bytes, measured by its offsets and mapped in a single call. */
 STRINGZILLA_INLINE sz_status_t sz_strings_gather_(sz_strings_view_t const *strings, sz_size_t const *order,
                                                   sz_size_t count, char const *lut, sz_allocator_t *allocator,
                                                   sz_strings_span_t *tape, sz_strings_walks_t const *walks) {
+    sz_bool_t const flat = (sz_bool_t)(!order && count && strings->layout != sz_strings_accessor_k);
+    sz_size_t const base = flat ? sz_strings_view_offset_(strings, 0) : 0;
+    sz_size_t payload = flat ? sz_strings_view_offset_(strings, count) - base : 0;
     sz_string_view_t views[64];
-    sz_size_t payload = 0;
-    sz_cptr_t first = STRINGZILLA_NULL;
-    for (sz_size_t start = 0; start < count; start += 64) {
+    for (sz_size_t start = 0; !flat && start < count; start += 64) {
         sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
-        if (!start) first = views[0].start;
         for (sz_size_t position = 0; position != block_count; ++position) {
             if (views[position].length > STRINGZILLA_SIZE_MAX - payload) return sz_bad_alloc_k;
             payload += views[position].length;
@@ -252,23 +253,23 @@ STRINGZILLA_INLINE sz_status_t sz_strings_gather_(sz_strings_view_t const *strin
     sz_status_t const status = sz_strings_acquire_(strings, tape, count, payload, allocator, &output, STRINGZILLA_NULL);
     if (status != sz_success_k) return status;
 
-    // A tape read in its own order is one run of bytes, mapped in a single call.
-    sz_bool_t const flat = (sz_bool_t)(!order && strings->layout != sz_strings_accessor_k);
     sz_ptr_t const data = sz_strings_payload_(&output);
-    sz_size_t offset = 0;
     sz_strings_offset_set_(&output, 0, 0);
-    for (sz_size_t start = 0; start < count; start += 64) {
+    for (sz_size_t index = 1; flat && index <= count; ++index)
+        sz_strings_offset_set_(&output, index, sz_strings_view_offset_(strings, index) - base);
+    if (flat && payload && lut) walks->lookup_bytes(data, sz_strings_view_data_(strings) + base, payload, lut);
+    else if (flat && payload) memcpy(data, sz_strings_view_data_(strings) + base, payload);
+    sz_size_t offset = 0;
+    for (sz_size_t start = 0; !flat && start < count; start += 64) {
         sz_size_t const block_count = sz_strings_block_(strings, order, count, start, views);
         for (sz_size_t position = 0; position != block_count; ++position) {
             sz_size_t const length = views[position].length;
-            if (!flat && length && lut) walks->lookup_bytes(data + offset, views[position].start, length, lut);
-            else if (!flat && length) memcpy(data + offset, views[position].start, length);
+            if (length && lut) walks->lookup_bytes(data + offset, views[position].start, length, lut);
+            else if (length) memcpy(data + offset, views[position].start, length);
             offset += length;
             sz_strings_offset_set_(&output, start + position + 1, offset);
         }
     }
-    if (flat && payload && lut) walks->lookup_bytes(data, first, payload, lut);
-    else if (flat && payload) memcpy(data, first, payload);
     sz_strings_commit_(tape, &output, allocator, STRINGZILLA_NULL);
     return sz_success_k;
 }

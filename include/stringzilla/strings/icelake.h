@@ -34,75 +34,45 @@ extern "C" {
                    "popcnt")
 #endif
 
+/** Maps the 64 bytes of @p source_u8x64 through the table @p lut_u8x64s holds. VPERMI2B, as
+ *  @c _mm512_permutex2var_epi8, reads bit 6 of each index to pick one of two 64-byte tables, and
+ *  VPMOVB2M, as @c _mm512_movepi8_mask, moves bit 7 into a mask on port 0, sparing the busy port 5
+ *  that VPTESTMB would take. */
+STRINGZILLA_INLINE __m512i sz_strings_lookup_u8x64_icelake_(__m512i source_u8x64, __m512i const lut_u8x64s[4]) {
+    __m512i const low_u8x64 = _mm512_permutex2var_epi8(lut_u8x64s[0], source_u8x64, lut_u8x64s[1]);
+    __m512i const high_u8x64 = _mm512_permutex2var_epi8(lut_u8x64s[2], source_u8x64, lut_u8x64s[3]);
+    return _mm512_mask_blend_epi8(_mm512_movepi8_mask(source_u8x64), low_u8x64, high_u8x64);
+}
+
 STRINGZILLA_INLINE void sz_strings_lookup_bytes_icelake_(sz_ptr_t target, sz_cptr_t source, sz_size_t length,
                                                          char const lut[sz_at_least_(256)]) {
     sz_assert_no_overlap_(target, length, source, length);
+    __m512i const lut_u8x64s[4] = {_mm512_loadu_si512(lut), _mm512_loadu_si512(lut + 64), _mm512_loadu_si512(lut + 128),
+                                   _mm512_loadu_si512(lut + 192)};
 
-    // Loading the table into registers only pays off once at least 3 cache lines are mapped.
-    if (length <= 128) {
-        sz_u8_t const *lut_u8 = (sz_u8_t const *)lut;
-        sz_u8_t const *source_u8 = (sz_u8_t const *)source;
-        sz_u8_t *target_u8 = (sz_u8_t *)target;
-        for (sz_size_t byte_index = 0; byte_index < length; ++byte_index)
-            target_u8[byte_index] = lut_u8[source_u8[byte_index]];
+    // A short string takes one masked step, leaving no loop whose exit its length mispredicts.
+    if (length <= 64) {
+        __mmask64 const mask_m64 = sz_u64_mask_until_(length);
+        __m512i const source_u8x64 = _mm512_maskz_loadu_epi8(mask_m64, source);
+        _mm512_mask_storeu_epi8(target, mask_m64, sz_strings_lookup_u8x64_icelake_(source_u8x64, lut_u8x64s));
         return;
     }
 
     // Masked stores cover the unaligned head and tail, so every body store is cache-line aligned.
-    sz_size_t head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
-    sz_size_t tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
-    __mmask64 head_mask_m64 = sz_u64_mask_until_(head_length);
-    __mmask64 tail_mask_m64 = sz_u64_mask_until_(tail_length);
-
-    // We use VPERMI2B (`_mm512_permutex2var_epi8`) to perform 256-entry lookups efficiently.
-    // VPERMI2B uses bit 6 of each index to select between two 64-byte tables, allowing us to
-    // cover 128 entries per instruction (2 instructions for all 256 entries).
-    //
-    // For the high-bit (bit 7) selection, we use VPMOVB2M (`_mm512_movepi8_mask`) which extracts
-    // the sign bit of each byte directly to a mask register. This goes to port 0 on Intel,
-    // avoiding the port 5 bottleneck that VPTESTMB would cause.
-    sz_u512_vec_t lut_0_to_63_vec, lut_64_to_127_vec, lut_128_to_191_vec, lut_192_to_255_vec;
-    lut_0_to_63_vec.zmm = _mm512_loadu_si512((lut));
-    lut_64_to_127_vec.zmm = _mm512_loadu_si512((lut + 64));
-    lut_128_to_191_vec.zmm = _mm512_loadu_si512((lut + 128));
-    lut_192_to_255_vec.zmm = _mm512_loadu_si512((lut + 192));
-
-    __mmask64 high_bit_mask_m64;
-    sz_u512_vec_t source_vec, low_half_vec, high_half_vec, result_vec;
-
-    // Handling the head.
+    sz_size_t const head_length = (64 - ((sz_size_t)target % 64)) % 64; // 63 or less.
+    sz_size_t const tail_length = (sz_size_t)(target + length) % 64;    // 63 or less.
     if (head_length) {
-        source_vec.zmm = _mm512_maskz_loadu_epi8(head_mask_m64, source);
-        // VPERMI2B: bit 6 selects between the two tables, bits 0-5 index within each
-        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
-        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
-        // VPMOVB2M moves bit 7 of each byte into a mask on port 0, sparing the busy port 5
-        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
-        _mm512_mask_storeu_epi8(target, head_mask_m64, result_vec.zmm);
+        __mmask64 const head_mask_m64 = sz_u64_mask_until_(head_length);
+        __m512i const source_u8x64 = _mm512_maskz_loadu_epi8(head_mask_m64, source);
+        _mm512_mask_storeu_epi8(target, head_mask_m64, sz_strings_lookup_u8x64_icelake_(source_u8x64, lut_u8x64s));
         source += head_length, target += head_length, length -= head_length;
     }
-
-    // The body in 64-byte chunks, aligned to cache lines of `target`.
-    while (length >= 64) {
-        source_vec.zmm = _mm512_loadu_si512(source);
-        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
-        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
-        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
-        _mm512_store_si512(target, result_vec.zmm); //! Aligned store, our main weapon!
-        source += 64, target += 64, length -= 64;
-    }
-
-    // Handling the tail.
+    for (; length >= 64; source += 64, target += 64, length -= 64)
+        _mm512_store_si512(target, sz_strings_lookup_u8x64_icelake_(_mm512_loadu_si512(source), lut_u8x64s));
     if (tail_length) {
-        source_vec.zmm = _mm512_maskz_loadu_epi8(tail_mask_m64, source);
-        low_half_vec.zmm = _mm512_permutex2var_epi8(lut_0_to_63_vec.zmm, source_vec.zmm, lut_64_to_127_vec.zmm);
-        high_half_vec.zmm = _mm512_permutex2var_epi8(lut_128_to_191_vec.zmm, source_vec.zmm, lut_192_to_255_vec.zmm);
-        high_bit_mask_m64 = _mm512_movepi8_mask(source_vec.zmm);
-        result_vec.zmm = _mm512_mask_blend_epi8(high_bit_mask_m64, low_half_vec.zmm, high_half_vec.zmm);
-        _mm512_mask_storeu_epi8(target, tail_mask_m64, result_vec.zmm);
-        source += tail_length, target += tail_length, length -= tail_length;
+        __mmask64 const tail_mask_m64 = sz_u64_mask_until_(tail_length);
+        __m512i const source_u8x64 = _mm512_maskz_loadu_epi8(tail_mask_m64, source);
+        _mm512_mask_storeu_epi8(target, tail_mask_m64, sz_strings_lookup_u8x64_icelake_(source_u8x64, lut_u8x64s));
     }
 }
 
