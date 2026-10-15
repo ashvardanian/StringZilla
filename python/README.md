@@ -263,8 +263,18 @@ assert sz.Str("hi!!").rstrip("!") == "hi"
 
 ### Translating
 
-`translate(table, inplace=False, start=0, end=len)` applies a byte-to-byte mapping in a single pass.
+`translate(table, inplace=False, start=0, end=len, *, out=None)` applies a byte-to-byte mapping in a single pass.
 `table` is either a 256-byte string/bytes lookup table or a `dict` mapping bytes to bytes.
+Pass a writable C-contiguous byte buffer as `out` to avoid allocating an immutable result. Its byte length must
+match the selected `[start, end)` input, and the call returns that same buffer. Exact input/output aliasing is
+supported; partially overlapping regions and combining `out` with `inplace=True` raise `ValueError`.
+
+```python
+out = bytearray(3)
+assert sz.translate(b"abc", {"a": "A", "b": "B", "c": "C"}, out=out) is out
+assert out == b"ABC"
+```
+
 With `inplace=True` the buffer is rewritten in place and `None` is returned; otherwise a new `bytes`/`str` is returned.
 A non-256-byte table raises `ValueError`; a non-string, non-dict table raises `TypeError`.
 
