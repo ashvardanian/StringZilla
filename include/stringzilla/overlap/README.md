@@ -82,6 +82,10 @@ Every width's query window hashes share one B-tree: the step primitives are told
 A candidate window hash is produced at a known width, so a hit is attributed to that width, and a coincidence with another width's window hash runs at $2^{-32}$.
 What to do with those scores — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
 
+The GPU engines take every width the host ones do.
+Each thread rolls every width's window hash through its stretch of a candidate in registers, re-reading the byte that leaves the window from the text, so no width outgrows a buffer.
+Eight widths roll together, and an engine holding more walks each stretch once per group of eight.
+
 The width above which spurious window matches become rare follows from the alphabet's collision entropy $H_2$, the Rényi entropy of order two, in bits per symbol:
 
 $$w^{\ast} = \frac{\log_2 \left( n_\text{query} \cdot n_\text{candidate} \right)}{H_2}.$$

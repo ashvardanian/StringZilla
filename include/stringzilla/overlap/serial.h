@@ -44,9 +44,9 @@ static sz_u32_t const sz_overlap_sign_flip_k = 0x80000000u;
  *  and a fifth gains nothing. */
 enum { sz_overlap_interleaved_chains_k = 4 };
 
-/** Widest window a GPU engine scores, and the most widths one holds, as its per-thread ring of
- *  prefix hashes and its register-held match counters bound them. */
-enum { sz_overlap_gpu_widest_window_k = 31, sz_overlap_gpu_widths_max_k = 8 };
+/** Widths one GPU walk rolls together, their hashes and match counters held in registers; an engine
+ *  with more walks each stretch of text once per group of them. */
+enum { sz_overlap_gpu_widths_per_walk_k = 8 };
 
 #pragma region Generic Public Helpers
 

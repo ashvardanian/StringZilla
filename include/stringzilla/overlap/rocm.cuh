@@ -62,11 +62,12 @@ typedef struct sz_overlap_geometry_rocm_t {
 } sz_overlap_geometry_rocm_t;
 
 /** Dynamic shared memory one block of @p threads takes: the staged tree, rounded up to a vector,
- *  then a count per width and a first chunk per candidate of its tile, the tile's total, and two
- *  16-bit owners per thread. */
+ *  then a count per width of one walk and a first chunk per candidate of its tile, the tile's
+ *  total, and two 16-bit owners per thread. */
 STRINGZILLA_INLINE sz_size_t sz_overlap_shared_bytes_rocm_(sz_size_t staged_nodes_count, sz_size_t threads,
                                                            sz_size_t widths_count) {
-    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (widths_count + 2) + 1) * sizeof(sz_u32_t);
+    sz_size_t const walk_widths = sz_min_of_two(widths_count, (sz_size_t)sz_overlap_gpu_widths_per_walk_k);
+    return (sz_size_divide_round_up(staged_nodes_count, 4) * 4 + threads * (walk_widths + 2) + 1) * sizeof(sz_u32_t);
 }
 
 /** Prepares the forest on the device the caller already made current, for the tier whose @p kernel
@@ -79,9 +80,6 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
                                                             sz_capability_t capability, sz_allocator_t *allocator,
                                                             sz_stream_t stream) {
     if (!sz_device_multiprocessors_rocm_()) return sz_missing_gpu_k;
-    if (!window_widths_count || window_widths_count > sz_overlap_gpu_widths_max_k) return sz_unexpected_dimensions_k;
-    for (sz_size_t index = 0; index != window_widths_count; ++index)
-        if (window_widths[index] > sz_overlap_gpu_widest_window_k) return sz_unexpected_dimensions_k;
 
     sz_allocator_t unified;
     if (allocator) unified = *allocator;
@@ -184,13 +182,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_rocm_(sz_overlap_engine_t 
  *  @param[in] allocator Unified and device-reachable, or @c STRINGZILLA_NULL for unified memory on
  *      the device of @p stream.
  *  @param[in] stream Names the device; the host lays the forest out, so the call schedules nothing.
- *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for a bad count or width of windows,
+ *  @return @c sz_success_k, @c sz_unexpected_dimensions_k for zero widths,
  *      @c sz_device_memory_mismatch_k when @p allocator hands back memory the device cannot reach
  *      or @p stream is one the runtime cannot place, or @c sz_missing_gpu_k without a device.
  *  @sa sz_overlap_engine_init
- *
- *  A window count is bad when zero or above @ref sz_overlap_gpu_widths_max_k, and a width when it
- *  is past @ref sz_overlap_gpu_widest_window_k, which bounds the bytes a chunk re-walks to start.
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
     sz_overlap_engine_t *engine, sz_strings_view_t const *queries, sz_size_t const *window_widths,
@@ -229,7 +224,6 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
         rows = sz_min_of_two(rows,
                              sz_size_divide_round_up(sz_overlap_grid_waves_rocm_k * geometry->resident_blocks, blocks));
     sz_size_t staged_nodes_count = geometry->staged_nodes_count;
-    sz_size_t const shared_bytes = sz_overlap_shared_bytes_rocm_(staged_nodes_count, per_block, engine->widths_count);
 
     // The engine travels by value with its host-only members cleared: an allocator's function pointers would ride
     // into constant memory on every launch and no kernel can call them.
@@ -242,13 +236,27 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
     launched_engine.scratch = STRINGZILLA_NULL, launched_engine.scratch_bytes = 0;
 
     sz_strings_view_t launched_candidates = *candidates;
+    sz_f32_t *launched_scores = scores;
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)rows, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
     void *arguments[6];
-    arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &scores;
+    arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &launched_scores;
     arguments[3] = &scores_query_stride, arguments[4] = &scores_candidate_stride, arguments[5] = &staged_nodes_count;
-    return sz_launch_rocm_(kernel, grid, block, arguments, shared_bytes, stream);
+
+    // One launch per group of widths one walk rolls, each over its own slice of every score row.
+    sz_status_t status = sz_success_k;
+    for (sz_size_t first_width = 0; status == sz_success_k && first_width < engine->widths_count;
+         first_width += sz_overlap_gpu_widths_per_walk_k) {
+        launched_engine.widths = engine->widths + first_width, launched_engine.powers = engine->powers + first_width;
+        launched_engine.widths_count = sz_min_of_two(engine->widths_count - first_width,
+                                                     (sz_size_t)sz_overlap_gpu_widths_per_walk_k);
+        launched_scores = scores + first_width;
+        sz_size_t const shared_bytes = sz_overlap_shared_bytes_rocm_(staged_nodes_count, per_block,
+                                                                     launched_engine.widths_count);
+        status = sz_launch_rocm_(kernel, grid, block, arguments, shared_bytes, stream);
+    }
+    return status;
 }
 
 /**

@@ -115,11 +115,6 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     sz_metal_call_t call;
     sz_status_t const entered = sz_device_enter_metal_(stream, &call);
     if (entered != sz_success_k) return sz_metal_commit_(&call, entered);
-    if (!window_widths_count || window_widths_count > sz_overlap_gpu_widths_max_k)
-        return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
-    for (sz_size_t index = 0; index != window_widths_count; ++index)
-        if (window_widths[index] > sz_overlap_gpu_widest_window_k)
-            return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     sz_allocator_t unified;
     if (allocator) unified = *allocator;

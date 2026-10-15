@@ -3,8 +3,8 @@
  *  @author Ash Vardanian
  *  @date September 24, 2026
  *  @brief Window overlap on Apple GPUs of Metal family 7, M1 and newer: one thread per segment of a
- *      candidate, its chain walked through a ring of prefix hashes so every width is scored in one
- *      pass, and one prepared query's B-tree probed per threadgroup row.
+ *      candidate, each width's window hash rolled through it in registers, and one prepared query's
+ *      B-tree probed per threadgroup row.
  *
  *  Nothing here needs more than Apple7: 32-bit atomics, simdgroup prefix sums and 32 KB of
  *  threadgroup memory. A later family that earns its own kernels gets its own file beside this one.
@@ -50,12 +50,9 @@ constant uint sz_overlap_btree_levels_max_metal_k = 8;
 /** The bit every stored key has flipped, so signed compares order them. */
 constant uint sz_overlap_sign_flip_metal_k = 0x80000000u;
 
-/** Prefix hashes one thread keeps, a power of two so the ring index is a mask. */
-constant uint sz_overlap_ring_span_metal_k = 32;
-
-/** Widths one engine may hold, their match counters held per thread, as
- *  @c sz_overlap_gpu_widths_max_k. */
-constant uint sz_overlap_gpu_widths_max_metal_k = 8;
+/** Widths one walk of a segment rolls together, their hashes and match counters held per thread, as
+ *  @c sz_overlap_gpu_widths_per_walk_k. */
+constant uint sz_overlap_gpu_widths_per_walk_metal_k = 8;
 
 /** Bytes of a candidate one thread scores; the windows ending inside it are its own. */
 constant uint sz_overlap_segment_bytes_metal_k = 128;
@@ -229,8 +226,12 @@ inline ulong sz_overlap_owner_metal_(device uint const *offsets, ulong candidate
  *      the candidate's counters.
  *
  *  The windows ending inside the segment are its own. Hashing restarts up to the widest width
- *  before it, since a window needs the prefix at its start, so every window is counted by exactly
- *  one thread, from the same residues serial computes.
+ *  before it, since a window needs all of its bytes, so every window is counted by exactly one
+ *  thread, from the same residues serial computes.
+ *
+ *  Each width rolls its own hash a byte at a time, `H' = H * 256 + in - out * 256^w`, the byte
+ *  leaving the window read again from the text, so no width is too wide for a thread to hold. An
+ *  engine with more widths than one walk rolls walks the segment once per group of them.
  */
 template <typename nodes_pointer_>
 inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch, sz_strings_tape_metal_t tape,
@@ -246,44 +247,49 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
     ulong const segment_end = min(text_length, segment_start + sz_overlap_segment_bytes_metal_k);
     ulong const origin = segment_start + 1 >= arguments.widest_width ? segment_start + 1 - arguments.widest_width : 0;
 
-    // Widths and their powers stay in registers for the whole segment; each power is lifted once
-    // into Montgomery form, 256^width × R mod p, so every window's product comes back plain.
-    uint matches[sz_overlap_gpu_widths_max_metal_k], window_widths[sz_overlap_gpu_widths_max_metal_k];
-    uint lifted_powers[sz_overlap_gpu_widths_max_metal_k];
-    for (ulong index = 0; index != arguments.widths_count; ++index) {
-        matches[index] = 0, window_widths[index] = widths[index];
-        lifted_powers[index] = sz_overlap_montgomery_metal_(powers[index], sz_overlap_montgomery_square_metal_k);
-    }
-
-    // `ring[k & mask]` is the prefix hash from `origin` to `k`, so a window ending at `k` reads its
-    // start at `(k - width) & mask`; the window's residue is the same whichever origin it rests on.
-    ulong const mask = sz_overlap_ring_span_metal_k - 1;
-    uint ring[sz_overlap_ring_span_metal_k];
-    ring[origin & mask] = 0;
-    uint prior = 0;
-    for (ulong position = origin; position != segment_end; ++position) {
-        // Under p + 256, which still fits 32 bits, so one subtraction reduces it.
-        prior = sz_overlap_montgomery_metal_(prior, sz_overlap_byte_shift_metal_k) + text[position];
-        if (prior >= sz_overlap_modulus_metal_k) prior -= sz_overlap_modulus_metal_k;
-        ulong const ending = position + 1;
-        ring[ending & mask] = prior;
-        if (ending <= segment_start) continue;
-        for (ulong index = 0; index != arguments.widths_count; ++index) {
-            uint const width = window_widths[index];
-            if (!width || width > ending) continue;
-            uint const start = ring[(ending - width) & mask];
-            uint const shifted = sz_overlap_montgomery_metal_(start, lifted_powers[index]);
-            // Wrapping arithmetic is exact here: the true residue is under p, below 2³².
-            uint const residue = prior - shifted + (prior < shifted ? sz_overlap_modulus_metal_k : 0u);
-            if (sz_overlap_filter_holds_metal_(filter, residue))
-                matches[index] += sz_overlap_probe_metal_(nodes, levels, level_bases, residue);
-        }
-    }
-
     device atomic_uint *counts = sz_reach_metal_<atomic_uint>(scratch, arguments.scratch_host, arguments.counts) +
                                  (query * arguments.candidates_count + candidate) * arguments.widths_count;
-    for (ulong index = 0; index != arguments.widths_count; ++index)
-        if (matches[index]) atomic_fetch_add_explicit(&counts[index], matches[index], memory_order_relaxed);
+
+    for (ulong first_width = 0; first_width < arguments.widths_count;
+         first_width += sz_overlap_gpu_widths_per_walk_metal_k) {
+        ulong const group = min(arguments.widths_count - first_width, (ulong)sz_overlap_gpu_widths_per_walk_metal_k);
+
+        // Widths and their powers stay in registers for the whole walk; each power is lifted once
+        // into Montgomery form, 256^width × R mod p, so its product with a byte comes back plain.
+        uint hashes[sz_overlap_gpu_widths_per_walk_metal_k], matches[sz_overlap_gpu_widths_per_walk_metal_k];
+        uint window_widths[sz_overlap_gpu_widths_per_walk_metal_k];
+        uint lifted_powers[sz_overlap_gpu_widths_per_walk_metal_k];
+        for (ulong index = 0; index != group; ++index) {
+            hashes[index] = 0, matches[index] = 0, window_widths[index] = widths[first_width + index];
+            lifted_powers[index] = sz_overlap_montgomery_metal_(powers[first_width + index],
+                                                                sz_overlap_montgomery_square_metal_k);
+        }
+
+        // Bytes before `origin` count as zeros, so a window not yet full holds its own bytes' hash.
+        for (ulong position = origin; position != segment_end; ++position) {
+            ulong const ending = position + 1;
+            uint const incoming = text[position];
+            for (ulong index = 0; index != group; ++index) {
+                uint const width = window_widths[index];
+                if (!width) continue;
+                uint const outgoing = ending - origin > width ? text[position - width] : 0u;
+                // Under p + 256, which still fits 32 bits.
+                uint const shifted = sz_overlap_montgomery_metal_(hashes[index], sz_overlap_byte_shift_metal_k) +
+                                     incoming;
+                uint const leaving = sz_overlap_montgomery_metal_(outgoing, lifted_powers[index]);
+                // Wrapping is exact here: the true difference is under p + 256, below 2³².
+                uint residue = shifted - leaving + (shifted < leaving ? sz_overlap_modulus_metal_k : 0u);
+                if (residue >= sz_overlap_modulus_metal_k) residue -= sz_overlap_modulus_metal_k;
+                hashes[index] = residue;
+                if (ending <= segment_start || width > ending) continue;
+                if (sz_overlap_filter_holds_metal_(filter, residue))
+                    matches[index] += sz_overlap_probe_metal_(nodes, levels, level_bases, residue);
+            }
+        }
+        for (ulong index = 0; index != group; ++index)
+            if (matches[index])
+                atomic_fetch_add_explicit(&counts[first_width + index], matches[index], memory_order_relaxed);
+    }
 }
 
 /** Every candidate's first segment, and the total after the last, as one threadgroup's scan. */

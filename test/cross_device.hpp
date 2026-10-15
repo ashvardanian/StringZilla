@@ -657,7 +657,7 @@ struct overlap_device_corpus_t {
         randomize_string(generator, arena);
         for (std::size_t at = 0; at < total;) {
             std::string const &query = queries[generator() % queries.size()];
-            std::size_t const span = std::min({(std::size_t)(1 + generator() % 48), query.size(), total - at});
+            std::size_t const span = std::min({(std::size_t)(1 + generator() % 128), query.size(), total - at});
             std::size_t const from = generator() % (query.size() - span + 1);
             std::copy(query.begin() + (std::ptrdiff_t)from, query.begin() + (std::ptrdiff_t)(from + span),
                       arena.begin() + (std::ptrdiff_t)at);
@@ -742,9 +742,10 @@ inline void check_overlap_device_equivalence_(std::mt19937 &generator, auto cons
             }
 }
 
-/** Skewed batches against serial, at the narrowest window and at the widest the device takes. */
+/** Skewed batches against serial, at narrow windows and at windows past 32 bytes, which most of the
+ *  lone-long batch's candidates are too short to hold. */
 inline void check_overlap_device_skewed_(std::mt19937 &generator, auto const &backend) {
-    std::array<sz_size_t, 3> const widths {3, 8, sz_overlap_gpu_widest_window_k};
+    std::array<sz_size_t, 4> const widths {3, 8, 33, 100};
     for (device_skew_t const skew : {device_skew_t::lone_long_k, device_skew_t::log_uniform_k}) {
         std::vector<std::size_t> const lengths = device_skewed_lengths_(generator, skew);
         overlap_device_corpus_t corpus(backend.runtime, generator, 2, lengths, 777, widths.size());
@@ -816,40 +817,40 @@ inline void check_overlap_device_memory_safety_(std::mt19937 &generator, auto co
     sz_overlap_engine_free(&engine, backend.runtime.stream);
 }
 
-/** The widest window a device engine takes, and the refusals one step past either bound. */
+/** Known answers past 32 bytes, at a text's own length and one past it, over more widths than one
+ *  walk rolls together: every window of a text and of its first half is among the text's own. */
 inline void check_overlap_device_width_safety_(std::mt19937 &generator, auto const &backend) {
-    std::array<sz_size_t, 1> const widest {sz_overlap_gpu_widest_window_k};
-    std::array<sz_size_t, 1> const past {sz_overlap_gpu_widest_window_k + 1};
-    std::array<sz_size_t, sz_overlap_gpu_widths_max_k + 1> too_many {};
-    for (std::size_t index = 0; index != too_many.size(); ++index) too_many[index] = index + 1;
+    std::array<sz_size_t, sz_overlap_gpu_widths_per_walk_k * 2 + 1> const widths {
+        1, 2, 3, 5, 8, 13, 21, 31, 32, 33, 64, 100, 128, 129, 200, 256, 257};
 
-    // The one candidate is the query's own bytes in unified storage, so the text scores itself.
-    overlap_device_corpus_t corpus(backend.runtime, generator, 1, 1, 256, widest.size());
+    // Both candidates are the query's own bytes in unified storage, whole and halved.
+    overlap_device_corpus_t corpus(backend.runtime, generator, 1, 2, 256, widths.size());
     sz_strings_view_t const query_strings = corpus.query_strings();
-    corpus.arena.assign(corpus.queries.front().begin(), corpus.queries.front().end());
-    corpus.views[0].start = corpus.arena.data(), corpus.views[0].length = corpus.arena.size();
+    std::string const &query = corpus.queries.front();
+    std::string const candidates[2] = {query, query.substr(0, query.size() / 2)};
+    corpus.arena.assign(query.begin(), query.end());
+    corpus.arena.insert(corpus.arena.end(), candidates[1].begin(), candidates[1].end());
+    corpus.views[0].start = corpus.arena.data(), corpus.views[0].length = query.size();
+    corpus.views[1].start = corpus.arena.data() + query.size(), corpus.views[1].length = candidates[1].size();
     unified_alloc<char> const tape_allocator(backend.runtime.unified, backend.runtime.stream);
     auto const [itself, gather_status] = strings_view_t(strings_from_(corpus.views)).gather(tape_allocator);
     verify(gather_status == status_t::success_k);
 
     sz_overlap_engine_t engine {};
-    if (sz_overlap_engine_init(&engine, &query_strings, past.data(), past.size(), 0, backend.runtime.capabilities,
-                               STRINGZILLA_NULL, backend.runtime.stream) != sz_unexpected_dimensions_k)
-        fail_backend_(backend.name, "a width past the ring was not refused");
-    if (sz_overlap_engine_init(&engine, &query_strings, too_many.data(), too_many.size(), 0,
-                               backend.runtime.capabilities, STRINGZILLA_NULL,
-                               backend.runtime.stream) != sz_unexpected_dimensions_k)
-        fail_backend_(backend.name, "more widths than the registers hold were not refused");
-    if (sz_overlap_engine_init(&engine, &query_strings, widest.data(), widest.size(), 0, backend.runtime.capabilities,
+    if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, backend.runtime.capabilities,
                                STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
-        fail_backend_(backend.name, "the widest window the ring holds was refused");
+        fail_backend_(backend.name, "a device engine refused widths the host takes");
     sz_strings_view_t const itself_strings = itself.view().raw;
     if (backend.overlap_scores(&engine, &itself_strings, corpus.scores.data(), corpus.query_stride(),
                                corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
     sz_overlap_engine_free(&engine, backend.runtime.stream);
-    if (corpus.scores[0] != 1.0f) fail_backend_(backend.name, "a text does not fully overlap itself");
+    for (std::size_t candidate = 0; candidate != 2; ++candidate)
+        for (std::size_t index = 0; index != widths.size(); ++index)
+            if (corpus.scores[candidate * widths.size() + index] !=
+                overlap_reference_score_(query, candidates[candidate], widths[index]))
+                fail_backend_(backend.name, "a text and its half do not overlap it as the oracle says");
 }
 
 /** Two streams score one prepared engine and produce the same answers after synchronization. */

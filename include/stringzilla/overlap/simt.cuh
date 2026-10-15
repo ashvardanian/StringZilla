@@ -134,8 +134,9 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_btree_probe_simt_(sz_overlap_btree_simt_
  *  before its own start and every window is counted by the one chunk it ends in. Each width rolls
  *  its own hash a byte at a time, `H' = H * 256 + in - out * 256^w`, the byte leaving the window
  *  read again from the text rather than kept: the hashes stay in registers, where a ring of prefix
- *  hashes indexed by width would take a stack frame, and each byte costs one reduction per width
- *  instead of three. The residues are the serial tier's, as both are exact modulo the same prime.
+ *  hashes indexed by width would take a stack frame and bound the width, and each byte costs one
+ *  reduction per width instead of three. The residues are the serial tier's, as both are exact
+ *  modulo the same prime.
  */
 STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine, sz_overlap_btree_simt_t const *btree,
                                                sz_strings_view_t const *candidates, sz_size_t candidate,
@@ -148,16 +149,16 @@ STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine
     sz_size_t const warm_bytes = chunk_begin - walk_begin;
     sz_u8_t const *const walk = (sz_u8_t const *)text + walk_begin;
 
-    // Unrolled to the ceiling and guarded, so the hashes and counters stay in registers.
-    sz_u32_t hashes[sz_overlap_gpu_widths_max_k], matches[sz_overlap_gpu_widths_max_k];
+    // Unrolled to one walk's widths and guarded, so the hashes and counters stay in registers.
+    sz_u32_t hashes[sz_overlap_gpu_widths_per_walk_k], matches[sz_overlap_gpu_widths_per_walk_k];
 #pragma unroll
-    for (sz_size_t index = 0; index != sz_overlap_gpu_widths_max_k; ++index) hashes[index] = 0, matches[index] = 0;
+    for (sz_size_t index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) hashes[index] = 0, matches[index] = 0;
 
     // Bytes before the walk count as zeros, so a window not yet full holds its own bytes' hash.
     for (sz_size_t ending = 1; ending <= walk_bytes; ++ending) {
         sz_u64_t const incoming = __ldg(walk + ending - 1);
 #pragma unroll
-        for (sz_size_t index = 0; index != sz_overlap_gpu_widths_max_k; ++index) {
+        for (sz_size_t index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index) {
             if (index >= widths_count) break;
             sz_size_t const width = engine->widths[index];
             if (!width) continue;
@@ -170,7 +171,7 @@ STRINGZILLA_DEVICE void sz_overlap_chunk_simt_(sz_overlap_engine_t const *engine
         }
     }
 #pragma unroll
-    for (sz_size_t index = 0; index != sz_overlap_gpu_widths_max_k; ++index)
+    for (sz_size_t index = 0; index != sz_overlap_gpu_widths_per_walk_k; ++index)
         if (index < widths_count && matches[index]) atomicAdd(counts + index, matches[index]);
 }
 
@@ -250,6 +251,10 @@ STRINGZILLA_DEVICE sz_size_t sz_overlap_tile_chunks_simt_(sz_strings_view_t cons
  *
  *  No thread leaves the query loop early, because the barriers are collective: the staging, the
  *  counts zeroed before the chunks add to them, and the scores read off them after.
+ *
+ *  The @p engine holds at most @ref sz_overlap_gpu_widths_per_walk_k widths, and @p scores starts
+ *  at its first one: the host launches once per group of an engine's widths, each over its own
+ *  slice of every score row, so the walk keeps the registers of one group alone.
  *
  *  Dynamic shared memory holds the staged tree, then each candidate's count per width, then each
  *  candidate's first chunk, then each chunk's candidate as a 16-bit index: a tile cuts into at most

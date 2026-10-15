@@ -66,10 +66,10 @@ extern "C" {
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, also naming the device:
  *      a @c cudaStream_t, a @c hipStream_t, or an @c id<MTLCommandQueue>; null for the default.
  *  @return @c sz_success_k; @c sz_missing_kernel_k when no capability of the mask has an init;
- *      @c sz_unexpected_dimensions_k for zero widths, or on a device a width its ring cannot hold;
- *      @c sz_bad_alloc_k when the forest's block cannot be taken; or on a device
- *      @c sz_device_memory_mismatch_k for memory or a @p stream it cannot use, @c sz_missing_gpu_k
- *      when it doesn't answer, or @c sz_device_code_mismatch_k when a kernel fails to build.
+ *      @c sz_unexpected_dimensions_k for zero widths; @c sz_bad_alloc_k when the forest's block
+ *      cannot be taken; or on a device @c sz_device_memory_mismatch_k for memory or a @p stream it
+ *      cannot use, @c sz_missing_gpu_k when it doesn't answer, or @c sz_device_code_mismatch_k when
+ *      a kernel fails to build.
  *  @note May join @p stream; no scoring verb ever does.
  */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,

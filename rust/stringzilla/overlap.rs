@@ -64,8 +64,8 @@ impl OverlapEngine {
     /// capability once, on the device `stream` names, which it may join.
     ///
     /// `window_widths` are n-gram widths in bytes and need not form a doubling chain; a width past
-    /// a text scores zero for every pair it spans. Zero widths are refused, and so is a width the
-    /// device backend's per-thread ring cannot hold, here rather than at the first round.
+    /// a text scores zero for every pair it spans. An empty list of widths is refused here rather
+    /// than at the first round.
     /// `candidates_budget` bounds one round for a backend that keeps state per candidate, zero
     /// asking for its default, and is ignored by one that keeps none.
     pub fn new<Query>(
