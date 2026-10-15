@@ -18,13 +18,15 @@
  *  listed, and a second launch walks the listed ones on fewer threads with stacks as deep as the
  *  most any of them needs, so every document is walked exactly however deep it nests.
  *
- *  A JSON document past @c sz_subdocuments_large_bytes_simt_k under paths without filters is listed
- *  too, and every listed one is walked over 256-byte chunks by the whole device in one pipeline,
- *  each chunk finding its document by binary search over a scan of their lengths. Each chunk's
- *  effect on the escape, quote and scalar carries composes, a document's first chunk resetting
- *  them, so one scan settles where every chunk starts; scans of opens and of opens minus closes
- *  number the containers and give their depths, each document's counted from its own first chunk. A
- *  document no walk accepts by its depths or quotes is dropped before its tokens are numbered. Each
+ *  Under paths without filters, once any JSON document of a batch passes both
+ *  @c sz_subdocuments_large_bytes_simt_k and the share of the batch's bytes
+ *  @c sz_subdocuments_large_walkers_simt_k walkers take, every one past that share is listed too,
+ *  and every listed one is walked over 256-byte chunks by the whole device in one pipeline, each
+ *  chunk finding its document by binary search over a scan of their lengths. Each chunk's effect on
+ *  the escape, quote and scalar carries composes, a document's first chunk resetting them, so one
+ *  scan settles where every chunk starts; scans of opens and of opens minus closes number the
+ *  containers and give their depths, each document's counted from its own first chunk. A document
+ *  no walk accepts by its depths or quotes is dropped before its tokens are numbered. Each
  *  container's parent is the last shallower one before it, found over a pyramid of depth minima,
  *  which reaches its document's root before any earlier document, and element positions are a scan
  *  of values from which each closed container takes its own back. Entering a child maps a live set
@@ -68,13 +70,20 @@ enum { sz_subdocuments_deep_frames_simt_k = 1 << 16 };
 /** Bytes the second launch's stacks may grow to, so the listed documents walk side by side. */
 enum { sz_subdocuments_deep_bytes_simt_k = 1 << 30 };
 
+/** Matches each walker of a JSON find stages while its first launch counts, which storing then
+ *  moves into place rather than walking those documents again. */
+enum { sz_subdocuments_staged_matches_simt_k = 128 };
+
 /** Words of a frame ahead of its live set, laid out as the serial @c sz_subdocuments_frame_t. */
 enum { sz_subdocuments_frame_header_words_simt_k = sizeof(sz_subdocuments_frame_t) / sizeof(sz_u64_t) };
 
-/** Bytes past which a JSON document under paths without filters walks over chunks rather than
- *  on one thread: one thread's walk of a mebibyte already outlasts the hundred or so launches
- *  of the cooperative one. */
-enum { sz_subdocuments_large_bytes_simt_k = 1 << 20 };
+/** Bytes a JSON document under paths without filters must pass for its batch to take the
+ *  cooperative walk at all, as a warp may walk a shorter one sooner than its launches end. */
+enum { sz_subdocuments_large_bytes_simt_k = 1 << 17 };
+
+/** Walkers whose share of a batch's bytes a document must pass to walk over chunks once the batch
+ *  takes the cooperative walk, as its one warp would still be walking after the others end. */
+enum { sz_subdocuments_large_walkers_simt_k = 4 };
 
 /** Bytes of each chunk a large document is cut into, four blocks of 64, which
  *  bounds every thread's work. */
@@ -137,15 +146,19 @@ typedef struct sz_subdocuments_header_simt_t {
 
     /** The deepest any byte of them nests, which bounds the rounds of pointer jumping. */
     sz_u64_t deepest;
+
+    /** Bytes past which a document walks over chunks, none until the routing launch lowers it. */
+    sz_u64_t large_bytes;
 } sz_subdocuments_header_simt_t;
 
 /** What one launch reads and writes, every pointer one the device addresses. */
 typedef struct sz_subdocuments_round_simt_t {
     sz_subdocuments_header_simt_t *header;
-    sz_u64_t *stacks, *keys, *deep, *large;
+    sz_u64_t *stacks, *keys, *deep, *large, *staged;
     sz_size_t *counted, *counts, *matches_offsets;
-    sz_match_t *matches;
+    sz_match_t *matches, *staging;
     sz_size_t counts_stride, matches_capacity, items, threads, frames, frame_words, key_bytes, large_bytes;
+    sz_size_t large_shares, staging_capacity;
     sz_u32_t listed, storing;
 } sz_subdocuments_round_simt_t;
 
@@ -1548,16 +1561,17 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_frames_simt_(sz_subdocuments_engine
 }
 
 /** Lists @p document of @p length bytes for the cooperative walk, emptying its count, when it is
- *  past @c large_bytes or needs more than @c sz_subdocuments_deep_frames_simt_k of its @p frames,
+ *  past @p large_bytes or needs more than @c sz_subdocuments_deep_frames_simt_k of its @p frames,
  *  and the listed chunks stay within @c sz_subdocuments_large_chunks_simt_k; otherwise for the
  *  second launch, measuring its frames when @p frames is zero. */
 STRINGZILLA_DEVICE void sz_subdocuments_list_simt_(sz_subdocuments_engine_t const *engine,
                                                    sz_subdocuments_round_simt_t const *round, sz_u8_t const *text,
-                                                   sz_size_t document, sz_size_t length, sz_size_t frames) {
+                                                   sz_size_t document, sz_size_t length, sz_size_t frames,
+                                                   sz_size_t large_bytes) {
     unsigned long long const chunks = sz_size_divide_round_up(length, sz_subdocuments_chunk_bytes_simt_k);
     unsigned long long *const listed_chunks = (unsigned long long *)&round->header->large_chunks;
     if (round->large_bytes != STRINGZILLA_SIZE_MAX && length <= 0xFFFFFFFFull &&
-        (length > round->large_bytes || frames > sz_subdocuments_deep_frames_simt_k)) {
+        (length > large_bytes || frames > sz_subdocuments_deep_frames_simt_k)) {
         if (atomicAdd(listed_chunks, chunks) + chunks <= sz_subdocuments_large_chunks_simt_k) {
             sz_size_t const slot = (sz_size_t)atomicAdd((unsigned long long *)&round->header->large_count, 1ull);
             if (round->counted) round->counted[document] = 0;
@@ -1581,40 +1595,58 @@ STRINGZILLA_DEVICE void sz_subdocuments_list_simt_(sz_subdocuments_engine_t cons
  *      each a thread or a warp: counting, or storing at the offsets the counts scanned into.
  *
  *  A counting walk writes each count, and lists a document needing more frames than the walker's
- *  stack holds for the second launch, measuring how many; only the @p leader lane lists or refuses
- *  one, and every lane of a warp writes the same values. A storing walk writes each document's
- *  boundary and, when any of its matches fits, the matches; one cut short by its stack is stored
- *  again by the second launch. A document past @c large_bytes, or under the same paths one needing
- *  a stack past @c sz_subdocuments_deep_frames_simt_k frames, is left to the cooperative walk:
- *  counting lists it and empties its count, and storing, which runs out of frames early, leaves its
- *  matches to be written over. One past @c large_bytes the cooperative walk has no room for goes to
- *  the second launch, which alone stores it.
+ *  stack holds for the second launch, measuring how many; only lane zero of the @p lanes walking
+ *  one document lists or refuses it, and every lane writes the same values. A storing walk writes
+ *  each document's boundary and, when any of its matches fits, the matches; one cut short by its
+ *  stack is stored again by the second launch. With @c staging_capacity set, the first launch's
+ *  counting walk also writes each document's matches into the walker's own staging slots while they
+ *  fit, marking where in @c staged, and its storing walk moves those instead of walking. A document
+ *  past the header's @c large_bytes, or under the same paths one needing a stack past
+ *  @c sz_subdocuments_deep_frames_simt_k frames, is left to the cooperative walk: counting lists it
+ *  and empties its count, and storing, which runs out of frames early, leaves its matches to be
+ *  written over. A large one the cooperative walk has no room for goes to the second launch, which
+ *  alone stores it.
  */
 STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_engine_t const *engine,
                                                              sz_strings_view_t const *documents,
                                                              sz_subdocuments_round_simt_t const *round,
-                                                             sz_size_t walker, sz_bool_t leader,
+                                                             sz_size_t walker, sz_size_t lane, sz_size_t lanes,
                                                              sz_subdocuments_load_simt_t load) {
     sz_u64_t *const stack = round->stacks + walker * round->frames * round->frame_words;
     sz_u8_t *const key = (sz_u8_t *)round->keys + walker * round->key_bytes;
+    sz_size_t const large_bytes = (sz_size_t)round->header->large_bytes;
+    sz_bool_t const leader = (sz_bool_t)(lane == 0), staging = (sz_bool_t)(round->staging_capacity && !round->listed);
+    sz_u32_t staged = 0;
     // Only the walkers the stacks were sized for walk, whatever the grid rounds up to.
     for (sz_size_t item = walker; walker < round->threads && item < round->items; item += round->threads) {
         sz_size_t const document = round->listed ? (sz_size_t)round->deep[item] : item;
         sz_u8_t const *const text = (sz_u8_t const *)sz_strings_start_simt_(*documents, document);
         sz_size_t const length = sz_strings_length_simt_(*documents, document);
-        sz_match_t *const matches = round->storing ? round->matches : (sz_match_t *)STRINGZILLA_NULL;
-        sz_size_t const matches_capacity = round->storing ? round->matches_capacity : 0;
+        sz_match_t *const matches = round->storing ? round->matches
+                                    : staging      ? round->staging + walker * round->staging_capacity + staged
+                                                   : (sz_match_t *)STRINGZILLA_NULL;
+        sz_size_t const matches_capacity = round->storing ? round->matches_capacity
+                                           : staging      ? round->staging_capacity - staged
+                                                          : 0;
         sz_size_t emitted = round->storing ? round->counted[document] : 0;
-        sz_bool_t const large = (sz_bool_t)(!round->listed && length > round->large_bytes && length <= 0xFFFFFFFFull);
+        sz_bool_t const large = (sz_bool_t)(!round->listed && length > large_bytes && length <= 0xFFFFFFFFull);
         sz_status_t status;
         if (round->storing) {
             round->matches_offsets[document] = emitted;
             if (document + 1 == documents->count)
                 round->matches_offsets[documents->count] = round->counted[documents->count];
             if (emitted >= round->matches_capacity || large) continue;
+            if (staging && round->staged[document] != STRINGZILLA_SIZE_MAX) {
+                sz_match_t const *const source = round->staging + round->staged[document];
+                sz_size_t const kept = sz_min_of_two(round->counted[document + 1], round->matches_capacity) - emitted;
+                for (sz_size_t index = lane; index < kept; index += lanes)
+                    round->matches[emitted + index] = source[index];
+                continue;
+            }
         }
         else if (large) {
-            if (leader) sz_subdocuments_list_simt_(engine, round, text, document, length, 0);
+            if (staging) round->staged[document] = STRINGZILLA_SIZE_MAX;
+            if (leader) sz_subdocuments_list_simt_(engine, round, text, document, length, 0, large_bytes);
             continue;
         }
         status = engine->format == sz_subdocuments_xml_k
@@ -1625,6 +1657,11 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
                                                   round->frame_words, key, round->key_bytes, matches, matches_capacity,
                                                   &emitted, load);
         if (round->storing) continue;
+        if (staging) {
+            sz_bool_t const kept = (sz_bool_t)(status == sz_success_k && emitted <= round->staging_capacity - staged);
+            round->staged[document] = kept ? walker * round->staging_capacity + staged : STRINGZILLA_SIZE_MAX;
+            staged += kept ? (sz_u32_t)emitted : 0u;
+        }
         if (status == sz_success_k) {
             if (round->counted) round->counted[document] = emitted;
             else round->counts[document * round->counts_stride] = emitted;
@@ -1634,7 +1671,22 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
             atomicMin((unsigned long long *)&round->header->first_malformed, (unsigned long long)document);
         else if (!round->listed)
             sz_subdocuments_list_simt_(engine, round, text, document, length,
-                                       sz_subdocuments_frames_simt_(engine, text, length));
+                                       sz_subdocuments_frames_simt_(engine, text, length), large_bytes);
+    }
+}
+
+/** Lowers the header's @c large_bytes to one of @c large_shares of the batch's bytes once any
+ *  document passes both that share and the round's @c large_bytes, so the documents past their
+ *  share walk over chunks only in a batch that takes the cooperative walk anyway. */
+static __global__ void sz_subdocuments_route_simt_kernel_(sz_strings_view_t documents,
+                                                          sz_subdocuments_round_simt_t round) {
+    sz_size_t const batch = (sz_size_t)(sz_strings_start_simt_(documents, documents.count) -
+                                        sz_strings_start_simt_(documents, 0));
+    sz_size_t const share = batch / round.large_shares, floor = sz_max_of_two(round.large_bytes, share);
+    for (sz_size_t document = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; document < documents.count;
+         document += (sz_size_t)gridDim.x * blockDim.x) {
+        sz_size_t const length = sz_strings_length_simt_(documents, document);
+        if (length > floor && length <= 0xFFFFFFFFull) round.header->large_bytes = share;
     }
 }
 
@@ -1642,7 +1694,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
 static __global__ void sz_subdocuments_walk_simt_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
                                                          sz_subdocuments_round_simt_t round) {
     sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x,
-                                         sz_true_k, sz_subdocuments_load_simt_);
+                                         0, 1, sz_subdocuments_load_simt_);
 }
 
 /** Scans one ticket's own tile of @p values in place, seeded by the totals the tiles before

@@ -54,9 +54,13 @@ enum { sz_subdocuments_frames_metal_k = 16 };
 /** Bytes the second walk's stacks may grow to, so the listed documents walk side by side. */
 enum { sz_subdocuments_deep_bytes_metal_k = 1 << 30 };
 
-/** Bytes past which a JSON document under paths without filters walks over chunks rather
- *  than on one thread. */
-enum { sz_subdocuments_large_bytes_metal_k = 1 << 20 };
+/** Bytes a JSON document under paths without filters must pass for its batch to take the
+ *  cooperative walk at all, as a thread may walk a shorter one sooner than its dispatches end. */
+enum { sz_subdocuments_large_bytes_metal_k = 1 << 17 };
+
+/** Threads whose share of a batch's bytes a document must pass to walk over chunks once the batch
+ *  takes the cooperative walk, as its one thread would still be walking after the others end. */
+enum { sz_subdocuments_large_walkers_metal_k = 4 };
 
 /** Entries of one level of depth minima each entry of the level above summarizes. */
 enum { sz_subdocuments_minima_fanout_metal_k = 32 };
@@ -479,6 +483,21 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_metal_(sz_subdocuments_engi
     arguments[0].large_bytes = engine->format == sz_subdocuments_json_k && !engine->filters_count
                                    ? (sz_u64_t)sz_subdocuments_large_bytes_metal_k
                                    : (sz_u64_t)STRINGZILLA_SIZE_MAX;
+    // Once one passes the floor too, all documents past their share walk over chunks, else none.
+    if (arguments[0].large_bytes != (sz_u64_t)STRINGZILLA_SIZE_MAX) {
+        sz_size_t const batch = sz_strings_view_offset_(documents, count) - sz_strings_view_offset_(documents, 0);
+        sz_size_t const share = batch / (sz_subdocuments_threads_metal_k / sz_subdocuments_large_walkers_metal_k);
+        sz_size_t const floor = sz_max_of_two((sz_size_t)arguments[0].large_bytes, share);
+        sz_size_t longest = 0;
+        sz_bool_t routed = sz_false_k;
+        for (sz_size_t index = 0; index != count; ++index) {
+            sz_size_t const length = sz_strings_view_offset_(documents, index + 1) -
+                                     sz_strings_view_offset_(documents, index);
+            longest = sz_max_of_two(longest, length);
+            if (length > floor && length <= 0xFFFFFFFFull) routed = sz_true_k;
+        }
+        arguments[0].large_bytes = routed ? share : longest;
+    }
     arguments[0].documents_count = count, arguments[0].documents_layout = (sz_u64_t)documents->layout;
     arguments[0].counts_stride = counts_stride, arguments[0].matches_capacity = matches_capacity;
     arguments[0].items = count, arguments[0].threads = threads, arguments[0].frames = sz_subdocuments_frames_metal_k;

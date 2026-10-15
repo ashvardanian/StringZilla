@@ -5,12 +5,14 @@
  *  @brief CUDA host side of path queries: the warp walk, the round block the walks run out of, the
  *      launches, and the @c _cuda exports, over the kernels of `subdocuments/simt.cuh`.
  *
- *  Both verbs read back once their counting walks end, which joins the stream: a malformed document
- *  fails the call as it does on the CPU, and the documents needing more frames than the first
- *  launch's stacks hold are counted again before anything is stored. The scan and the storing walks
- *  then run on the stream. The large documents the counting walks list then walk over chunks in one
- *  pipeline past both launches' stacks, reading back once all their chunks are counted; storing
- *  reruns only its last walk over the arrays it keeps.
+ *  A routing launch settles which documents of the batch are large. Both verbs read back once their
+ *  counting walks end, which joins the stream: a malformed document fails the call as it does on
+ *  the CPU, and the documents needing more frames than the first launch's stacks hold are counted
+ *  again before anything is stored. The scan and the storing walks then run on the stream; a find
+ *  stages each warp's matches while counting, so its first storing launch moves them and walks
+ *  again only the documents whose matches outgrew the staging. The large documents the counting
+ *  walks list then walk over chunks in one pipeline past both launches' stacks, reading back once
+ *  all their chunks are counted; storing reruns only its last walk over the arrays it keeps.
  *
  *  @sa include/stringzilla/subdocuments/simt.cuh
  *  @sa include/stringzilla/subdocuments/rocm.cuh
@@ -40,7 +42,20 @@ static __global__ void sz_subdocuments_warp_walk_cuda_kernel_(sz_subdocuments_en
                                                               sz_strings_view_t documents,
                                                               sz_subdocuments_round_simt_t round) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, (sz_bool_t)((thread & 31) == 0),
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32,
+                                         sz_subdocuments_load_warp_cuda_);
+}
+
+/** Blocks of the dense warp walk each multiprocessor keeps resident: once every walker has a
+ *  document, more warps hiding the serial walk's latency outweigh the registers they give up. */
+enum { sz_subdocuments_walk_blocks_cuda_k = 3 };
+
+/** @ref sz_subdocuments_warp_walk_cuda_kernel_ for launches of every walker the device holds. */
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k, sz_subdocuments_walk_blocks_cuda_k)
+    sz_subdocuments_warp_walk_dense_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                                 sz_subdocuments_round_simt_t round) {
+    sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32,
                                          sz_subdocuments_load_warp_cuda_);
 }
 
@@ -63,22 +78,25 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_reserve_cuda_(sz_subdocuments_eng
     return sz_success_k;
 }
 
-/** Points @p round into the round block: the header, the counts, the list of deep documents and
- *  the list of large ones among @p count, then the key buffers of the threads, and their stacks
- *  from @p stacks on. */
+/** Points @p round into the round block: the header, the counts, the list of deep documents, the
+ *  list of large ones and where each one's matches are staged among @p count, then the key buffers
+ *  of the threads, their staged matches from @p staging on, and their stacks from @p stacks on. */
 STRINGZILLA_INLINE void sz_subdocuments_round_cuda_(sz_subdocuments_engine_t const *engine, sz_size_t count,
-                                                    sz_size_t stacks, sz_subdocuments_round_simt_t *round) {
+                                                    sz_size_t staging, sz_size_t stacks,
+                                                    sz_subdocuments_round_simt_t *round) {
     sz_ptr_t const block = (sz_ptr_t)engine->scratch;
     sz_size_t const counted = sizeof(sz_subdocuments_header_simt_t), deep = counted + (count + 1) * sizeof(sz_size_t);
     sz_size_t const large = deep + count * sizeof(sz_u64_t);
     round->header = (sz_subdocuments_header_simt_t *)block;
     round->counted = round->counts ? (sz_size_t *)STRINGZILLA_NULL : (sz_size_t *)(block + counted);
     round->deep = (sz_u64_t *)(block + deep), round->large = (sz_u64_t *)(block + large);
-    round->keys = (sz_u64_t *)(block + large + 2 * count * sizeof(sz_u64_t));
-    round->stacks = (sz_u64_t *)(block + stacks);
+    round->staged = (sz_u64_t *)(block + large + 2 * count * sizeof(sz_u64_t));
+    round->keys = (sz_u64_t *)(block + large + 3 * count * sizeof(sz_u64_t));
+    round->staging = (sz_match_t *)(block + staging), round->stacks = (sz_u64_t *)(block + stacks);
 }
 
-/** Launches one walk over @p round 's items, a warp each for JSON and a thread each for XML. */
+/** Launches one walk over @p round 's items, a warp each for JSON and a thread each for XML; the
+ *  dense warp walk once there are as many walkers as the device holds warps. */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_cuda_(sz_subdocuments_engine_t const *engine,
                                                             sz_strings_view_t const *documents,
                                                             sz_subdocuments_round_simt_t const *round,
@@ -94,9 +112,29 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_launch_cuda_(sz_subdocuments_engi
                                                sz_subdocuments_threads_per_block_simt_k);
     grid.y = 1, grid.z = 1;
     block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
-    return sz_launch_cuda_(
-        warps ? (void const *)sz_subdocuments_warp_walk_cuda_kernel_ : (void const *)sz_subdocuments_walk_simt_kernel_,
-        grid, block, arguments, 0, stream);
+    sz_bool_t const dense = (sz_bool_t)(round->threads * 32 >= sz_device_multiprocessors_cuda_() *
+                                                                   sz_device_threads_per_multiprocessor_cuda_());
+    return sz_launch_cuda_(!warps  ? (void const *)sz_subdocuments_walk_simt_kernel_
+                           : dense ? (void const *)sz_subdocuments_warp_walk_dense_cuda_kernel_
+                                   : (void const *)sz_subdocuments_warp_walk_cuda_kernel_,
+                           grid, block, arguments, 0, stream);
+}
+
+/** Routes @p documents: settles the header's @c large_bytes, which every walk then reads. */
+STRINGZILLA_INLINE sz_status_t sz_subdocuments_route_cuda_(sz_strings_view_t const *documents,
+                                                           sz_subdocuments_round_simt_t const *round,
+                                                           sz_stream_t stream) {
+    sz_strings_view_t launched_documents = *documents;
+    sz_subdocuments_round_simt_t launched_round = *round;
+    void *arguments[2];
+    dim3 grid, block;
+    arguments[0] = &launched_documents, arguments[1] = &launched_round;
+    grid.x = (unsigned)sz_min_of_two(
+        sz_size_divide_round_up(documents->count, sz_subdocuments_threads_per_block_simt_k),
+        (sz_size_t)sz_subdocuments_blocks_cuda_k);
+    grid.y = 1, grid.z = 1;
+    block.x = sz_subdocuments_threads_per_block_simt_k, block.y = 1, block.z = 1;
+    return sz_launch_cuda_((void const *)sz_subdocuments_route_simt_kernel_, grid, block, arguments, 0, stream);
 }
 
 /** Copies the header back to @p header, which joins @p stream. */
@@ -161,7 +199,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_walk_cuda_(sz_subdocuments_
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(sz_subdocuments_engine_t *engine,
                                                            sz_strings_view_t const *documents,
                                                            sz_subdocuments_round_simt_t *round, sz_size_t count,
-                                                           sz_size_t stacks, sz_size_t region,
+                                                           sz_size_t staging, sz_size_t stacks, sz_size_t region,
                                                            sz_subdocuments_header_simt_t *header,
                                                            sz_subdocuments_large_simt_t *large, sz_stream_t stream) {
     sz_size_t const blocks = sz_subdocuments_blocks_cuda_k, threads = blocks * sz_subdocuments_threads_per_block_simt_k;
@@ -178,7 +216,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(sz_subdocuments_engin
     // The caller has just joined the stream, so the block may move.
     sz_status_t status = sz_subdocuments_reserve_cuda_(engine, region + bytes, stream);
     if (status != sz_success_k) return status;
-    sz_subdocuments_round_cuda_(engine, count, stacks, round);
+    sz_subdocuments_round_cuda_(engine, count, staging, stacks, round);
     sz_subdocuments_large_layout_simt_(engine, (sz_ptr_t)engine->scratch + region, listed, chunks, threads,
                                        round->key_bytes, 0, 0, large);
     large->list = round->large, large->bound = (sz_size_t)header->first_malformed;
@@ -220,7 +258,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_large_cuda_(sz_subdocuments_engin
                                                (sz_size_t)tokens, (sz_size_t)containers, large);
     status = sz_subdocuments_reserve_cuda_(engine, region + bytes, stream);
     if (status != sz_success_k) return status;
-    sz_subdocuments_round_cuda_(engine, count, stacks, round);
+    sz_subdocuments_round_cuda_(engine, count, staging, stacks, round);
     sz_subdocuments_large_layout_simt_(engine, (sz_ptr_t)engine->scratch + region, listed, chunks, threads,
                                        round->key_bytes, (sz_size_t)tokens, (sz_size_t)containers, large);
     large->list = round->large, launched_round = *round;
@@ -283,11 +321,16 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(sz_subdocuments_engin
     sz_size_t const count = documents->count, frame_words = sz_subdocuments_frame_words_simt_(engine);
     sz_size_t const frame_bytes = frame_words * sizeof(sz_u64_t), key_bytes = sz_subdocuments_key_bytes_(engine);
     // Walkers, each with its own stack: a warp each in JSON, a thread each in XML.
-    sz_size_t const threads = sz_min_of_two(count, sz_device_multiprocessors_cuda_() *
-                                                       sz_device_threads_per_multiprocessor_cuda_() /
-                                                       (engine->format == sz_subdocuments_json_k ? 32 : 1));
-    sz_size_t const stacks = sizeof(sz_subdocuments_header_simt_t) + (4 * count + 1) * sizeof(sz_u64_t) +
-                             threads * key_bytes;
+    sz_size_t const walkers = sz_device_multiprocessors_cuda_() * sz_device_threads_per_multiprocessor_cuda_() /
+                              (engine->format == sz_subdocuments_json_k ? 32 : 1);
+    sz_size_t const threads = sz_min_of_two(count, walkers);
+    // A find stages each warp's matches while counting, so storing moves them rather than walking.
+    sz_size_t const staging_capacity = !counts && engine->format == sz_subdocuments_json_k
+                                           ? (sz_size_t)sz_subdocuments_staged_matches_simt_k
+                                           : 0;
+    sz_size_t const staging = sizeof(sz_subdocuments_header_simt_t) + (5 * count + 1) * sizeof(sz_u64_t) +
+                              threads * key_bytes;
+    sz_size_t const stacks = staging + threads * staging_capacity * sizeof(sz_match_t);
     sz_size_t const stacks_bytes = threads * sz_subdocuments_frames_simt_k * frame_bytes;
     sz_size_t deep_threads = 0, deep_frames = 0;
     sz_subdocuments_header_simt_t header;
@@ -304,10 +347,14 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(sz_subdocuments_engin
     round.large_bytes = engine->format == sz_subdocuments_json_k && !engine->filters_count
                             ? (sz_size_t)sz_subdocuments_large_bytes_simt_k
                             : STRINGZILLA_SIZE_MAX;
-    sz_subdocuments_round_cuda_(engine, count, stacks, &round);
+    round.large_shares = sz_max_of_two(walkers / sz_subdocuments_large_walkers_simt_k, (sz_size_t)1);
+    round.staging_capacity = staging_capacity;
+    sz_subdocuments_round_cuda_(engine, count, staging, stacks, &round);
     header.first_malformed = count, header.deep_count = 0, header.frames = 0, header.chain = 0;
-    header.large_count = 0, header.large_chunks = 0, header.deepest = 0;
+    header.large_count = 0, header.large_chunks = 0, header.deepest = 0, header.large_bytes = STRINGZILLA_SIZE_MAX;
     status = sz_copy_cuda_(round.header, &header, sizeof(header), stream);
+    if (status == sz_success_k && round.large_bytes != STRINGZILLA_SIZE_MAX)
+        status = sz_subdocuments_route_cuda_(documents, &round, stream);
     if (status == sz_success_k) status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
     if (status == sz_success_k) status = sz_subdocuments_read_cuda_(&round, &header, stream);
 
@@ -322,7 +369,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(sz_subdocuments_engin
                                      sz_max_of_two(budget / (deep_frames * frame_bytes), (sz_size_t)1));
         status = sz_subdocuments_reserve_cuda_(engine, stacks + deep_threads * deep_frames * frame_bytes, stream);
         if (status == sz_success_k) {
-            sz_subdocuments_round_cuda_(engine, count, stacks, &round);
+            sz_subdocuments_round_cuda_(engine, count, staging, stacks, &round);
             round.listed = 1, round.items = (sz_size_t)header.deep_count, round.threads = deep_threads;
             round.frames = deep_frames;
             status = sz_subdocuments_launch_cuda_(engine, documents, &round, stream);
@@ -334,7 +381,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_walks_cuda_(sz_subdocuments_engin
     if (status == sz_success_k && header.large_count) {
         sz_size_t const stacked = stacks + sz_max_of_two(stacks_bytes, deep_threads * deep_frames * frame_bytes);
         sz_size_t const region = sz_size_divide_round_up(stacked, 64) * 64;
-        status = sz_subdocuments_large_cuda_(engine, documents, &round, count, stacks, region, &header, &large, stream);
+        status = sz_subdocuments_large_cuda_(engine, documents, &round, count, staging, stacks, region, &header, &large,
+                                             stream);
         if (status == sz_success_k) status = sz_subdocuments_read_cuda_(&round, &header, stream);
     }
     if (status != sz_success_k) return status;
