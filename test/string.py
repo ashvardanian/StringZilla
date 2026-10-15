@@ -629,7 +629,7 @@ def test_string_lengths():
 @pytest.mark.parametrize("seed_value", SEED_VALUES)
 def test_translations(length: int, seed_value: int):
     """`sz.translate` on `str` and `bytes` input matches `bytes.translate` for the identity,
-    inversion, and threshold lookup tables, both copying and in place on a `bytearray`."""
+    inversion, and threshold lookup tables, allocating, in place, and into caller-owned buffers."""
     seed_random_generators(seed_value)
 
     map_identity = np.arange(256, dtype=np.uint8)
@@ -649,6 +649,12 @@ def test_translations(length: int, seed_value: int):
     assert sz.translate(body_bytes, view_invert) == body_bytes.translate(view_invert)
     assert sz.translate(body_bytes, view_threshold) == body_bytes.translate(view_threshold)
 
+    out = np.full((1, len(body_bytes) + 1), 0xA5, dtype=np.uint8)
+    for table in (view_identity, view_invert, view_threshold):
+        assert sz.translate(body_bytes, table, out=out) is out
+        assert out[0, :-1].tobytes() == body_bytes.translate(table)
+        assert out[0, -1] == 0xA5
+
     # Check in-place translations on mutable byte-arrays - all of them return nothing
     # Compare against the byte-level oracle `bytes.translate`; a str `.translate` would re-encode any
     # byte >= 128 as a multi-byte UTF-8 codepoint, which is not what an in-place byte translation produces.
@@ -661,6 +667,59 @@ def test_translations(length: int, seed_value: int):
     after_threshold = bytearray(body_bytes)
     assert sz.translate(after_threshold, view_threshold, inplace=True) is None
     assert sz.equal(after_threshold, body_bytes.translate(view_threshold))
+
+
+def test_translation_out_buffers():
+    source = bytearray(b"_abc_")
+    out = memoryview(source)[1:-1]
+    assert Str(source).translate({"a": "A"}, start=1, end=-1, out=out) is out
+    assert source == b"_Abc_"
+    for start in (0, 2):
+        with pytest.raises(ValueError, match="overlap"):
+            sz.translate(out, {}, out=memoryview(source)[start : start + 3])
+    assert Str().translate({}, out=bytearray(b"!")) == b"!"
+    assert sz.translate("abc", {}, out=None) == "abc"
+
+
+def test_translation_out_errors():
+    source = bytearray(b"abc")
+    for out, error in (
+        (b"...", BufferError),
+        (memoryview(bytearray(6))[::2], BufferError),
+        (memoryview(bytearray(12)).cast("I"), TypeError),
+        (bytearray(2), ValueError),
+    ):
+        with pytest.raises(error):
+            sz.translate(source, {}, out=out)
+    with pytest.raises(ValueError):
+        sz.translate(source, {}, inplace=True, out=bytearray(3))
+    with pytest.raises(TypeError):
+        sz.translate(source, {}, inplace=True, unexpected=True)
+    with pytest.raises(TypeError):
+        Str(source).translate({}, True, inplace=True)
+    assert source == b"abc"
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Python buffer exporters require 3.12")
+@pytest.mark.parametrize("kind", ["view", "str", "bytearray"])
+def test_translation_out_callback(kind):
+    backing = bytearray(b"abc")
+    view = memoryview(backing)
+    source = Str(backing) if kind == "bytearray" else view
+    if kind == "str":
+        source = Str(source)
+    out = bytearray(b"...")
+
+    class ResizeOnExport:
+        def __buffer__(self, flags):
+            view.release()
+            backing.clear()
+            return memoryview(out)
+
+    with pytest.raises(ValueError):
+        sz.translate(source, {}, out=ResizeOnExport())
+    assert out == b"..."
+    out.extend(b"!")
 
 
 @pytest.mark.parametrize("length", list(range(0, 300)) + [1024, 4096, 100000])
