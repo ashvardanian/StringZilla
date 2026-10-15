@@ -31,6 +31,9 @@
  *  stand apart: a small batch, where a round's chain of launches rather than its walk sets the
  *  rate, and BM25 over a few long documents, where one block per document would idle the device.
  *
+ *  Regex walks the multilingual slice's lines and path queries the documents, each kept resident,
+ *  under the vocabularies their CPU benchmarks run, so a device row and its baseline share inputs.
+ *
  *  @code{.sh}
  *  cmake -D STRINGZILLA_BUILD_BENCH=1 -D STRINGZILLA_BUILD_CUDA=1 -D CMAKE_BUILD_TYPE=Release -B build_release
  *  cmake --build build_release --config Release --target stringzilla_bench
@@ -73,6 +76,14 @@ struct simt_backend_t {
     sz_kernel_substrings_find_t substrings_find;
     sz_kernel_substrings_replace_t substrings_replace;
     sz_kernel_substrings_bm25_scores_t substrings_bm25_scores;
+    sz_kernel_regex_engine_init_t regex_engine_init;
+    sz_kernel_regex_counts_t regex_counts;
+    sz_kernel_regex_find_t regex_find;
+    sz_kernel_regex_replace_t regex_replace;
+    sz_kernel_regex_extract_t regex_extract;
+    sz_kernel_subdocuments_engine_init_t subdocuments_engine_init;
+    sz_kernel_subdocuments_counts_t subdocuments_counts;
+    sz_kernel_subdocuments_find_t subdocuments_find;
     sz_kernel_utf8_uncased_fold_t utf8_uncased_fold;
     sz_kernel_utf8_norm_t utf8_norm;
     sz_kernel_sha256_multistate_update_t sha256_multistate_update;
@@ -699,6 +710,94 @@ inline void bench_substrings_simt(simt_backend_t const &backend, environment_t c
 
 #pragma endregion Substrings Verbs
 
+#pragma region Regex and Subdocuments
+
+/** The device arm of @p verb logged against the dispatched CPU arm, which also checks it. */
+template <typename dispatched_type_, typename device_type_>
+void bench_simt_against_cpu(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus,
+                            char const *verb, std::string const &suffix, dispatched_type_ dispatched,
+                            device_type_ device) {
+    std::string const device_name = simt_arm(backend, verb) + suffix;
+    std::string const baseline_name = fmt::format("{}:{}:{}{}", verb, backend.name, backend.runtime.selected.ordinal(),
+                                                  suffix);
+    std::optional<double> const base = bench_baseline(env, corpus, baseline_name, {device_name}, dispatched);
+    print(bench_unary(env, corpus, device_name, dispatched, device), base);
+}
+
+/** Every regex verb over @p corpus kept resident: each vocabulary counted, found and rewritten,
+ *  and the dates' groups extracted. */
+inline void bench_regex_simt(simt_backend_t const &backend, environment_t const &env, corpus_t const &corpus) {
+    std::string const kit = simt_arm(backend, "");
+    auto const selects = [&](vocabulary_t const &vocabulary) { return regex_selects(env, kit, vocabulary); };
+    if (std::none_of(std::begin(regex_vocabularies_k), std::end(regex_vocabularies_k), selects) &&
+        !selects(regex_date_k))
+        return;
+    sz_allocator_t heap;
+    if (sz_allocator_init_heap(&heap) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+    substrings_corpus_t const resident(corpus);
+    unified_strings_t const haystacks_tape = resident_strings(backend.runtime, resident.haystacks());
+    sz_strings_view_t const device_haystacks = haystacks_tape.view().raw;
+    fmt::println("Starting regex benchmarks over {} resident haystacks...", resident.views.size());
+    for (vocabulary_t const &vocabulary : regex_vocabularies_k) {
+        if (!selects(vocabulary)) continue;
+        regex_engine_t host(vocabulary, regex_engine_init_cpu_, heap);
+        regex_engine_t device(vocabulary, backend.regex_engine_init, backend.runtime.unified, backend.runtime.stream);
+        unified_strings_t const replacements_tape = resident_strings(backend.runtime, regex_replacements(vocabulary));
+        std::string const label = vocabulary.label;
+        bench_simt_against_cpu(backend, env, corpus, "sz_regex_counts", label,
+                               regex_counts_from_sz {sz_regex_counts, host, resident, resident.haystacks()},
+                               regex_counts_from_sz {backend.regex_counts, device, resident, device_haystacks,
+                                                     std::cref(backend.runtime)});
+        bench_simt_against_cpu(backend, env, corpus, "sz_regex_find", label,
+                               regex_find_from_sz {sz_regex_find, host, resident, resident.haystacks()},
+                               regex_find_from_sz {backend.regex_find, device, resident, device_haystacks});
+        bench_simt_against_cpu(backend, env, corpus, "sz_regex_replace", label,
+                               regex_replace_from_sz {sz_regex_replace, host, resident, resident.haystacks(),
+                                                      regex_replacements(vocabulary)},
+                               regex_replace_from_sz {backend.regex_replace, device, resident, device_haystacks,
+                                                      replacements_tape.view().raw});
+    }
+    if (!selects(regex_date_k)) return;
+    regex_engine_t host(regex_date_k, regex_engine_init_cpu_, heap);
+    regex_engine_t device(regex_date_k, backend.regex_engine_init, backend.runtime.unified, backend.runtime.stream);
+    bench_simt_against_cpu(backend, env, corpus, "sz_regex_extract", regex_date_k.label,
+                           regex_extract_from_sz {sz_regex_extract, host, resident, resident.haystacks()},
+                           regex_extract_from_sz {backend.regex_extract, device, resident, device_haystacks});
+}
+
+/** Every path query verb over the documents kept resident, under each vocabulary of their
+ *  format. */
+inline void bench_subdocuments_simt(simt_backend_t const &backend, environment_t &env) {
+    if (!subdocuments_selects(env, simt_arm(backend, ""))) return;
+    sz_allocator_t heap;
+    if (sz_allocator_init_heap(&heap) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+    corpus_t const &corpus = env.corpora.documents();
+    sz_subdocuments_format_t const format = subdocuments_format(corpus);
+    substrings_corpus_t const resident(subdocuments_documents(corpus));
+    unified_strings_t const documents_tape = resident_strings(backend.runtime, resident.haystacks());
+    sz_strings_view_t const device_documents = documents_tape.view().raw;
+    fmt::println("Starting path query benchmarks over {} resident documents...", resident.views.size());
+    for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format)) {
+        subdocuments_engine_t host(vocabulary, format, subdocuments_engine_init_cpu_, heap);
+        subdocuments_engine_t device(vocabulary, format, backend.subdocuments_engine_init, backend.runtime.unified,
+                                     backend.runtime.stream);
+        std::string const label = vocabulary.label;
+        bench_simt_against_cpu(
+            backend, env, corpus, "sz_subdocuments_counts", label,
+            subdocuments_counts_from_sz {sz_subdocuments_counts, host, resident, resident.haystacks()},
+            subdocuments_counts_from_sz {backend.subdocuments_counts, device, resident, device_documents,
+                                         std::cref(backend.runtime)});
+        bench_simt_against_cpu(
+            backend, env, corpus, "sz_subdocuments_find", label,
+            subdocuments_find_from_sz {sz_subdocuments_find, host, resident, resident.haystacks()},
+            subdocuments_find_from_sz {backend.subdocuments_find, device, resident, device_documents});
+    }
+}
+
+#pragma endregion Regex and Subdocuments
+
 #pragma region UTF8 Norm and Fold
 
 /** Case folding and NFC normalization of every token, each device arm against the dispatch. */
@@ -793,6 +892,8 @@ inline int bench_cross_simt(environment_t &env, simt_backend_t const &backend) {
         bench_levenshtein_simt(backend, env, corpus);
         bench_overlap_simt(backend, env, corpus);
         bench_substrings_simt(backend, env, corpus);
+        bench_regex_simt(backend, env, env.corpora.multilingual_slice());
+        bench_subdocuments_simt(backend, env);
         fmt::println("Starting UTF-8 normalization and case folding benchmarks...");
         bench_utf8_norm_and_fold(backend, env, env.corpora.multilingual_slice());
         bench_sha256_multistate_simt(backend, env);

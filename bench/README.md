@@ -17,6 +17,8 @@ The family files time the dispatch points against the standard baselines, like `
 - `levenshtein.cpp` — one-to-one and one-to-many edit distances, over bytes and over runes.
 - `overlap.cpp` — window hashing, key extraction, B-tree probes, and whole-verb overlap scoring.
 - `substrings.cpp` — multi-pattern Aho-Corasick counting, locating, rewriting, and BM25 scoring.
+- `regex.cpp` — multi-pattern regular expressions: counting, locating, rewriting, and extracting groups.
+- `subdocuments.cpp` — batched JSONPath and XPath queries: counting and locating the selected nodes.
 - `utf8_traverse.cpp` — codepoint counting, Nth-codepoint seeking, and codepoint iteration.
 - `utf8_scan.cpp` — codepoint-class enumeration: newlines, whitespace, and delimiter runs.
 - `utf8_segment.cpp` — UAX-29 and UAX-14 boundary segmentation: words, graphemes, sentences, and linebreaks.
@@ -41,7 +43,7 @@ It times the same public capability kernels inline, without the linked dispatch 
 
 The same `stringzilla_bench` runs CPU rows once, then each selected device's resident rounds against the CPU baseline:
 
-- `cross_simt.cuh` — the edit-distance, window-overlap, and multi-pattern search rows CUDA and ROCm share.
+- `cross_simt.cuh` — the edit-distance, window-overlap, multi-pattern search, regex, and path query rows CUDA and ROCm share.
 - `cross_cuda.cu` and `cross_rocm.hip` — vendor entry points over those shared rows.
 - `cross_metal.cpp` — Metal engine rows on Apple GPUs.
 - `substrings.cuh` — the vocabulary, corpus, and arms the CPU and GPU multi-pattern benchmarks share.
@@ -56,7 +58,7 @@ Unset, the runner visits device zero of each available compiled vendor; an expli
 ## Configuration
 
 `harness.hpp` is the common harness, and `main.cpp` runs the families and then the cross files.
-Each family runs on its own corpus: English words or lines of `leipzig1M.txt`, or multilingual lines of `xlsum.csv`, each loaded on first use.
+Each family runs on its own corpus: English words or lines of `leipzig1M.txt`, multilingual lines of `xlsum.csv`, or the JSON events of `gharchive/2024-01-01-15.json`, each loaded on first use.
 The environment variables are listed with their defaults in the header of `harness.hpp` and in `CONTRIBUTING.md`.
 
 ```sh

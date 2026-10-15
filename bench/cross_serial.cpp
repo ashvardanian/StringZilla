@@ -63,6 +63,10 @@ void bench_cross_serial(environment_t &env) {
     bench_overlap_scores_kernels<sz_overlap_engine_init_serial, sz_overlap_scores_serial>(env, "serial");
     bench_substrings_kernels<sz_substrings_engine_init_serial, sz_substrings_counts_serial, sz_substrings_find_serial,
                              sz_substrings_replace_serial, sz_substrings_bm25_scores_serial>(env, "serial");
+    bench_regex_kernels<sz_regex_engine_init_serial, sz_regex_counts_serial, sz_regex_find_serial,
+                        sz_regex_replace_serial, sz_regex_extract_serial>(env, "serial");
+    bench_subdocuments_kernels<sz_subdocuments_engine_init_serial, sz_subdocuments_counts_serial,
+                               sz_subdocuments_find_serial>(env, "serial");
 }
 
 } // namespace ashvardanian::stringzilla::bench

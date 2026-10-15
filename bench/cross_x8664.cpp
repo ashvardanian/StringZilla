@@ -78,6 +78,10 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_substrings_kernels<sz_substrings_engine_init_haswell, sz_substrings_counts_haswell,
                                  sz_substrings_find_haswell, sz_substrings_replace_haswell,
                                  sz_substrings_bm25_scores_haswell>(env, "haswell");
+        bench_regex_kernels<sz_regex_engine_init_haswell, sz_regex_counts_haswell, sz_regex_find_haswell,
+                            sz_regex_replace_haswell, sz_regex_extract_haswell>(env, "haswell");
+        bench_subdocuments_kernels<sz_subdocuments_engine_init_haswell, sz_subdocuments_counts_haswell,
+                                   sz_subdocuments_find_haswell>(env, "haswell");
     }
 #endif // STRINGZILLA_TARGET_HASWELL
 #if STRINGZILLA_TARGET_SKYLAKE
@@ -147,6 +151,10 @@ void bench_cross_x8664([[maybe_unused]] environment_t &env) {
         bench_substrings_kernels<sz_substrings_engine_init_icelake, sz_substrings_counts_icelake,
                                  sz_substrings_find_icelake, sz_substrings_replace_icelake,
                                  sz_substrings_bm25_scores_icelake>(env, "icelake");
+        bench_regex_kernels<sz_regex_engine_init_icelake, sz_regex_counts_icelake, sz_regex_find_icelake,
+                            sz_regex_replace_icelake, sz_regex_extract_icelake>(env, "icelake");
+        bench_subdocuments_kernels<sz_subdocuments_engine_init_icelake, sz_subdocuments_counts_icelake,
+                                   sz_subdocuments_find_icelake>(env, "icelake");
     }
 #endif // STRINGZILLA_TARGET_ICELAKE
 }

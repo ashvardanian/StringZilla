@@ -1043,7 +1043,7 @@ inline corpus_t build_corpus(settings_t const &settings, char const *default_dat
  */
 class corpora_t {
     settings_t const &settings_;
-    std::optional<corpus_t> words_, lines_, multilingual_lines_, multilingual_slice_;
+    std::optional<corpus_t> words_, lines_, multilingual_lines_, multilingual_slice_, documents_;
 
     corpus_t const &build_(std::optional<corpus_t> &corpus, char const *dataset, tokenization_t tokenization,
                            std::optional<bytes_t> read_limit) {
@@ -1068,6 +1068,12 @@ class corpora_t {
     /** Multilingual lines of a compute-bound `xlsum.csv` slice: the UTF-8 families' text. */
     corpus_t const &multilingual_slice() {
         return build_(multilingual_slice_, "xlsum.csv", tokenization_t::lines_k, compute_bound_slice_k);
+    }
+
+    /** One JSON event per line of a GH Archive hour's first 64 MB: the documents of path queries,
+     *  which a `.xml` dataset turns into XML rows. */
+    corpus_t const &documents() {
+        return build_(documents_, "gharchive/2024-01-01-15.json", tokenization_t::lines_k, compute_bound_slice_k);
     }
 };
 
@@ -1314,6 +1320,8 @@ void bench_container(environment_t &env);
 void bench_levenshtein(environment_t &env);
 void bench_overlap(environment_t &env);
 void bench_substrings(environment_t &env);
+void bench_regex(environment_t &env);
+void bench_subdocuments(environment_t &env);
 void bench_utf8_traverse(environment_t &env);
 void bench_utf8_scan(environment_t &env);
 void bench_utf8_segment(environment_t &env);

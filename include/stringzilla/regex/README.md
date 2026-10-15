@@ -130,3 +130,74 @@ Each automaton gives way to its fallback past its budget or past 32-bit state id
 The end-finding automaton is anchored, so it grows linearly with a bounded gap, but not with a gap under an unbounded repetition: `(?:[a-c ]{1,14}.{0,13}\s)*a` would take 1.3 million end-finding states and 4.7 s to compile.
 So its subset construction also stops at 16,384 states, and end walks then run a PikeVM over the forward Thompson NFA, with threads in leftmost-first priority over the candidate's span only; that vocabulary compiles in about 45 ms.
 No vocabulary is refused for size below the 32-bit ceiling, and device backends run the same fallbacks.
+
+## Methodology
+
+Cells are haystack MB/s over the lines of the first 64 MB of `xlsum.csv`, which the harness's multilingual slice reads.
+The vocabularies are StringWars' three, compiled cased: __Literal__ holds `government`, `minister`, `president` and `police`, __Plain__ five everyday patterns for emails, URLs, ISO dates, numbers and the same keywords between word boundaries, and __Lookaround__ four patterns for prices, percentages, names and acronyms, each bounded by a lookbehind or a lookahead.
+A `↑` cell reuses the kernel of the tier above, and a `…` cell is not measured yet.
+
+## Counting
+
+Leftmost-first matches per haystack, one count each.
+
+| Backend                       |  Literal |    Plain | Lookaround |
+| :---------------------------- | -------: | -------: | ---------: |
+| Serial @ 1× Intel Xeon5       |    699.8 |    526.0 |       12.8 |
+| Haswell @ 1× Intel Xeon5      |  1,100.8 |    559.8 |       12.8 |
+| Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
+| Ice Lake @ 1× Intel Xeon5     |  1,032.2 |    558.9 |       13.2 |
+| CUDA @ 148× Nvidia SM100      | 32,716.8 | 19,384.3 |      425.3 |
+| Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
+| Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
+
+## Locating
+
+Every match, by haystack, pattern and byte span.
+
+| Backend                       |  Literal |    Plain | Lookaround |
+| :---------------------------- | -------: | -------: | ---------: |
+| Serial @ 1× Intel Xeon5       |    688.7 |    542.4 |       12.4 |
+| Haswell @ 1× Intel Xeon5      |  1,073.2 |    548.8 |       12.6 |
+| Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
+| Ice Lake @ 1× Intel Xeon5     |  1,042.4 |    562.3 |       13.0 |
+| CUDA @ 148× Nvidia SM100      | 30,617.6 | 17,469.4 |      421.1 |
+| Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
+| Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
+
+## Rewriting
+
+Every match substituted with its pattern's replacement, `<0>` for the first pattern, into one tape.
+
+| Backend                       |  Literal |    Plain | Lookaround |
+| :---------------------------- | -------: | -------: | ---------: |
+| Serial @ 1× Intel Xeon5       |    701.3 |    526.2 |       12.3 |
+| Haswell @ 1× Intel Xeon5      |  1,114.1 |    528.4 |       12.1 |
+| Skylake @ 1× Intel Xeon5      |        ↑ |        ↑ |          ↑ |
+| Ice Lake @ 1× Intel Xeon5     |  1,010.0 |    543.4 |       12.6 |
+| CUDA @ 148× Nvidia SM100      | 22,190.1 | 11,939.8 |      419.8 |
+| Hopper @ 148× Nvidia SM100    |        ↑ |        ↑ |          ↑ |
+| Blackwell @ 148× Nvidia SM100 |        ↑ |        ↑ |          ↑ |
+
+## Extracting Groups
+
+The year, month and day of every line's first ISO date, as `([0-9]{4})-([0-9]{2})-([0-9]{2})` captures them.
+
+| Backend                       |     Date |
+| :---------------------------- | -------: |
+| Serial @ 1× Intel Xeon5       |  1,956.9 |
+| Haswell @ 1× Intel Xeon5      |  7,653.4 |
+| Skylake @ 1× Intel Xeon5      |        ↑ |
+| Ice Lake @ 1× Intel Xeon5     |  8,676.4 |
+| CUDA @ 148× Nvidia SM100      | 27,166.7 |
+| Hopper @ 148× Nvidia SM100    |        ↑ |
+| Blackwell @ 148× Nvidia SM100 |        ↑ |
+
+## Compilation
+
+Building both automata is paid once per vocabulary, and it is reported separately because a pipeline that rebuilds per query is bound by this rather than by the walk.
+Cells are compilations per second.
+
+| Backend                 | Literal | Plain | Lookaround |
+| :---------------------- | ------: | ----: | ---------: |
+| Serial @ 1× Intel Xeon5 |   9,644 | 160.2 |    299,200 |

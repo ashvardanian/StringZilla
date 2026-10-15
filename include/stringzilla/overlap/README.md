@@ -16,33 +16,47 @@ That slice averages 8.55 bytes per word and 4,976.32 bytes per line, with scored
 
 ## Short Words
 
-| Backend                      | `sz_overlap_scores` |
-| :--------------------------- | ------------------: |
-| Serial @ 1× Intel Xeon6      |                61.9 |
-| Haswell @ 1× Intel Xeon6     |                73.1 |
-| Skylake @ 1× Intel Xeon6     |                71.5 |
-| Serial @ 1× Apple M5 Pro     |               180.8 |
-| NEON @ 1× Apple M5 Pro       |               201.7 |
-| Metal @ Apple M5 Pro         |               1,051 |
-| CUDA @ Nvidia SM90           |                   … |
-| CUDA @ 18× Nvidia SM103      |               1,163 |
-| Blackwell @ 18× Nvidia SM103 |                   … |
-| CUDA @ Nvidia SM120          |                   … |
+| Backend                       | `sz_overlap_scores` |
+| :---------------------------- | ------------------: |
+| Serial @ 1× Intel Xeon6       |                61.9 |
+| Haswell @ 1× Intel Xeon6      |                73.1 |
+| Skylake @ 1× Intel Xeon6      |                71.5 |
+| Serial @ 1× Intel Xeon5       |                75.5 |
+| Haswell @ 1× Intel Xeon5      |                96.5 |
+| Skylake @ 1× Intel Xeon5      |               103.3 |
+| Ice Lake @ 1× Intel Xeon5     |                   ↑ |
+| Serial @ 1× Apple M5 Pro      |               180.8 |
+| NEON @ 1× Apple M5 Pro        |               201.7 |
+| Metal @ Apple M5 Pro          |               1,051 |
+| CUDA @ Nvidia SM90            |                   … |
+| CUDA @ 148× Nvidia SM100      |               3,064 |
+| Hopper @ 148× Nvidia SM100    |                   ↑ |
+| Blackwell @ 148× Nvidia SM100 |               3,076 |
+| CUDA @ 18× Nvidia SM103       |               1,163 |
+| Blackwell @ 18× Nvidia SM103  |                   … |
+| CUDA @ Nvidia SM120           |                   … |
 
 ## Long Lines
 
-| Backend                      | `sz_overlap_scores` |
-| :--------------------------- | ------------------: |
-| Serial @ 1× Intel Xeon6      |                57.8 |
-| Haswell @ 1× Intel Xeon6     |               118.2 |
-| Skylake @ 1× Intel Xeon6     |               191.7 |
-| Serial @ 1× Apple M5 Pro     |               133.1 |
-| NEON @ 1× Apple M5 Pro       |               201.7 |
-| Metal @ Apple M5 Pro         |              25,020 |
-| CUDA @ Nvidia SM90           |                   … |
-| CUDA @ 18× Nvidia SM103      |               8,696 |
-| Blackwell @ 18× Nvidia SM103 |              10,700 |
-| CUDA @ Nvidia SM120          |                   … |
+| Backend                       | `sz_overlap_scores` |
+| :---------------------------- | ------------------: |
+| Serial @ 1× Intel Xeon6       |                57.8 |
+| Haswell @ 1× Intel Xeon6      |               118.2 |
+| Skylake @ 1× Intel Xeon6      |               191.7 |
+| Serial @ 1× Intel Xeon5       |                69.8 |
+| Haswell @ 1× Intel Xeon5      |               140.7 |
+| Skylake @ 1× Intel Xeon5      |               254.1 |
+| Ice Lake @ 1× Intel Xeon5     |                   ↑ |
+| Serial @ 1× Apple M5 Pro      |               133.1 |
+| NEON @ 1× Apple M5 Pro        |               201.7 |
+| Metal @ Apple M5 Pro          |              25,020 |
+| CUDA @ Nvidia SM90            |                   … |
+| CUDA @ 148× Nvidia SM100      |              22,190 |
+| Hopper @ 148× Nvidia SM100    |                   ↑ |
+| Blackwell @ 148× Nvidia SM100 |              22,810 |
+| CUDA @ 18× Nvidia SM103       |               8,696 |
+| Blackwell @ 18× Nvidia SM103  |              10,700 |
+| CUDA @ Nvidia SM120           |                   … |
 
 ## Window Hashes
 

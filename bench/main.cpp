@@ -70,6 +70,8 @@ int main() {
             bench_levenshtein(env);
             bench_overlap(env);
             bench_substrings(env);
+            bench_regex(env);
+            bench_subdocuments(env);
             bench_utf8_traverse(env);
             bench_utf8_scan(env);
             bench_utf8_segment(env);

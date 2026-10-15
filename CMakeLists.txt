@@ -723,6 +723,8 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/levenshtein.cpp
         bench/overlap.cpp
         bench/substrings.cpp
+        bench/regex.cpp
+        bench/subdocuments.cpp
         bench/utf8_traverse.cpp
         bench/utf8_scan.cpp
         bench/utf8_segment.cpp

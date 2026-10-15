@@ -1462,10 +1462,11 @@ void bench_aes256_gcm_stream_kernels(environment_t &env, std::string_view kit) {
 
 /** A @p string_type_ holding the bytes of @p other: views borrow them, and an owning StringZilla
  *  string copies them through its factory, aborting the benchmark when that fails. */
-template <typename string_type_, typename other_string_type_>
+template <typename string_type_, typename other_string_type_, typename view_type_ = string_view_t>
 string_type_ string_cast(other_string_type_ const &other) {
-    if constexpr (requires { string_type_::make(string_view_t(other.data(), other.size())); }) {
-        auto made = string_type_::make(string_view_t(other.data(), other.size()));
+    // A dependent view, as `string_slice` is complete only where `stringzilla.hpp` is included.
+    if constexpr (requires { string_type_::make(view_type_(other.data(), other.size())); }) {
+        auto made = string_type_::make(view_type_(other.data(), other.size()));
         if (!made) throw std::runtime_error("The key could not be copied into an owning string.");
         return std::move(made.value);
     }
@@ -2015,6 +2016,518 @@ void bench_substrings_kernels(environment_t &env, std::string_view kit) {
 }
 
 #pragma endregion Substrings
+
+#pragma region Regex
+
+/** A view of @p text, which the vocabularies below hold in static storage. */
+constexpr sz_string_view_t static_view_(std::string_view text) noexcept { return {text.data(), text.size()}; }
+
+/** A fixed vocabulary of regex patterns or subdocument paths, as StringWars spells it, under the
+ *  label its rows carry. */
+struct vocabulary_t {
+    char const *label;
+    std::span<sz_string_view_t const> texts;
+
+    sz_strings_view_t strings() const noexcept {
+        sz_strings_view_t result {};
+        sz_strings_from_string_views(texts.data(), texts.size(), &result);
+        return result;
+    }
+};
+
+inline constexpr sz_string_view_t regex_literal_k[] = {static_view_("government"), static_view_("minister"),
+                                                       static_view_("president"), static_view_("police")};
+inline constexpr sz_string_view_t regex_plain_k[] = {
+    static_view_(R"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})"),
+    static_view_(R"(https?://[A-Za-z0-9.-]+(?:/[A-Za-z0-9._~%/-]*)?)"),
+    static_view_(R"([0-9]{4}-[0-9]{2}-[0-9]{2})"),
+    static_view_(R"([0-9]+(?:[.,][0-9]+)*)"),
+    static_view_(R"(\b(?:government|minister|president|police)\b)"),
+};
+inline constexpr sz_string_view_t regex_lookaround_k[] = {
+    static_view_(R"((?<=\$)[0-9]+(?:\.[0-9]{2})?)"),
+    static_view_(R"([0-9]+(?=%))"),
+    static_view_(R"([A-Z][a-z]+(?= [A-Z][a-z]+))"),
+    static_view_(R"((?<![A-Za-z])[A-Z]{2,}(?![a-z]))"),
+};
+inline constexpr sz_string_view_t regex_date_groups_k[] = {static_view_(R"(([0-9]{4})-([0-9]{2})-([0-9]{2}))")};
+
+/** Keywords, everyday patterns and lookarounds, each counted, found and rewritten. */
+inline constexpr vocabulary_t regex_vocabularies_k[] = {
+    {":literal", regex_literal_k}, {":plain", regex_plain_k}, {":lookaround", regex_lookaround_k}};
+
+/** The one pattern whose groups extraction reads: an ISO date's year, month and day. */
+inline constexpr vocabulary_t regex_date_k {":date", regex_date_groups_k};
+
+/** Replacements as StringWars writes them, `<0>` for the first pattern. */
+inline constexpr sz_string_view_t regex_replacements_k[] = {
+    static_view_("<0>"), static_view_("<1>"), static_view_("<2>"), static_view_("<3>"), static_view_("<4>")};
+
+/** One replacement per pattern of @p vocabulary. */
+inline sz_strings_view_t regex_replacements(vocabulary_t const &vocabulary) noexcept {
+    sz_strings_view_t result {};
+    sz_strings_from_string_views(regex_replacements_k, vocabulary.texts.size(), &result);
+    return result;
+}
+
+/** Whether the filter keeps any row of @p kit, like @c _haswell, over @p vocabulary, so an
+ *  unwanted vocabulary is never compiled. */
+inline bool regex_selects(environment_t const &env, std::string_view kit, vocabulary_t const &vocabulary) {
+    for (char const *verb : {"engine_init", "counts", "find", "replace", "extract"})
+        if (env.settings.selects(fmt::format("sz_regex_{}{}{}", verb, kit, vocabulary.label))) return true;
+    return false;
+}
+
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+inline sz_status_t regex_engine_init_cpu_(sz_regex_engine_t *engine, sz_strings_view_t const *patterns,
+                                          sz_case_sensitivity_t sensitivity, sz_size_t *malformed_index,
+                                          sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_regex_engine_init(engine, patterns, sensitivity, malformed_index, sz::default_capabilities(), allocator,
+                                stream);
+}
+
+struct regex_engine_t {
+    sz_regex_engine_t engine {};
+    sz_stream_t stream = nullptr;
+
+    regex_engine_t(vocabulary_t const &vocabulary, sz_kernel_regex_engine_init_t init, sz_allocator_t allocator,
+                   sz_stream_t stream = nullptr)
+        : stream(stream) {
+        sz_strings_view_t const patterns = vocabulary.strings();
+        if (init(&engine, &patterns, sz_cased_k, nullptr, &allocator, stream) != sz_success_k)
+            throw std::runtime_error("The patterns would not compile.");
+    }
+    regex_engine_t(regex_engine_t const &) = delete;
+    regex_engine_t &operator=(regex_engine_t const &) = delete;
+    ~regex_engine_t() noexcept { sz_regex_engine_free(&engine, stream); }
+    void join() const {
+        if (engine.capability & sz_cap_gpus_k)
+            if (sz_stream_synchronize_best(engine.capability, stream) != sz_success_k)
+                throw std::runtime_error("The regex stream would not synchronize.");
+    }
+};
+
+/** Counts every match in the whole corpus, one call per round, into counts it owns. */
+template <typename function_type_>
+struct regex_counts_from_sz {
+    regex_engine_t &engine;
+    function_type_ counts_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the strings read by this arm. */
+    sz_strings_view_t haystacks;
+
+    /** @b [haystacks], what a round fills, on a device with memory of its own. */
+    device_vector<sz_size_t> device_counts;
+
+    /** @b [haystacks], what the host checks. */
+    pinned_vector<sz_size_t> counts;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+
+    regex_counts_from_sz(function_type_ kernel, regex_engine_t &engine, substrings_corpus_t const &corpus,
+                         sz_strings_view_t const &haystacks,
+                         std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : engine(engine), counts_kernel(kernel), corpus(corpus), haystacks(haystacks), runtime(runtime) {
+        bool const separate = runtime && runtime->get().separate();
+        counts = pinned_vector<sz_size_t>(
+            corpus.views.size(), 0,
+            pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+        if (!separate) return;
+        device_counts = device_vector<sz_size_t>(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
+        if (device_counts.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the counts.");
+    }
+
+    call_result_t operator()(std::size_t) {
+        if (counts_kernel(&engine.engine, &haystacks, device_counts.size() == 0 ? counts.data() : device_counts.data(),
+                          1, engine.stream) != sz_success_k)
+            throw std::runtime_error("The counting round failed.");
+        if (device_counts.size() != 0 &&
+            copy_device_to_host(device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The counts would not come back.");
+        engine.join();
+        check_value_t mixed = 0;
+        for (sz_size_t const count : counts) mixed = mixed * 31u + (check_value_t)count;
+        return corpus.round(mixed);
+    }
+};
+
+/** Reports every match in the whole corpus, into an array its own backend sized. */
+template <typename function_type_>
+struct regex_find_from_sz {
+    regex_engine_t &engine;
+    function_type_ find_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the strings read by this arm. */
+    sz_strings_view_t haystacks;
+
+    /** @b [haystacks + 1] boundaries into @c matches. */
+    unified_vector<sz_size_t> offsets;
+
+    /** Sized by a size query, so a round never grows it. */
+    unified_vector<sz_match_t> matches;
+    bool sized = false;
+
+    regex_find_from_sz(function_type_ kernel, regex_engine_t &engine, substrings_corpus_t const &corpus,
+                       sz_strings_view_t const &haystacks)
+        : engine(engine), find_kernel(kernel), corpus(corpus), haystacks(haystacks),
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
+          matches(unified_alloc<sz_match_t>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
+        if (find_kernel(&engine.engine, &haystacks, nullptr, 0, offsets.data(), engine.stream) != sz_success_k)
+            throw std::runtime_error("The reporting round could not be sized.");
+        engine.join();
+        matches.resize(offsets[corpus.views.size()]);
+        sized = true;
+    }
+
+    call_result_t operator()(std::size_t) {
+        if (find_kernel(&engine.engine, &haystacks, matches.data(), matches.size(), offsets.data(), engine.stream) !=
+            sz_success_k)
+            throw std::runtime_error("The reporting round failed.");
+        engine.join();
+        return corpus.round((check_value_t)offsets[corpus.views.size()]);
+    }
+};
+
+/** Rewrites the whole corpus onto one tape its own backend sized. */
+template <typename function_type_>
+struct regex_replace_from_sz {
+    regex_engine_t &engine;
+    function_type_ replace_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the strings read by this arm. */
+    sz_strings_view_t haystacks;
+
+    /** Borrowed view of the replacements, where the same backend reads them. */
+    sz_strings_view_t replacements;
+
+    /** @b [haystacks + 1] rewritten boundaries, the last the total. */
+    unified_vector<sz_size_t> offsets;
+
+    /** Sized by a size query, so a round never grows it. */
+    unified_vector<char> tape;
+    bool sized = false;
+
+    regex_replace_from_sz(function_type_ kernel, regex_engine_t &engine, substrings_corpus_t const &corpus,
+                          sz_strings_view_t const &haystacks, sz_strings_view_t const &replacements)
+        : engine(engine), replace_kernel(kernel), corpus(corpus), haystacks(haystacks), replacements(replacements),
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
+          tape(unified_alloc<char>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
+        if (replace_kernel(&engine.engine, &haystacks, &replacements, nullptr, 0, offsets.data(), engine.stream) !=
+            sz_success_k)
+            throw std::runtime_error("The rewriting round could not be sized.");
+        engine.join();
+        tape.resize(offsets[corpus.views.size()]);
+        sized = true;
+    }
+
+    call_result_t operator()(std::size_t) {
+        if (replace_kernel(&engine.engine, &haystacks, &replacements, tape.data(), tape.size(), offsets.data(),
+                           engine.stream) != sz_success_k)
+            throw std::runtime_error("The rewriting round failed.");
+        engine.join();
+        return corpus.round((check_value_t)offsets[corpus.views.size()]);
+    }
+};
+
+/** Locates the groups of every haystack's first match of the first pattern, into rows its own
+ *  backend sized. */
+template <typename function_type_>
+struct regex_extract_from_sz {
+    regex_engine_t &engine;
+    function_type_ extract_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the strings read by this arm. */
+    sz_strings_view_t haystacks;
+
+    /** @b [haystacks + 1] boundaries into @c rows. */
+    unified_vector<sz_size_t> offsets;
+
+    /** Sized by a size query, so a round never grows it. */
+    unified_vector<sz_match_t> rows;
+    bool sized = false;
+
+    regex_extract_from_sz(function_type_ kernel, regex_engine_t &engine, substrings_corpus_t const &corpus,
+                          sz_strings_view_t const &haystacks)
+        : engine(engine), extract_kernel(kernel), corpus(corpus), haystacks(haystacks),
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
+          rows(unified_alloc<sz_match_t>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
+        if (extract_kernel(&engine.engine, &haystacks, 0, nullptr, 0, offsets.data(), engine.stream) != sz_success_k)
+            throw std::runtime_error("The extracting round could not be sized.");
+        engine.join();
+        rows.resize(offsets[corpus.views.size()]);
+        sized = true;
+    }
+
+    call_result_t operator()(std::size_t) {
+        if (extract_kernel(&engine.engine, &haystacks, 0, rows.data(), rows.size(), offsets.data(), engine.stream) !=
+            sz_success_k)
+            throw std::runtime_error("The extracting round failed.");
+        engine.join();
+        return corpus.round((check_value_t)offsets[corpus.views.size()]);
+    }
+};
+
+/** Times one capability's counting, reporting and rewriting over every vocabulary, and its
+ *  extraction of the dates' groups, over the multilingual slice. */
+template <sz_kernel_regex_engine_init_t init_, sz_kernel_regex_counts_t counts_, sz_kernel_regex_find_t find_,
+          sz_kernel_regex_replace_t replace_, sz_kernel_regex_extract_t extract_>
+void bench_regex_kernels(environment_t &env, std::string_view kit) {
+    sz_allocator_t allocator;
+    if (sz_allocator_init_heap(&allocator) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+    corpus_t const &corpus = env.corpora.multilingual_slice();
+    substrings_corpus_t const staged(corpus);
+    std::string const of = "_" + std::string(kit);
+    auto const name = [&](char const *verb, std::string_view tier, char const *label) {
+        return fmt::format("sz_regex_{}_{}{}", verb, tier, label);
+    };
+    for (vocabulary_t const &vocabulary : regex_vocabularies_k) {
+        if (!regex_selects(env, of, vocabulary)) continue;
+        regex_engine_t engine(vocabulary, init_, allocator);
+        char const *const label = vocabulary.label;
+        bench_kernel_unary(env, corpus, name("counts", kit, label), name("counts", "serial", label),
+                           regex_counts_from_sz {sz_regex_counts_serial, engine, staged, staged.haystacks()},
+                           regex_counts_from_sz {counts_, engine, staged, staged.haystacks()});
+        bench_kernel_unary(env, corpus, name("find", kit, label), name("find", "serial", label),
+                           regex_find_from_sz {sz_regex_find_serial, engine, staged, staged.haystacks()},
+                           regex_find_from_sz {find_, engine, staged, staged.haystacks()});
+        bench_kernel_unary(
+            env, corpus, name("replace", kit, label), name("replace", "serial", label),
+            regex_replace_from_sz {sz_regex_replace_serial, engine, staged, staged.haystacks(),
+                                   regex_replacements(vocabulary)},
+            regex_replace_from_sz {replace_, engine, staged, staged.haystacks(), regex_replacements(vocabulary)});
+    }
+    if (!regex_selects(env, of, regex_date_k)) return;
+    regex_engine_t engine(regex_date_k, init_, allocator);
+    bench_kernel_unary(env, corpus, name("extract", kit, regex_date_k.label),
+                       name("extract", "serial", regex_date_k.label),
+                       regex_extract_from_sz {sz_regex_extract_serial, engine, staged, staged.haystacks()},
+                       regex_extract_from_sz {extract_, engine, staged, staged.haystacks()});
+}
+
+#pragma endregion Regex
+
+#pragma region Subdocuments
+
+inline constexpr sz_string_view_t subdocuments_json_pointer_k[] = {
+    static_view_("$.type"), static_view_("$.actor.login"), static_view_("$.repo.name")};
+inline constexpr sz_string_view_t subdocuments_json_query_k[] = {
+    static_view_("$.payload.commits[*].sha"),
+    static_view_("$..url"),
+    static_view_("$.payload.commits[?@.distinct == true].message"),
+};
+inline constexpr sz_string_view_t subdocuments_xml_attributes_k[] = {
+    static_view_("/row/@Id"), static_view_("/row/@Score"), static_view_("/row/@Tags"),
+    static_view_("/row/@OwnerUserId")};
+
+/** JSON pointers' paths and richer queries over GH Archive events. */
+inline constexpr vocabulary_t subdocuments_json_vocabularies_k[] = {{":json-pointer", subdocuments_json_pointer_k},
+                                                                    {":json-query", subdocuments_json_query_k}};
+
+/** Attributes of Stack Exchange `<row>` elements. */
+inline constexpr vocabulary_t subdocuments_xml_vocabularies_k[] = {{":xml-attributes", subdocuments_xml_attributes_k}};
+
+inline std::span<vocabulary_t const> subdocuments_vocabularies(sz_subdocuments_format_t format) noexcept {
+    if (format == sz_subdocuments_xml_k) return subdocuments_xml_vocabularies_k;
+    return subdocuments_json_vocabularies_k;
+}
+
+/** Whether @p corpus holds XML rather than JSON, by its dataset's extension, as StringWars
+ *  decides. */
+inline sz_subdocuments_format_t subdocuments_format(corpus_t const &corpus) noexcept {
+    return std::string_view(corpus.path).ends_with(".xml") ? sz_subdocuments_xml_k : sz_subdocuments_json_k;
+}
+
+/** The lines of @p corpus that are whole documents once trimmed, a JSON object or a self-closing
+ *  `<row>`, which leaves out an XML dump's header and the line the read limit cut. */
+inline std::vector<sz_string_view_t> subdocuments_documents(corpus_t const &corpus) {
+    bool const xml = subdocuments_format(corpus) == sz_subdocuments_xml_k;
+    std::vector<sz_string_view_t> documents;
+    for (std::string_view line : corpus.tokens) {
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front()))) line.remove_prefix(1);
+        while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.remove_suffix(1);
+        if (xml ? line.starts_with("<row") && line.ends_with("/>") : line.starts_with('{') && line.ends_with('}'))
+            documents.push_back({line.data(), line.size()});
+    }
+    return documents;
+}
+
+/** Whether the filter keeps any row of @p kit over either format's vocabularies, checked before
+ *  the documents are loaded. */
+inline bool subdocuments_selects(environment_t const &env, std::string_view kit) {
+    for (sz_subdocuments_format_t const format : {sz_subdocuments_json_k, sz_subdocuments_xml_k})
+        for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format))
+            for (char const *verb : {"counts", "find"})
+                if (env.settings.selects(fmt::format("sz_subdocuments_{}{}{}", verb, kit, vocabulary.label)))
+                    return true;
+    return false;
+}
+
+/** The engine's init over the CPU's capabilities, in the shape of its init kernels. */
+inline sz_status_t subdocuments_engine_init_cpu_(sz_subdocuments_engine_t *engine, sz_strings_view_t const *paths,
+                                                 sz_subdocuments_format_t format, sz_size_t *malformed_index,
+                                                 sz_allocator_t *allocator, sz_stream_t stream) {
+    return sz_subdocuments_engine_init(engine, paths, format, malformed_index, sz::default_capabilities(), allocator,
+                                       stream);
+}
+
+struct subdocuments_engine_t {
+    sz_subdocuments_engine_t engine {};
+    sz_stream_t stream = nullptr;
+
+    subdocuments_engine_t(vocabulary_t const &vocabulary, sz_subdocuments_format_t format,
+                          sz_kernel_subdocuments_engine_init_t init, sz_allocator_t allocator,
+                          sz_stream_t stream = nullptr)
+        : stream(stream) {
+        sz_strings_view_t const paths = vocabulary.strings();
+        if (init(&engine, &paths, format, nullptr, &allocator, stream) != sz_success_k)
+            throw std::runtime_error("The paths would not compile.");
+    }
+    subdocuments_engine_t(subdocuments_engine_t const &) = delete;
+    subdocuments_engine_t &operator=(subdocuments_engine_t const &) = delete;
+    ~subdocuments_engine_t() noexcept { sz_subdocuments_engine_free(&engine, stream); }
+    void join() const {
+        if (engine.capability & sz_cap_gpus_k)
+            if (sz_stream_synchronize_best(engine.capability, stream) != sz_success_k)
+                throw std::runtime_error("The subdocuments stream would not synchronize.");
+    }
+};
+
+/** Counts every selected node of every document, one call per round, into counts it owns. */
+template <typename function_type_>
+struct subdocuments_counts_from_sz {
+    subdocuments_engine_t &engine;
+    function_type_ counts_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the documents read by this arm. */
+    sz_strings_view_t documents;
+
+    /** @b [documents], what a round fills, on a device with memory of its own. */
+    device_vector<sz_size_t> device_counts;
+
+    /** @b [documents], what the host checks. */
+    pinned_vector<sz_size_t> counts;
+    std::optional<std::reference_wrapper<device_backend_t const>> runtime;
+
+    subdocuments_counts_from_sz(function_type_ kernel, subdocuments_engine_t &engine, substrings_corpus_t const &corpus,
+                                sz_strings_view_t const &documents,
+                                std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
+        : engine(engine), counts_kernel(kernel), corpus(corpus), documents(documents), runtime(runtime) {
+        bool const separate = runtime && runtime->get().separate();
+        counts = pinned_vector<sz_size_t>(
+            corpus.views.size(), 0,
+            pinned_alloc<sz_size_t>(separate ? runtime->get().pinned : engine.engine.allocator, engine.stream));
+        if (!separate) return;
+        device_counts = device_vector<sz_size_t>(device_alloc<sz_size_t>(runtime->get().device, engine.stream));
+        if (device_counts.resize_uninitialized(corpus.views.size()) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the counts.");
+    }
+
+    call_result_t operator()(std::size_t) {
+        sz_size_t malformed_index = 0;
+        if (counts_kernel(&engine.engine, &documents, device_counts.size() == 0 ? counts.data() : device_counts.data(),
+                          1, &malformed_index, engine.stream) != sz_success_k)
+            throw std::runtime_error("The counting round failed.");
+        if (device_counts.size() != 0 &&
+            copy_device_to_host(device_counts, std::span<sz_size_t>(counts), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The counts would not come back.");
+        engine.join();
+        check_value_t mixed = 0;
+        for (sz_size_t const count : counts) mixed = mixed * 31u + (check_value_t)count;
+        return corpus.round(mixed);
+    }
+};
+
+/** Reports every selected node of every document, into an array its own backend sized. */
+template <typename function_type_>
+struct subdocuments_find_from_sz {
+    subdocuments_engine_t &engine;
+    function_type_ find_kernel;
+    substrings_corpus_t const &corpus;
+
+    /** Borrowed view of the documents read by this arm. */
+    sz_strings_view_t documents;
+
+    /** @b [documents + 1] boundaries into @c matches. */
+    unified_vector<sz_size_t> offsets;
+
+    /** Sized by a size query, so a round never grows it. */
+    unified_vector<sz_match_t> matches;
+    bool sized = false;
+
+    subdocuments_find_from_sz(function_type_ kernel, subdocuments_engine_t &engine, substrings_corpus_t const &corpus,
+                              sz_strings_view_t const &documents)
+        : engine(engine), find_kernel(kernel), corpus(corpus), documents(documents),
+          offsets(corpus.views.size() + 1, unified_alloc<sz_size_t>(engine.engine.allocator, engine.stream)),
+          matches(unified_alloc<sz_match_t>(engine.engine.allocator, engine.stream)) {}
+
+    /** The size query, a whole walk, run once the filter keeps the row. */
+    void preprocess() {
+        if (sized) return;
+        sz_size_t malformed_index = 0;
+        if (find_kernel(&engine.engine, &documents, nullptr, 0, offsets.data(), &malformed_index, engine.stream) !=
+            sz_success_k)
+            throw std::runtime_error("The reporting round could not be sized.");
+        engine.join();
+        matches.resize(offsets[corpus.views.size()]);
+        sized = true;
+    }
+
+    call_result_t operator()(std::size_t) {
+        sz_size_t malformed_index = 0;
+        if (find_kernel(&engine.engine, &documents, matches.data(), matches.size(), offsets.data(), &malformed_index,
+                        engine.stream) != sz_success_k)
+            throw std::runtime_error("The reporting round failed.");
+        engine.join();
+        return corpus.round((check_value_t)offsets[corpus.views.size()]);
+    }
+};
+
+/** Times one capability's counting and reporting over every vocabulary of the documents' format. */
+template <sz_kernel_subdocuments_engine_init_t init_, sz_kernel_subdocuments_counts_t counts_,
+          sz_kernel_subdocuments_find_t find_>
+void bench_subdocuments_kernels(environment_t &env, std::string_view kit) {
+    if (!subdocuments_selects(env, "_" + std::string(kit))) return;
+    sz_allocator_t allocator;
+    if (sz_allocator_init_heap(&allocator) != sz_success_k)
+        throw std::runtime_error("The heap allocator could not be initialized.");
+    corpus_t const &corpus = env.corpora.documents();
+    sz_subdocuments_format_t const format = subdocuments_format(corpus);
+    substrings_corpus_t const staged(subdocuments_documents(corpus));
+    auto const name = [&](char const *verb, std::string_view tier, char const *label) {
+        return fmt::format("sz_subdocuments_{}_{}{}", verb, tier, label);
+    };
+    for (vocabulary_t const &vocabulary : subdocuments_vocabularies(format)) {
+        subdocuments_engine_t engine(vocabulary, format, init_, allocator);
+        char const *const label = vocabulary.label;
+        bench_kernel_unary(
+            env, corpus, name("counts", kit, label), name("counts", "serial", label),
+            subdocuments_counts_from_sz {sz_subdocuments_counts_serial, engine, staged, staged.haystacks()},
+            subdocuments_counts_from_sz {counts_, engine, staged, staged.haystacks()});
+        bench_kernel_unary(env, corpus, name("find", kit, label), name("find", "serial", label),
+                           subdocuments_find_from_sz {sz_subdocuments_find_serial, engine, staged, staged.haystacks()},
+                           subdocuments_find_from_sz {find_, engine, staged, staged.haystacks()});
+    }
+}
+
+#pragma endregion Subdocuments
 
 #pragma region UTF8 Traverse
 

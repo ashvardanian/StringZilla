@@ -110,3 +110,36 @@ A DOCTYPE is skipped when it has no internal subset, and refused when it has one
 A tape or a DOM materializes structure that a query then navigates, and most of that structure belongs to values no path selects.
 Here the paths are known before the documents, so the automaton decides at each container whether anything below it can matter, and the bytes of everything that cannot are classified once and never revisited.
 The same shape carries to devices, where classification is a prefix XOR and depth a prefix sum, and the live sets advance one depth level at a time.
+
+## Methodology
+
+Cells are document MB/s over one document per line: the JSON events of the first 64 MB of `gharchive/2024-01-01-15.json`, and the `<row>` elements of the first 16 MB of `stackexchange-bioinformatics/Posts.xml`.
+A line that is not a whole document once trimmed, like the dump's header, is left out, as StringWars leaves it out.
+The vocabularies are StringWars': __Pointers__ are `$.type`, `$.actor.login` and `$.repo.name`, the paths a JSON pointer spells, and __Queries__ are `$.payload.commits[*].sha`, `$..url` and `$.payload.commits[?@.distinct == true].message`.
+A `↑` cell reuses the kernel of the tier above, and a `…` cell is not measured yet.
+
+## JSONPath
+
+| Backend                       | Count, Pointers | Count, Queries | Find, Pointers | Find, Queries |
+| :---------------------------- | --------------: | -------------: | -------------: | ------------: |
+| Serial @ 1× Intel Xeon5       |           894.4 |          607.7 |          877.6 |         596.0 |
+| Haswell @ 1× Intel Xeon5      |         3,647.5 |        1,199.1 |        3,626.0 |       1,186.8 |
+| Skylake @ 1× Intel Xeon5      |               ↑ |              ↑ |              ↑ |             ↑ |
+| Ice Lake @ 1× Intel Xeon5     |         3,180.5 |        1,153.0 |        3,705.9 |       1,185.8 |
+| CUDA @ 148× Nvidia SM100      |        49,879.0 |        5,995.5 |       24,217.6 |       3,049.5 |
+| Hopper @ 148× Nvidia SM100    |               ↑ |              ↑ |              ↑ |             ↑ |
+| Blackwell @ 148× Nvidia SM100 |               ↑ |              ↑ |              ↑ |             ↑ |
+
+## XPath
+
+`/row/@Id`, `/row/@Score`, `/row/@Tags` and `/row/@OwnerUserId` over every row.
+
+| Backend                       |    Count |    Find |
+| :---------------------------- | -------: | ------: |
+| Serial @ 1× Intel Xeon5       |  3,488.8 | 3,204.1 |
+| Haswell @ 1× Intel Xeon5      |  4,647.9 | 3,661.8 |
+| Skylake @ 1× Intel Xeon5      |        ↑ |       ↑ |
+| Ice Lake @ 1× Intel Xeon5     |  4,758.5 | 4,081.7 |
+| CUDA @ 148× Nvidia SM100      | 11,059.2 | 5,334.0 |
+| Hopper @ 148× Nvidia SM100    |        ↑ |       ↑ |
+| Blackwell @ 148× Nvidia SM100 |        ↑ |       ↑ |
