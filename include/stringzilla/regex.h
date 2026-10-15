@@ -13,8 +13,9 @@
  *  start at; the end-finding one walks forward from one marked start until it dies. A search takes
  *  the first marked start at or past its cursor, walks to its end, and moves the cursor there, so
  *  the bytes it walks are the window once plus each match and its lookahead. A window that does not
- *  end the haystack finds its entry state by priming rather than by guessing: every state walks the
- *  bytes right of its edge together until one remains.
+ *  end the haystack needs its entry state: a cased DFA walk on CPUs guesses it from the bytes right
+ *  of its edge and settles the guess against the window right of it once both are walked; other
+ *  walks prime it, every state walking the bytes right of the edge together until one remains.
  *
  *  @section regex_api Public API
  *

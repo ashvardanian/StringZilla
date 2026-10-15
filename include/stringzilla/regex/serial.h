@@ -396,9 +396,13 @@ typedef struct sz_regex_engine_t {
  *  @c sz_regex_chains_serial_k windows each. */
 enum { sz_regex_window_serial_k = 262144 };
 
-/** The shortest window worth a chain of its own; a haystack too short for a batch of them
- *  is one window. */
+/** The shortest window worth a chain of its own where every window primes its entry, as uncased and
+ *  position walks do; a haystack too short for a batch of them is one window. */
 enum { sz_regex_window_minimum_k = 4096 };
+
+/** The shortest window worth a chain of its own where a cased DFA batch guesses its entries,
+ *  priming one per batch. */
+enum { sz_regex_window_guessed_k = 128 };
 
 /** Start-finding DFA states past which the start pass runs on the bit-parallel
  *  position automaton instead. */
@@ -3755,6 +3759,10 @@ typedef struct sz_regex_walk_t {
      *  exist. */
     sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *);
 
+    /** The tier's fill of the lookaround table from the bytes beside each position, as
+     *  @ref sz_regex_fill_looks_serial_ does. */
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *);
+
     /** The PikeVM that end walks run without forward rows and groups are read with, empty unless
      *  one of them is. */
     sz_regex_pike_t pike;
@@ -3775,6 +3783,23 @@ STRINGZILLA_INLINE sz_cptr_t sz_regex_find_prefixes_serial_(sz_cptr_t text, sz_s
     return STRINGZILLA_NULL;
 }
 
+/**
+ *  @brief Fills the lookaround table of @p text with the one-byte lookarounds holding at every
+ *      position, by the tables of @p looks_bytes, a byte at a time, and @p flipped XORed in.
+ *
+ *  A position holds a lookbehind of one byte by the byte before it and a lookahead by the byte at
+ *  it; neither side holds past an edge of the haystack.
+ */
+STRINGZILLA_INLINE void sz_regex_fill_looks_serial_(sz_cptr_t text, sz_size_t length, sz_u32_t const *looks_bytes,
+                                                    sz_u32_t flipped, sz_u32_t *looks) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)text;
+    sz_u32_t const *const after = looks_bytes + 1, *const before = after + 256;
+    sz_u32_t previous = 0;
+    for (sz_size_t position = 0; position != length; ++position)
+        looks[position] = (previous | before[bytes[position]]) ^ flipped, previous = after[bytes[position]];
+    looks[length] = previous ^ flipped;
+}
+
 /** The first unit boundary at or past @p position: a byte that does not continue a codepoint
  *  begun before it. */
 STRINGZILLA_INLINE sz_size_t sz_regex_boundary_(sz_cptr_t haystack, sz_size_t length, sz_size_t position) {
@@ -3786,6 +3811,25 @@ STRINGZILLA_INLINE sz_size_t sz_regex_boundary_(sz_cptr_t haystack, sz_size_t le
     if (back == 4 || back > position) return position;
     rune_length = sz_rune_decode(haystack + position - back, haystack + length, &rune);
     return (sz_size_t)rune_length > back ? position - back + (sz_size_t)rune_length : position;
+}
+
+/**
+ *  @brief Whether so few bytes of `[begin, end)` leave the start pass's idle states that skipping
+ *      between them beats walking in lockstep, judged by 64 evenly spaced samples, as in
+ *      @c substrings.
+ *
+ *  A DFA skips once fewer than one in 46 is live, as each costs a search and a few slow steps, or
+ *  one in 20 where the tier's searches are @p vectorized, passing a block per compare; a position
+ *  walk skips once fewer than one in six is live, as its lockstep steps are slow too.
+ */
+STRINGZILLA_INLINE sz_bool_t sz_regex_live_sparse_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t begin,
+                                                   sz_size_t end, sz_bool_t vectorized) {
+    sz_size_t const samples = 64, stride = end - begin > samples ? (end - begin) / samples : 1;
+    sz_size_t const ratio = engine->positions_words ? 6 : vectorized ? 20 : 46;
+    sz_size_t position, taken = 0, live = 0;
+    for (position = begin; position < end && taken != samples; position += stride, ++taken)
+        live += sz_byteset_contains_u8(&engine->reverse_live, (sz_u8_t)haystack[position]);
+    return (sz_bool_t)(live * ratio < taken);
 }
 
 /** One unit of a haystack as an uncased walk steps it: the case folds of one codepoint,
@@ -3867,11 +3911,20 @@ STRINGZILLA_INLINE sz_status_t sz_regex_walk_scratch_(
     sz_regex_engine_t *engine, sz_cptr_t haystack, sz_size_t length,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *), sz_size_t slots_count,
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *), sz_size_t slots_count,
     sz_regex_walk_t *walk) {
     sz_size_t const batch_bytes = (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_serial_k;
     sz_size_t const batches = sz_size_divide_round_up(length, batch_bytes);
-    sz_size_t const chained = length >= (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_minimum_k;
+    sz_bool_t const guessed = (sz_bool_t)(engine->case_sensitivity == sz_cased_k && !engine->positions_words);
+    // Where prefixes replace the start pass, no window is marked; a haystack too short for windows
+    // that prime splits into guessed ones only to walk in lockstep, which sparse live bytes leave
+    // to one skipping walk.
+    sz_size_t const chained =
+        !engine->prefixes &&
+        (length >= (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_minimum_k ||
+         (guessed && length >= (sz_size_t)sz_regex_chains_serial_k * sz_regex_window_guessed_k &&
+          !sz_regex_live_sparse_(engine, haystack, 0, length, (sz_bool_t)(find_escape != STRINGZILLA_NULL))));
     sz_size_t const window_bytes = chained ? sz_size_divide_round_up(length, batches * sz_regex_chains_serial_k)
                                            : length + 1;
     sz_size_t const windows = chained ? sz_size_divide_round_up(length, window_bytes) : 1;
@@ -3920,7 +3973,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_walk_scratch_(
     walk->windows = windows, walk->window_bytes = window_bytes, walk->window_words = window_words, walk->window = 0;
     walk->batch = 0, walk->batch_count = 0, walk->serial = ++*served;
     walk->skip_cost = 0, walk->skip_spanned = 0, walk->rfind_live = rfind_live, walk->find_escape = find_escape;
-    walk->find_prefixes = find_prefixes;
+    walk->find_prefixes = find_prefixes, walk->fill_looks = fill_looks;
     memset(walk->edges, 0, (windows + 1) * stride * sizeof(sz_u64_t));
     memset(walk->seen, 0, priming);
     walk->bounds[0] = 0, walk->bounds[windows] = length;
@@ -4239,6 +4292,8 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_prime_positions_folded_(sz_regex_eng
 /**
  *  @brief Marks every position in `[low, edge]` that some match starts at, walking right to left
  *      from the start-finding state at @p edge; the bit of position @c p is `p - base`, ORed in.
+ *  @param[out] final The state after the byte before @p low, or after the haystack's first byte
+ *      where @p low is zero.
  *  @return What it cost in bytes of a lockstep pass, which steps one byte about three times as fast
  *      and covers forty bytes in the time of one byte-set search.
  *
@@ -4250,7 +4305,7 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_prime_positions_folded_(sz_regex_eng
 STRINGZILLA_INLINE sz_size_t sz_regex_mark_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t low,
                                                    sz_size_t edge, sz_size_t base, sz_u32_t state,
                                                    sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-                                                   sz_u32_t const *looks, sz_u64_t *starts) {
+                                                   sz_u32_t const *looks, sz_u64_t *starts, sz_u32_t *final) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u32_t const *const rows = engine->reverse_rows, *const idles = engine->reverse_starts;
     sz_u8_t const *const byte_to_class = engine->byte_to_class;
@@ -4272,6 +4327,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_mark_serial_(sz_regex_engine_t const *engi
     }
     if (low == 0 && rows[state + sz_regex_block_at_(engine, looks, 0) + engine->classes_count] >= accepts)
         starts[0] |= 1;
+    *final = state;
     return cost;
 }
 
@@ -4439,18 +4495,17 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_entry_positions_serial_(sz_regex_eng
 
 /**
  *  @brief Marks the starts of @c sz_regex_chains_serial_k windows at once, one DFA chain per window
- *      walking right to left from its own primed state, so the chains' loads overlap.
+ *      walking right to left from its own entry state, so the chains' loads overlap.
  *
  *  Each chain gathers its start bits in a register, 64 steps at a time, and stores them at its
  *  window's offset; windows differ in length by a few bytes, which the chains then finish one by
- *  one. Steps read @p looks for their blocks, which callers pass as a literal null for a vocabulary
- *  without lookarounds.
+ *  one, each leaving its last state in @p finals. Steps read @p looks for their blocks, which
+ *  callers pass as a literal null for a vocabulary without lookarounds.
  */
-STRINGZILLA_INLINE void sz_regex_mark_chains_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
-                                                     sz_size_t const *bounds, sz_u32_t const *entries,
-                                                     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t,
-                                                                             sz_byteset_t const *),
-                                                     sz_u32_t const *looks, sz_size_t window_words, sz_u64_t *starts) {
+STRINGZILLA_INLINE void sz_regex_mark_chains_serial_(
+    sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t const *bounds, sz_u32_t const *entries,
+    sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *), sz_u32_t const *looks, sz_size_t window_words,
+    sz_u64_t *starts, sz_u32_t *finals) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u32_t const *const rows = engine->reverse_rows;
     sz_u8_t const *const byte_to_class = engine->byte_to_class;
@@ -4481,7 +4536,7 @@ STRINGZILLA_INLINE void sz_regex_mark_chains_serial_(sz_regex_engine_t const *en
     }
     for (chain = 0; chain != sz_regex_chains_serial_k; ++chain)
         sz_regex_mark_serial_(engine, haystack, bounds[chain], bounds[chain + 1] - steps, bounds[chain], states[chain],
-                              rfind_live, looks, starts + chain * window_words);
+                              rfind_live, looks, starts + chain * window_words, finals + chain);
 }
 
 /**
@@ -4543,22 +4598,126 @@ STRINGZILLA_INLINE void sz_regex_mark_chains_positions_serial_(
  *  @brief Whether the next batch should skip from the idle states with the tier's byte-set search
  *      rather than walk its windows in lockstep.
  *
- *  Before any batch skipped, the live bytes of 64 evenly spaced samples decide, as in
- *  @c substrings: a DFA skips once fewer than one in 46 is live, as each costs a search and a few
- *  slow steps, and a position walk once fewer than one in six, as its lockstep steps are slow too.
- *  A rare live byte can still hold a walk off its idle states for long, like the opening quote of
- *  `"[^"]*"`, so once batches skipped, skipping continues only while it cost less than the lockstep
- *  pass over the same bytes.
+ *  Before any batch skipped, the samples of @ref sz_regex_live_sparse_ decide. A rare live byte
+ *  can still hold a walk off its idle states for long, like the opening quote of `"[^"]*"`, so
+ *  once batches skipped, skipping goes on only while it costs less than a lockstep pass would
+ *  have cost over the bytes it spanned.
  */
 STRINGZILLA_INLINE sz_bool_t sz_regex_skipping_pays_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
                                                      sz_regex_walk_t const *walk, sz_size_t begin, sz_size_t end) {
-    sz_size_t const samples = 64, stride = end - begin > samples ? (end - begin) / samples : 1;
-    sz_size_t const ratio = engine->positions_words ? 6 : 46;
-    sz_size_t position, taken = 0, live = 0;
     if (walk->skip_spanned) return (sz_bool_t)(walk->skip_cost < walk->skip_spanned);
-    for (position = begin; position < end && taken != samples; position += stride, ++taken)
-        live += sz_byteset_contains_u8(&engine->reverse_live, (sz_u8_t)haystack[position]);
-    return (sz_bool_t)(live * ratio < taken);
+    return sz_regex_live_sparse_(engine, haystack, begin, end, (sz_bool_t)(walk->find_escape != STRINGZILLA_NULL));
+}
+
+/** Bytes right of a window's edge the start pass walks from an idle state to guess the state it
+ *  enters the window with. */
+enum { sz_regex_mark_warmup_k = 16 };
+
+/**
+ *  @brief Guesses the start-finding state at the right edge of each of the first @p count windows
+ *      from @p bounds, walking in lockstep from an idle state over the bytes just right of it.
+ *
+ *  A guess is the true state once the walk from the haystack's end would have reached an idle state
+ *  within those bytes; a walk starting at the haystack's end starts from its true state.
+ */
+STRINGZILLA_INLINE void sz_regex_mark_guesses_serial_(sz_regex_engine_t const *engine, sz_u8_t const *bytes,
+                                                      sz_size_t length, sz_size_t const *bounds, sz_size_t count,
+                                                      sz_u32_t const *looks, sz_u32_t *guesses) {
+    sz_u32_t const *const rows = engine->reverse_rows;
+    sz_size_t positions[sz_regex_chains_serial_k];
+    for (sz_size_t chain = 0; chain != count; ++chain) {
+        sz_size_t const far = sz_min_of_two(bounds[chain + 1] + sz_regex_mark_warmup_k, length);
+        positions[chain] = far;
+        guesses[chain] = engine->reverse_starts[far == length ? 0 : sz_regex_byte_kind_(bytes[far])];
+    }
+    for (sz_size_t step = 0; step != sz_regex_mark_warmup_k; ++step)
+        for (sz_size_t chain = 0; chain != count; ++chain) {
+            sz_size_t const position = positions[chain];
+            if (position == bounds[chain + 1]) continue;
+            guesses[chain] = rows[guesses[chain] + sz_regex_block_at_(engine, looks, position) +
+                                  engine->byte_to_class[bytes[position - 1]]];
+            positions[chain] = position - 1;
+        }
+}
+
+/**
+ *  @brief Checks the guessed entry of every window of a batch but the last against the state the
+ *      window right of it ended on, right to left, correcting the start bits where they differ.
+ *
+ *  A window's first step marks its right edge, which only the window right of it is searched for,
+ *  so the guess is compared one step in. Where it differs, both states walk on until they meet, and
+ *  the bits of the positions where only one of them accepts flip; a pair that never meets leaves
+ *  the true state as the window's last, and the first window's edge bit follows it.
+ */
+STRINGZILLA_INLINE void sz_regex_mark_settle_serial_(sz_regex_engine_t const *engine, sz_u8_t const *bytes,
+                                                     sz_size_t const *bounds, sz_size_t count, sz_u32_t const *guesses,
+                                                     sz_u32_t const *looks, sz_size_t window_words, sz_u64_t *starts,
+                                                     sz_u32_t *finals) {
+    sz_u32_t const *const rows = engine->reverse_rows;
+    sz_u8_t const *const byte_to_class = engine->byte_to_class;
+    sz_u32_t const accepts = engine->reverse_accepts_begin;
+    for (sz_size_t chain = count - 1; chain-- != 0;) {
+        sz_size_t const low = bounds[chain], edge = bounds[chain + 1], stop = low ? low - 1 : 0;
+        sz_u64_t *const bits = starts + chain * window_words;
+        sz_u32_t truth = finals[chain + 1];
+        sz_u32_t guess =
+            rows[guesses[chain] + sz_regex_block_at_(engine, looks, edge) + byte_to_class[bytes[edge - 1]]];
+        sz_size_t position = edge - 1;
+        if (truth == guess) continue;
+        while (truth != guess && position > stop) {
+            sz_u32_t const column = sz_regex_block_at_(engine, looks, position) + byte_to_class[bytes[position - 1]];
+            truth = rows[truth + column], guess = rows[guess + column];
+            if ((truth >= accepts) != (guess >= accepts))
+                bits[(position - low) / 64] ^= 1ull << ((position - low) % 64);
+            --position;
+        }
+        if (truth == guess) continue;
+        finals[chain] = truth;
+        if (low == 0)
+            bits[0] = (bits[0] & ~1ull) |
+                      (sz_u64_t)(rows[truth + sz_regex_block_at_(engine, looks, 0) + engine->classes_count] >= accepts);
+    }
+}
+
+/**
+ *  @brief Marks the starts of a cased DFA batch for @ref sz_regex_mark_batch_serial_, priming only
+ *      its last window's entry.
+ *
+ *  Skipping, it walks right to left as one walk, each window entered with the state the one right
+ *  of it ended on; in lockstep, it guesses the other entries and settles them once every window is
+ *  marked. Outlined, so that no tier's target widens the chains into gathers.
+ */
+STRINGZILLA_OUTLINED_ void sz_regex_mark_states_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
+                                                        sz_size_t length, sz_regex_walk_t *walk, sz_size_t first,
+                                                        sz_size_t count, sz_bool_t skipping, sz_bool_t trying) {
+    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
+    sz_size_t const *const bounds = walk->bounds + first;
+    sz_u32_t states[sz_regex_chains_serial_k], finals[sz_regex_chains_serial_k];
+    states[count - 1] = sz_regex_entry_serial_(engine, bytes, length, first + count, walk);
+    for (sz_size_t chain = count; skipping && chain-- != 0;) {
+        sz_bool_t const last = (sz_bool_t)(chain + 1 == count);
+        sz_size_t const edge = last ? bounds[chain + 1] : bounds[chain + 1] - 1;
+        sz_u32_t const entry = last ? states[chain] : finals[chain + 1];
+        sz_u64_t *const starts = walk->starts + chain * walk->window_words;
+        sz_size_t const cost = walk->looks
+                                   ? sz_regex_mark_serial_(engine, haystack, bounds[chain], edge, bounds[chain], entry,
+                                                           walk->rfind_live, walk->looks, starts, finals + chain)
+                                   : sz_regex_mark_serial_(engine, haystack, bounds[chain], edge, bounds[chain], entry,
+                                                           walk->rfind_live, STRINGZILLA_NULL, starts, finals + chain);
+        if (count == 1) continue;
+        walk->skip_cost += cost, walk->skip_spanned += bounds[chain + 1] - bounds[chain];
+        if (trying && last) skipping = (sz_bool_t)(walk->skip_cost < walk->skip_spanned);
+    }
+    if (skipping) return;
+    sz_regex_mark_guesses_serial_(engine, bytes, length, bounds, count - 1, walk->looks, states);
+    if (walk->looks)
+        sz_regex_mark_chains_serial_(engine, haystack, bounds, states, walk->rfind_live, walk->looks,
+                                     walk->window_words, walk->starts, finals);
+    else
+        sz_regex_mark_chains_serial_(engine, haystack, bounds, states, walk->rfind_live, STRINGZILLA_NULL,
+                                     walk->window_words, walk->starts, finals);
+    sz_regex_mark_settle_serial_(engine, bytes, bounds, count, states, walk->looks, walk->window_words, walk->starts,
+                                 finals);
 }
 
 /**
@@ -4566,65 +4725,55 @@ STRINGZILLA_INLINE sz_bool_t sz_regex_skipping_pays_(sz_regex_engine_t const *en
  *      lockstep or skipping one window after another, or one window alone in a haystack too short
  *      for a batch.
  *
- *  The first batch that samples well enough to skip only tries its first window, then decides again
- *  from what that cost; a window marked twice keeps its bits, as both passes OR the same ones in.
+ *  The first batch that samples well enough to skip only tries one window, then decides again from
+ *  what that cost; a window marked twice keeps its bits, as both passes OR the same ones in.
  *  Position sets of one and two words step with their word loops unrolled, and DFA walks without
  *  lookarounds step with no table loads.
  */
 STRINGZILLA_INLINE void sz_regex_mark_batch_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
                                                     sz_size_t length, sz_regex_walk_t *walk, sz_size_t first) {
-    sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_size_t const words = engine->positions_words, *const bounds = walk->bounds + first;
     sz_size_t const count = engine->case_sensitivity == sz_cased_k && walk->windows - first >= sz_regex_chains_serial_k
                                 ? sz_regex_chains_serial_k
                                 : 1;
     sz_u64_t *const single = walk->sets + 2 * sz_regex_chains_serial_k * words;
     sz_u64_t const *sets[sz_regex_chains_serial_k];
-    sz_u32_t states[sz_regex_chains_serial_k];
     sz_bool_t skipping = (sz_bool_t)(count == 1 ||
                                      sz_regex_skipping_pays_(engine, haystack, walk, bounds[0], bounds[count]));
     sz_bool_t const trying = (sz_bool_t)(skipping && count != 1 && !walk->skip_spanned);
     memset(walk->starts, 0, count * walk->window_words * sizeof(sz_u64_t));
     walk->batch = first, walk->batch_count = count;
-    for (sz_size_t chain = 0; chain != count; ++chain)
-        if (words) sets[chain] = sz_regex_entry_positions_serial_(engine, haystack, length, first + chain + 1, walk);
-        else states[chain] = sz_regex_entry_serial_(engine, bytes, length, first + chain + 1, walk);
     if (engine->case_sensitivity != sz_cased_k) {
         if (words)
-            sz_regex_mark_positions_folded_(engine, haystack, length, bounds[0], bounds[1], bounds[0], sets[0],
+            sz_regex_mark_positions_folded_(engine, haystack, length, bounds[0], bounds[1], bounds[0],
+                                            sz_regex_entry_positions_serial_(engine, haystack, length, first + 1, walk),
                                             walk->rfind_live, walk->looks, single, walk->starts);
         else
-            sz_regex_mark_folded_(engine, haystack, bounds[0], bounds[1], bounds[0], states[0], walk->rfind_live,
-                                  walk->looks, walk->starts);
+            sz_regex_mark_folded_(engine, haystack, bounds[0], bounds[1], bounds[0],
+                                  sz_regex_entry_serial_(engine, (sz_u8_t const *)haystack, length, first + 1, walk),
+                                  walk->rfind_live, walk->looks, walk->starts);
         return;
     }
+    if (!words) {
+        sz_regex_mark_states_serial_(engine, haystack, length, walk, first, count, skipping, trying);
+        return;
+    }
+    for (sz_size_t chain = 0; chain != count; ++chain)
+        sets[chain] = sz_regex_entry_positions_serial_(engine, haystack, length, first + chain + 1, walk);
     for (sz_size_t chain = 0; skipping && chain != count; ++chain) {
         sz_u64_t *const starts = walk->starts + chain * walk->window_words;
-        sz_size_t const cost =
-            words == 1 ? sz_regex_mark_positions_serial_(engine, 1, haystack, length, bounds[chain], bounds[chain + 1],
-                                                         bounds[chain], sets[chain], walk->rfind_live, walk->looks,
-                                                         single, starts)
-            : words ? sz_regex_mark_positions_serial_(engine, words, haystack, length, bounds[chain], bounds[chain + 1],
-                                                      bounds[chain], sets[chain], walk->rfind_live, walk->looks, single,
-                                                      starts)
-            : walk->looks ? sz_regex_mark_serial_(engine, haystack, bounds[chain], bounds[chain + 1], bounds[chain],
-                                                  states[chain], walk->rfind_live, walk->looks, starts)
-                          : sz_regex_mark_serial_(engine, haystack, bounds[chain], bounds[chain + 1], bounds[chain],
-                                                  states[chain], walk->rfind_live, STRINGZILLA_NULL, starts);
+        sz_size_t const cost = words == 1
+                                   ? sz_regex_mark_positions_serial_(engine, 1, haystack, length, bounds[chain],
+                                                                     bounds[chain + 1], bounds[chain], sets[chain],
+                                                                     walk->rfind_live, walk->looks, single, starts)
+                                   : sz_regex_mark_positions_serial_(engine, words, haystack, length, bounds[chain],
+                                                                     bounds[chain + 1], bounds[chain], sets[chain],
+                                                                     walk->rfind_live, walk->looks, single, starts);
         if (count == 1) continue;
         walk->skip_cost += cost, walk->skip_spanned += bounds[chain + 1] - bounds[chain];
         if (trying && chain == 0) skipping = (sz_bool_t)(walk->skip_cost < walk->skip_spanned);
     }
     if (skipping) return;
-    if (!words) {
-        if (walk->looks)
-            sz_regex_mark_chains_serial_(engine, haystack, bounds, states, walk->rfind_live, walk->looks,
-                                         walk->window_words, walk->starts);
-        else
-            sz_regex_mark_chains_serial_(engine, haystack, bounds, states, walk->rfind_live, STRINGZILLA_NULL,
-                                         walk->window_words, walk->starts);
-        return;
-    }
     for (sz_size_t chain = 0; chain != count; chain += sz_regex_position_chains_serial_k) {
         sz_u64_t *const starts = walk->starts + chain * walk->window_words;
         if (words == 1)
@@ -4994,9 +5143,90 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_looks_step_(sz_regex_engine_t const *engine
     return matched;
 }
 
+/** Steps a chain of a body pass takes from the body's start, over the bytes just before its
+ *  stretch, to guess the state it enters the stretch with. */
+enum { sz_regex_body_warmup_k = 16 };
+
+/** The shortest stretch of a haystack worth a body chain of its own. */
+enum { sz_regex_body_stretch_k = 128 };
+
+/** Body chains walked in lockstep, fewer than the start pass's, as each keeps its gathered bits
+ *  in a register too and eight spill. */
+enum { sz_regex_body_chains_k = 4 };
+
 /**
- *  @brief Marks where the lookarounds of @p members hold, stepping their bodies' DFAs one after
- *      another over the haystack, forward for lookbehinds and backward for lookaheads, as
+ *  @brief Steps one body's DFA over a cased haystack in @c sz_regex_body_chains_k chains, each over
+ *      its own stretch, so their dependent loads overlap, flipping @p bit where it accepts.
+ *  @return The state after the last byte.
+ *
+ *  Step @c i reads the byte at @c i and marks position @c i when walking @p behind, and reads the
+ *  byte before position `length - i` and marks that position otherwise. Each chain but the first
+ *  guesses the state it enters its stretch with by walking from the start over the bytes just
+ *  before it. Once all are done, each in turn checks its guess against the state the chain before
+ *  it ended on, and where the two differ walks both on until they meet, flipping each position
+ *  where exactly one of them accepts.
+ */
+STRINGZILLA_INLINE sz_u32_t sz_regex_body_chains_(sz_regex_body_t const *body, sz_u8_t const *byte_to_class,
+                                                  sz_u8_t const *bytes, sz_size_t length, sz_bool_t behind,
+                                                  sz_u32_t bit, sz_u32_t *looks) {
+    sz_u32_t const *const rows = body->rows;
+    sz_u32_t const accepts = body->accepts_begin;
+    sz_size_t const chains = length >= (sz_size_t)sz_regex_body_chains_k * sz_regex_body_stretch_k
+                                 ? (sz_size_t)sz_regex_body_chains_k
+                                 : 1;
+    sz_size_t firsts[sz_regex_body_chains_k + 1], steps = 0, chain, step;
+    sz_u32_t states[sz_regex_body_chains_k], guesses[sz_regex_body_chains_k];
+    for (chain = 0; chain != chains; ++chain) firsts[chain] = chain * length / chains, states[chain] = body->start;
+    firsts[chains] = length;
+    if (chains == sz_regex_body_chains_k) {
+        sz_size_t const warmup = sz_min_of_two((sz_size_t)sz_regex_body_warmup_k, firsts[1]);
+        for (step = 0; step != warmup; ++step)
+            for (chain = 1; chain != sz_regex_body_chains_k; ++chain) {
+                sz_size_t const index = firsts[chain] - warmup + step;
+                states[chain] = rows[states[chain] + byte_to_class[bytes[behind ? index : length - 1 - index]]];
+            }
+        steps = firsts[1];
+        for (chain = 1; chain != sz_regex_body_chains_k; ++chain)
+            steps = sz_min_of_two(steps, firsts[chain + 1] - firsts[chain]);
+        steps -= steps % 64;
+    }
+    for (chain = 0; chain != chains; ++chain) guesses[chain] = states[chain];
+    for (sz_size_t block = 0; block != steps; block += 64) {
+        sz_u64_t gathered[sz_regex_body_chains_k];
+        for (chain = 0; chain != sz_regex_body_chains_k; ++chain) gathered[chain] = 0;
+        for (step = 0; step != 64; ++step)
+            for (chain = 0; chain != sz_regex_body_chains_k; ++chain) {
+                sz_size_t const index = firsts[chain] + block + step;
+                states[chain] = rows[states[chain] + byte_to_class[bytes[behind ? index : length - 1 - index]]];
+                gathered[chain] = gathered[chain] << 1 | (sz_u64_t)(states[chain] >= accepts);
+            }
+        // Accepting steps are rare, and the last step's bit is the lowest.
+        for (chain = 0; chain != sz_regex_body_chains_k; ++chain)
+            for (sz_u64_t bits = gathered[chain]; bits; bits &= bits - 1) {
+                sz_size_t const index = firsts[chain] + block + 63 - (sz_size_t)sz_u64_ctz(bits);
+                looks[behind ? index : length - index] ^= bit;
+            }
+    }
+    for (chain = 0; chain != chains; ++chain)
+        for (step = firsts[chain] + steps; step != firsts[chain + 1]; ++step) {
+            states[chain] = rows[states[chain] + byte_to_class[bytes[behind ? step : length - 1 - step]]];
+            if (states[chain] >= accepts) looks[behind ? step : length - step] ^= bit;
+        }
+    for (chain = 1; chain != chains; ++chain) {
+        sz_u32_t truth = states[chain - 1], guess = guesses[chain];
+        for (step = firsts[chain]; truth != guess && step != firsts[chain + 1]; ++step) {
+            sz_u8_t const unit_class = byte_to_class[bytes[behind ? step : length - 1 - step]];
+            truth = rows[truth + unit_class], guess = rows[guess + unit_class];
+            if ((truth >= accepts) != (guess >= accepts)) looks[behind ? step : length - step] ^= bit;
+        }
+        if (truth != guess) states[chain] = truth;
+    }
+    return states[chains - 1];
+}
+
+/**
+ *  @brief Flips the bits of @p members where their lookaround bodies match, stepping their DFAs one
+ *      after another over the haystack, forward for lookbehinds and backward for lookaheads, as
  *      @ref sz_regex_looks_serial_ steps the PikeVM.
  *
  *  A step landing on an accepting state marks the boundary it crossed, one unit late as both
@@ -5004,22 +5234,20 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_looks_step_(sz_regex_engine_t const *engine
  *  codepoint mark the codepoint's edge they snap out to.
  */
 STRINGZILLA_INLINE void sz_regex_looks_bodies_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
-                                               sz_u32_t members, sz_u32_t negated, sz_bool_t behind, sz_u32_t *looks) {
+                                               sz_u32_t members, sz_bool_t behind, sz_u32_t *looks) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack, *const byte_to_class = engine->byte_to_class;
     sz_size_t const edge = engine->classes_count, stop = behind ? length : 0;
     sz_regex_image_t image;
     for (sz_u32_t index = 0; index != engine->lookarounds_count; ++index) {
         sz_u32_t const bit = (sz_u32_t)sz_regex_look_lookaround_k << index;
-        sz_u32_t const *const rows = engine->bodies[index].rows, accepts = engine->bodies[index].accepts_begin;
-        sz_u32_t const flip = negated & bit;
-        sz_u32_t state = engine->bodies[index].start, pending = 0;
+        sz_regex_body_t const *const body = engine->bodies + index;
+        sz_u32_t const *const rows = body->rows, accepts = body->accepts_begin;
+        sz_u32_t state = body->start, pending = 0;
         sz_size_t position = behind ? 0 : length;
         if (!(members & bit)) continue;
         if (engine->case_sensitivity == sz_cased_k)
-            for (; position != stop; behind ? ++position : --position) {
-                state = rows[state + byte_to_class[bytes[behind ? position : position - 1]]];
-                looks[position] |= (state >= accepts ? bit : 0) ^ flip;
-            }
+            state = behind ? sz_regex_body_chains_(body, byte_to_class, bytes, length, sz_true_k, bit, looks)
+                           : sz_regex_body_chains_(body, byte_to_class, bytes, length, sz_false_k, bit, looks);
         else
             while (position != stop) {
                 sz_size_t const next = behind ? sz_regex_image_after_(haystack, length, position, &image)
@@ -5029,11 +5257,11 @@ STRINGZILLA_INLINE void sz_regex_looks_bodies_(sz_regex_engine_t const *engine, 
                     state = rows[state + byte_to_class[image.bytes[behind ? byte : image.length - 1 - byte]]];
                     held = state >= accepts ? bit : 0;
                     if (byte) pending |= held;
-                    else looks[position] |= (held | pending) ^ flip, pending = 0;
+                    else looks[position] ^= held | pending, pending = 0;
                 }
                 position = next;
             }
-        looks[stop] |= ((rows[state + edge] >= accepts ? bit : 0) | pending) ^ flip;
+        looks[stop] ^= (rows[state + edge] >= accepts ? bit : 0) | pending;
     }
 }
 
@@ -5043,10 +5271,11 @@ STRINGZILLA_INLINE void sz_regex_looks_bodies_(sz_regex_engine_t const *engine, 
  *
  *  Per level, a forward pass runs every lookbehind body as one unanchored automaton keeping every
  *  match and marks where they end, and a backward pass runs the reversed lookahead bodies alike and
- *  marks where they start; a negated lookaround holds where its body marked nothing. Bodies with a
- *  DFA of their own step it, a byte per step, and the rest step a PikeVM. Steps inside the folds of
- *  one codepoint see no lookaround hold, and a body ending or starting there marks the codepoint's
- *  edge it snaps out to.
+ *  marks where they start; a negated lookaround holds where its body marked nothing. The tier's
+ *  fill first writes the one-byte lookarounds and marks every negated one a DFA walks as holding;
+ *  bodies with a DFA of their own then flip their bits where they match, in chains over a cased
+ *  haystack, and the rest step a PikeVM. Steps inside the folds of one codepoint see no lookaround
+ *  hold, and a body ending or starting there marks the codepoint's edge it snaps out to.
  */
 STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length,
                                                   sz_regex_walk_t *walk) {
@@ -5054,22 +5283,17 @@ STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engin
     sz_u32_t *const looks = walk->looks;
     sz_size_t const slots_count = pike->slots_count;
     sz_u32_t const singles = engine->looks_bytes ? engine->looks_bytes[0] : 0;
-    sz_u32_t levels = 0, negated_singles = 0;
+    sz_u32_t levels = 0, flipped = 0;
     sz_regex_image_t image;
     for (sz_size_t index = 0; index != engine->lookarounds_count; ++index) {
+        sz_u32_t const bit = (sz_u32_t)sz_regex_look_lookaround_k << index;
         levels = sz_max_of_two(levels, engine->lookarounds[index].level);
-        if (engine->lookarounds[index].kind & 1) negated_singles |= (sz_u32_t)sz_regex_look_lookaround_k << index;
+        // Negated lookarounds a byte decides or a DFA walks hold unless their bodies flip them.
+        if (engine->lookarounds[index].kind & 1 && (singles & bit || engine->bodies[index].rows)) flipped |= bit;
     }
-    negated_singles &= singles;
-    if (singles) {
-        // One-byte lookarounds hold by the byte before a position or at it, and none at an edge.
-        sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
-        sz_u32_t const *const after = engine->looks_bytes + 1, *const before = after + 256;
-        sz_u32_t previous = 0;
-        for (sz_size_t position = 0; position != length; ++position)
-            looks[position] = (previous | before[bytes[position]]) ^ negated_singles, previous = after[bytes[position]];
-        looks[length] = previous ^ negated_singles;
-    }
+    if (singles) walk->fill_looks(haystack, length, engine->looks_bytes, flipped, looks);
+    else if (flipped)
+        for (sz_size_t position = 0; position != length + 1; ++position) looks[position] = flipped;
     else memset(looks, 0, (length + 1) * sizeof(sz_u32_t));
     // The bodies hold no groups, so their threads carry no slots.
     pike->slots_count = 0;
@@ -5085,8 +5309,7 @@ STRINGZILLA_OUTLINED_ void sz_regex_looks_serial_(sz_regex_engine_t const *engin
             if (lookaround.kind & 1) negated |= (sz_u32_t)sz_regex_look_lookaround_k << index;
             if (engine->bodies[index].rows) walked |= (sz_u32_t)sz_regex_look_lookaround_k << index;
         }
-        if (walked)
-            sz_regex_looks_bodies_(engine, haystack, length, walked, negated & walked, (sz_bool_t)behind, looks);
+        if (walked) sz_regex_looks_bodies_(engine, haystack, length, walked, (sz_bool_t)behind, looks);
         members &= ~walked & ~singles, negated &= ~walked & ~singles;
         if (!members) continue;
         pike->entered_count = 0;
@@ -5223,7 +5446,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_size_t *counts, sz_size_t counts_stride,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
     sz_string_view_t views[64];
     sz_size_t matches_count = 0;
     if (counts_stride == 0) return sz_unexpected_dimensions_k;
@@ -5233,7 +5457,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_counts_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
-                                        rfind_live, find_escape, find_prefixes, 0, &walk);
+                                        rfind_live, find_escape, find_prefixes, fill_looks, 0, &walk);
         if (status != sz_success_k) return status;
         counts[haystack_index * counts_stride] = sz_regex_walk_serial_(
             engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk, haystack_index,
@@ -5248,7 +5472,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_find_with_(
     sz_regex_engine_t *engine, sz_strings_view_t const *haystacks, sz_match_t *matches, sz_size_t matches_capacity,
     sz_size_t *matches_offsets, sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
     sz_string_view_t views[64];
     sz_size_t matches_count = 0;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -5257,7 +5482,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_find_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         status = sz_regex_walk_scratch_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length,
-                                        rfind_live, find_escape, find_prefixes, 0, &walk);
+                                        rfind_live, find_escape, find_prefixes, fill_looks, 0, &walk);
         if (status != sz_success_k) return status;
         matches_offsets[haystack_index] = matches_count;
         sz_regex_walk_serial_(engine, views[haystack_index % 64].start, views[haystack_index % 64].length, &walk,
@@ -5366,7 +5591,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_replace_with_(
     sz_ptr_t target, sz_size_t target_capacity, sz_size_t *offsets,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
     sz_string_view_t views[64];
     sz_size_t written = 0, slots_count;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -5380,8 +5606,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_replace_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         haystack = views[haystack_index % 64].start, length = views[haystack_index % 64].length;
-        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes, slots_count,
-                                        &walk);
+        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes, fill_looks,
+                                        slots_count, &walk);
         if (status != sz_success_k) return status;
         offsets[haystack_index] = written;
         while (sz_regex_next_(engine, haystack, length, &walk, cursor, found, &start, &end, &pattern, &offset)) {
@@ -5413,7 +5639,8 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_with_(
     sz_size_t groups_capacity, sz_size_t *groups_offsets,
     sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
     sz_cptr_t (*find_escape)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *)) {
+    sz_cptr_t (*find_prefixes)(sz_cptr_t, sz_size_t, sz_regex_prefixes_t const *),
+    void (*fill_looks)(sz_cptr_t, sz_size_t, sz_u32_t const *, sz_u32_t, sz_u32_t *)) {
     sz_string_view_t views[64];
     sz_size_t groups_count, rows_count = 0;
     if (!engine->memory) return sz_missing_kernel_k;
@@ -5428,7 +5655,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_extract_with_(
         sz_status_t status;
         if (haystack_index % 64 == 0) sz_strings_get_block_(haystacks, haystack_index, views);
         haystack = views[haystack_index % 64].start, length = views[haystack_index % 64].length;
-        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes,
+        status = sz_regex_walk_scratch_(engine, haystack, length, rfind_live, find_escape, find_prefixes, fill_looks,
                                         2 * groups_count + 2, &walk);
         if (status != sz_success_k) return status;
         groups_offsets[haystack_index] = rows_count;
@@ -5474,7 +5701,7 @@ STRINGZILLA_API sz_status_t sz_regex_counts_serial(sz_regex_engine_t *engine, sz
                                                    sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_counts_with_(engine, haystacks, counts, counts_stride, &sz_rfind_byteset_serial_, STRINGZILLA_NULL,
-                                 &sz_regex_find_prefixes_serial_);
+                                 &sz_regex_find_prefixes_serial_, &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_find_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5482,7 +5709,7 @@ STRINGZILLA_API sz_status_t sz_regex_find_serial(sz_regex_engine_t *engine, sz_s
                                                  sz_size_t *matches_offsets, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_find_with_(engine, haystacks, matches, matches_capacity, matches_offsets, &sz_rfind_byteset_serial_,
-                               STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
+                               STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_, &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_replace_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5490,7 +5717,8 @@ STRINGZILLA_API sz_status_t sz_regex_replace_serial(sz_regex_engine_t *engine, s
                                                     sz_size_t target_capacity, sz_size_t *offsets, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_replace_with_(engine, haystacks, replacements, target, target_capacity, offsets,
-                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
+                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_,
+                                  &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_extract_serial(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -5499,7 +5727,8 @@ STRINGZILLA_API sz_status_t sz_regex_extract_serial(sz_regex_engine_t *engine, s
                                                     sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_extract_with_(engine, haystacks, pattern_index, groups, groups_capacity, groups_offsets,
-                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_);
+                                  &sz_rfind_byteset_serial_, STRINGZILLA_NULL, &sz_regex_find_prefixes_serial_,
+                                  &sz_regex_fill_looks_serial_);
 }
 
 #endif // STRINGZILLA_TARGET_SERIAL

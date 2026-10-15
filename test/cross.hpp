@@ -4683,6 +4683,28 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
                                        {1, 0, 1, 1},
                                        {2, 3, 0, 4}}});
 
+    // Kilobyte haystacks split into windows and body stretches, each entered with a guessed state:
+    // a body or a pattern whose partial match spans every stretch, so a walk settles each guess,
+    // matches straddling a stretch's edge or at a haystack's edge, and one-byte lookarounds on both
+    // sides of the edges of 64-byte blocks.
+    std::string const run_3000(3000, 'b'), run_1500(1500, 'b'), dots_1021(1021, '.'), dots_2043(2043, '.');
+    check_regex_known_(tier, {{"(?<=a[^\n]*)z", "y(?![^\n]*a)"},
+                              {"a" + run_3000 + "z", run_3000 + "z", "a" + run_3000 + "\n" + run_3000 + "z",
+                               "y" + run_3000 + "a", "y" + run_3000, "y" + run_3000 + "\na"},
+                              cases_t {{0, 0, 3001, 1}, {4, 1, 0, 1}, {5, 1, 0, 1}}});
+    check_regex_known_(tier, {{"a[^\n]*z", "\"[^\"]*\""},
+                              {"a" + run_3000 + "z", run_1500 + "a" + run_1500 + "z" + run_1500,
+                               "a" + run_3000 + "\n" + run_3000 + "z", "\"" + run_3000 + "\"" + run_3000},
+                              cases_t {{0, 0, 0, 3002}, {1, 0, 1500, 1502}, {3, 1, 0, 3002}}});
+    check_regex_known_(
+        tier, {{"[A-Z][a-z]+(?= [A-Z][a-z]+)"},
+               {"Ab Cd Ef gh", "." + dots_1021 + "Ab Cd" + dots_1021, dots_2043 + "Ab Cd", "Ab Cd" + dots_2043},
+               cases_t {{0, 0, 0, 2}, {0, 0, 3, 2}, {1, 0, 1022, 2}, {2, 0, 2043, 2}, {3, 0, 0, 2}}});
+    check_regex_known_(tier, {{"(?<=\\$)[0-9]+", "(?<![a-z])[A-Z](?![a-z])"},
+                              {std::string(63, '.') + "$12" + std::string(60, '.') + "$7", std::string(127, '.') + "$5",
+                               std::string(64, '.') + "Q" + std::string(63, '.') + "Rb"},
+                              cases_t {{0, 0, 64, 2}, {0, 0, 127, 1}, {1, 0, 128, 1}, {2, 1, 64, 1}}});
+
     // Vocabularies whose matches start with a few literal bytes skip to them: candidates straddling
     // vector blocks or near the haystack's end, overlapping candidates, prefixes past a lookbehind,
     // a word boundary or a multi-byte codepoint, and vocabularies that cannot skip, as uncased ones

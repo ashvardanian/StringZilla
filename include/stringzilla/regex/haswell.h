@@ -86,7 +86,8 @@ STRINGZILLA_API sz_status_t sz_regex_counts_haswell(sz_regex_engine_t *engine, s
                                                     sz_size_t *counts, sz_size_t counts_stride, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_counts_with_(engine, haystacks, counts, counts_stride, &sz_rfind_byteset_haswell_,
-                                 &sz_find_byteset_haswell_, &sz_regex_find_prefixes_haswell_);
+                                 &sz_find_byteset_haswell_, &sz_regex_find_prefixes_haswell_,
+                                 &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_find_haswell(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -94,7 +95,8 @@ STRINGZILLA_API sz_status_t sz_regex_find_haswell(sz_regex_engine_t *engine, sz_
                                                   sz_size_t *matches_offsets, sz_stream_t stream) {
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_find_with_(engine, haystacks, matches, matches_capacity, matches_offsets,
-                               &sz_rfind_byteset_haswell_, &sz_find_byteset_haswell_, &sz_regex_find_prefixes_haswell_);
+                               &sz_rfind_byteset_haswell_, &sz_find_byteset_haswell_, &sz_regex_find_prefixes_haswell_,
+                               &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_replace_haswell(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -104,7 +106,7 @@ STRINGZILLA_API sz_status_t sz_regex_replace_haswell(sz_regex_engine_t *engine, 
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_replace_with_(engine, haystacks, replacements, target, target_capacity, offsets,
                                   &sz_rfind_byteset_haswell_, &sz_find_byteset_haswell_,
-                                  &sz_regex_find_prefixes_haswell_);
+                                  &sz_regex_find_prefixes_haswell_, &sz_regex_fill_looks_serial_);
 }
 
 STRINGZILLA_API sz_status_t sz_regex_extract_haswell(sz_regex_engine_t *engine, sz_strings_view_t const *haystacks,
@@ -114,7 +116,7 @@ STRINGZILLA_API sz_status_t sz_regex_extract_haswell(sz_regex_engine_t *engine, 
     if (stream) return sz_device_memory_mismatch_k;
     return sz_regex_extract_with_(engine, haystacks, pattern_index, groups, groups_capacity, groups_offsets,
                                   &sz_rfind_byteset_haswell_, &sz_find_byteset_haswell_,
-                                  &sz_regex_find_prefixes_haswell_);
+                                  &sz_regex_find_prefixes_haswell_, &sz_regex_fill_looks_serial_);
 }
 
 #endif // STRINGZILLA_TARGET_HASWELL

@@ -27,15 +27,19 @@ Look-behind is settled by the start state, one per kind of byte before the walk:
 ## The Walks
 
 A haystack splits into equal windows of at most 256 KB, eight to a batch, left to right.
-The search marks a whole batch at once: every window primes its own right edge, and eight start-finding walks then step right to left in lockstep, one per window, so their dependent loads overlap.
+The search marks a whole batch at once: eight start-finding walks step right to left in lockstep, one per window, each from the state at its window's right edge, so their dependent loads overlap.
 A DFA chain gathers its start bits in a register, 64 steps at a time; position sets walk four at a time, as each step holds many more values.
-A haystack too short for a batch of 4 KB windows is one window, walked alone.
+A cased DFA walk finds those states almost for free, as the section on speculation below tells, so its windows can be as short as 128 bytes; uncased and position walks prime every window, and a haystack too short for a batch of their 4 KB windows is one window, walked alone.
+Short windows only pay in lockstep, so a haystack under 32 KB whose sampled bytes would skip, as below, stays one window too.
+Where literal prefixes replace the start pass, below, a haystack stays one window.
 
 While the start pass idles, a reverse byte-set search can jump to the next byte that leaves it, as nothing between can start a match.
 The DFA idles in its start states after a line feed, a word byte and another byte, as long as every byte outside the live set maps those three into one another; after a jump it lands on the start for the kind of the last byte it skipped, so vocabularies ending in `\b` skip too.
 The position walk idles when only the loop is live, unless the loop alone can match empty.
 A batch skips window by window instead of walking in lockstep when that is cheaper, judged first by 64 sampled bytes and then by what skipping cost: a DFA step on one chain costs about three lockstep bytes and a search about forty, while a position step costs about as much as its lockstep step and a search about four.
-A rare live byte can still hold the walk off its idle states for long, like the opening quote of `"[^"]*"` in a quoted CSV, so the first batch that samples well only tries its first window before deciding.
+The samples let a DFA skip below one live byte in 46 on the serial tier and one in 20 where vector searches pass a block per compare.
+A rare live byte can still hold the walk off its idle states for long, like the opening quote of `"[^"]*"` in a quoted CSV, so the first batch that samples well only tries one window before deciding.
+A skipping DFA batch walks right to left as one walk, each window entered with the state the window right of it ended on.
 
 The search then follows the chain the sequential search takes: the first marked start at or past the cursor, its end from the end-finding walk, and the cursor moved there.
 The cost is one pass over the haystack for starts plus the matched bytes and their lookahead for ends, the same order as RE2's forward pass plus a reverse walk per match.
@@ -56,6 +60,8 @@ The check stays at checkpoints, as searching after every escape loses where esca
 Every CPU tier shares the serial walks and brings its byte-set searches: the reverse one for the start pass's skips, and the forward one for end walks.
 NEON, AVX2 and AVX-512 search 16, 32 and 64 bytes per compare; the serial tier skips the start pass with a byte loop, which still pays for position walks, and does not search ahead in end walks, where a byte loop is no faster than stepping.
 Each tier also brings its search for literal prefixes: the serial one reads a bucket table per offset, a byte at a time, and the vector ones test both nibbles of every byte at every offset with one table lookup each, a superset of the buckets' bytes that the end walk settles.
+And each brings its fill of the lookaround table's one-byte lookarounds: AVX-512 narrows both 256-entry tables to bytes and looks up 64 positions per step with two byte permutations and a blend, NEON 16 with four four-register lookups, where every lookaround written is among the first eight; serial and AVX2, which has no 256-entry byte lookup cheaper than two scalar loads, read the tables a byte at a time.
+The batch marking is compiled once outside every tier's target, as an AVX-512 target otherwise widens the eight chains into gathers, several times slower than the chains.
 
 After a match the search resumes at its end, and an empty match there is refused in favour of the search one byte further, so matches share no bytes and none repeats.
 An empty match is never reported before a UTF-8 continuation byte, so none splits a codepoint, while non-empty matches stand where they are found.
@@ -77,10 +83,10 @@ Window edges move forward to the next unit boundary, so both start passes share 
 
 Priming stays exact by __sandwich__: a step is monotone in its set, so a run from the loop alone and a run from every position a walk can hold bound the true set from both sides, and where they meet it is known.
 
-## Why No Speculation
+## Priming and Speculation
 
 A window that does not end its haystack needs the start-finding state at its right edge, which depends on every byte after it.
-Rather than guess and fix up, the window __primes__ itself: every state of the automaton walks the bytes right of the edge together, deduplicated, until one state remains.
+Uncased and position walks, and the GPUs, have each window __prime__ itself: every state of the automaton walks the bytes right of the edge together, deduplicated, until one state remains.
 Whichever state the walk from the haystack's end would have held there, it is now that one, so the result is exact by construction.
 A distance that ends uncollapsed is doubled, one that reaches the haystack's end starts from the true start instead, and every window edge passed once collapsed is recorded, so no window primes over the same bytes twice.
 A primed state that dies is dropped on the spot, as the true walk never dies inside a haystack: the state after the edge column accepts with nothing left to run.
@@ -93,6 +99,12 @@ A guess was measured on the GPU backends anyway, where priming takes launches of
 Each chunk walked its own bytes from the idle state after the byte at its edge and, beside it, the set priming walks, so once that set narrowed to one state the marks and the state handed left were exact, and only the bytes before that point waited for the neighbour's state.
 Where nearly every pair of bytes collapses the start-finding states, as for keywords and everyday patterns, that gained a few percent: the priming it saves is a fraction of a pass, while the chunks it leaves unsettled, at least one per block, still take priming's launches.
 Where no pair does, as for `"[^"]*"`, every chunk fell back to priming, and the guess cost a quarter more.
+
+A cased DFA batch on CPUs primes only its last window, whose state at the right edge comes from priming or the haystack's end, and guesses the rest without launches to save.
+Each guess walks from an idle state over the 16 bytes right of its window's edge, all windows in lockstep.
+Once every window is walked, the guesses are settled right to left against the state the window right of each ended on, one step into the window, as a window's first step marks its right edge, which only the next window is searched for.
+A wrong guess walks on beside the true state until the two meet, flipping the start bits where exactly one accepts; for `"[^"]*"` they meet at the next quote, the bytes priming would have walked, and a pair that never meets hands the true state on.
+That lets lines of a few kilobytes, which used to be one window each, walk in eight-way lockstep.
 
 ## Rewriting and Groups
 
@@ -111,7 +123,8 @@ Each body compiles into the forward NFA as a sub-vocabulary of its own, a lookbe
 Before the walks, every haystack fills a table of those bits per position: a forward pass runs all lookbehind bodies as one unanchored automaton keeping every match and marks where they end, and a backward pass runs the reversed lookahead bodies alike and marks where they start, which is the start-finding construction again; a negated lookaround holds where its body marked nothing.
 Bodies nest, so lookarounds are computed level by level, innermost first, each level's bodies reading the bits below them.
 A body nesting no lookaround gets a DFA of its own, unanchored and keeping every match as the start-finding one, and fills its bits a byte per step; nested bodies and those past the start-finding budget step the PikeVM.
-A cased body of one byte from a set, asserting nothing, needs no walk at all: the byte before a position decides a lookbehind and the byte at it a lookahead, so one table per side fills all of them in one pass.
+Over a cased haystack of a kilobyte or more, a body's DFA walks four stretches in lockstep, each guessing its entry from the 16 bytes before it and settled against the stretch before it as the start pass's windows are.
+A cased body of one byte from a set, asserting nothing, needs no walk at all: the byte before a position decides a lookbehind and the byte at it a lookahead, so one table per side fills all of them in one pass, which also marks every negated lookaround a DFA walks as holding until its body flips it.
 The PikeVM adds a position's bits to the assertions it crosses there, and the position automaton tests them beside the boundary kinds of its groups, the loop's follows across a lookaround joining the groups too.
 Both DFAs read the bits as columns: a vocabulary of at most six lookarounds on CPUs and four on GPUs, nested ones included, widens every row to one block per set of them, and a step takes the block of the lookarounds holding at the boundary it crosses, the one before its byte left to right and the one after it right to left.
 Such a step first closes its state's threads under the assertions the state knows and the block's lookarounds, then consumes the byte, so a lookaround ending a pattern resolves one byte late like `$`, and each block's edge column settles the haystack's edges.
