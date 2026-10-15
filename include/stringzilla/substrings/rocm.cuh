@@ -57,6 +57,12 @@ STRINGZILLA_INLINE void const *sz_substrings_walk_kernel_rocm_(sz_substrings_eng
                    : (void const *)sz_substrings_walk_cased_simt_kernel_;
 }
 
+/** The walk kernel of @p engine's case sensitivity that tallies a scoring round's pairs. */
+STRINGZILLA_INLINE void const *sz_substrings_pairs_kernel_rocm_(sz_substrings_engine_t const *engine) {
+    return engine->case_sensitivity == sz_uncased_k ? (void const *)sz_substrings_pairs_uncased_simt_kernel_
+                                                    : (void const *)sz_substrings_pairs_cased_simt_kernel_;
+}
+
 /** Words of the acceptance bitmap, one bit per double-array slot. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_substrings_accepts_words_rocm_(sz_substrings_engine_t const *engine) {
     return sz_size_divide_round_up(engine->slots_count, 32);
@@ -244,6 +250,13 @@ typedef struct sz_substrings_arena_rocm_t {
      *  buffer, unallocated without a cover. */
     sz_size_t jumps, doubled;
 
+    /** Offset of the scoring rounds' pairs table, @b [pairs_capacity] keys then as many counts,
+     *  zeroed once and cleared again by each round's scoring. */
+    sz_size_t pairs;
+
+    /** Slots in the pairs table, a few per budgeted match. */
+    sz_size_t pairs_capacity;
+
     /** Offset of the hashed BM25 tally rows, unallocated for a vocabulary a block's
      *  own table holds. */
     sz_size_t overflow_rows;
@@ -286,7 +299,9 @@ STRINGZILLA_INLINE sz_substrings_arena_rocm_t sz_substrings_arena_rocm_(sz_subst
     arena.gap_offsets = arena.keep_offsets + (covering ? (matches + 1) * sizeof(sz_size_t) : 0);
     arena.jumps = arena.gap_offsets + (covering ? matches * sizeof(sz_size_t) : 0);
     arena.doubled = arena.jumps + (covering ? matches * sizeof(sz_size_t) : 0);
-    arena.overflow_rows = arena.doubled + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.pairs = arena.doubled + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.pairs_capacity = matches * sz_substrings_pairs_per_match_simt_k;
+    arena.overflow_rows = arena.pairs + arena.pairs_capacity * (sizeof(sz_u64_t) + sizeof(sz_u32_t));
     arena.total = arena.overflow_rows + arena.overflow_count * engine->needles_count * sizeof(sz_u32_t);
     return arena;
 }
@@ -423,7 +438,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_rocm_(sz_substrings_e
     }
     engine->scratch = block, engine->scratch_bytes = arena.total;
     engine->report = (sz_substrings_report_t *)((sz_ptr_t)block + arena.report);
-    return sz_success_k;
+    // A scoring round leaves the pairs table as clear as it found it, so only here is it zeroed.
+    return sz_fill_rocm_((sz_ptr_t)block + arena.pairs, arena.overflow_rows - arena.pairs, 0, stream);
 }
 
 /** Zeroes everything a round reads before it writes: the report, the counters
@@ -728,6 +744,63 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_rocm_(sz_substrings_engine_
     return status;
 }
 
+/**
+ *  @brief Counts every needle of every haystack into the arena's pairs table, walking the chunks a
+ *      counting round walks, then adds each pair's term into its haystack's fixed-point sum.
+ *  @param[out] sums Each haystack's sum, in the round's chunk slots, which scoring leaves unused.
+ *  @param[out] overflowed Each haystack's flag, set where the table missed one of its pairs, in the
+ *      round's match boundaries, which scoring leaves unused as well.
+ */
+STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_pairs_rocm_(sz_substrings_engine_t *engine,
+                                                              sz_strings_view_t const *haystacks,
+                                                              sz_f32_t const *document_lengths,
+                                                              sz_substrings_bm25_t const *parameters,
+                                                              sz_f32_t const *needle_weights, unsigned long long **sums,
+                                                              sz_size_t **overflowed, sz_stream_t stream) {
+    sz_substrings_arena_rocm_t const arena = sz_substrings_arena_rocm_(engine, haystacks->count);
+    void const *const walk = sz_substrings_pairs_kernel_rocm_(engine);
+    sz_u32_t staged_rows = sz_substrings_staged_rows_rocm_(engine, walk, 0, sz_substrings_stage_whole_rocm_k);
+    sz_size_t const staged_bytes = (sz_size_t)staged_rows * engine->classes_count * sizeof(sz_u32_t);
+    sz_size_t boundaries = haystacks->count + 1;
+    sz_substrings_engine_t launched_engine = *engine;
+    sz_strings_view_t launched_haystacks = *haystacks;
+    sz_substrings_bm25_t launched_parameters = *parameters;
+    sz_substrings_round_rocm_t round;
+    sz_substrings_pairs_simt_t pairs;
+    void *arguments[6];
+    sz_status_t status;
+    sz_substrings_round_bind_rocm_(engine, haystacks->count, &round);
+    pairs.keys = (sz_u64_t *)((sz_ptr_t)engine->scratch + arena.pairs);
+    pairs.counts = (sz_u32_t *)(pairs.keys + arena.pairs_capacity);
+    pairs.capacity = arena.pairs_capacity, pairs.needles_count = engine->needles_count;
+    pairs.overflowed = round.haystack_offsets;
+    *sums = (unsigned long long *)round.chunk_slots, *overflowed = round.haystack_offsets;
+    // Zeroes the report, the flags and the sums with the rest of the round's head.
+    status = sz_substrings_arena_clear_rocm_(engine, haystacks->count, stream);
+    if (status == sz_success_k) {
+        arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = &round.chunk_offsets;
+        status = sz_substrings_launch_rocm_((void const *)sz_substrings_chunk_counts_simt_kernel_,
+                                            sz_substrings_grid_rocm_(haystacks->count), arguments, 0, stream);
+    }
+    if (status == sz_success_k)
+        status = sz_substrings_scan_rocm_(round.chunk_offsets, boundaries, STRINGZILLA_NULL, &round, stream);
+    if (status == sz_success_k) {
+        arguments[0] = &launched_engine, arguments[1] = &staged_rows, arguments[2] = &launched_haystacks;
+        arguments[3] = &round.chunk_offsets, arguments[4] = &pairs;
+        status = sz_substrings_launch_rocm_(walk, sz_substrings_grid_for_rocm_(walk, staged_bytes, round.slots_count),
+                                            arguments, staged_bytes, stream);
+    }
+    if (status == sz_success_k) {
+        arguments[0] = &pairs, arguments[1] = &launched_haystacks, arguments[2] = &document_lengths;
+        arguments[3] = &launched_parameters, arguments[4] = &needle_weights, arguments[5] = sums;
+        status = sz_substrings_launch_rocm_((void const *)sz_substrings_bm25_pairs_simt_kernel_,
+                                            sz_substrings_grid_rocm_(pairs.capacity), arguments, 0, stream);
+    }
+    return status;
+}
+
+/** Scores every haystack through a round of the pairs table, and the ones it missed with a block of
+ *  their own. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_rocm_(sz_substrings_engine_t *engine,
                                                                sz_strings_view_t const *haystacks,
                                                                sz_f32_t const *document_lengths,
@@ -748,10 +821,12 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_rocm_(sz_substrings_eng
     sz_strings_view_t haystacks_copy = *haystacks;
     sz_substrings_bm25_t parameters_copy;
     sz_u32_t *overflow_rows = STRINGZILLA_NULL;
+    unsigned long long *sums = STRINGZILLA_NULL;
+    sz_size_t *overflowed = STRINGZILLA_NULL;
     sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks, resident;
     sz_u32_t staged_accepts_words = 0, staged_count;
     dim3 grid, block;
-    void *arguments[10];
+    void *arguments[12];
     sz_status_t status = sz_substrings_bm25_check(parameters, needle_weights);
     if (status != sz_success_k) return status;
     if (!scores_stride) return sz_unexpected_dimensions_k;
@@ -782,14 +857,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_rocm_(sz_substrings_eng
         status = sz_fill_rocm_(overflow_rows, overflow_bytes, 0, stream);
         if (status != sz_success_k) return status;
     }
-    status = sz_fill_rocm_(engine->report, sizeof(sz_substrings_report_t), 0, stream);
+    status = sz_substrings_bm25_pairs_rocm_(engine, haystacks, document_lengths, parameters, needle_weights, &sums,
+                                            &overflowed, stream);
     if (status != sz_success_k) return status;
 
     parameters_copy = *parameters;
     arguments[0] = &engine_copy, arguments[1] = &haystacks_copy, arguments[2] = &document_lengths;
     arguments[3] = &parameters_copy, arguments[4] = &needle_weights, arguments[5] = &overflow_rows;
     arguments[6] = &scores, arguments[7] = &scores_stride, arguments[8] = &staged_accepts_words;
-    arguments[9] = &staged_count;
+    arguments[9] = &staged_count, arguments[10] = &sums, arguments[11] = &overflowed;
     grid.x = (unsigned)blocks, grid.y = 1, grid.z = 1;
     block.x = sz_substrings_threads_per_block_simt_k, block.y = 1, block.z = 1;
     return sz_launch_rocm_(kernel, grid, block, arguments, shared_bytes, stream);

@@ -44,8 +44,9 @@ A leftmost cover is settled after the walk instead, since inside it would cost e
 On CUDA and ROCm each block stages the class map and as much of the hot tier as fits beside its own scratch into shared memory.
 Their walk that counts a chunk's matches also keeps them, the first four beside the chunk's count and the rest in a pool the round shares, so once the counts are scanned a gather copies them to their offsets instead of a second walk.
 A thread there walks one chain rather than eight: the resident warps already hide the transition's latency, and more chains per thread cost the registers those warps need.
-BM25 gives each block one haystack and a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, and sums in fixed point so thread order cannot move a score.
-A batch of fewer haystacks than the device holds clusters of blocks gives each haystack a whole cluster instead, every block counting into the first one's tally through distributed shared memory.
+BM25 on CUDA and ROCm runs a round like a count's over the same chunks, every match counted into a hashed table of `(haystack, needle)` pairs the arena holds, two slots per budgeted match, so a short haystack keeps as many threads walking as a long one.
+A second kernel adds each pair's term to its haystack's sum, in fixed point so the order of additions cannot move a score, and leaves the table clear for the next round.
+A haystack one of whose pairs found no slot is scored again by a block with a shared-memory tally sized by the vocabulary, hashing a wider one and spilling past it, or on Hopper, when the batch holds fewer haystacks than the device holds blocks, by a whole cluster counting into its first block's tally through distributed shared memory.
 A device engine's arena is sized once, by `sz_substrings_engine_init` from `matches_budget` and `haystacks_budget`, so a round carrying more haystacks is refused with `sz_unexpected_dimensions_k` and matches past the budget surface as the report's `shortfall`.
 Every round of one engine shares that arena and its report, so the caller orders them, on one stream or with events between two, and reads the report only after joining the round that wrote it.
 A device round over no haystacks returns at once and leaves the report as the round before it wrote it.

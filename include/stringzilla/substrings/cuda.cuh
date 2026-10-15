@@ -13,9 +13,9 @@
  *  boundaries kernel each retire at their first instruction, so an output is left untouched and
  *  never holds a truncated answer.
  *
- *  Everything but the exports serves the Hopper tier too, whose BM25 scoring launches in clusters,
- *  so a batch of fewer haystacks than resident blocks walks each of them with a whole cluster
- *  rather than idling the device.
+ *  Everything but the exports serves the Hopper tier too, whose BM25 scoring walks each haystack
+ *  the round's pairs table missed with a whole cluster of blocks where the batch holds fewer
+ *  haystacks than resident blocks.
  *
  *  @sa include/stringzilla/substrings/simt.cuh
  *  @sa include/stringzilla/substrings/hopper.cuh
@@ -61,6 +61,12 @@ STRINGZILLA_INLINE void const *sz_substrings_walk_kernel_cuda_(sz_substrings_eng
                        : (void const *)sz_substrings_walk_uncased_simt_kernel_;
     return keeping ? (void const *)sz_substrings_keep_cased_simt_kernel_
                    : (void const *)sz_substrings_walk_cased_simt_kernel_;
+}
+
+/** The walk kernel of @p engine's case sensitivity that tallies a scoring round's pairs. */
+STRINGZILLA_INLINE void const *sz_substrings_pairs_kernel_cuda_(sz_substrings_engine_t const *engine) {
+    return engine->case_sensitivity == sz_uncased_k ? (void const *)sz_substrings_pairs_uncased_simt_kernel_
+                                                    : (void const *)sz_substrings_pairs_cased_simt_kernel_;
 }
 
 /** Words of the acceptance bitmap, one bit per double-array slot. */
@@ -250,6 +256,13 @@ typedef struct sz_substrings_arena_cuda_t {
      *  buffer, unallocated without a cover. */
     sz_size_t jumps, doubled;
 
+    /** Offset of the scoring rounds' pairs table, @b [pairs_capacity] keys then as many counts,
+     *  zeroed once and cleared again by each round's scoring. */
+    sz_size_t pairs;
+
+    /** Slots in the pairs table, a few per budgeted match. */
+    sz_size_t pairs_capacity;
+
     /** Offset of the hashed BM25 tally rows, unallocated for a vocabulary a block's
      *  own table holds. */
     sz_size_t overflow_rows;
@@ -292,7 +305,9 @@ STRINGZILLA_INLINE sz_substrings_arena_cuda_t sz_substrings_arena_cuda_(sz_subst
     arena.gap_offsets = arena.keep_offsets + (covering ? (matches + 1) * sizeof(sz_size_t) : 0);
     arena.jumps = arena.gap_offsets + (covering ? matches * sizeof(sz_size_t) : 0);
     arena.doubled = arena.jumps + (covering ? matches * sizeof(sz_size_t) : 0);
-    arena.overflow_rows = arena.doubled + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.pairs = arena.doubled + (covering ? matches * sizeof(sz_size_t) : 0);
+    arena.pairs_capacity = matches * sz_substrings_pairs_per_match_simt_k;
+    arena.overflow_rows = arena.pairs + arena.pairs_capacity * (sizeof(sz_u64_t) + sizeof(sz_u32_t));
     arena.total = arena.overflow_rows + arena.overflow_count * engine->needles_count * sizeof(sz_u32_t);
     return arena;
 }
@@ -429,7 +444,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_cuda_(sz_substrings_e
     }
     engine->scratch = block, engine->scratch_bytes = arena.total;
     engine->report = (sz_substrings_report_t *)((sz_ptr_t)block + arena.report);
-    return sz_success_k;
+    // A scoring round leaves the pairs table as clear as it found it, so only here is it zeroed.
+    return sz_fill_cuda_((sz_ptr_t)block + arena.pairs, arena.overflow_rows - arena.pairs, 0, stream);
 }
 
 /** Zeroes everything a round reads before it writes: the report, the counters
@@ -735,8 +751,64 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_replace_cuda_(sz_substrings_engine_
 }
 
 /**
- *  @brief Scores every haystack with a block of its own, or, given @p clustered, with a whole
- *      cluster of blocks where the batch holds too few haystacks to fill the device.
+ *  @brief Counts every needle of every haystack into the arena's pairs table, walking the chunks a
+ *      counting round walks, then adds each pair's term into its haystack's fixed-point sum.
+ *  @param[out] sums Each haystack's sum, in the round's chunk slots, which scoring leaves unused.
+ *  @param[out] overflowed Each haystack's flag, set where the table missed one of its pairs, in the
+ *      round's match boundaries, which scoring leaves unused as well.
+ */
+STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_pairs_cuda_(sz_substrings_engine_t *engine,
+                                                              sz_strings_view_t const *haystacks,
+                                                              sz_f32_t const *document_lengths,
+                                                              sz_substrings_bm25_t const *parameters,
+                                                              sz_f32_t const *needle_weights, unsigned long long **sums,
+                                                              sz_size_t **overflowed, sz_stream_t stream) {
+    sz_substrings_arena_cuda_t const arena = sz_substrings_arena_cuda_(engine, haystacks->count);
+    void const *const walk = sz_substrings_pairs_kernel_cuda_(engine);
+    sz_u32_t staged_rows = sz_substrings_staged_rows_cuda_(engine, walk, 0, sz_substrings_stage_whole_cuda_k);
+    sz_size_t const staged_bytes = (sz_size_t)staged_rows * engine->classes_count * sizeof(sz_u32_t);
+    sz_size_t boundaries = haystacks->count + 1;
+    sz_substrings_engine_t launched_engine = *engine;
+    sz_strings_view_t launched_haystacks = *haystacks;
+    sz_substrings_bm25_t launched_parameters = *parameters;
+    sz_substrings_round_cuda_t round;
+    sz_substrings_pairs_simt_t pairs;
+    void *arguments[6];
+    sz_status_t status;
+    sz_substrings_round_bind_cuda_(engine, haystacks->count, &round);
+    pairs.keys = (sz_u64_t *)((sz_ptr_t)engine->scratch + arena.pairs);
+    pairs.counts = (sz_u32_t *)(pairs.keys + arena.pairs_capacity);
+    pairs.capacity = arena.pairs_capacity, pairs.needles_count = engine->needles_count;
+    pairs.overflowed = round.haystack_offsets;
+    *sums = (unsigned long long *)round.chunk_slots, *overflowed = round.haystack_offsets;
+    // Zeroes the report, the flags and the sums with the rest of the round's head.
+    status = sz_substrings_arena_clear_cuda_(engine, haystacks->count, stream);
+    if (status == sz_success_k) {
+        arguments[0] = &launched_engine, arguments[1] = &launched_haystacks, arguments[2] = &round.chunk_offsets;
+        status = sz_substrings_launch_cuda_((void const *)sz_substrings_chunk_counts_simt_kernel_,
+                                            sz_substrings_grid_cuda_(haystacks->count), arguments, 0, stream);
+    }
+    if (status == sz_success_k)
+        status = sz_substrings_scan_cuda_(round.chunk_offsets, boundaries, STRINGZILLA_NULL, &round, stream);
+    if (status == sz_success_k) {
+        arguments[0] = &launched_engine, arguments[1] = &staged_rows, arguments[2] = &launched_haystacks;
+        arguments[3] = &round.chunk_offsets, arguments[4] = &pairs;
+        status = sz_substrings_launch_cuda_(walk, sz_substrings_grid_for_cuda_(walk, staged_bytes, round.slots_count),
+                                            arguments, staged_bytes, stream);
+    }
+    if (status == sz_success_k) {
+        arguments[0] = &pairs, arguments[1] = &launched_haystacks, arguments[2] = &document_lengths;
+        arguments[3] = &launched_parameters, arguments[4] = &needle_weights, arguments[5] = sums;
+        status = sz_substrings_launch_cuda_((void const *)sz_substrings_bm25_pairs_simt_kernel_,
+                                            sz_substrings_grid_cuda_(pairs.capacity), arguments, 0, stream);
+    }
+    return status;
+}
+
+/**
+ *  @brief Scores every haystack through a round of the pairs table, the ones it missed with a
+ *      block of their own, or, given @p clustered, each with a whole cluster of blocks where the
+ *      batch holds too few haystacks to fill the device.
  *  @param[in] clustered The kernel walking one haystack per cluster, which Hopper's tier passes,
  *      or @c STRINGZILLA_NULL.
  */
@@ -758,10 +830,12 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
     sz_strings_view_t haystacks_copy = *haystacks;
     sz_substrings_bm25_t parameters_copy;
     sz_u32_t *overflow_rows = STRINGZILLA_NULL;
+    unsigned long long *sums = STRINGZILLA_NULL;
+    sz_size_t *overflowed = STRINGZILLA_NULL;
     sz_size_t reserved_bytes = table_bytes, shared_bytes, blocks, resident, clusters, cluster_blocks = 1;
     sz_u32_t staged_accepts_words = 0, staged_count;
     dim3 grid, block;
-    void *arguments[10];
+    void *arguments[12];
     sz_status_t status = sz_substrings_bm25_check(parameters, needle_weights);
     if (status != sz_success_k) return status;
     if (!scores_stride) return sz_unexpected_dimensions_k;
@@ -782,8 +856,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
     shared_bytes = reserved_bytes + (sz_size_t)staged_count * engine->classes_count * sizeof(sz_u32_t);
     resident = sz_substrings_multiprocessors_cuda_() * sz_substrings_resident_blocks_cuda_(kernel, shared_bytes);
     blocks = sz_min_of_two(haystacks->count, resident);
-    // Fewer haystacks than resident blocks would idle the device at a block each, so where the tier
-    // groups blocks, each haystack takes a whole cluster instead.
+    // Fewer haystacks than resident blocks would leave each one the table missed to a lone block,
+    // so where the tier groups blocks, each takes a whole cluster instead.
     clusters = clustered && haystacks->count < resident
                    ? sz_resident_clusters_cuda_(clustered, sz_substrings_threads_per_block_simt_k, shared_bytes,
                                                 sz_substrings_bm25_cluster_blocks_cuda_k)
@@ -804,14 +878,15 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_cuda_(
         status = sz_fill_cuda_(overflow_rows, overflow_bytes, 0, stream);
         if (status != sz_success_k) return status;
     }
-    status = sz_fill_cuda_(engine->report, sizeof(sz_substrings_report_t), 0, stream);
+    status = sz_substrings_bm25_pairs_cuda_(engine, haystacks, document_lengths, parameters, needle_weights, &sums,
+                                            &overflowed, stream);
     if (status != sz_success_k) return status;
 
     parameters_copy = *parameters;
     arguments[0] = &engine_copy, arguments[1] = &haystacks_copy, arguments[2] = &document_lengths;
     arguments[3] = &parameters_copy, arguments[4] = &needle_weights, arguments[5] = &overflow_rows;
     arguments[6] = &scores, arguments[7] = &scores_stride, arguments[8] = &staged_accepts_words;
-    arguments[9] = &staged_count;
+    arguments[9] = &staged_count, arguments[10] = &sums, arguments[11] = &overflowed;
     grid.x = (unsigned)blocks, grid.y = 1, grid.z = 1;
     block.x = sz_substrings_threads_per_block_simt_k, block.y = 1, block.z = 1;
     return sz_launch_clustered_cuda_(kernel, grid, block, arguments, shared_bytes, cluster_blocks, stream);
