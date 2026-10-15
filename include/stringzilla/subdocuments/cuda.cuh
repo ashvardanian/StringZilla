@@ -453,7 +453,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_cuda_(sz_subdo
         attributes.type == cudaMemoryTypeManaged) {
         cudaMemLocation where;
         where.type = cudaMemLocationTypeDevice, where.id = attributes.device;
-        sz_unused_(cudaMemAdvise(engine->memory, engine->memory_bytes, cudaMemAdviseSetReadMostly, where));
+        sz_unused_(cudaMemAdvise((void *)engine->names_steps, engine->memory_bytes - sz_subdocuments_page_bytes_k,
+                                 cudaMemAdviseSetReadMostly, where));
     }
     return sz_success_k;
 }

@@ -254,6 +254,10 @@ static sz_i64_t const sz_subdocuments_unbounded_k = 9007199254740992ll;
  *  recursion of the compiler and the values a filter program holds at once. */
 enum { sz_subdocuments_filter_depth_k = 32 };
 
+/** Bytes the compiled paths are aligned and padded to, so no page of theirs, which the host reads
+ *  every call, also holds a buffer a device writes. */
+enum { sz_subdocuments_page_bytes_k = 1 << 16 };
+
 #pragma endregion Engine
 
 #pragma region Paths
@@ -1389,7 +1393,8 @@ STRINGZILLA_INLINE void sz_subdocuments_engine_free_(sz_subdocuments_engine_t *e
  *  @brief Compiles @p paths into one block, parsing them twice: once to size it, once to fill it.
  *
  *  The block is laid out widest element first: the step bitsets, the slices, the 32-bit arrays,
- *  and the name bytes last, so no array needs padding.
+ *  and the name bytes last, so no array needs padding, over whole pages of
+ *  @c sz_subdocuments_page_bytes_k from the block's first page boundary on.
  */
 STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_engine_t *engine,
                                                                sz_strings_view_t const *paths,
@@ -1401,7 +1406,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
     sz_allocator_t allocator;
     sz_string_view_t views[64];
     sz_size_t path_index, names_bound, steps_bound, slices_bound, filters_bound, instructions_bound, bitset_words;
-    sz_size_t total_bytes, index, filter;
+    sz_size_t total_bytes, page_bytes, index, filter;
     sz_regex_engine_t regex;
     sz_status_t status;
     sz_u8_t *block;
@@ -1449,10 +1454,12 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
                   instructions_bound * sizeof(sz_subdocuments_instruction_t) +
                   (2 * steps_bound + 1 + names_bound + 1 + builder.names_slots_count) * sizeof(sz_u32_t) +
                   filters_bound * sizeof(sz_subdocuments_filter_t) + builder.names_bytes + builder.strings_bytes;
+    page_bytes = sz_subdocuments_page_bytes_k;
+    total_bytes = (sz_size_divide_round_up(total_bytes, page_bytes) + 1) * page_bytes;
     block = (sz_u8_t *)allocator.allocate(total_bytes, allocator.handle, stream);
     if (!block) return sz_bad_alloc_k;
 
-    builder.names_steps = (sz_u64_t *)block;
+    builder.names_steps = (sz_u64_t *)(block + (page_bytes - (sz_size_t)block % page_bytes) % page_bytes);
     builder.wildcard_steps = builder.names_steps + names_bound * builder.words_count;
     builder.descendant_steps = builder.wildcard_steps + builder.words_count;
     builder.relative_steps = builder.descendant_steps + builder.words_count;

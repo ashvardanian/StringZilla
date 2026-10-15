@@ -432,7 +432,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_init_scoped_rocm_(sz_subdo
     // Every call reads the engine on the host too, which would pull a managed engine's pages off
     // the device for the next kernel to fault back; read-mostly pages keep a copy on each side.
     if (hipPointerGetAttributes(&attributes, engine->memory) == hipSuccess && attributes.type == hipMemoryTypeManaged)
-        sz_unused_(hipMemAdvise(engine->memory, engine->memory_bytes, hipMemAdviseSetReadMostly, attributes.device));
+        sz_unused_(hipMemAdvise((void *)engine->names_steps, engine->memory_bytes - sz_subdocuments_page_bytes_k,
+                                hipMemAdviseSetReadMostly, attributes.device));
     return sz_success_k;
 }
 
