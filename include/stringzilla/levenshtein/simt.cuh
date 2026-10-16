@@ -913,6 +913,127 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_utf8_simt_(
 #pragma region Myers Engine
 
 /**
+ *  @brief Builds one byte query's class map and match masks into a warp's @p span, every lane of
+ *      the warp taking part, so a device walk prepares each query where it scores it.
+ *
+ *  The passes are @ref sz_levenshtein_query_prepare 's, but each class row is @p stride words long
+ *  rather than padded to a warp, so a short query takes a short span. Each lane gathers the bytes
+ *  it strides over into a 256-bit set and the warp unions them in the class map's first 32 bytes,
+ *  which the ranks overwrite once every lane holds the union. A lane owns one word of every class
+ *  row, so the masks fill without atomics. The warp is synchronized on return.
+ *
+ *  @param[in] stride Words from one class row to the next, at least the query's own words.
+ *  @param[out] span Eight-byte aligned: @c sz_levenshtein_byte_classes_k class bytes, then one row
+ *      of @p stride words per class, a class per distinct byte plus the absent bytes' one.
+ *  @param[in] lane The calling lane, below 32.
+ */
+STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_simt_(sz_cptr_t text, sz_size_t length, sz_size_t stride,
+                                                           sz_ptr_t span, sz_levenshtein_query_t *query,
+                                                           unsigned lane) {
+    sz_u8_t *const byte_to_class = (sz_u8_t *)span;
+    sz_u32_t *const present = (sz_u32_t *)span;
+    sz_u64_t *const masks = (sz_u64_t *)(span + sz_levenshtein_byte_classes_k);
+    sz_size_t const words = sz_levenshtein_query_words(length);
+    sz_u32_t lane_present[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    sz_size_t position, entry, word;
+    for (position = lane; position < length; position += 32) {
+        sz_u8_t const byte = (sz_u8_t)text[position];
+        lane_present[byte >> 5] |= 1u << (byte & 31u);
+    }
+    // The span may still serve the previous query's readers until every lane gets here.
+    __syncwarp();
+    if (lane < 8) present[lane] = 0;
+    __syncwarp();
+    for (word = 0; word != 8; ++word)
+        if (lane_present[word]) atomicOr(present + word, lane_present[word]);
+    __syncwarp();
+    sz_size_t distinct = 0;
+    for (word = 0; word != 8; ++word) lane_present[word] = present[word], distinct += __popc(lane_present[word]);
+    __syncwarp();
+    sz_size_t const classes = sz_min_of_two(distinct + 1, (sz_size_t)sz_levenshtein_byte_classes_k);
+    // Byte `word * 32 + lane` ranks among the present bytes below it.
+    sz_size_t below = 0;
+    for (word = 0; word != 8; ++word) {
+        sz_u32_t const rank = (sz_u32_t)below + __popc(lane_present[word] & ((1u << lane) - 1u));
+        byte_to_class[word * 32 + lane] = (lane_present[word] >> lane) & 1u ? (sz_u8_t)rank : (sz_u8_t)(classes - 1);
+        below += __popc(lane_present[word]);
+    }
+    for (entry = lane; entry < classes * stride; entry += 32) masks[entry] = 0;
+    __syncwarp();
+    for (word = lane; word < words; word += 32)
+        for (position = word * 64; position != sz_min_of_two(word * 64 + 64, length); ++position)
+            masks[byte_to_class[(sz_u8_t)text[position]] * stride + word] |= (sz_u64_t)1 << (position & 63);
+    __syncwarp();
+    query->masks = masks;
+    query->byte_to_class = byte_to_class;
+    query->page_rows = STRINGZILLA_NULL;
+    query->class_rows = STRINGZILLA_NULL;
+    query->classes = classes;
+    query->stride = stride;
+    query->length = length;
+}
+
+/**
+ *  @brief Builds one UTF-8 query's page table, class rows and match masks into a warp's @p span,
+ *      every lane of the warp taking part, so a device walk prepares each query where it scores it.
+ *
+ *  The passes are @ref sz_levenshtein_query_prepare_utf8 's, but each class row is the query's own
+ *  words long. Classes follow first appearance, which only a serial pass hands out, so the first
+ *  lane decodes the runes and sets the bits while the warp zeroes the table and the masks.
+ *
+ *  @param[out] span Eight-byte aligned: @c sz_levenshtein_utf8_span_header_k bytes, the
+ *      @c sz_levenshtein_utf8_pages_k page rows, a class row of 256 entries per page the query
+ *      touches plus the absent pages' one, then one mask row per class of the query's own words.
+ *  @param[in] lane The calling lane, below 32.
+ */
+STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, sz_size_t length, sz_ptr_t span,
+                                                                sz_levenshtein_query_t *query, unsigned lane) {
+    sz_u32_t *const header = (sz_u32_t *)span;
+    sz_u16_t *const page_rows = (sz_u16_t *)(span + sz_levenshtein_utf8_span_header_k);
+    sz_u32_t *const class_rows = (sz_u32_t *)(page_rows + sz_levenshtein_utf8_pages_k);
+    sz_size_t position, entry;
+    // The span may still serve the previous query's readers until every lane gets here.
+    __syncwarp();
+    for (entry = lane; entry < sz_levenshtein_utf8_pages_k; entry += 32) page_rows[entry] = 0;
+    for (entry = lane; entry < 256; entry += 32) class_rows[entry] = 0;
+    __syncwarp();
+    if (lane == 0) {
+        sz_u32_t rows = 1, classes = 1, runes = 0;
+        for (position = 0; position < length; ++runes) {
+            sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+            if (page_rows[rune >> 8] == 0) {
+                page_rows[rune >> 8] = (sz_u16_t)rows;
+                for (entry = 0; entry != 256; ++entry) class_rows[rows * 256 + entry] = 0;
+                ++rows;
+            }
+            sz_u32_t *const class_slot = class_rows + (sz_size_t)page_rows[rune >> 8] * 256 + (rune & 255);
+            if (*class_slot == 0) *class_slot = classes++;
+        }
+        header[0] = classes, header[1] = rows, header[2] = runes;
+    }
+    __syncwarp();
+    sz_size_t const classes = header[0], runes = header[2];
+    sz_size_t const stride = sz_levenshtein_query_words(runes);
+    sz_u64_t *const masks = (sz_u64_t *)(class_rows + (sz_size_t)header[1] * 256);
+    for (entry = lane; entry < classes * stride; entry += 32) masks[entry] = 0;
+    __syncwarp();
+    if (lane == 0)
+        for (sz_size_t rune_index = position = 0; position < length; ++rune_index) {
+            sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+            sz_u32_t const class_id = class_rows[(sz_size_t)page_rows[rune >> 8] * 256 + (rune & 255)];
+            masks[class_id * stride + (rune_index >> 6)] |= (sz_u64_t)1 << (rune_index & 63);
+        }
+    __syncwarp();
+    query->masks = masks;
+    query->byte_to_class = STRINGZILLA_NULL;
+    query->page_rows = page_rows;
+    query->class_rows = class_rows;
+    query->classes = classes;
+    query->stride = stride;
+    query->length = runes;
+}
+
+/**
  *  @brief Builds one byte query's match masks and class map per grid row, on the device itself.
  *
  *  The passes are @ref sz_levenshtein_query_prepare 's: flag the byte values the query holds, hand

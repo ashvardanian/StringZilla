@@ -152,6 +152,10 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_pages_bytes_(sz_size_t runes) {
     return sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) + rows * 256 * sizeof(sz_u32_t);
 }
 
+/** Bytes ahead of the page table in a device walk's UTF-8 query span: the classes, the page rows
+ *  and the runes, which one lane counts and every lane reads. */
+enum { sz_levenshtein_utf8_span_header_k = 16 };
+
 /** Scratch the page table of a @p runes -rune query takes: the page index, then one class row per
  *  page the query can touch plus the all-zero row. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_pages_bytes(sz_size_t runes) {
@@ -939,9 +943,9 @@ STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1
 /** Whether the candidate can still come under @p radius at @p position: its score falls by
  *  at most one per remaining symbol. Monotone, so once false it stays false;
  *  @c STRINGZILLA_SSIZE_MAX bounds nothing. */
-STRINGZILLA_INLINE sz_bool_t sz_levenshtein_u64x1_any_active_serial(sz_levenshtein_u64x1_state_serial_t const *state,
-                                                                    sz_u64_t symbol_count, sz_size_t position,
-                                                                    sz_ssize_t radius) {
+STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_u64x1_any_active_serial(sz_levenshtein_u64x1_state_serial_t const *state,
+                                                                       sz_u64_t symbol_count, sz_size_t position,
+                                                                       sz_ssize_t radius) {
     if (position >= symbol_count) return sz_false_k;
     return (sz_ssize_t)state->score - (sz_ssize_t)(symbol_count - position) <= radius ? sz_true_k : sz_false_k;
 }
