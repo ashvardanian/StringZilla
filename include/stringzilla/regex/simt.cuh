@@ -3012,11 +3012,11 @@ static __global__ void sz_regex_links_simt_kernel_(sz_regex_engine_t engine, sz_
 }
 
 /** Walks every group the last slide made on from where its walks paused, as the links kernel walks
- *  links, the window having moved one segment on from its end there. */
+ *  links, the window having moved two segments on from its end there. */
 static __global__ void sz_regex_resume_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
                                                     sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
-    sz_size_t const paused = round.looks.end - (round.looks.mask + 1) / 2;
+    sz_size_t const paused = round.looks.begin;
     sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
     sz_regex_haystack_simt_t const haystack = sz_regex_haystack_simt_(haystacks,
                                                                       sz_regex_haystack_at_simt_(haystacks, paused, 0));

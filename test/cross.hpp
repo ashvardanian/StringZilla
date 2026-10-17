@@ -4748,6 +4748,9 @@ inline void check_regex_unit_(regex_tier_t const &tier, regex_rewriting_t const 
     check_regex_known_(tier, {{"a\\b"}, {"a\xC3\x9F", "a\xC3\xA9"}, cases_t {{1, 0, 0, 1}}}, uncased);
     check_regex_known_(tier, {{""}, {"\xC3\x9F"}, cases_t {{0, 0, 0, 0}, {0, 0, 2, 0}}}, uncased);
 
+    // Skipping dead bytes down to offset 0, the start pass still judges the empty match by byte 0.
+    check_regex_known_(tier, {{"\\b^"}, {"b  ", "  b"}, cases_t {{0, 0, 0, 0}}}, uncased);
+
     // Lookarounds: an excluding line filter, a price after a dollar, whitespace not followed by a
     // word as GPT tokenizers split it, chained password rules, a nested pair, a negative lookbehind
     // at the haystack's start, lookarounds beside `\b`, and folded text.

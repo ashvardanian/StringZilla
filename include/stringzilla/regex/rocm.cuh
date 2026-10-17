@@ -487,10 +487,12 @@ STRINGZILLA_INLINE sz_status_t sz_regex_slides_rocm_(sz_regex_engine_t const *en
             status = sz_regex_launch_rocm_((void const *)sz_regex_point_simt_kernel_, grid, group_arguments, 0, stream);
         if (status == sz_success_k)
             status = sz_fill_rocm_(round->counters + sz_regex_handed_counter_simt_k, 2 * sizeof(sz_u32_t), 0, stream);
-        // The window moves a segment on, the half it leaves taking the segment past the other.
+        // The window moves two segments on, filling both halves before the groups resume.
+        sz_size_t const first = segment + 2 * (ends + 1);
         if (status == sz_success_k)
-            status = sz_regex_looks_rocm_(engine, haystacks, round, arena, segment + ends + 2, segment + ends + 1,
-                                          levels, stream);
+            status = sz_regex_looks_rocm_(engine, haystacks, round, arena, first, first, levels, stream);
+        if (status == sz_success_k)
+            status = sz_regex_looks_rocm_(engine, haystacks, round, arena, first + 1, first, levels, stream);
         sz_regex_segment_rocm_(round, segment, slots);
         round->groups_begin = counters[sz_regex_groups_counter_simt_k];
         if (status == sz_success_k)

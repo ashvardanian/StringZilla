@@ -3857,7 +3857,7 @@ STRINGZILLA_INLINE void sz_regex_image_push_(sz_regex_image_t *image, sz_rune_t 
 STRINGZILLA_INLINE sz_size_t sz_regex_image_after_(sz_cptr_t haystack, sz_size_t length, sz_size_t position,
                                                    sz_regex_image_t *image) {
     sz_utf8_folded_iter_t runes;
-    sz_rune_t rune;
+    sz_rune_t rune = 0; // Never read unset: `position` precedes `length`, so every step yields a rune
     sz_utf8_folded_iter_init_(&runes, haystack + position, length - position);
     image->runes_count = 0, image->length = 0;
     do {
@@ -4382,7 +4382,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_mark_positions_serial_(sz_regex_engine_t c
 STRINGZILLA_INLINE void sz_regex_mark_folded_(sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t low,
                                               sz_size_t edge, sz_size_t base, sz_u32_t state,
                                               sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-                                              sz_u32_t const *looks, sz_u64_t *starts) {
+                                              sz_u32_t const *looks, sz_u64_t *starts, sz_u64_t *low_edge) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_u32_t const *const rows = engine->reverse_rows, *const idles = engine->reverse_starts;
     sz_u8_t const *const byte_to_class = engine->byte_to_class;
@@ -4390,15 +4390,21 @@ STRINGZILLA_INLINE void sz_regex_mark_folded_(sz_regex_engine_t const *engine, s
     sz_size_t const stop = low ? low - 1 : 0;
     sz_size_t position = edge;
     sz_regex_image_t image;
+    if (position == low) *low_edge = state;
     while (position > stop) {
         sz_size_t begin;
         sz_u32_t block;
         if ((state == idles[1] || state == idles[2] || state == idles[3]) &&
             !sz_byteset_contains_u8(&engine->reverse_live, bytes[position - 1])) {
             sz_cptr_t const live = rfind_live(haystack + stop, position - stop, &engine->reverse_live);
-            position = live ? (sz_size_t)(live - haystack) + 1 : stop;
+            if (!live) {
+                if (position > low) *low_edge = idles[sz_regex_byte_kind_(bytes[low])];
+                state = idles[sz_regex_byte_kind_(bytes[stop])];
+                break;
+            }
+            position = (sz_size_t)(live - haystack) + 1;
             state = idles[sz_regex_byte_kind_(bytes[position])];
-            if (!live) break;
+            if (position == low) *low_edge = state;
         }
         block = sz_regex_block_at_(engine, looks, position);
         begin = sz_regex_image_before_(haystack, position, &image);
@@ -4408,6 +4414,7 @@ STRINGZILLA_INLINE void sz_regex_mark_folded_(sz_regex_engine_t const *engine, s
             if (state >= accepts && start >= low) starts[(start - base) / 64] |= 1ull << ((start - base) % 64);
         }
         position = begin;
+        if (position == low) *low_edge = state;
     }
     if (low == 0 && rows[state + sz_regex_block_at_(engine, looks, 0) + engine->classes_count] >= accepts)
         starts[0] |= 1;
@@ -4418,7 +4425,7 @@ STRINGZILLA_INLINE void sz_regex_mark_folded_(sz_regex_engine_t const *engine, s
 STRINGZILLA_INLINE void sz_regex_mark_positions_folded_(
     sz_regex_engine_t const *engine, sz_cptr_t haystack, sz_size_t length, sz_size_t low, sz_size_t edge,
     sz_size_t base, sz_u64_t const *entry, sz_cptr_t (*rfind_live)(sz_cptr_t, sz_size_t, sz_byteset_t const *),
-    sz_u32_t const *looks, sz_u64_t *sets, sz_u64_t *starts) {
+    sz_u32_t const *looks, sz_u64_t *sets, sz_u64_t *starts, sz_u64_t *low_edge) {
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_size_t const words = engine->positions_words, stop = low ? low - 1 : 0;
     sz_size_t position = edge, right_kind = 0;
@@ -4429,15 +4436,21 @@ STRINGZILLA_INLINE void sz_regex_mark_positions_folded_(
         right_kind = sz_regex_rune_kind_(image.runes[0]);
     }
     memcpy(state, entry, words * sizeof(sz_u64_t));
+    if (position == low) memcpy(low_edge, state, words * sizeof(sz_u64_t));
     while (position != 0 && position >= low) {
         sz_size_t begin;
         sz_u64_t others = state[0] ^ 1;
         for (sz_size_t word = 1; word != words; ++word) others |= state[word];
         if (!others && !sz_byteset_contains_u8(&engine->reverse_live, bytes[position - 1])) {
             sz_cptr_t const live = rfind_live(haystack + stop, position - stop, &engine->reverse_live);
-            position = live ? (sz_size_t)(live - haystack) + 1 : 0;
+            if (!live) {
+                if (position > low) memcpy(low_edge, state, words * sizeof(sz_u64_t));
+                position = 0, right_kind = sz_regex_byte_kind_(bytes[0]);
+                break;
+            }
+            position = (sz_size_t)(live - haystack) + 1;
             right_kind = position == length ? 0 : sz_regex_byte_kind_(bytes[position]);
-            if (!live) break;
+            if (position == low) memcpy(low_edge, state, words * sizeof(sz_u64_t));
         }
         begin = sz_regex_image_before_(haystack, position, &image);
         for (sz_size_t rune = image.runes_count; rune--;) {
@@ -4452,6 +4465,7 @@ STRINGZILLA_INLINE void sz_regex_mark_positions_folded_(
             right_kind = left_kind;
         }
         position = begin;
+        if (position == low) memcpy(low_edge, state, words * sizeof(sz_u64_t));
     }
     if (position == 0 && low == 0) {
         sz_regex_positions_step_(engine, words, state, next, 1, right_kind, sz_regex_looks_at_(looks, 0));
@@ -4726,9 +4740,7 @@ STRINGZILLA_OUTLINED_ void sz_regex_mark_states_serial_(sz_regex_engine_t const 
 STRINGZILLA_INLINE void sz_regex_mark_batch_serial_(sz_regex_engine_t const *engine, sz_cptr_t haystack,
                                                     sz_size_t length, sz_regex_walk_t *walk, sz_size_t first) {
     sz_size_t const words = engine->positions_words, *const bounds = walk->bounds + first;
-    sz_size_t const count = engine->case_sensitivity == sz_cased_k && walk->windows - first >= sz_regex_chains_serial_k
-                                ? sz_regex_chains_serial_k
-                                : 1;
+    sz_size_t const count = walk->windows - first >= sz_regex_chains_serial_k ? sz_regex_chains_serial_k : 1;
     sz_u64_t *const single = walk->sets + 2 * sz_regex_chains_serial_k * words;
     sz_u64_t const *sets[sz_regex_chains_serial_k];
     sz_bool_t skipping = (sz_bool_t)(count == 1 ||
@@ -4737,14 +4749,19 @@ STRINGZILLA_INLINE void sz_regex_mark_batch_serial_(sz_regex_engine_t const *eng
     memset(walk->starts, 0, count * walk->window_words * sizeof(sz_u64_t));
     walk->batch = first, walk->batch_count = count;
     if (engine->case_sensitivity != sz_cased_k) {
-        if (words)
-            sz_regex_mark_positions_folded_(engine, haystack, length, bounds[0], bounds[1], bounds[0],
-                                            sz_regex_entry_positions_serial_(engine, haystack, length, first + 1, walk),
-                                            walk->rfind_live, walk->looks, single, walk->starts);
-        else
-            sz_regex_mark_folded_(engine, haystack, bounds[0], bounds[1], bounds[0],
-                                  sz_regex_entry_serial_(engine, (sz_u8_t const *)haystack, length, first + 1, walk),
-                                  walk->rfind_live, walk->looks, walk->starts);
+        for (sz_size_t chain = count; chain-- != 0;) {
+            sz_u64_t *const starts = walk->starts + chain * walk->window_words;
+            if (words)
+                sz_regex_mark_positions_folded_(
+                    engine, haystack, length, bounds[chain], bounds[chain + 1], bounds[chain],
+                    sz_regex_entry_positions_serial_(engine, haystack, length, first + chain + 1, walk),
+                    walk->rfind_live, walk->looks, single, starts, walk->edges + (first + chain) * words);
+            else
+                sz_regex_mark_folded_(
+                    engine, haystack, bounds[chain], bounds[chain + 1], bounds[chain],
+                    sz_regex_entry_serial_(engine, (sz_u8_t const *)haystack, length, first + chain + 1, walk),
+                    walk->rfind_live, walk->looks, starts, walk->edges + first + chain);
+        }
         return;
     }
     if (!words) {
