@@ -8,11 +8,12 @@
  *  Both walks are the serial ones. JSON classifies every 64-byte block into masks, skips a
  *  container no live step continues into by counting its brackets, and keeps the nodes of a pending
  *  run until the array or filtered node holding them closes and the replay settles them. A warp
- *  walking a JSON document classifies 1,024 bytes at once, 32 to a lane, and every lane then runs
- *  the same walk over the masks its lanes share, so only the classification is split. XML searches
- *  byte by byte for the one byte its lexer needs next. The replay runs the filters of a node one
- *  level up in its spare frames rather than recursing, and `match()` and `search()` walk the
- *  forward DFA of the regex engine the paths embed over the tested string in the same thread.
+ *  walking a JSON document classifies 1,024 bytes at once, 32 to a lane, and its lanes then take
+ *  the structural bytes one each, matching each with its container by depth, so the checks, the key
+ *  lookups and the live sets of a batch settle side by side. XML searches byte by byte for the one
+ *  byte its lexer needs next. The replay runs the filters of a node one level up in its spare
+ *  frames rather than recursing, and `match()` and `search()` walk the forward DFA of the regex
+ *  engine the paths embed over the tested string in the same thread.
  *
  *  A thread's stack holds a fixed number of frames. A document needing more is measured instead and
  *  listed, and a second launch walks the listed ones on fewer threads with stacks as deep as the
@@ -294,18 +295,21 @@ typedef struct sz_subdocuments_cursor_simt_t {
     sz_u8_t const *text;
     sz_size_t length, block_offset, window_end;
     sz_u64_t opens, closes, pending;
-    sz_u64_t escaped, in_string, scalar;
+    sz_u64_t escaped, in_string, scalar, slashes;
     sz_u32_t lane_opens, lane_closes, lane_pending;
 } sz_subdocuments_cursor_simt_t;
 
 /** The class masks of 32 bytes, one bit per byte. */
 typedef struct sz_subdocuments_classes_simt_t {
-    sz_u32_t quotes, backslashes, opens, closes, separators, blanks;
+    sz_u32_t quotes, backslashes, opens, closes, separators, blanks, slashes;
 } sz_subdocuments_classes_simt_t;
 
-/** Classifies the block at an offset into a cursor: @ref sz_subdocuments_load_simt_ alone, or a
- *  vendor's binding of @ref sz_subdocuments_load_window_simt_ with every lane of a warp at once. */
-typedef void (*sz_subdocuments_load_simt_t)(struct sz_subdocuments_cursor_simt_t *cursor, sz_size_t offset);
+/** A vendor's lane steps for the 32 lanes of a warp walking one JSON document together. */
+typedef struct sz_subdocuments_warp_simt_t {
+    sz_u32_t (*ballot)(int);
+    sz_u32_t (*shuffle)(sz_u32_t, unsigned);
+    sz_u32_t (*shuffle_up)(sz_u32_t, unsigned);
+} sz_subdocuments_warp_simt_t;
 
 /** The top bit of every byte of @p word equal to the byte @p repeated repeats, with no carry
  *  between bytes. */
@@ -331,7 +335,7 @@ STRINGZILLA_DEVICE sz_subdocuments_classes_simt_t sz_subdocuments_classify_simt_
     // An aligned word holding one of the bytes lies in a page the device may read whole.
     sz_u32_t previous = available ? __ldg(aligned) : 0;
     classes.quotes = 0, classes.backslashes = 0, classes.opens = 0, classes.closes = 0, classes.separators = 0;
-    classes.blanks = 0;
+    classes.blanks = 0, classes.slashes = 0;
 #pragma unroll
     for (unsigned index = 0; index != 8; ++index) {
         sz_u32_t const next = 4 * index + 4 < misalignment + available ? __ldg(aligned + index + 1) : 0;
@@ -355,6 +359,7 @@ STRINGZILLA_DEVICE sz_subdocuments_classes_simt_t sz_subdocuments_classify_simt_
                               sz_subdocuments_bytes_equal_simt_(word, 0x0A0A0A0Au) |
                               sz_subdocuments_bytes_equal_simt_(word | 0x04040404u, 0x0D0D0D0Du))
                           << shift;
+        classes.slashes |= sz_subdocuments_nibble_simt_(sz_subdocuments_bytes_equal_simt_(word, 0x2F2F2F2Fu)) << shift;
         previous = next;
     }
     return classes;
@@ -371,6 +376,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_load_simt_(sz_subdocuments_cursor_simt_t
     sz_u64_t opens = low.opens | (sz_u64_t)high.opens << 32, closes = low.closes | (sz_u64_t)high.closes << 32;
     sz_u64_t separators = low.separators | (sz_u64_t)high.separators << 32;
     sz_u64_t const blanks = low.blanks | (sz_u64_t)high.blanks << 32;
+    sz_u64_t const slashes = low.slashes | (sz_u64_t)high.slashes << 32;
     sz_u64_t escaped, in_string, scalars;
     if (!backslashes) escaped = cursor->escaped, cursor->escaped = 0;
     else {
@@ -386,6 +392,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_load_simt_(sz_subdocuments_cursor_simt_t
     in_string ^= in_string << 8, in_string ^= in_string << 16, in_string ^= in_string << 32;
     in_string ^= cursor->in_string;
     cursor->in_string = 0 - (in_string >> 63);
+    cursor->slashes |= slashes & ~in_string;
     opens &= ~in_string, closes &= ~in_string, separators &= ~in_string;
     scalars = ~(in_string | quotes | blanks | opens | closes | separators);
     cursor->block_offset = offset, cursor->opens = opens, cursor->closes = closes;
@@ -424,6 +431,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_window_simt_(sz_subdocuments_cursor_simt
     opens = classes.opens & ~in_string, closes = classes.closes & ~in_string;
     separators = classes.separators & ~in_string;
     scalars = ~(in_string | quotes | classes.blanks | opens | closes | separators);
+    cursor->slashes |= ballot((classes.slashes & ~in_string) != 0);
     cursor->lane_opens = opens, cursor->lane_closes = closes;
     scalar_before = shuffle(scalars >> 31, (lane + 31) & 31u);
     cursor->lane_pending = opens | closes | separators | quotes |
@@ -434,53 +442,106 @@ STRINGZILLA_DEVICE void sz_subdocuments_window_simt_(sz_subdocuments_cursor_simt
     cursor->window_end = window + 1024;
 }
 
-/** Loads the block at @p offset from the warp's window, as @ref sz_subdocuments_load_simt_
- *  classifies it, classifying the next window first once the walk passes the last. */
-STRINGZILLA_DEVICE void sz_subdocuments_load_window_simt_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t offset,
-                                                          sz_u32_t (*ballot)(int),
-                                                          sz_u32_t (*shuffle)(sz_u32_t, unsigned)) {
-    unsigned lane;
-    if (offset >= cursor->window_end) sz_subdocuments_window_simt_(cursor, offset, ballot, shuffle);
-    lane = (unsigned)(offset + 1024 - cursor->window_end) / 32;
-    cursor->block_offset = offset;
-    cursor->opens = shuffle(cursor->lane_opens, lane) | (sz_u64_t)shuffle(cursor->lane_opens, lane + 1) << 32;
-    cursor->closes = shuffle(cursor->lane_closes, lane) | (sz_u64_t)shuffle(cursor->lane_closes, lane + 1) << 32;
-    cursor->pending = shuffle(cursor->lane_pending, lane) | (sz_u64_t)shuffle(cursor->lane_pending, lane + 1) << 32;
+/** The bits of the 32 bytes from @p base at or past @p from. */
+STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_from_mask_simt_(sz_size_t base, sz_size_t from) {
+    return from <= base ? 0xFFFFFFFFu : from - base >= 32 ? 0u : 0xFFFFFFFFu << (from - base);
 }
 
-/** Moves to the next structural byte, or reports the end of the document. */
-STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_next_simt_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t *position,
-                                                        sz_subdocuments_load_simt_t load) {
-    while (!cursor->pending) {
-        if (cursor->length - cursor->block_offset <= 64) return sz_false_k;
-        load(cursor, cursor->block_offset + 64);
+/** The position of the set bit of @p bits with @p rank set bits below it. */
+STRINGZILLA_DEVICE unsigned sz_subdocuments_select_simt_(sz_u32_t bits, unsigned rank) {
+    unsigned position = 0;
+    for (unsigned width = 16; width; width >>= 1) {
+        unsigned const lower = (unsigned)__popc(bits & ((1u << width) - 1u));
+        if (rank >= lower) rank -= lower, bits >>= width, position += width;
     }
-    *position = cursor->block_offset + sz_subdocuments_ctz_simt_(cursor->pending);
-    cursor->pending &= cursor->pending - 1;
+    return position;
+}
+
+/** The sum of @p value over this lane and every lane below it. */
+STRINGZILLA_DEVICE sz_u32_t sz_subdocuments_lanes_sum_simt_(sz_subdocuments_warp_simt_t const *warp, sz_u32_t value) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        sz_u32_t const below = warp->shuffle_up(value, delta);
+        if (lane >= delta) value += below;
+    }
+    return value;
+}
+
+/** The least of @p value over this lane and every lane below it. */
+STRINGZILLA_DEVICE int sz_subdocuments_lanes_min_simt_(sz_subdocuments_warp_simt_t const *warp, int value) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (unsigned delta = 1; delta != 32; delta <<= 1) {
+        int const below = (int)warp->shuffle_up((sz_u32_t)value, delta);
+        if (lane >= delta && below < value) value = below;
+    }
+    return value;
+}
+
+/** Classifies the window past the cursor's last, every lane at once, or returns false past the
+ *  document. */
+STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_advance_simt_(sz_subdocuments_cursor_simt_t *cursor,
+                                                           sz_subdocuments_warp_simt_t const *warp) {
+    if (cursor->window_end >= cursor->length) return sz_false_k;
+    sz_subdocuments_window_simt_(cursor, cursor->window_end, warp->ballot, warp->shuffle);
     return sz_true_k;
 }
 
-/** Moves past the bracket closing the container just entered, counting brackets kind-blind. */
-STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_skip_simt_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t *position,
-                                                        sz_subdocuments_load_simt_t load) {
-    sz_size_t depth = 1;
-    for (;;) {
-        sz_u64_t const opens = cursor->opens & cursor->pending, closes = cursor->closes & cursor->pending;
-        sz_size_t const closes_count = (sz_size_t)__popcll(closes);
-        if (depth > closes_count) depth = depth - closes_count + (sz_size_t)__popcll(opens);
-        else
-            for (sz_u64_t brackets = opens | closes; brackets;) {
-                sz_u64_t const bit = brackets & (0 - brackets);
-                brackets ^= bit;
-                if (opens & bit) ++depth;
-                else if (--depth == 0) {
-                    *position = cursor->block_offset + sz_subdocuments_ctz_simt_(bit);
-                    cursor->pending &= ~(bit | (bit - 1));
-                    return sz_true_k;
+/** The first structural byte at or past @p from, classifying windows as it passes them, or
+ *  @c STRINGZILLA_SIZE_MAX past the document; every lane calls it at once. */
+STRINGZILLA_DEVICE sz_size_t sz_subdocuments_next_simt_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t from,
+                                                        sz_subdocuments_warp_simt_t const *warp) {
+    unsigned const lane = threadIdx.x & 31u;
+    for (;; from = cursor->window_end) {
+        sz_u32_t pending, holding;
+        if (from >= cursor->window_end && !sz_subdocuments_advance_simt_(cursor, warp)) return STRINGZILLA_SIZE_MAX;
+        pending = cursor->lane_pending & sz_subdocuments_from_mask_simt_(cursor->window_end - 1024 + 32 * lane, from);
+        holding = warp->ballot(pending != 0);
+        if (holding) {
+            unsigned const first = (unsigned)__ffs((int)holding) - 1;
+            return cursor->window_end - 1024 + 32 * first + (unsigned)__ffs((int)warp->shuffle(pending, first)) - 1;
+        }
+    }
+}
+
+/**
+ *  @brief The bracket closing the container whose opening bracket lies just before @p from, or
+ *      @c STRINGZILLA_SIZE_MAX past the document, counting brackets kind-blind a window at a time.
+ *
+ *  Each lane counts its bytes' brackets and the lowest depth they reach, a sum over the lanes
+ *  places every lane's first byte, and the first lane whose bytes close the container finds where.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_subdocuments_skip_simt_(sz_subdocuments_cursor_simt_t *cursor, sz_size_t from,
+                                                        sz_subdocuments_warp_simt_t const *warp) {
+    unsigned const lane = threadIdx.x & 31u;
+    sz_i64_t depth = 1;
+    for (;; from = cursor->window_end) {
+        sz_size_t window;
+        sz_u32_t mask, opens, closes, brackets, closing, net, before_lane;
+        int running = 0, lowest = 0;
+        sz_i64_t before;
+        if (from >= cursor->window_end && !sz_subdocuments_advance_simt_(cursor, warp)) return STRINGZILLA_SIZE_MAX;
+        window = cursor->window_end - 1024;
+        mask = sz_subdocuments_from_mask_simt_(window + 32 * lane, from);
+        opens = cursor->lane_opens & mask, closes = cursor->lane_closes & mask;
+        for (brackets = closes ? opens | closes : 0; brackets; brackets &= brackets - 1)
+            running += opens & brackets & (0u - brackets) ? 1 : -1, lowest = running < lowest ? running : lowest;
+        net = (sz_u32_t)(__popc(opens) - __popc(closes));
+        before_lane = sz_subdocuments_lanes_sum_simt_(warp, net) - net;
+        before = depth + (sz_i64_t)(int)before_lane;
+        closing = warp->ballot(before + lowest <= 0);
+        if (closing) {
+            unsigned const first = (unsigned)__ffs((int)closing) - 1;
+            sz_u32_t found = 0;
+            for (brackets = lane == first ? opens | closes : 0; brackets; brackets &= brackets - 1) {
+                if (opens & brackets & (0u - brackets)) ++before;
+                else if (--before == 0) {
+                    found = 32 * lane + (unsigned)__ffs((int)brackets) - 1;
+                    break;
                 }
             }
-        if (cursor->length - cursor->block_offset <= 64) return sz_false_k;
-        load(cursor, cursor->block_offset + 64);
+            return window + warp->shuffle(found, first);
+        }
+        depth += (sz_i64_t)(int)warp->shuffle(before_lane + net, 31);
     }
 }
 
@@ -489,17 +550,40 @@ STRINGZILLA_DEVICE sz_bool_t sz_subdocuments_skip_simt_(sz_subdocuments_cursor_s
 STRINGZILLA_DEVICE sz_size_t sz_subdocuments_scalar_length_simt_(sz_u8_t const *text, sz_size_t position,
                                                                  sz_size_t length) {
     sz_u8_t const *const scalar = text + position;
-    sz_size_t run = 0, cursor = 0, digits;
-    for (; position + run != length; ++run) {
-        sz_u8_t const byte = scalar[run];
-        if (byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r' || byte == ',' || byte == ':' || byte == '"' ||
-            (byte | 0x20) == '{' || (byte | 0x20) == '}')
-            break;
+    unsigned const misalignment = (unsigned)((sz_size_t)scalar & 3);
+    sz_u32_t const *const aligned = (sz_u32_t const *)(scalar - misalignment);
+    sz_size_t const available = length - position;
+    sz_size_t run = 0, cursor = 0, digits, chunk;
+    // An aligned word holding a byte of the document lies in a page the device may read whole.
+    sz_u32_t previous = __ldg(aligned), first = 0, others = 0;
+    // The run ends at the first blank, separator, quote or bracket, four bytes at a time, noting
+    // whether any byte of it is not a digit.
+    for (chunk = 0;; ++chunk) {
+        sz_u32_t const next = 4 * chunk + 4 - misalignment < available ? __ldg(aligned + chunk + 1) : 0;
+        sz_u32_t const word = __funnelshift_r(previous, next, misalignment * 8), folded = word | 0x20202020u;
+        sz_size_t const left = available - 4 * chunk;
+        sz_u32_t const outside = left >= 4 ? 0u : 0x80808080u << (8 * left);
+        sz_u32_t const stops = sz_subdocuments_bytes_equal_simt_(word, 0x20202020u) |
+                               sz_subdocuments_bytes_equal_simt_(word, 0x0A0A0A0Au) |
+                               sz_subdocuments_bytes_equal_simt_(word | 0x04040404u, 0x0D0D0D0Du) |
+                               sz_subdocuments_bytes_equal_simt_(word, 0x2C2C2C2Cu) |
+                               sz_subdocuments_bytes_equal_simt_(word, 0x3A3A3A3Au) |
+                               sz_subdocuments_bytes_equal_simt_(word, 0x22222222u) |
+                               sz_subdocuments_bytes_equal_simt_(folded, 0x7B7B7B7Bu) |
+                               sz_subdocuments_bytes_equal_simt_(folded, 0x7D7D7D7Du) | outside;
+        unsigned const stop = stops ? (unsigned)(__ffs((int)stops) - 1) / 8 : 4;
+        sz_u32_t const shifted = word ^ 0x30303030u;
+        others |= ((shifted & 0x7F7F7F7Fu) + 0x76767676u | shifted) & 0x80808080u &
+                  (stop == 4 ? 0xFFFFFFFFu : (1u << (8 * stop)) - 1u);
+        if (!chunk) first = word;
+        run = 4 * chunk + stop;
+        if (stop != 4) break;
+        previous = next;
     }
-    if (run == 4 && scalar[0] == 't' && scalar[1] == 'r' && scalar[2] == 'u' && scalar[3] == 'e') return run;
-    if (run == 4 && scalar[0] == 'n' && scalar[1] == 'u' && scalar[2] == 'l' && scalar[3] == 'l') return run;
-    if (run == 5 && scalar[0] == 'f' && scalar[1] == 'a' && scalar[2] == 'l' && scalar[3] == 's' && scalar[4] == 'e')
-        return run;
+    if (run == 4 && first == 0x65757274u) return run;
+    if (run == 4 && first == 0x6C6C756Eu) return run;
+    if (run == 5 && first == 0x736C6166u && scalar[4] == 'e') return run;
+    if (run && !others) return run == 1 || (first & 0xFFu) != '0' ? run : 0;
     if (cursor != run && scalar[cursor] == '-') ++cursor;
     if (cursor == run || scalar[cursor] < '0' || scalar[cursor] > '9') return 0;
     if (scalar[cursor] == '0') ++cursor;
@@ -612,6 +696,52 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_name_simt_(sz_subdocuments_engine_t
              index != key_length && (sz_u8_t)engine->names_data[engine->names_offsets[name] + index] == key[index];)
             ++index;
         if (index == key_length) return name;
+    }
+}
+
+/**
+ *  @brief The name the @p length bytes of a document at @p key spell, as
+ *      @ref sz_subdocuments_name_simt_ finds it for a key of at most @p key_bytes bytes,
+ *      reading them as aligned words up to the closing quote that follows them.
+ *  @return The name, @c sz_subdocuments_no_name_k, or @c STRINGZILLA_SIZE_MAX for a key holding a
+ *      backslash, which only its unescaped bytes name.
+ */
+STRINGZILLA_DEVICE sz_size_t sz_subdocuments_key_name_simt_(sz_subdocuments_engine_t const *engine, sz_u8_t const *key,
+                                                            sz_size_t length, sz_size_t key_bytes) {
+    unsigned const misalignment = (unsigned)((sz_size_t)key & 3);
+    sz_u32_t const *const aligned = (sz_u32_t const *)(key - misalignment);
+    sz_size_t const mask = engine->names_slots_count - 1;
+    sz_u64_t hash = length * 0x9E3779B97F4A7C15ull, word = 0;
+    sz_u32_t previous = __ldg(aligned), backslashes = 0;
+    sz_size_t chunk, slot, index, tail_bytes = length & 7;
+    for (chunk = 0; 4 * chunk < length; ++chunk) {
+        // An aligned word holding a byte up to the closing quote lies in the document.
+        sz_u32_t const next = 4 * chunk + 4 - misalignment <= length ? __ldg(aligned + chunk + 1) : 0;
+        sz_u32_t const left = (sz_u32_t)sz_min_of_two(length - 4 * chunk, (sz_size_t)4);
+        sz_u32_t const kept = left == 4 ? 0xFFFFFFFFu : (1u << (8 * left)) - 1u;
+        sz_u32_t const bytes = __funnelshift_r(previous, next, misalignment * 8) & kept;
+        backslashes |= sz_subdocuments_bytes_equal_simt_(bytes, 0x5C5C5C5Cu) & kept;
+        word |= (sz_u64_t)bytes << (chunk & 1 ? 32 : 0);
+        if (chunk & 1 && 4 * chunk + 4 <= length)
+            hash = (hash ^ word) * 0xFF51AFD7ED558CCDull, hash ^= hash >> 32, word = 0;
+        previous = next;
+    }
+    if (backslashes) return STRINGZILLA_SIZE_MAX;
+    if (length > key_bytes) return sz_subdocuments_no_name_k;
+    // The bytes past the last whole word hash first byte highest.
+    if (tail_bytes)
+        word = ((sz_u64_t)__byte_perm((sz_u32_t)word, 0, 0x0123) << 32 |
+                __byte_perm((sz_u32_t)(word >> 32), 0, 0x0123)) >>
+               (8 * (8 - tail_bytes));
+    hash = (hash ^ word) * 0xC4CEB9FE1A85EC53ull;
+    for (slot = (sz_size_t)(hash ^ hash >> 32) & mask;; slot = (slot + 1) & mask) {
+        sz_u32_t const name = engine->names_slots[slot];
+        if (name == sz_subdocuments_no_name_k) return name;
+        if (engine->names_offsets[name + 1] - engine->names_offsets[name] != length) continue;
+        for (index = 0;
+             index != length && (sz_u8_t)engine->names_data[engine->names_offsets[name] + index] == key[index];)
+            ++index;
+        if (index == length) return name;
     }
 }
 
@@ -753,6 +883,15 @@ STRINGZILLA_DEVICE void sz_subdocuments_close_simt_(sz_match_t *matches, sz_size
                                                     sz_size_t end, sz_size_t end_offset) {
     for (end = sz_min_of_two(end, matches_capacity); begin < end; ++begin)
         matches[begin].byte_length = end_offset - matches[begin].byte_offset;
+}
+
+/** Settles the lengths of the matches @p frame 's container reported that fit, closing at
+ *  @p end_offset, from the frame every lane wrote rather than the matches one lane may have. */
+STRINGZILLA_DEVICE void sz_subdocuments_close_frame_simt_(sz_match_t *matches, sz_size_t matches_capacity,
+                                                          sz_subdocuments_frame_t const *frame, sz_size_t end_offset) {
+    sz_size_t const end = sz_min_of_two(frame->matches_end, matches_capacity);
+    for (sz_size_t index = frame->matches_begin; index < end; ++index)
+        matches[index].byte_length = end_offset - frame->byte_offset;
 }
 
 /** Whether no step is live in @p live, so a replay skips the subtree below. */
@@ -1063,11 +1202,349 @@ STRINGZILLA_DEVICE void sz_subdocuments_replay_simt_(sz_subdocuments_engine_t co
 }
 
 /**
+ *  @brief Walks the next structural bytes of the window a byte to a lane, as
+ *      @ref sz_subdocuments_walk_simt_ steps through them one at a time, while every live set fits
+ *      a single word.
+ *
+ *  Each lane takes the byte left whose rank is its own: a sum of opens minus closes over the lanes
+ *  gives each byte its depth, and the lowest depth before it tells whether a container opened in
+ *  this batch holds it. Every byte none holds is checked against what the byte before it leaves
+ *  expected, with keys looked up and live sets settled in their own lanes; one that such a
+ *  container holds is skipped with it, as no live step enters it, and that container's close ends
+ *  its value. The batch commits every byte before the first it cannot settle alone: a container to
+ *  enter, entered last; one whose close lies past the batch, after which the warp skips to that
+ *  close; and a key to unescape, a container opening a run or the close of the pending one, left to
+ *  the walk's own step. Inside a pending run nothing reports: each value a path selects and each
+ *  container entered keeps the next slot in order, as the walk keeps them for the replay, and each
+ *  container's slot is found by following the parents up from the innermost one.
+ *
+ *  @param[inout] from The first byte not walked yet, left in place when nothing was committed.
+ *  @param[inout] current The innermost open container's slot, never @c sz_subdocuments_no_slot_k ;
+ *      @c sz_subdocuments_no_slot_k once the root closes.
+ *  @param[inout] top Inside a pending run, the first slot past the kept ones; read otherwise.
+ *  @param[in] run The pending run's container, or @c sz_subdocuments_no_slot_k .
+ *  @return The first failure among the committed bytes, else @c sz_success_k.
+ */
+STRINGZILLA_DEVICE sz_status_t sz_subdocuments_batch_simt_(
+    sz_subdocuments_engine_t const *engine, sz_u8_t const *text, sz_size_t length, sz_size_t document, sz_u64_t *stack,
+    sz_size_t frames, sz_size_t frame_words, sz_size_t key_bytes, sz_match_t *matches, sz_size_t matches_capacity,
+    sz_size_t *emitted, sz_subdocuments_cursor_simt_t *cursor, sz_subdocuments_warp_simt_t const *warp, sz_size_t *from,
+    sz_size_t *current, sz_size_t *top, sz_size_t run, sz_subdocuments_expect_t *expect) {
+    unsigned const lane = threadIdx.x & 31u;
+    sz_u32_t const below = (1u << lane) - 1u, above = lane == 31 ? 0u : ~0u << (lane + 1);
+    sz_size_t const header_words = sz_subdocuments_frame_header_words_simt_k;
+    sz_u64_t const final_steps = engine->final_steps[0];
+    sz_bool_t const pending_run = (sz_bool_t)(run != sz_subdocuments_no_slot_k);
+    sz_size_t window, position, end = 0, name = sz_subdocuments_no_name_k, closer = 0;
+    sz_u32_t pending, inclusive, total, bits, offset, quotes, openings, elements, closes, since, ends, committed;
+    sz_u32_t after, expected, stops, failures, reports, reports_through, keys, kept, chain = (sz_u32_t)*current;
+    sz_u64_t owner_live = 0, live = 0, reported, continuing, waiting;
+    unsigned source = 0, tokens, step, commit, last;
+    int delta, depth_after, depth_before, lowest, lowest_through;
+    sz_i64_t slot, kept_slot;
+    sz_bool_t valid, quote, opening, walked, is_open, is_close, is_scalar, keyed, is_value, malformed;
+    sz_bool_t entering, unfinished, keeping, unescape = sz_false_k, enters, skips;
+    sz_subdocuments_frame_t *owner;
+    sz_u8_t byte;
+
+    // Each lane takes the structural byte at or past the first unwalked one whose rank is its own:
+    // the lane holding it, then its bit.
+    for (;; *from = cursor->window_end) {
+        if (*from >= cursor->window_end && !sz_subdocuments_advance_simt_(cursor, warp)) return sz_success_k;
+        window = cursor->window_end - 1024;
+        pending = cursor->lane_pending & sz_subdocuments_from_mask_simt_(window + 32 * lane, *from);
+        inclusive = sz_subdocuments_lanes_sum_simt_(warp, (sz_u32_t)__popc(pending));
+        total = warp->shuffle(inclusive, 31);
+        if (total) break;
+    }
+    for (step = 16; step; step >>= 1)
+        if (warp->shuffle(inclusive, source + step - 1) <= lane) source += step;
+    bits = warp->shuffle(pending, source);
+    offset = 32 * source +
+             sz_subdocuments_select_simt_(bits, lane - (warp->shuffle(inclusive, source) - (sz_u32_t)__popc(bits)));
+    position = window + offset;
+    tokens = total < 32 ? total : 32;
+    byte = lane < tokens ? text[position] : (sz_u8_t)' ';
+
+    // Quotes pair up in order, and a string closing past the batch waits for the next one.
+    quotes = warp->ballot(lane < tokens && byte == '"');
+    quote = (sz_bool_t)(quotes >> lane & 1u);
+    opening = (sz_bool_t)(quote && !(__popc(quotes & below) & 1));
+    openings = warp->ballot(opening);
+    if (openings >> (tokens - 1) & 1u && (total > 32 || cursor->window_end < length)) --tokens;
+    if (!tokens) return sz_success_k;
+    valid = (sz_bool_t)(lane < tokens);
+
+    // Depths relative to the innermost open container, and how many of this batch's containers hold
+    // a byte, which leaves it to be walked only when none does.
+    delta = valid ? ((byte | 0x20) == '{') - ((byte | 0x20) == '}') : 0;
+    depth_after = (int)sz_subdocuments_lanes_sum_simt_(warp, (sz_u32_t)delta);
+    depth_before = depth_after - delta;
+    lowest_through = sz_subdocuments_lanes_min_simt_(warp, depth_after);
+    lowest = (int)warp->shuffle_up((sz_u32_t)lowest_through, 1);
+    lowest = lane && lowest < 0 ? lowest : 0;
+    walked = (sz_bool_t)(valid && depth_before == lowest);
+    is_open = (sz_bool_t)(delta > 0), is_close = (sz_bool_t)(delta < 0);
+    is_scalar = (sz_bool_t)(valid && !quote && !delta && byte != ':' && byte != ',');
+    // Outside a run every open container sits a slot past its parent; inside one, each lane follows
+    // the parents up as many levels as its index.
+    if (pending_run)
+        for (int level = 1, levels = -(int)warp->shuffle((sz_u32_t)lowest_through, tokens - 1); level <= levels;
+             ++level)
+            if (lane >= (unsigned)level && chain != 0xFFFFFFFFu)
+                chain = (sz_u32_t)((sz_subdocuments_frame_t const *)(stack + (sz_size_t)chain * frame_words))->parent;
+    slot = pending_run ? (sz_i64_t)(int)warp->shuffle(chain, (unsigned)-depth_before & 31u)
+                       : (sz_i64_t)*current + depth_before;
+    owner = (sz_subdocuments_frame_t *)(stack + (sz_size_t)(walked && slot >= 0 ? slot : 0) * frame_words);
+    if (walked && slot >= 0) {
+        sz_u64_t const *const owner_words = (sz_u64_t const *)owner;
+        closer = owner->closer, owner_live = owner_words[header_words];
+    }
+
+    // What each byte leaves expected, a closing quote's by whether its string was a key.
+    after = sz_subdocuments_expect_comma_or_close_k;
+    if (byte == ':') after = sz_subdocuments_expect_value_k;
+    else if (byte == ',') after = closer == '}' ? sz_subdocuments_expect_key_k : sz_subdocuments_expect_value_k;
+    else if (walked && is_close) after = pending_run || slot > 0 ? after : sz_subdocuments_expect_end_k;
+    else if (quote && !opening) after = sz_subdocuments_expect_colon_k;
+    expected = warp->shuffle_up(after, 1);
+    expected = lane ? expected : (sz_u32_t)*expect;
+    keyed = (sz_bool_t)(opening && (expected == sz_subdocuments_expect_key_k ||
+                                    expected == sz_subdocuments_expect_key_or_close_k));
+    if (warp->shuffle_up(keyed, 1) && quote && !opening) after = sz_subdocuments_expect_colon_k;
+    else if (quote && !opening) after = sz_subdocuments_expect_comma_or_close_k;
+    expected = warp->shuffle_up(after, 1);
+    expected = lane ? expected : (sz_u32_t)*expect;
+
+    // Each byte checked as the walk's step for it checks it.
+    is_value = (sz_bool_t)(walked && (is_open || is_scalar || (opening && !keyed)));
+    malformed = (sz_bool_t)(slot < 0);
+    if (byte == ':') malformed = (sz_bool_t)(malformed || expected != sz_subdocuments_expect_colon_k);
+    else if (byte == ',') malformed = (sz_bool_t)(malformed || expected != sz_subdocuments_expect_comma_or_close_k);
+    else if (is_close)
+        malformed = (sz_bool_t)(malformed || closer != byte ||
+                                (expected != sz_subdocuments_expect_comma_or_close_k &&
+                                 expected != (byte == '}' ? sz_subdocuments_expect_key_or_close_k
+                                                          : sz_subdocuments_expect_value_or_close_k)));
+    else if (is_value)
+        malformed = (sz_bool_t)(malformed || (expected != sz_subdocuments_expect_value_k &&
+                                              expected != sz_subdocuments_expect_value_or_close_k));
+    // A string still open at the document's end has no closing quote.
+    if (opening && lane + 1 == tokens && !(total > 32 || cursor->window_end < length)) malformed = sz_true_k;
+    malformed = (sz_bool_t)(walked && malformed);
+
+    // Keys look up their names, and live sets settle in their own lanes.
+    {
+        sz_u32_t const closing = warp->shuffle(offset, (lane + 1) & 31u);
+        sz_u64_t carry = 0;
+        if (opening) end = window + closing + 1;
+        if (walked && keyed && !malformed) {
+            sz_u8_t const *const name_bytes = text + position + 1;
+            sz_size_t const name_length = window + closing - position - 1;
+            if (engine->names_slots_count && ((owner_live & ~final_steps) << 1 & ~engine->wildcard_steps[0]) != 0) {
+                name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes);
+                if (name == STRINGZILLA_SIZE_MAX) unescape = sz_true_k, name = sz_subdocuments_no_name_k;
+            }
+            live = sz_subdocuments_child_word_simt_(engine, &owner_live, (sz_u64_t const *)STRINGZILLA_NULL, 0, &carry,
+                                                    sz_false_k, name, 0);
+        }
+    }
+    elements = warp->ballot(is_value && closer == ']');
+    closes = warp->ballot(walked && is_close);
+    since = closes & below ? ~0u << (31 - __clz((int)(closes & below))) << 1 : ~0u;
+    if (is_value && closer == ']') {
+        sz_u64_t carry = 0;
+        name = owner->next_position + (sz_size_t)__popc(elements & below & since);
+        live = sz_subdocuments_child_word_simt_(engine, &owner_live, (sz_u64_t const *)STRINGZILLA_NULL, 0, &carry,
+                                                sz_true_k, name, 0);
+    }
+    if (engine->filters_count && walked && (keyed || (is_value && closer == ']'))) {
+        sz_u64_t const filtered = (owner_live & ~final_steps) << 1 & engine->filter_steps[0];
+        live |= filtered;
+        for (sz_size_t filter = 0; filtered && filter != engine->filters_count; ++filter)
+            if (live >> engine->filters[filter].step & 1) live |= engine->filters_roots[filter];
+    }
+    // A member's value takes the live set its key settled three lanes before, or, for a key before
+    // the batch, the one it left in the slot past the last kept one.
+    {
+        unsigned const key_lane = (lane - 3) & 31u;
+        sz_u64_t const key_live = warp->shuffle((sz_u32_t)live, key_lane) |
+                                  (sz_u64_t)warp->shuffle((sz_u32_t)(live >> 32), key_lane) << 32;
+        sz_size_t const key_name = warp->shuffle((sz_u32_t)name, key_lane);
+        if (is_value && closer == '}' && lane >= 3) live = key_live, name = key_name;
+        else if (is_value && closer == '}') {
+            sz_u64_t const *const held = stack + *top * frame_words;
+            live = held[header_words], name = ((sz_subdocuments_frame_t const *)held)->selector;
+        }
+    }
+
+    // Values report, or inside a run keep a slot each in order, and containers are entered,
+    // skipped to their close, or left to the walk.
+    reported = is_value ? live & final_steps : 0;
+    continuing = is_value ? live & ~final_steps : 0;
+    entering = (sz_bool_t)(is_open && continuing);
+    waiting = entering && !pending_run
+                  ? continuing << 1 & ((byte == '[' ? engine->relative_steps[0] : 0) | engine->filter_steps[0])
+                  : 0;
+    keeping = (sz_bool_t)(pending_run ? entering || reported : entering);
+    kept = warp->ballot(keeping);
+    kept_slot = pending_run ? (sz_i64_t)(*top + (sz_size_t)__popc(kept & below)) : slot + 1;
+    ends = warp->ballot(valid && is_close && depth_before == lowest + 1);
+    {
+        sz_u32_t const ends_after = ends & above;
+        sz_u32_t const closing = warp->shuffle(offset, ends_after ? (unsigned)__ffs((int)ends_after) - 1 : lane);
+        unfinished = (sz_bool_t)(is_value && is_open && !continuing && !ends_after);
+        if (is_value && is_open && !continuing) end = window + closing + 1;
+    }
+    if (is_value && is_scalar) {
+        end = position + sz_subdocuments_scalar_length_simt_(text, position, length);
+        malformed = (sz_bool_t)(malformed || end == position);
+    }
+    reports = pending_run ? 0 : (sz_u32_t)__popcll(reported);
+    reports_through = sz_subdocuments_lanes_sum_simt_(warp, reports);
+
+    // The batch commits up to its first stop; the first failure before it fails the walk.
+    commit = tokens;
+    // In a run, its own close replays it, and no batch closes more containers than a lane can name.
+    stops = warp->ballot(
+        walked && (unescape || waiting || (pending_run && ((is_close && slot == (sz_i64_t)run) || depth_after < -31))));
+    if (stops) commit = sz_min_of_two(commit, (unsigned)__ffs((int)stops) - 1);
+    stops = warp->ballot(walked && ((entering && !waiting) || unfinished));
+    if (stops) commit = sz_min_of_two(commit, (unsigned)__ffs((int)stops));
+    if (!commit) return sz_success_k;
+    committed = commit == 32 ? ~0u : (1u << commit) - 1u;
+    failures = warp->ballot(malformed || (keeping && kept_slot + 2 > (sz_i64_t)frames)) & committed;
+    if (failures)
+        return warp->shuffle(malformed, (unsigned)__ffs((int)failures) - 1) ? sz_invalid_syntax_k : sz_bad_alloc_k;
+
+    // Matches go in place, and the containers open before the batch that it closes settle theirs.
+    if (committed >> lane & 1u) {
+        sz_size_t index = *emitted + reports_through - reports;
+        for (sz_u64_t left = pending_run ? 0 : reported; left; left &= left - 1, ++index)
+            if (index < matches_capacity) {
+                sz_match_t *const match = &matches[index];
+                match->haystack_index = document;
+                match->needle_index = engine->steps_paths[sz_subdocuments_ctz_simt_(left)];
+                match->byte_offset = position;
+                if (!entering && !unfinished) match->byte_length = end - position;
+            }
+        if (walked && is_close && !pending_run)
+            sz_subdocuments_close_frame_simt_(matches, matches_capacity, owner, position + 1);
+    }
+
+    // Every lane writes the same frames, so each reads its own writes back.
+    last = commit - 1;
+    enters = (sz_bool_t)warp->shuffle(entering, last), skips = (sz_bool_t)warp->shuffle(unfinished, last);
+    {
+        int const level = (int)warp->shuffle((sz_u32_t)(enters || skips ? depth_before : depth_after), last);
+        sz_i64_t const open = pending_run ? (sz_i64_t)(int)warp->shuffle(chain, (unsigned)-level & 31u)
+                                          : (sz_i64_t)*current + level;
+        sz_size_t const last_position = window + warp->shuffle(offset, last);
+        sz_size_t const last_reports = warp->shuffle(reports, last);
+        sz_size_t const reports_committed = warp->shuffle(reports_through, last);
+        sz_u32_t const closes_committed = closes & committed, kept_committed = kept & committed;
+        sz_u32_t const tail = closes_committed ? ~0u << (31 - __clz((int)closes_committed)) << 1 : ~0u;
+        sz_u32_t const appended = (sz_u32_t)__popc(elements & committed & tail);
+        sz_u32_t const last_after = warp->shuffle(after, last);
+        sz_u8_t const last_byte = (sz_u8_t)warp->shuffle(byte, last);
+        sz_u32_t left;
+        // In a run, the containers the batch closes keep spans and element counts for the replay.
+        for (left = pending_run ? closes_committed : 0; left; left &= left - 1) {
+            unsigned const closing = (unsigned)__ffs((int)left) - 1;
+            sz_u32_t const before_closing = closes_committed & ((1u << closing) - 1u);
+            sz_u32_t const from_lane = before_closing ? ~0u << (31 - __clz((int)before_closing)) << 1 : ~0u;
+            sz_subdocuments_frame_t *const frame =
+                (sz_subdocuments_frame_t *)(stack + warp->shuffle((sz_u32_t)slot, closing) * frame_words);
+            frame->next_position += (sz_size_t)__popc(elements & from_lane & ((1u << closing) - 1u));
+            frame->byte_length = window + warp->shuffle(offset, closing) + 1 - frame->byte_offset;
+        }
+        // Inside a run, every value a path selects keeps a frame for the replay.
+        for (left = pending_run ? kept_committed & ~warp->ballot(entering) & ~warp->ballot(unfinished) : 0; left;
+             left &= left - 1) {
+            unsigned const keeper = (unsigned)__ffs((int)left) - 1;
+            sz_u64_t *const slot_words = stack + (sz_size_t)(*top + (sz_size_t)__popc(kept & ((1u << keeper) - 1u))) *
+                                                     frame_words;
+            sz_subdocuments_frame_t *const frame = (sz_subdocuments_frame_t *)slot_words;
+            sz_size_t const begin = window + warp->shuffle(offset, keeper);
+            frame->parent = warp->shuffle((sz_u32_t)slot, keeper), frame->byte_offset = begin;
+            frame->byte_length = warp->shuffle((sz_u32_t)(end - position), keeper) |
+                                 (sz_size_t)warp->shuffle((sz_u32_t)((end - position) >> 32), keeper) << 32;
+            frame->closer = 0;
+            frame->selector = warp->shuffle((sz_u32_t)name, keeper) |
+                              (sz_size_t)warp->shuffle((sz_u32_t)((sz_u64_t)name >> 32), keeper) << 32;
+            slot_words[header_words] = warp->shuffle((sz_u32_t)live, keeper) |
+                                       (sz_u64_t)warp->shuffle((sz_u32_t)(live >> 32), keeper) << 32;
+        }
+        if (appended && open >= 0) ((sz_subdocuments_frame_t *)(stack + open * frame_words))->next_position += appended;
+        if (pending_run) *top += (sz_size_t)__popc(kept_committed);
+        // A key whose value lies past the batch leaves its live set where that value will read it.
+        keys = warp->ballot(walked && keyed && lane < commit && lane + 3 >= commit);
+        if (keys) {
+            unsigned const key_lane = (unsigned)__ffs((int)keys) - 1;
+            sz_u64_t *const slot_words =
+                stack +
+                (pending_run ? *top : (sz_size_t)(int)warp->shuffle((sz_u32_t)slot, key_lane) + 1) * frame_words;
+            slot_words[header_words] = warp->shuffle((sz_u32_t)live, key_lane) |
+                                       (sz_u64_t)warp->shuffle((sz_u32_t)(live >> 32), key_lane) << 32;
+            ((sz_subdocuments_frame_t *)slot_words)->selector = warp->shuffle((sz_u32_t)name, key_lane);
+        }
+        if (enters) {
+            sz_size_t const pushed = (sz_size_t)(int)warp->shuffle((sz_u32_t)kept_slot, last);
+            sz_u64_t *const slot_words = stack + pushed * frame_words;
+            sz_subdocuments_frame_t *const frame = (sz_subdocuments_frame_t *)slot_words;
+            frame->parent = (sz_size_t)open, frame->byte_offset = last_position, frame->next_position = 0;
+            frame->matches_begin = *emitted + reports_committed - last_reports;
+            frame->matches_end = *emitted + reports_committed;
+            frame->closer = last_byte == '{' ? '}' : ']';
+            frame->selector = warp->shuffle((sz_u32_t)name, last) |
+                              (sz_size_t)warp->shuffle((sz_u32_t)((sz_u64_t)name >> 32), last) << 32;
+            slot_words[header_words] = warp->shuffle((sz_u32_t)live, last) |
+                                       (sz_u64_t)warp->shuffle((sz_u32_t)(live >> 32), last) << 32;
+            *current = pushed;
+            *expect = last_byte == '{' ? sz_subdocuments_expect_key_or_close_k
+                                       : sz_subdocuments_expect_value_or_close_k;
+        }
+        else if (skips) *current = (sz_size_t)open, *expect = sz_subdocuments_expect_comma_or_close_k;
+        else
+            *current = open >= 0 ? (sz_size_t)open : sz_subdocuments_no_slot_k,
+            *expect = (sz_subdocuments_expect_t)last_after;
+        *emitted += reports_committed;
+        *from = last_position + 1;
+    }
+    if (skips) {
+        sz_size_t const closing = sz_subdocuments_skip_simt_(cursor, *from, warp);
+        if (closing == STRINGZILLA_SIZE_MAX) return sz_invalid_syntax_k;
+        if (lane == last)
+            for (sz_size_t index = *emitted - reports, ends_at = sz_min_of_two(*emitted, matches_capacity);
+                 index < ends_at; ++index)
+                matches[index].byte_length = closing + 1 - position;
+        // A container a run keeps, skipped past the batch, takes its frame once its close is known.
+        if (pending_run && kept >> last & 1u) {
+            sz_u64_t *const slot_words = stack + (*top - 1) * frame_words;
+            sz_subdocuments_frame_t *const frame = (sz_subdocuments_frame_t *)slot_words;
+            frame->parent = *current, frame->byte_offset = *from - 1;
+            frame->byte_length = closing + 1 - frame->byte_offset;
+            frame->closer = 0;
+            frame->selector = warp->shuffle((sz_u32_t)name, last) |
+                              (sz_size_t)warp->shuffle((sz_u32_t)((sz_u64_t)name >> 32), last) << 32;
+            slot_words[header_words] = warp->shuffle((sz_u32_t)live, last) |
+                                       (sz_u64_t)warp->shuffle((sz_u32_t)(live >> 32), last) << 32;
+        }
+        *from = closing + 1;
+    }
+    return sz_success_k;
+}
+
+/**
  *  @brief Walks one JSON document as @c sz_subdocuments_walk_ does, emitting its matches from
- *      @p emitted on, those below @p matches_capacity written.
+ *      @p emitted on, those below @p matches_capacity written, every lane of a warp at once.
+ *
+ *  While live sets take one word, @ref sz_subdocuments_batch_simt_ walks the bytes a lane each; the
+ *  rest, and whatever a batch leaves, take one step at a time on every lane alike, finding bytes
+ *  and skipping containers a window at a time.
+ *
  *  @param[in] stack Room for @p frames frames of @p frame_words words each.
  *  @param[in] key Room for @p key_bytes bytes, where keys and compared strings are unescaped.
- *  @param[in] load Classifies each block; every lane of a warp sharing it runs the walk alike.
  *  @return @c sz_success_k, @c sz_invalid_syntax_k for a malformed document, or
  *      @c sz_bad_alloc_k when it needs more than @p frames frames, as the serial walk does when
  *      its stack cannot grow.
@@ -1077,19 +1554,29 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
                                                           sz_size_t frames, sz_size_t frame_words, sz_u8_t *key,
                                                           sz_size_t key_bytes, sz_match_t *matches,
                                                           sz_size_t matches_capacity, sz_size_t *emitted,
-                                                          sz_subdocuments_load_simt_t load) {
+                                                          sz_subdocuments_warp_simt_t const *warp) {
     sz_u64_t const *const final_steps = engine->final_steps;
     sz_size_t const words = engine->words_count, header_words = sz_subdocuments_frame_header_words_simt_k;
     sz_subdocuments_expect_t expect = sz_subdocuments_expect_value_k;
-    sz_size_t top = 0, current = sz_subdocuments_no_slot_k, run = sz_subdocuments_no_slot_k;
+    sz_size_t top = 0, current = sz_subdocuments_no_slot_k, run = sz_subdocuments_no_slot_k, from = 0;
     sz_size_t position, closing, word;
     sz_subdocuments_cursor_simt_t cursor;
     for (word = 0; word != words; ++word) stack[header_words + word] = engine->root_steps[word];
     cursor.text = text, cursor.length = length, cursor.escaped = 0, cursor.in_string = 0, cursor.scalar = 0;
-    cursor.window_end = 0;
-    load(&cursor, 0);
+    cursor.slashes = 0, cursor.window_end = 0;
 
-    while (sz_subdocuments_next_simt_(&cursor, &position, load)) {
+    for (;;) {
+        if (words == 1 && current != sz_subdocuments_no_slot_k) {
+            sz_size_t const walked = from;
+            sz_status_t const status = sz_subdocuments_batch_simt_(
+                engine, text, length, document, stack, frames, frame_words, key_bytes, matches, matches_capacity,
+                emitted, &cursor, warp, &from, &current, &top, run, &expect);
+            if (status != sz_success_k) return status;
+            if (run == sz_subdocuments_no_slot_k) top = current != sz_subdocuments_no_slot_k ? current + 1 : 0;
+            if (from != walked) continue;
+        }
+        if ((position = sz_subdocuments_next_simt_(&cursor, from, warp)) == STRINGZILLA_SIZE_MAX) break;
+        from = position + 1;
         sz_u8_t const byte = text[position];
         sz_subdocuments_frame_t *const parent = current != sz_subdocuments_no_slot_k
                                                     ? (sz_subdocuments_frame_t *)(stack + current * frame_words)
@@ -1120,8 +1607,7 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
             parent->byte_length = position + 1 - parent->byte_offset;
             closing = parent->parent;
             if (run == sz_subdocuments_no_slot_k || run == current) {
-                sz_subdocuments_close_simt_(matches, matches_capacity, parent->matches_begin, parent->matches_end,
-                                            position + 1);
+                sz_subdocuments_close_frame_simt_(matches, matches_capacity, parent, position + 1);
                 if (run == current) {
                     sz_size_t slot;
                     // Filters replay at one spare slot per nesting level past the kept ones.
@@ -1152,19 +1638,20 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
 
         if (byte == '"' &&
             (expect == sz_subdocuments_expect_key_k || expect == sz_subdocuments_expect_key_or_close_k)) {
-            sz_u8_t const *name_bytes = text + position + 1;
-            sz_size_t name_length, name = sz_subdocuments_no_name_k, index;
-            if (!sz_subdocuments_next_simt_(&cursor, &closing, load)) return sz_invalid_syntax_k;
+            sz_u8_t const *const name_bytes = text + position + 1;
+            sz_size_t name_length, name = sz_subdocuments_no_name_k;
+            if ((closing = sz_subdocuments_next_simt_(&cursor, from, warp)) == STRINGZILLA_SIZE_MAX)
+                return sz_invalid_syntax_k;
+            from = closing + 1;
             name_length = closing - position - 1;
             if (engine->names_slots_count &&
-                sz_subdocuments_needs_name_simt_(engine, parent_live, (sz_u64_t const *)STRINGZILLA_NULL)) {
-                for (index = 0; index != name_length && name_bytes[index] != '\\';) ++index;
-                if (index != name_length) {
-                    name_length = sz_subdocuments_unescape_simt_(name_bytes, name_length, key, key_bytes);
-                    if (name_length == STRINGZILLA_SIZE_MAX) return sz_invalid_syntax_k;
-                    name_bytes = key;
-                }
-                if (name_length <= key_bytes) name = sz_subdocuments_name_simt_(engine, name_bytes, name_length);
+                sz_subdocuments_needs_name_simt_(engine, parent_live, (sz_u64_t const *)STRINGZILLA_NULL) &&
+                (name = sz_subdocuments_key_name_simt_(engine, name_bytes, name_length, key_bytes)) ==
+                    STRINGZILLA_SIZE_MAX) {
+                name_length = sz_subdocuments_unescape_simt_(name_bytes, name_length, key, key_bytes);
+                if (name_length == STRINGZILLA_SIZE_MAX) return sz_invalid_syntax_k;
+                name = name_length <= key_bytes ? sz_subdocuments_name_simt_(engine, key, name_length)
+                                                : sz_subdocuments_no_name_k;
             }
             sz_subdocuments_member_live_simt_(engine, parent_live, name, live);
             if (engine->filters_count) sz_subdocuments_filters_tentative_simt_(engine, parent_live, live);
@@ -1207,13 +1694,11 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
             expect = byte == '{' ? sz_subdocuments_expect_key_or_close_k : sz_subdocuments_expect_value_or_close_k;
             continue;
         }
-        if (byte == '{' || byte == '[') {
-            if (!sz_subdocuments_skip_simt_(&cursor, &closing, load)) return sz_invalid_syntax_k;
-            end = closing + 1;
-        }
-        else if (byte == '"') {
-            if (!sz_subdocuments_next_simt_(&cursor, &closing, load)) return sz_invalid_syntax_k;
-            end = closing + 1;
+        if (byte == '{' || byte == '[' || byte == '"') {
+            closing = byte == '"' ? sz_subdocuments_next_simt_(&cursor, from, warp)
+                                  : sz_subdocuments_skip_simt_(&cursor, from, warp);
+            if (closing == STRINGZILLA_SIZE_MAX) return sz_invalid_syntax_k;
+            end = from = closing + 1;
         }
         else {
             end = position + sz_subdocuments_scalar_length_simt_(text, position, length);
@@ -1229,8 +1714,9 @@ STRINGZILLA_DEVICE sz_status_t sz_subdocuments_walk_simt_(sz_subdocuments_engine
         expect = current != sz_subdocuments_no_slot_k ? sz_subdocuments_expect_comma_or_close_k
                                                       : sz_subdocuments_expect_end_k;
     }
-    return current != sz_subdocuments_no_slot_k || expect != sz_subdocuments_expect_end_k ? sz_invalid_syntax_k
-                                                                                          : sz_success_k;
+    return current != sz_subdocuments_no_slot_k || expect != sz_subdocuments_expect_end_k || cursor.slashes
+               ? sz_invalid_syntax_k
+               : sz_success_k;
 }
 
 /** The first @p byte at or after @p from, or @p from past the last, read four bytes at a time. */
@@ -1549,6 +2035,7 @@ STRINGZILLA_DEVICE sz_size_t sz_subdocuments_frames_simt_(sz_subdocuments_engine
         return deepest + 3;
     }
     cursor.text = text, cursor.length = length, cursor.escaped = 0, cursor.in_string = 0, cursor.scalar = 0;
+    cursor.slashes = 0;
     for (; position < length; position += 64) {
         sz_subdocuments_load_simt_(&cursor, position);
         structurals += (sz_size_t)__popcll(cursor.pending);
@@ -1594,6 +2081,9 @@ STRINGZILLA_DEVICE void sz_subdocuments_list_simt_(sz_subdocuments_engine_t cons
  *  @brief Walks every document, or every listed one, as walker @p walker of a launch's walkers,
  *      each a thread or a warp: counting, or storing at the offsets the counts scanned into.
  *
+ *  JSON documents walk on the lanes of a warp, with @p warp its vendor's lane steps, and XML ones
+ *  on a thread, with @p warp null.
+ *
  *  A counting walk writes each count, and lists a document needing more frames than the walker's
  *  stack holds for the second launch, measuring how many; only lane zero of the @p lanes walking
  *  one document lists or refuses it, and every lane writes the same values. A storing walk writes
@@ -1611,7 +2101,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
                                                              sz_strings_view_t const *documents,
                                                              sz_subdocuments_round_simt_t const *round,
                                                              sz_size_t walker, sz_size_t lane, sz_size_t lanes,
-                                                             sz_subdocuments_load_simt_t load) {
+                                                             sz_subdocuments_warp_simt_t const *warp) {
     sz_u64_t *const stack = round->stacks + walker * round->frames * round->frame_words;
     sz_u8_t *const key = (sz_u8_t *)round->keys + walker * round->key_bytes;
     sz_size_t const large_bytes = (sz_size_t)round->header->large_bytes;
@@ -1649,13 +2139,12 @@ STRINGZILLA_DEVICE void sz_subdocuments_walk_documents_simt_(sz_subdocuments_eng
             if (leader) sz_subdocuments_list_simt_(engine, round, text, document, length, 0, large_bytes);
             continue;
         }
-        status = engine->format == sz_subdocuments_xml_k
-                     ? sz_subdocuments_walk_markup_simt_(engine, text, length, document, stack, round->frames,
-                                                         round->frame_words, round->key_bytes, matches,
-                                                         matches_capacity, &emitted)
-                     : sz_subdocuments_walk_simt_(engine, text, length, document, stack, round->frames,
-                                                  round->frame_words, key, round->key_bytes, matches, matches_capacity,
-                                                  &emitted, load);
+        status = !warp ? sz_subdocuments_walk_markup_simt_(engine, text, length, document, stack, round->frames,
+                                                           round->frame_words, round->key_bytes, matches,
+                                                           matches_capacity, &emitted)
+                       : sz_subdocuments_walk_simt_(engine, text, length, document, stack, round->frames,
+                                                    round->frame_words, key, round->key_bytes, matches,
+                                                    matches_capacity, &emitted, warp);
         if (round->storing) continue;
         if (staging) {
             sz_bool_t const kept = (sz_bool_t)(status == sz_success_k && emitted <= round->staging_capacity - staged);
@@ -1690,11 +2179,11 @@ static __global__ void sz_subdocuments_route_simt_kernel_(sz_strings_view_t docu
     }
 }
 
-/** @ref sz_subdocuments_walk_documents_simt_ with a thread walking each document. */
+/** @ref sz_subdocuments_walk_documents_simt_ with a thread walking each XML document. */
 static __global__ void sz_subdocuments_walk_simt_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
                                                          sz_subdocuments_round_simt_t round) {
     sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x,
-                                         0, 1, sz_subdocuments_load_simt_);
+                                         0, 1, (sz_subdocuments_warp_simt_t const *)STRINGZILLA_NULL);
 }
 
 /** Scans one ticket's own tile of @p values in place, seeded by the totals the tiles before
@@ -1813,7 +2302,7 @@ STRINGZILLA_DEVICE void sz_subdocuments_chunk_cursor_simt_(sz_subdocuments_large
     sz_u64_t const before = chunk != place->first ? large->transfers[chunk] : 0, in_string = before >> 3 & 1;
     cursor->text = text, cursor->length = place->length;
     cursor->escaped = before >> 1 & 1, cursor->in_string = 0 - in_string;
-    cursor->scalar = (before >> 5 & 1) & (in_string ^ 1);
+    cursor->scalar = (before >> 5 & 1) & (in_string ^ 1), cursor->slashes = 0;
 }
 
 /** Whether the last byte of the chunk `[start, end)` belongs to a scalar outside strings, its
@@ -2012,7 +2501,7 @@ static __global__ void sz_subdocuments_large_summary_simt_kernel_(sz_strings_vie
             large.transfers[chunk] = 0;
             continue;
         }
-        cursor.text = text, cursor.length = place.length, cursor.scalar = 0;
+        cursor.text = text, cursor.length = place.length, cursor.scalar = 0, cursor.slashes = 0;
         for (sz_u64_t escape = 0; escape != 2; ++escape) {
             cursor.escaped = escape, cursor.in_string = 0;
             for (sz_size_t offset = start; offset < end; offset += 64) sz_subdocuments_load_simt_(&cursor, offset);
@@ -2071,7 +2560,7 @@ static __global__ void sz_subdocuments_large_apply_simt_kernel_(sz_subdocuments_
 }
 
 /** Counts each chunk's tokens and opening brackets, the depth it ends at, and how far its
- *  depth dips and rises. */
+ *  depth dips and rises, marking its document malformed for a `/` outside strings. */
 static __global__ void sz_subdocuments_large_count_simt_kernel_(sz_strings_view_t documents,
                                                                 sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk <= large.chunks;
@@ -2098,11 +2587,12 @@ static __global__ void sz_subdocuments_large_count_simt_kernel_(sz_strings_view_
         }
         large.tokens[chunk] = tokens, large.opens[chunk] = opens, large.depths[chunk] = (sz_u64_t)depth;
         large.extremes[chunk] = (sz_u64_t)-lowest | (sz_u64_t)highest << 32;
+        if (cursor.slashes) large.malformed[place.slot] = 1;
     }
 }
 
-/** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it, or
- *  ends inside a string, as no walk accepts one. */
+/** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it,
+ *  ends inside a string, or that the count marked, as no walk accepts one. */
 static __global__ void sz_subdocuments_large_check_simt_kernel_(sz_subdocuments_round_simt_t round,
                                                                 sz_subdocuments_large_simt_t large) {
     for (sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; chunk < large.chunks;
@@ -2113,7 +2603,8 @@ static __global__ void sz_subdocuments_large_check_simt_kernel_(sz_subdocuments_
         sz_u32_t malformed = depth - (sz_i64_t)(large.extremes[chunk] & 0xFFFFFFFFull) < 0;
         if (place.slot == large.listed) continue;
         if (chunk == place.first)
-            malformed |= large.depths[place.next] != base || (large.transfers[place.next] >> 3 & 1) != 0;
+            malformed |= large.depths[place.next] != base || (large.transfers[place.next] >> 3 & 1) != 0 ||
+                         large.malformed[place.slot];
         if (malformed) {
             large.malformed[place.slot] = 1;
             atomicMin((unsigned long long *)&round.header->first_malformed, (unsigned long long)place.document);

@@ -1998,6 +1998,52 @@ inline void test_subdocuments_device_unit(auto const &backend) {
     check_subdocuments_against_serial_(backend, {deep_markup, "<a><a/></a>"}, {"//a", "//a/text()", "//a[1]/@id"},
                                        sz_subdocuments_xml_k);
 
+    // A warp walks keys, colons, values and escapes a lane each: every one lands on every lane of
+    // its batch and on both sides of a window's edge, keys leave their live sets to the next batch,
+    // and escaped keys, element positions and nesting past the stacks carry across batches.
+    std::vector<std::string> shifted;
+    std::vector<std::string> const pointers = {"$.type", "$.actor.login", "$.repo.name", "$[33].type"};
+    for (std::size_t filler = 990; filler != 1060; ++filler)
+        shifted.push_back("{\"pad\": \"" + std::string(filler, 'f') + "\\\\\\\"\", \"type\": \"x\", \"actor\": " +
+                          "{\"login\": \"y\", \"id\": [1, {\"a\": 2}], \"n\": 12345678}, \"repo\": {\"name\": \"z\"}}");
+    for (std::size_t length = 1020; length != 1030; ++length)
+        shifted.push_back("{\"type\":\"" + std::string(length - 11, 'f') + "\"}");
+    for (std::size_t members = 0; members != 40; ++members) {
+        std::string text = "{";
+        for (std::size_t index = 0; index != members; ++index) text += "\"k\": [1], \"n\": 2, ";
+        shifted.push_back(text + "\"type\": [3], \"actor\": {\"login\": 4}, \"ty\\u0070e\": 5}");
+    }
+    std::string array = "[", nest, closers;
+    for (std::size_t index = 0; index != 80; ++index)
+        array += (index ? ", " : "") +
+                 (index % 3 ? std::to_string(index) : "{\"type\": [" + std::to_string(index) + "]}");
+    shifted.push_back(array + "]");
+    for (std::size_t level = 0; level != 40; ++level) nest += "{\"actor\": [", closers += "]}";
+    shifted.push_back(nest + "{\"login\": 1}" + closers);
+    check_subdocuments_against_serial_(backend, shifted, pointers);
+    check_subdocuments_against_serial_(backend, shifted, {"$..login", "$..[1]", "$..type[0]"});
+    // Malformed in a walked container, after the root, or inside a skipped one, which only its
+    // brackets are counted in, so both tiers accept it.
+    for (std::string const malformed :
+         {"{\"actor\": {\"login\" 1}}", "{\"type\": \"x\"} 2", "{\"type\": \"x\"}}", "{\"type\": \"x\"]",
+          "{\"type\": \"x\" \"actor\": 1}", "{\"type\": \"x\",}", "{\"type\"}", "{\"type\": tru}", "{\"type\": \"x",
+          "{\"actor\": {\"login\": 1}", "{\"actor\": {\"login\": 1]}", "{, \"type\": 1}", "{\"type\": 1,, \"a\": 2}",
+          "{\"type\"::1}", "{\"ty\\qe\": 1}", "{\"a\": [1 2], \"type\": 1}", "{\"a\": {\"b\": [}], \"type\": 1}",
+          "{\"a\": {\"\\q\": 1}, \"type\": 1}"})
+        for (std::size_t filler : {0, 1000, 1010, 1017, 1023})
+            check_subdocuments_against_serial_(
+                backend,
+                {"{}", filler ? "{\"pad\": \"" + std::string(filler, 'f') + "\", " + malformed.substr(1) : malformed},
+                pointers);
+    // A `/` outside strings fails a document even inside a skipped container, on either side of a
+    // window's edge and in a document long enough for the device to walk in chunks, while slashes
+    // in strings pass.
+    for (std::size_t filler : {0, 1000, 1017, 1023, 2050, 140000})
+        for (char const *between : {", /**/ ", ", // ]\n", ", \"/*\", "})
+            check_subdocuments_against_serial_(
+                backend, {"{}", "{\"a\": [\"" + std::string(filler, 'f') + "\"" + between + "1], \"type\": 1}"},
+                pointers);
+
     // Unbalanced, unterminated and stray bytes, each after a well-formed document.
     check_subdocuments_against_serial_(backend, {"{}", "{\"a\": [1, 2}"}, {"$..*"});
     check_subdocuments_against_serial_(backend, {"[1]", "[1]", "{\"a\": \"open"}, {"$.a"});
