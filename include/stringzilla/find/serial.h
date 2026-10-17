@@ -149,7 +149,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_find_byte_serial_(sz_cptr_t haystack, sz_size_t 
     match_vec.u64 = 0;
     needle_vec.u64 = (sz_u64_t)*needle_u8 * 0x0101010101010101ull;
     for (; haystack_cursor + 8 <= haystack_end; haystack_cursor += 8) {
-        haystack_vec.u64 = *(sz_u64_t const *)haystack_cursor;
+        haystack_vec.u64 = sz_u64_load((sz_cptr_t)haystack_cursor).u64;
         match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
         if (match_vec.u64) return (sz_cptr_t)(haystack_cursor + sz_u64_ctz(match_vec.u64) / 8);
     }
@@ -183,7 +183,7 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_byte_serial_(sz_cptr_t haystack, sz_size_t
     sz_u64_vec_t haystack_vec, needle_vec, match_vec;
     needle_vec.u64 = (sz_u64_t)*needle_u8 * 0x0101010101010101ull;
     for (; haystack_cursor >= haystack_start + 7; haystack_cursor -= 8) {
-        haystack_vec.u64 = *(sz_u64_t const *)(haystack_cursor - 7);
+        haystack_vec.u64 = sz_u64_load((sz_cptr_t)(haystack_cursor - 7)).u64;
         match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
         if (match_vec.u64) return (sz_cptr_t)(haystack_cursor - sz_u64_clz(match_vec.u64) / 8);
     }
@@ -251,7 +251,7 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_2byte_serial_(sz_cptr_t haystack, sz_siz
 
     // This code simulates hyper-scalar execution, analyzing 8 offsets at a time.
     for (; haystack + 9 <= haystack_end; haystack += 8) {
-        haystack_even_vec.u64 = *(sz_u64_t *)haystack;
+        haystack_even_vec.u64 = sz_u64_load(haystack).u64;
         haystack_odd_vec.u64 = (haystack_even_vec.u64 >> 8) | ((sz_u64_t)haystack[8] << 56);
         matches_even_vec = sz_u64_each_2byte_equal_(haystack_even_vec, needle_vec);
         matches_odd_vec = sz_u64_each_2byte_equal_(haystack_odd_vec, needle_vec);
@@ -322,8 +322,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_4byte_serial_(sz_cptr_t haystack, sz_siz
     // We load the subsequent four-byte word as well, taking its first bytes. Think of it as a glorified prefetch :)
     sz_u64_t haystack_page_current, haystack_page_next;
     for (; haystack + sizeof(sz_u64_t) + sizeof(sz_u32_t) <= haystack_end; haystack += sizeof(sz_u64_t)) {
-        haystack_page_current = *(sz_u64_t *)haystack;
-        haystack_page_next = *(sz_u32_t *)(haystack + 8);
+        haystack_page_current = sz_u64_load(haystack).u64;
+        haystack_page_next = sz_u32_load(haystack + 8).u32;
         haystack0_vec.u64 = (haystack_page_current);
         haystack1_vec.u64 = (haystack_page_current >> 8) | (haystack_page_next << 56);
         haystack2_vec.u64 = (haystack_page_current >> 16) | (haystack_page_next << 48);
@@ -400,8 +400,8 @@ STRINGZILLA_OUTLINED_ sz_cptr_t sz_find_3byte_serial_(sz_cptr_t haystack, sz_siz
     // We load the subsequent two-byte word as well.
     sz_u64_t haystack_page_current, haystack_page_next;
     for (; haystack + sizeof(sz_u64_t) + sizeof(sz_u16_t) <= haystack_end; haystack += sizeof(sz_u64_t)) {
-        haystack_page_current = *(sz_u64_t *)haystack;
-        haystack_page_next = *(sz_u16_t *)(haystack + 8);
+        haystack_page_current = sz_u64_load(haystack).u64;
+        haystack_page_next = sz_u16_load(haystack + 8).u16;
         haystack0_vec.u64 = (haystack_page_current);
         haystack1_vec.u64 = (haystack_page_current >> 8) | (haystack_page_next << 56);
         haystack2_vec.u64 = (haystack_page_current >> 16) | (haystack_page_next << 48);

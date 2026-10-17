@@ -569,10 +569,10 @@ STRINGZILLA_OUTLINED_ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(s
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec;
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
+        data0_vec.u64s[0] = sz_u64_load(text).u64;
+        data0_vec.u64s[1] = sz_u64_load(text + 8).u64;
+        data1_vec.u64s[0] = sz_u64_load(text + length - 16).u64;
+        data1_vec.u64s[1] = sz_u64_load(text + length - 8).u64;
 #else
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index)
@@ -591,12 +591,12 @@ STRINGZILLA_OUTLINED_ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(s
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec;
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(text + 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(text + 24);
-        data2_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
-        data2_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
+        data0_vec.u64s[0] = sz_u64_load(text).u64;
+        data0_vec.u64s[1] = sz_u64_load(text + 8).u64;
+        data1_vec.u64s[0] = sz_u64_load(text + 16).u64;
+        data1_vec.u64s[1] = sz_u64_load(text + 24).u64;
+        data2_vec.u64s[0] = sz_u64_load(text + length - 16).u64;
+        data2_vec.u64s[1] = sz_u64_load(text + length - 8).u64;
 #else
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data1_vec.u8s[byte_index] = text[16 + byte_index];
@@ -617,14 +617,14 @@ STRINGZILLA_OUTLINED_ STRINGZILLA_NO_STACK_PROTECTOR_ sz_u64_t sz_hash_serial_(s
         // Load the data and update the state
         sz_u128_vec_t data0_vec, data1_vec, data2_vec, data3_vec;
 #if STRINGZILLA_ALLOW_MISALIGNED_LOADS
-        data0_vec.u64s[0] = *(sz_u64_t const *)(text);
-        data0_vec.u64s[1] = *(sz_u64_t const *)(text + 8);
-        data1_vec.u64s[0] = *(sz_u64_t const *)(text + 16);
-        data1_vec.u64s[1] = *(sz_u64_t const *)(text + 24);
-        data2_vec.u64s[0] = *(sz_u64_t const *)(text + 32);
-        data2_vec.u64s[1] = *(sz_u64_t const *)(text + 40);
-        data3_vec.u64s[0] = *(sz_u64_t const *)(text + length - 16);
-        data3_vec.u64s[1] = *(sz_u64_t const *)(text + length - 8);
+        data0_vec.u64s[0] = sz_u64_load(text).u64;
+        data0_vec.u64s[1] = sz_u64_load(text + 8).u64;
+        data1_vec.u64s[0] = sz_u64_load(text + 16).u64;
+        data1_vec.u64s[1] = sz_u64_load(text + 24).u64;
+        data2_vec.u64s[0] = sz_u64_load(text + 32).u64;
+        data2_vec.u64s[1] = sz_u64_load(text + 40).u64;
+        data3_vec.u64s[0] = sz_u64_load(text + length - 16).u64;
+        data3_vec.u64s[1] = sz_u64_load(text + length - 8).u64;
 #else
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data0_vec.u8s[byte_index] = text[byte_index];
         for (sz_size_t byte_index = 0; byte_index < 16; ++byte_index) data1_vec.u8s[byte_index] = text[16 + byte_index];

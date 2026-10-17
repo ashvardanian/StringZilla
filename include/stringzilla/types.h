@@ -2214,6 +2214,16 @@ STRINGZILLA_CONSTEXPR sz_u64_t sz_u64_transpose(sz_u64_t x) {
     return x;
 }
 
+#if STRINGZILLA_ALLOW_MISALIGNED_LOADS && (!defined(_MSC_VER) || defined(__clang__))
+
+/** The words at byte alignment, which the loads and stores below access memory through. The
+ *  attribute must sit on a typedef: on a pointer's declaration it aligns the pointer variable, and
+ *  GCC keeps assuming the pointee is word-aligned. */
+typedef sz_u16_t __attribute__((aligned(1))) sz_u16_unaligned_t;
+typedef sz_u32_t __attribute__((aligned(1))) sz_u32_unaligned_t;
+typedef sz_u64_t __attribute__((aligned(1))) sz_u64_unaligned_t;
+#endif
+
 /** Load a 16-bit unsigned integer from a potentially unaligned pointer, slow on some platforms. */
 STRINGZILLA_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
 #if !STRINGZILLA_ALLOW_MISALIGNED_LOADS
@@ -2228,8 +2238,9 @@ STRINGZILLA_INLINE sz_u16_vec_t sz_u16_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u16_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u16_vec_t const *result_vec = (sz_u16_vec_t const *)ptr;
-    return *result_vec;
+    sz_u16_vec_t result_vec;
+    result_vec.u16 = *(sz_u16_unaligned_t const *)ptr;
+    return result_vec;
 #endif
 }
 
@@ -2249,8 +2260,9 @@ STRINGZILLA_INLINE sz_u32_vec_t sz_u32_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u32_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u32_vec_t const *result_vec = (sz_u32_vec_t const *)ptr;
-    return *result_vec;
+    sz_u32_vec_t result_vec;
+    result_vec.u32 = *(sz_u32_unaligned_t const *)ptr;
+    return result_vec;
 #endif
 }
 
@@ -2274,8 +2286,9 @@ STRINGZILLA_INLINE sz_u64_vec_t sz_u64_load(sz_cptr_t ptr) {
     return *((__unaligned sz_u64_vec_t *)ptr);
 #endif
 #else
-    __attribute__((aligned(1))) sz_u64_vec_t const *result_vec = (sz_u64_vec_t const *)ptr;
-    return *result_vec;
+    sz_u64_vec_t result_vec;
+    result_vec.u64 = *(sz_u64_unaligned_t const *)ptr;
+    return result_vec;
 #endif
 }
 
@@ -2293,8 +2306,7 @@ STRINGZILLA_INLINE void sz_u16_store(sz_ptr_t ptr, sz_u16_t value) {
     ((__unaligned sz_u16_vec_t *)ptr)->u16 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u16_vec_t *result_vec = (sz_u16_vec_t *)ptr;
-    result_vec->u16 = value;
+    *(sz_u16_unaligned_t *)ptr = value;
 #endif
 }
 
@@ -2314,8 +2326,7 @@ STRINGZILLA_INLINE void sz_u32_store(sz_ptr_t ptr, sz_u32_t value) {
     ((__unaligned sz_u32_vec_t *)ptr)->u32 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u32_vec_t *result_vec = (sz_u32_vec_t *)ptr;
-    result_vec->u32 = value;
+    *(sz_u32_unaligned_t *)ptr = value;
 #endif
 }
 
@@ -2339,8 +2350,7 @@ STRINGZILLA_INLINE void sz_u64_store(sz_ptr_t ptr, sz_u64_t value) {
     ((__unaligned sz_u64_vec_t *)ptr)->u64 = value;
 #endif
 #else
-    __attribute__((aligned(1))) sz_u64_vec_t *result_vec = (sz_u64_vec_t *)ptr;
-    result_vec->u64 = value;
+    *(sz_u64_unaligned_t *)ptr = value;
 #endif
 }
 
