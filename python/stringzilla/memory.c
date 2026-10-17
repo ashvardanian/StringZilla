@@ -38,7 +38,15 @@ static PyObject *Str_translate_into_(PyObject *str_obj, PyObject *out_obj, char 
         PyBuffer_Release(&out_view);
         return NULL;
     }
-    // A Python buffer exporter may mutate the input, so bind the source after exporting out.
+    // The output exporter can resize the input or release a source memoryview.
+    if (PyMemoryView_Check(str_obj)) {
+        Py_buffer source_view;
+        if (PyObject_GetBuffer(str_obj, &source_view, PyBUF_FULL_RO) != 0) {
+            PyBuffer_Release(&out_view);
+            return NULL;
+        }
+        PyBuffer_Release(&source_view);
+    }
     sz_string_view_t str;
     if (!sz_py_export_string_like(str_obj, &str.start, &str.length)) {
         PyBuffer_Release(&out_view);

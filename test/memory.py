@@ -1,6 +1,7 @@
 """Writable outputs and error boundaries for byte lookup translation."""
 
 import array
+import sys
 
 import pytest
 import stringzilla as sz
@@ -160,3 +161,22 @@ def test_translate_refreshes_source_after_control_callback(provided_output):
         assert result is output
     assert result == b"xy" + b"z" * 32
     assert source == b"ab" + b"c" * 32
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="Python buffer protocol requires Python 3.12")
+def test_translate_out_rejects_source_released_by_output_callback():
+    backing = bytearray(b"abc")
+    source = memoryview(backing)
+    output = bytearray(b"...")
+
+    class ReleaseSourceOnExport:
+        def __buffer__(self, flags):
+            source.release()
+            backing.extend(b"d" * 4096)
+            return memoryview(output)
+
+    with pytest.raises(ValueError, match="released memoryview"):
+        sz.translate(source, {"a": "A"}, out=ReleaseSourceOnExport())
+    assert backing == b"abc" + b"d" * 4096
+    assert output == b"..."
+    output.extend(b"!")
