@@ -402,6 +402,23 @@ STRINGZILLA_DEVICE sz_u32_t sz_shuffle_index_cuda_(sz_u32_t value, unsigned lane
     return __shfl_sync(0xFFFFFFFFu, value, lane);
 }
 
+/** The members of this lane's aligned group of @p width lanes, @p width a power of two up to 32. */
+STRINGZILLA_DEVICE unsigned sz_group_members_cuda_(unsigned width) {
+    return width == 32 ? 0xFFFFFFFFu : ((1u << width) - 1u) << ((threadIdx.x & 31u) & ~(width - 1u));
+}
+
+/** Lane `lane - delta`'s @p value within this lane's aligned group of @p width lanes, a lane's own
+ *  below @p delta, with @c shfl.sync.up ; groups may diverge from one another. */
+STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_up_cuda_(sz_u32_t value, unsigned delta, unsigned width) {
+    return __shfl_up_sync(sz_group_members_cuda_(width), value, delta, (int)width);
+}
+
+/** Lane @p lane 's @p value within this lane's aligned group of @p width lanes, with
+ *  @c shfl.sync.idx ; groups may diverge from one another. */
+STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_index_cuda_(sz_u32_t value, unsigned lane, unsigned width) {
+    return __shfl_sync(sz_group_members_cuda_(width), value, (int)lane, (int)width);
+}
+
 /** Lane zero's @p value across the warp, with @c shfl.sync.idx . */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_cuda_(sz_u32_t value) { return __shfl_sync(0xFFFFFFFFu, value, 0); }
 

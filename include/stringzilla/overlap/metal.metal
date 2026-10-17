@@ -60,9 +60,6 @@ constant uint sz_overlap_segment_bytes_metal_k = 128;
 /** Threads the segment scan runs, as one threadgroup of 32 simdgroups. */
 constant uint sz_overlap_scan_threads_metal_k = 1024;
 
-/** Words of the per-query membership filter: 2¹⁷ bits, 16 KB of threadgroup memory. */
-constant uint sz_overlap_filter_words_metal_k = 4096;
-
 /** The launch record the host copies in: host addresses inside the forest and the round block, and
  *  the round's shape. */
 struct sz_overlap_arguments_metal_t {
@@ -70,7 +67,7 @@ struct sz_overlap_arguments_metal_t {
     ulong nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     ulong segments, counts;
     ulong queries_count, widths_count, candidates_count, segments_count;
-    ulong scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout;
+    ulong scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout, bound;
 };
 
 /**
@@ -86,12 +83,21 @@ inline uint sz_overlap_montgomery_metal_(uint a, uint b) {
     return (uint)(sum >= sz_overlap_modulus_metal_k ? sum - sz_overlap_modulus_metal_k : sum);
 }
 
+/** How many of a node's sixteen ascending entries sit below the flipped @p key, up to fifteen, by
+ *  halving: four dependent loads where a scan takes sixteen, as @c sz_overlap_rank_simt_ does. */
+inline uint sz_overlap_rank_metal_(device uint const *node, int key) {
+    uint rank = (int)node[7] < key ? 8u : 0u;
+    rank += (int)node[rank + 3] < key ? 4u : 0u;
+    rank += (int)node[rank + 1] < key ? 2u : 0u;
+    rank += (int)node[rank] < key ? 1u : 0u;
+    return rank;
+}
+
 /** Separators of one branch node under @p key, the child to descend into. */
 inline uint sz_overlap_branch_step_metal_(device uint const *separators, int key) {
-    uint child = 0;
-    for (uint separator = 0; separator != sz_overlap_keys_per_node_metal_k; ++separator)
-        child += (int)separators[separator] < key;
-    return child;
+    uint const last = sz_overlap_keys_per_node_metal_k - 1;
+    uint const rank = sz_overlap_rank_metal_(separators, key);
+    return rank + (rank == last && (int)separators[last] < key);
 }
 
 /** The staged node is 16-byte aligned, so its sixteen keys come in four vector loads. */
@@ -105,9 +111,7 @@ inline uint sz_overlap_branch_step_metal_(threadgroup uint const *separators, in
 
 /** One when the flipped @p key sits in the leaf. */
 inline uint sz_overlap_leaf_step_metal_(device uint const *leaf, uint key) {
-    uint found = 0;
-    for (uint position = 0; position != sz_overlap_keys_per_node_metal_k; ++position) found |= leaf[position] == key;
-    return found;
+    return leaf[sz_overlap_rank_metal_(leaf, (int)key)] == key ? 1u : 0u;
 }
 
 inline uint sz_overlap_leaf_step_metal_(threadgroup uint const *leaf, uint key) {
@@ -116,33 +120,23 @@ inline uint sz_overlap_leaf_step_metal_(threadgroup uint const *leaf, uint key) 
     return any((quads[0] == keys) | (quads[1] == keys) | (quads[2] == keys) | (quads[3] == keys)) ? 1u : 0u;
 }
 
-/** Whether the tree over @p nodes holds one raw @p window_hash, walking it a level at a time, as
- *  @c sz_overlap_btree_probe_simt_ does. */
-template <typename nodes_pointer_>
-inline uint sz_overlap_probe_metal_(nodes_pointer_ nodes, uint levels, thread uint const *level_bases,
-                                    uint window_hash) {
+/** Whether the tree over @p tree holds one raw @p window_hash, walking it a level at a time,
+ *  reading the top levels staged from @p staged_from in @p staged_nodes and any lower levels in
+ *  @p tree, as @c sz_overlap_btree_probe_simt_ does. */
+inline uint sz_overlap_probe_metal_(device uint const *tree, threadgroup uint const *staged_nodes, uint staged_from,
+                                    uint levels, thread uint const *level_bases, uint window_hash) {
     uint const key = window_hash ^ sz_overlap_sign_flip_metal_k;
     uint node = 0;
     for (uint level = 0; level + 1 != levels; ++level) {
-        uint const child = sz_overlap_branch_step_metal_(
-            nodes + (level_bases[level] + node) * sz_overlap_keys_per_node_metal_k, (int)key);
+        uint const offset = (level_bases[level] + node) * sz_overlap_keys_per_node_metal_k;
+        uint const child = offset >= staged_from
+                               ? sz_overlap_branch_step_metal_(staged_nodes + (offset - staged_from), (int)key)
+                               : sz_overlap_branch_step_metal_(tree + offset, (int)key);
         node = node * sz_overlap_branches_per_node_metal_k + child;
     }
-    return sz_overlap_leaf_step_metal_(nodes + (level_bases[levels - 1] + node) * sz_overlap_keys_per_node_metal_k,
-                                       key);
-}
-
-/**
- *  @brief Whether @p window_hash may be among the query's keys: the bits both of its halves pick
- *      are set. Never a false negative, so a miss skips the exact probe.
- *
- *  A simdgroup runs the probe when any of its 32 lanes needs it, so the filter pays only if nearly
- *  every lane misses; two bits per key keep false positives low enough for queries of thousands of
- *  windows, where one bit would still send most simdgroups down the tree.
- */
-inline bool sz_overlap_filter_holds_metal_(threadgroup uint const *filter, uint window_hash) {
-    uint const low = window_hash & 0x1FFFFu, high = window_hash >> 15;
-    return ((filter[low >> 5] >> (low & 31)) & (filter[high >> 5] >> (high & 31)) & 1u) != 0;
+    uint const offset = (level_bases[levels - 1] + node) * sz_overlap_keys_per_node_metal_k;
+    return offset >= staged_from ? sz_overlap_leaf_step_metal_(staged_nodes + (offset - staged_from), key)
+                                 : sz_overlap_leaf_step_metal_(tree + offset, key);
 }
 
 /** The levels of a tree of @p keys_count keys and each level's first node, the root at zero, as
@@ -221,6 +215,21 @@ inline ulong sz_overlap_owner_metal_(device uint const *offsets, ulong candidate
     return low;
 }
 
+/** Windows of the longer side no probe can match, summed over every width: a window past either
+ *  text, and every window past the shorter one. */
+inline ulong sz_overlap_unreachable_metal_(device uint const *widths, ulong widths_count, ulong query_length,
+                                           ulong length) {
+    ulong longer = 0, reachable = 0;
+    for (ulong index = 0; index != widths_count; ++index) {
+        ulong const width = widths[index];
+        ulong const windows = width && width <= length ? length - width + 1 : 0;
+        ulong const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+        longer += max(windows, query_windows);
+        reachable += query_windows ? windows : 0;
+    }
+    return longer - reachable;
+}
+
 /**
  *  @brief Counts one segment's windows of one candidate against one prepared query, adding them to
  *      the candidate's counters.
@@ -233,11 +242,10 @@ inline ulong sz_overlap_owner_metal_(device uint const *offsets, ulong candidate
  *  leaving the window read again from the text, so no width is too wide for a thread to hold. An
  *  engine with more widths than one walk rolls walks the segment once per group of them.
  */
-template <typename nodes_pointer_>
 inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch, sz_strings_tape_metal_t tape,
-                                    constant sz_overlap_arguments_metal_t &arguments, nodes_pointer_ nodes,
-                                    threadgroup uint const *filter, uint levels, thread uint const *level_bases,
-                                    ulong query, uint segment, ulong candidate) {
+                                    constant sz_overlap_arguments_metal_t &arguments, device uint const *tree,
+                                    threadgroup uint const *staged_nodes, uint staged_from, uint levels,
+                                    thread uint const *level_bases, ulong query, uint segment, ulong candidate) {
     device uint const *offsets = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.segments);
     device uint const *widths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.widths);
     device uint const *powers = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.powers);
@@ -249,6 +257,11 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
 
     device atomic_uint *counts = sz_reach_metal_<atomic_uint>(scratch, arguments.scratch_host, arguments.counts) +
                                  (query * arguments.candidates_count + candidate) * arguments.widths_count;
+
+    // A pair whose lengths alone put it past the bound rolls nothing; the shares kernel zeroes it.
+    device uint const *lengths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.lengths);
+    if (sz_overlap_unreachable_metal_(widths, arguments.widths_count, lengths[query], text_length) > arguments.bound)
+        return;
 
     for (ulong first_width = 0; first_width < arguments.widths_count;
          first_width += sz_overlap_gpu_widths_per_walk_metal_k) {
@@ -282,8 +295,8 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
                 if (residue >= sz_overlap_modulus_metal_k) residue -= sz_overlap_modulus_metal_k;
                 hashes[index] = residue;
                 if (ending <= segment_start || width > ending) continue;
-                if (sz_overlap_filter_holds_metal_(filter, residue))
-                    matches[index] += sz_overlap_probe_metal_(nodes, levels, level_bases, residue);
+                matches[index] += sz_overlap_probe_metal_(tree, staged_nodes, staged_from, levels, level_bases,
+                                                          residue);
             }
         }
         for (ulong index = 0; index != group; ++index)
@@ -325,20 +338,18 @@ kernel void sz_overlap_segments_metal_kernel_(device uchar *scratch [[buffer(1)]
 }
 
 /**
- *  @brief One threadgroup row per prepared query, one thread per segment, the tree staged in
- *      threadgroup memory when the launch asked for it.
+ *  @brief One threadgroup row per prepared query, one thread per segment, the top of the tree
+ *      staged in threadgroup memory when the launch asked for it.
  *
  *  No thread leaves the query loop early, because the staging barriers are collective: a segment
- *  past the round skips its sweep rather than returning. Every query also gets its membership
- *  filter built from the leaves - the first @c keys_count entries of its tree - before any probe.
+ *  past the round skips its sweep rather than returning.
  */
 kernel void sz_overlap_scores_metal_kernel_(
     device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
     device uchar const *candidates [[buffer(2)]], device uchar const *candidates_offsets [[buffer(3)]],
     constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]], threadgroup uint *staged_nodes [[threadgroup(0)]],
-    threadgroup uint *filter [[threadgroup(1)]], uint2 group [[threadgroup_position_in_grid]],
-    uint2 groups [[threadgroups_per_grid]], uint thread_index [[thread_index_in_threadgroup]],
-    uint2 group_size [[threads_per_threadgroup]]) {
+    uint2 group [[threadgroup_position_in_grid]], uint2 groups [[threadgroups_per_grid]],
+    uint thread_index [[thread_index_in_threadgroup]], uint2 group_size [[threads_per_threadgroup]]) {
     uint const segment = group.x * group_size.x + thread_index;
     sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
     device uint const *nodes = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.nodes);
@@ -350,34 +361,20 @@ kernel void sz_overlap_scores_metal_kernel_(
                                 ? sz_overlap_owner_metal_(offsets, arguments.candidates_count, segment)
                                 : 0;
 
-    threadgroup atomic_uint *const filter_bits = (threadgroup atomic_uint *)filter;
     for (ulong query = group.y; query < arguments.queries_count; query += groups.y) {
         uint level_bases[sz_overlap_btree_levels_max_metal_k];
         uint const keys_count = keys_counts[query];
         uint const levels = sz_overlap_levels_metal_(keys_count, level_bases);
         device uint const *tree = nodes + nodes_offsets[query];
-        for (uint word = thread_index; word < sz_overlap_filter_words_metal_k; word += group_size.x)
-            atomic_store_explicit(&filter_bits[word], 0u, memory_order_relaxed);
-        if (arguments.staged_nodes_count) {
-            ulong const entries = nodes_offsets[query + 1] - nodes_offsets[query];
-            for (ulong entry = thread_index; entry < entries; entry += group_size.x) staged_nodes[entry] = tree[entry];
-        }
+        ulong const entries = nodes_offsets[query + 1] - nodes_offsets[query];
+        ulong const staged_from = entries > arguments.staged_nodes_count ? entries - arguments.staged_nodes_count : 0;
+        ulong const staged_entries = entries - staged_from;
+        for (ulong entry = thread_index; entry < staged_entries; entry += group_size.x)
+            staged_nodes[entry] = tree[staged_from + entry];
         threadgroup_barrier(mem_flags::mem_threadgroup);
-        for (uint entry = thread_index; entry < keys_count; entry += group_size.x) {
-            uint const window_hash = tree[entry] ^ sz_overlap_sign_flip_metal_k;
-            uint const low = window_hash & 0x1FFFFu, high = window_hash >> 15;
-            atomic_fetch_or_explicit(&filter_bits[low >> 5], 1u << (low & 31), memory_order_relaxed);
-            atomic_fetch_or_explicit(&filter_bits[high >> 5], 1u << (high & 31), memory_order_relaxed);
-        }
-        threadgroup_barrier(mem_flags::mem_threadgroup);
-        if (segment < arguments.segments_count) {
-            if (arguments.staged_nodes_count)
-                sz_overlap_sweep_metal_(engine, scratch, tape, arguments, (threadgroup uint const *)staged_nodes,
-                                        filter, levels, level_bases, query, segment, candidate);
-            else
-                sz_overlap_sweep_metal_(engine, scratch, tape, arguments, tree, filter, levels, level_bases, query,
-                                        segment, candidate);
-        }
+        if (segment < arguments.segments_count)
+            sz_overlap_sweep_metal_(engine, scratch, tape, arguments, tree, staged_nodes, (uint)staged_from, levels,
+                                    level_bases, query, segment, candidate);
         threadgroup_barrier(mem_flags::mem_threadgroup);
     }
 }
@@ -399,9 +396,18 @@ kernel void sz_overlap_shares_metal_kernel_(device uchar *engine [[buffer(0)]], 
     device float *candidate_scores = scores + query * arguments.scores_query_stride +
                                      candidate * arguments.scores_candidate_stride;
     ulong const length = sz_strings_length_metal_(tape, candidate), query_length = lengths[query];
-    for (ulong index = 0; index != arguments.widths_count; ++index) {
+    ulong misses = 0, index;
+    for (index = 0; index != arguments.widths_count; ++index) {
         ulong const width = widths[index];
-        bool const scored = width && width <= query_length && width <= length;
+        ulong const windows = width && width <= length ? length - width + 1 : 0;
+        ulong const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+        misses += max(windows, query_windows) - (windows && query_windows ? counts[index] : 0);
+    }
+    // One epilogue for every pair: exact shares within the bound, zeros past it.
+    bool const within = misses <= arguments.bound;
+    for (index = 0; index != arguments.widths_count; ++index) {
+        ulong const width = widths[index];
+        bool const scored = within && width && width <= query_length && width <= length;
         candidate_scores[index] =
             scored ? sz_overlap_share_metal_(counts[index], length - width + 1, query_length - width + 1) : 0.0f;
         counts[index] = 0;

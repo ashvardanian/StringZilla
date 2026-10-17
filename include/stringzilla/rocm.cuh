@@ -338,6 +338,17 @@ STRINGZILLA_DEVICE sz_u32_t sz_shuffle_index_rocm_(sz_u32_t value, unsigned lane
     return __shfl(value, (int)lane, 32);
 }
 
+/** Lane `lane - delta`'s @p value within this lane's aligned group of @p width lanes, a lane's own
+ *  below @p delta. */
+STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_up_rocm_(sz_u32_t value, unsigned delta, unsigned width) {
+    return __shfl_up(value, delta, (int)width);
+}
+
+/** Lane @p lane 's @p value within this lane's aligned group of @p width lanes. */
+STRINGZILLA_DEVICE sz_u32_t sz_group_shuffle_index_rocm_(sz_u32_t value, unsigned lane, unsigned width) {
+    return __shfl(value, (int)lane, (int)width);
+}
+
 /** Lane zero's @p value across this thread's 32 lanes. */
 STRINGZILLA_DEVICE sz_u32_t sz_lanes_broadcast_rocm_(sz_u32_t value) { return __shfl(value, 0, 32); }
 

@@ -653,7 +653,7 @@ unsafe extern "C" fn free_in<A: Allocator>(
 /// let cpu = Stream::default(Capabilities::cpu_enabled());
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu)?;
 /// let mut distances = [0usize; 2];
-/// cpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 2))?;
+/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))?;
 /// assert_eq!(distances, [3, 0]);
 /// # Ok::<(), stringzilla::sz::Status>(())
 /// ```
@@ -1738,7 +1738,7 @@ mod tests {
         let mut engine = sz::LevenshteinEngine::new(&["kitten"], sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
         let mut distances = Vec::new_in(unified);
         distances.resize(words.len(), usize::MAX);
-        gpu.scope(|scope| engine.distances(scope, device_view, &mut distances, words.len()))
+        gpu.scope(|scope| engine.distances(scope, device_view, None, &mut distances, words.len()))
             .unwrap();
         assert_eq!(distances[4], 0);
     }

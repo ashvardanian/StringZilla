@@ -645,6 +645,9 @@ extern "C" {
     pub(crate) fn sz_levenshtein_distances(
         engine: *mut LevenshteinEngine,
         candidates: *const sz_strings_view_t,
+        symbol_counts: *const sz_size_t,
+        order: *const sz_size_t,
+        bound: sz_size_t,
         distances: *mut sz_size_t,
         distances_stride: sz_size_t,
         stream: sz_stream_t,
@@ -664,6 +667,7 @@ extern "C" {
     pub(crate) fn sz_overlap_scores(
         engine: *mut OverlapEngine,
         candidates: *const sz_strings_view_t,
+        bound: sz_size_t,
         scores: *mut f32,
         scores_query_stride: sz_size_t,
         scores_candidate_stride: sz_size_t,

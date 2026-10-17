@@ -104,23 +104,25 @@ static int LevenshteinEngine_init(LevenshteinEngine *self, PyObject *args, PyObj
 
 #pragma region Operations
 
-static char const doc_LevenshteinEngine_distances[] =                                              //
-    "distances(candidates, out, *, stream=None) -> None\n"                                         //
-    "\n"                                                                                           //
-    "Score every prepared query against every candidate, into `out`.\n"                            //
-    "\n"                                                                                           //
-    "Args:\n"                                                                                      //
-    "  candidates (Strings): Texts forming the matrix columns, from `Strings.copy` on a GPU.\n"    //
-    "  out (buffer): Writable 2-D buffer of pointer-width unsigned integers like numpy.uintp,\n"   //
-    "    at least (len(queries), len(candidates)), contiguous along its candidate axis.\n"         //
-    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"   //
-    "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n" //
-    "    and read only after the caller joins the stream; a host engine ignores it.\n"             //
-    "Example:\n"                                                                                   //
-    "  >>> engine = sz.LevenshteinEngine(sz.Strings(['hello', 'world']))\n"                        //
-    "  >>> out = memoryview(bytearray(32)).cast('Q', (2, 2))\n"                                    //
-    "  >>> engine.distances(sz.Strings(['hallo', 'word']), out)\n"                                 //
-    "  >>> out[0, 0]\n"                                                                            //
+static char const doc_LevenshteinEngine_distances[] =                                               //
+    "distances(candidates, out, *, bound=None, stream=None) -> None\n"                              //
+    "\n"                                                                                            //
+    "Score every prepared query against every candidate, into `out`.\n"                             //
+    "\n"                                                                                            //
+    "Args:\n"                                                                                       //
+    "  candidates (Strings): Texts forming the matrix columns, from `Strings.copy` on a GPU.\n"     //
+    "  out (buffer): Writable 2-D buffer of pointer-width unsigned integers like numpy.uintp,\n"    //
+    "    at least (len(queries), len(candidates)), contiguous along its candidate axis.\n"          //
+    "  bound (int, optional): The largest distance reported exactly. A candidate past it reports\n" //
+    "    exactly bound + 1, and None keeps every distance exact.\n"                                 //
+    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"    //
+    "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n"  //
+    "    and read only after the caller joins the stream; a host engine ignores it.\n"              //
+    "Example:\n"                                                                                    //
+    "  >>> engine = sz.LevenshteinEngine(sz.Strings(['hello', 'world']))\n"                         //
+    "  >>> out = memoryview(bytearray(32)).cast('Q', (2, 2))\n"                                     //
+    "  >>> engine.distances(sz.Strings(['hallo', 'word']), out)\n"                                  //
+    "  >>> out[0, 0]\n"                                                                             //
     "  1";
 
 static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *const *args,
@@ -131,6 +133,7 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
     }
     PyObject *const candidates_obj = args[0];
     PyObject *out_obj = positional_args_count > 1 ? args[1] : NULL;
+    PyObject *bound_object = NULL;
     PyObject *stream_object = NULL;
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
@@ -143,6 +146,7 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
             }
             out_obj = value;
         }
+        else if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) { bound_object = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "stream") == 0) { stream_object = value; }
         else {
             PyErr_Format(PyExc_TypeError, "distances() got an unexpected keyword argument '%U'", key);
@@ -161,6 +165,8 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
     sz_capability_t const capability = self->engine.capability;
     sz_strings_view_t candidates;
     sz_stream_t stream = NULL;
+    sz_size_t bound = STRINGZILLA_SIZE_MAX;
+    if (!sz_py_export_optional_size(bound_object, "bound", STRINGZILLA_SIZE_MAX, &bound)) return NULL;
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_strings(candidates_obj, "candidates", &candidates) != 0) return NULL;
@@ -182,7 +188,9 @@ static PyObject *LevenshteinEngine_distances(LevenshteinEngine *self, PyObject *
     sz_py_mutex_lock_(&self->mutex);
     // Another thread may have rebuilt the engine since the arguments were bound to its shape.
     if (self->engine.capability != capability || self->engine.count != extents[0]) status = sz_unexpected_dimensions_k;
-    else status = sz_levenshtein_distances(&self->engine, &candidates, distances, strides[0], stream);
+    else
+        status = sz_levenshtein_distances(&self->engine, &candidates, STRINGZILLA_NULL, STRINGZILLA_NULL, bound,
+                                          distances, strides[0], stream);
     sz_py_mutex_unlock_(&self->mutex);
     Py_END_ALLOW_THREADS;
     PyBuffer_Release(&out_view);

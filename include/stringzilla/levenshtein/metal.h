@@ -120,7 +120,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_head_bytes_metal_(sz_size_t count
 typedef struct {
     sz_u64_t engine_host;
     sz_u64_t masks, masks_offsets, symbol_to_class, lengths, order;
-    sz_u64_t candidates_count, distances_stride, candidates_layout;
+    sz_u64_t candidates_count, distances_stride, bound, candidates_layout;
 } sz_levenshtein_arguments_metal_t;
 
 /**
@@ -220,7 +220,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     sz_metal_call_t call;
     sz_status_t status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    if (queries->count == 0 || queries->count > 0xFFFFFFFFu) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
+    if (queries->count > 0xFFFFFFFFu) return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
 
     sz_size_t longest = 0, text_bytes = 0;
     sz_string_view_t views[64];
@@ -309,10 +309,13 @@ STRINGZILLA_INLINE sz_levenshtein_long_layout_metal_t sz_levenshtein_long_layout
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine_t *engine,
-                                                           sz_strings_view_t const *candidates, sz_size_t *distances,
+                                                           sz_strings_view_t const *candidates,
+                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                           sz_size_t bound, sz_size_t *distances,
                                                            sz_size_t distances_stride, sz_stream_t stream) {
+    sz_unused_(symbol_counts), sz_unused_(order);
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
-    if (!candidates->count) return sz_success_k;
+    if (!candidates->count || !engine->count) return sz_success_k;
 
     // The engine's block, the candidates' payload and offsets, and the distances, in kernel order.
     sz_metal_bound_t buffers[4];
@@ -334,12 +337,13 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
     sz_levenshtein_head_metal_t const *const head = (sz_levenshtein_head_metal_t const *)block;
     sz_size_t const *const bucket_offsets = (sz_size_t const *)(block + head->bucket_offsets);
     sz_size_t const *const per_group = (sz_size_t const *)(block + head->per_group);
-    sz_u32_t const *const order = (sz_u32_t const *)(block + head->order);
+    sz_u32_t const *const query_order = (sz_u32_t const *)(block + head->order);
     sz_levenshtein_arguments_metal_t arguments;
     arguments.engine_host = (sz_u64_t)engine->memory;
     arguments.masks = (sz_u64_t)engine->masks, arguments.masks_offsets = (sz_u64_t)engine->masks_offsets;
     arguments.symbol_to_class = (sz_u64_t)engine->symbol_to_class, arguments.lengths = (sz_u64_t)engine->lengths;
     arguments.candidates_count = candidates->count, arguments.distances_stride = distances_stride;
+    arguments.bound = bound;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;
 
     for (sz_size_t bucket = 0, next = 0; bucket != head->buckets; bucket = next) {
@@ -358,7 +362,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
             sz_size_t const rows = sz_min_of_two(end - row, (sz_size_t)sz_levenshtein_gpu_grid_rows_max_k);
             sz_metal_size_t const groups = {sz_size_divide_round_up(candidates->count, candidates_per_group), rows, 1};
             sz_metal_size_t const group = {threads, 1, 1};
-            arguments.order = (sz_u64_t)(order + row);
+            arguments.order = (sz_u64_t)(query_order + row);
             status = sz_metal_encode_(&call, sz_levenshtein_source_metal_, kernel, buffers, 4, &arguments,
                                       sizeof(arguments), groups, group);
             if (status != sz_success_k) return sz_metal_commit_(&call, status);
@@ -457,7 +461,7 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_metal(sz_levenshtein_engine
             sz_size_t const query_chunk = sz_min_of_two(queries->count, pair_capacity / candidate_chunk);
             for (sz_size_t query = 0; query < queries->count; query += query_chunk) {
                 sz_size_t const query_count = sz_min_of_two(queries->count - query, query_chunk);
-                long_arguments.common.order = (sz_u64_t)(order + queries->offset + query);
+                long_arguments.common.order = (sz_u64_t)(query_order + queries->offset + query);
                 long_arguments.query_first = query;
                 for (sz_size_t candidate = 0; candidate < texts->count; candidate += candidate_chunk) {
                     sz_size_t const candidate_count = sz_min_of_two(texts->count - candidate, candidate_chunk);

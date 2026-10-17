@@ -63,131 +63,131 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_warp_words_per_lane_cuda_(sz_size
 /*  Warped byte rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_k1_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 1,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k2_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 2,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k3_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 3,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k4_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 4,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k5_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 5,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k6_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 6,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k7_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 7,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_k8_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_cuda_,
-                                    sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 8,
+                                    sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 /*  Warped rune rung: one entry point per words-per-lane. */
 static __global__ void sz_levenshtein_distances_utf8_k1_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 1, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 1,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k2_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 2, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 2,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k3_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 3, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 3,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k4_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 4, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 4,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k5_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 5, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 5,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k6_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 6, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 6,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k7_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 7, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 7,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 static __global__ void sz_levenshtein_distances_utf8_k8_cuda_kernel_( //
     sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride) {
-    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, 8, sz_shuffle_up_cuda_,
-                                         sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_, sz_lanes_any_cuda_,
-                                         sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
+    sz_size_t distances_stride, sz_size_t bound) {
+    sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 8,
+                                         sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
+                                         sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 #endif // STRINGZILLA_TARGET_CUDA
@@ -197,7 +197,7 @@ static __global__ void sz_levenshtein_distances_utf8_k8_cuda_kernel_( //
 enum {
     sz_levenshtein_tiled_warp_stride_cuda_k = sz_levenshtein_lanes_simt_k,
     sz_levenshtein_tiled_threads_per_block_cuda_k = sz_levenshtein_tiled_warps_per_block_simt_k *
-        sz_levenshtein_tiled_warp_stride_cuda_k,
+                                                    sz_levenshtein_tiled_warp_stride_cuda_k,
 };
 
 /**
@@ -441,6 +441,10 @@ enum { sz_levenshtein_masks_threads_cuda_k = sz_levenshtein_byte_classes_k };
  */
 static sz_status_t sz_levenshtein_build_masks_cuda_(sz_levenshtein_engine_t *engine, sz_strings_view_t const *queries,
                                                     sz_stream_t stream) {
+    if (!queries->count) {
+        sz_prefetch_cuda_(engine->memory, engine->memory_bytes, stream);
+        return sz_success_k;
+    }
     sz_size_t texts_bytes = 0;
     sz_string_view_t query_views[64];
     for (sz_size_t index = 0; index != queries->count; ++index) {
@@ -496,7 +500,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cuda_(sz_levenshtein_e
     if (!sz_device_multiprocessors_cuda_()) return sz_missing_gpu_k;
     if (allocator) unified = *allocator;
     else sz_allocator_init_unified_cuda_(&unified);
-    if (queries->count == 0 || queries->count > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
+    if (queries->count > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
 
     sz_size_t longest = 0, text_bytes = 0, all_text_bytes = 0;
     sz_string_view_t views[64];
@@ -527,6 +531,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cuda_(sz_levenshtein_e
     sz_levenshtein_head_cuda_t *const head = (sz_levenshtein_head_cuda_t *)engine->memory;
     head->query_offsets = (sz_size_t *)((sz_ptr_t)engine->memory + head_bytes);
     head->query_text = (sz_ptr_t)head->query_offsets + offsets_bytes;
+    head->query_offsets[0] = 0;
     for (sz_size_t index = 0, written = 0; index != queries->count; ++index) {
         head->query_offsets[index] = written;
         if (index % 64 == 0) sz_strings_get_block_(queries, index, views);
@@ -566,15 +571,15 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_scoped_cuda_(
 static sz_status_t sz_levenshtein_launch_cuda_(void const *entry_point, sz_size_t blocks, sz_size_t queries,
                                                sz_size_t per_block, sz_stream_t stream, sz_levenshtein_engine_t engine,
                                                sz_u32_t const *order, sz_strings_view_t candidates,
-                                               sz_size_t *distances, sz_size_t distances_stride,
+                                               sz_size_t *distances, sz_size_t distances_stride, sz_size_t bound,
                                                sz_size_t const *candidate_order) {
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)queries, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
     // Only the threaded rungs declare the last argument; a launch reads what its kernel declares.
-    void *arguments[6];
+    void *arguments[7];
     arguments[0] = &engine, arguments[1] = &order, arguments[2] = &candidates, arguments[3] = &distances;
-    arguments[4] = &distances_stride, arguments[5] = &candidate_order;
+    arguments[4] = &distances_stride, arguments[5] = &bound, arguments[6] = &candidate_order;
     return sz_launch_cuda_(entry_point, grid, block, arguments, 0, stream);
 }
 
@@ -623,7 +628,7 @@ static sz_status_t sz_levenshtein_order_longest_cuda_(sz_strings_view_t candidat
 static sz_status_t sz_levenshtein_enqueue_long_cuda_(sz_levenshtein_engine_t engine, sz_strings_view_t candidates,
                                                      sz_levenshtein_length_bucket_t const *candidate_buckets,
                                                      sz_size_t resident, sz_bool_t cooperative, sz_size_t *distances,
-                                                     sz_size_t distances_stride, sz_ptr_t workspace,
+                                                     sz_size_t distances_stride, sz_size_t bound, sz_ptr_t workspace,
                                                      sz_size_t *candidate_storage, sz_stream_t stream) {
     sz_levenshtein_head_cuda_t const *const head = (sz_levenshtein_head_cuda_t const *)engine.memory;
     sz_size_t *candidate_order = STRINGZILLA_NULL;
@@ -642,7 +647,7 @@ static sz_status_t sz_levenshtein_enqueue_long_cuda_(sz_levenshtein_engine_t eng
         if (status != sz_success_k) return status;
     }
     sz_levenshtein_long_arguments_simt_t batch = {};
-    batch.distances_stride = distances_stride;
+    batch.distances_stride = distances_stride, batch.bound = bound;
     batch.query_order = head->order, batch.candidate_order = candidate_order;
     batch.query_offsets = head->query_offsets, batch.query_text = head->query_text;
     for (sz_size_t query_bucket = 0; query_bucket != sz_levenshtein_length_buckets_k; ++query_bucket) {
@@ -699,7 +704,8 @@ static sz_status_t sz_levenshtein_enqueue_long_cuda_(sz_levenshtein_engine_t eng
 }
 
 static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates,
-                                             sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream) {
+                                             sz_size_t *distances, sz_size_t distances_stride, sz_size_t bound,
+                                             sz_stream_t stream) {
     sz_levenshtein_head_cuda_t const *const head = (sz_levenshtein_head_cuda_t const *)engine->memory;
     if (head->bucket_offsets[head->buckets] == engine->count) return sz_success_k;
     sz_levenshtein_length_bucket_t candidate_buckets[sz_levenshtein_length_buckets_k] = {{0, 0, 0}};
@@ -768,7 +774,7 @@ static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz
         return sz_bad_alloc_k;
     sz_size_t *const candidate_storage = candidate_bytes ? (sz_size_t *)(workspace + scratch_bytes) : STRINGZILLA_NULL;
     sz_status_t status = sz_levenshtein_enqueue_long_cuda_(*engine, *candidates, candidate_buckets, resident,
-                                                           cooperative, distances, distances_stride, workspace,
+                                                           cooperative, distances, distances_stride, bound, workspace,
                                                            candidate_storage, stream);
     if (cudaFreeAsync(workspace, (cudaStream_t)stream) != cudaSuccess && status == sz_success_k)
         status = sz_device_code_mismatch_k;
@@ -780,7 +786,8 @@ static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz
  *  batch's own order where it is null. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_cuda_(sz_levenshtein_engine_t *engine,
                                                            sz_strings_view_t const *candidates, sz_size_t *distances,
-                                                           sz_size_t distances_stride, sz_size_t const *candidate_order,
+                                                           sz_size_t distances_stride, sz_size_t bound,
+                                                           sz_size_t const *candidate_order,
                                                            sz_levenshtein_entry_points_cuda_t const *entry_points,
                                                            sz_stream_t stream) {
     sz_levenshtein_head_cuda_t const *const head = (sz_levenshtein_head_cuda_t const *)engine->memory;
@@ -814,7 +821,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_cuda_(sz_levenshtein_engine
             sz_size_t const rows = sz_min_of_two(last - row, (sz_size_t)sz_levenshtein_gpu_grid_rows_max_k);
             sz_status_t const launched = sz_levenshtein_launch_cuda_(entry_point, blocks, rows, per_block, stream,
                                                                      *engine, head->order + row, *candidates, distances,
-                                                                     distances_stride, candidate_order);
+                                                                     distances_stride, bound, candidate_order);
             if (launched != sz_success_k) return launched;
         }
     }
@@ -827,11 +834,11 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_rounds_cuda_(sz_levenshtein_engine
  *  then the long queries. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_cuda_(sz_levenshtein_engine_t *engine,
                                                               sz_strings_view_t const *candidates, sz_size_t *distances,
-                                                              sz_size_t distances_stride,
+                                                              sz_size_t distances_stride, sz_size_t bound,
                                                               sz_levenshtein_entry_points_cuda_t const *entry_points,
                                                               sz_stream_t stream) {
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
-    if (candidates->count == 0) return sz_success_k;
+    if (candidates->count == 0 || engine->count == 0) return sz_success_k;
     if (engine->count > 1 && distances_stride > (STRINGZILLA_SIZE_MAX - candidates->count) / (engine->count - 1))
         return sz_unexpected_dimensions_k;
     if ((engine->count - 1) * distances_stride + candidates->count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t))
@@ -861,21 +868,23 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_cuda_(sz_levenshtein_eng
         candidate_order = storage + sz_levenshtein_length_keys_simt_k;
     }
     if (status == sz_success_k)
-        status = sz_levenshtein_rounds_cuda_(engine, candidates, distances, distances_stride, candidate_order,
+        status = sz_levenshtein_rounds_cuda_(engine, candidates, distances, distances_stride, bound, candidate_order,
                                              entry_points, stream);
     if (storage && cudaFreeAsync(storage, (cudaStream_t)stream) != cudaSuccess && status == sz_success_k)
         status = sz_device_code_mismatch_k;
     if (status != sz_success_k) return status;
-    return sz_levenshtein_long_cuda_(engine, candidates, distances, distances_stride, stream);
+    return sz_levenshtein_long_cuda_(engine, candidates, distances, distances_stride, bound, stream);
 }
 
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_distances_scoped_cuda_(
     sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_levenshtein_entry_points_cuda_t const *entry_points, sz_stream_t stream) {
+    sz_size_t distances_stride, sz_size_t bound, sz_levenshtein_entry_points_cuda_t const *entry_points,
+    sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_cuda_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_levenshtein_distances_cuda_(engine, candidates, distances, distances_stride, entry_points, stream);
+    status = sz_levenshtein_distances_cuda_(engine, candidates, distances, distances_stride, bound, entry_points,
+                                            stream);
     sz_device_leave_cuda_(caller);
     return status;
 }
@@ -954,9 +963,12 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_cuda(sz_levenshtein_engin
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_cuda(sz_levenshtein_engine_t *engine,
-                                                          sz_strings_view_t const *candidates, sz_size_t *distances,
+                                                          sz_strings_view_t const *candidates,
+                                                          sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                          sz_size_t bound, sz_size_t *distances,
                                                           sz_size_t distances_stride, sz_stream_t stream) {
-    return sz_levenshtein_distances_scoped_cuda_(engine, candidates, distances, distances_stride,
+    sz_unused_(symbol_counts), sz_unused_(order);
+    return sz_levenshtein_distances_scoped_cuda_(engine, candidates, distances, distances_stride, bound,
                                                  &sz_levenshtein_entry_points_cuda_, stream);
 }
 

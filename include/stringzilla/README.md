@@ -58,6 +58,7 @@ sz_status_t sz_levenshtein_engine_init(sz_levenshtein_engine_t *engine, sz_strin
                                        sz_levenshtein_symbol_t symbol, sz_capability_t capabilities,
                                        sz_allocator_t *allocator, sz_stream_t stream);
 sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine, sz_strings_view_t const *candidates,
+                                     sz_size_t const *symbol_counts, sz_size_t const *order, sz_size_t bound,
                                      sz_size_t *distances, sz_size_t distances_stride, sz_stream_t stream);
 void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine, sz_stream_t stream);
 ```
@@ -179,7 +180,7 @@ sz_strings_to_tape_best(&host_candidates, NULL, host_candidates.count, &unified,
 sz_strings_view_t candidates;
 sz_strings_from_span(&tape, &candidates);
 sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, caps, NULL, stream);
-sz_levenshtein_distances(&engine, &candidates, distances, candidates.count, stream);
+sz_levenshtein_distances(&engine, &candidates, NULL, NULL, STRINGZILLA_SIZE_MAX, distances, candidates.count, stream);
 sz_stream_synchronize_best(caps, stream);
 sz_levenshtein_engine_free(&engine, stream);
 sz_strings_span_free(&tape, &unified, stream);

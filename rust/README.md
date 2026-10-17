@@ -701,7 +701,8 @@ fn new<Q: AsRef<[u8]>>(queries: &[Q], symbol: LevenshteinSymbol,
     stream: &Stream) -> Result<LevenshteinEngine, Status>;
 
 fn distances<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, distances: &'scope mut [usize], distances_stride: usize) -> Result<(), Status>;
+    candidates: StringsView<'scope>, bound: Option<usize>, distances: &'scope mut [usize],
+    distances_stride: usize) -> Result<(), Status>;
 ```
 
 `LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, an ill-formed byte decoding to `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
@@ -709,6 +710,7 @@ Costs are unit — one per substitution, insertion and deletion — and there ar
 
 The output is a `[queries, candidates]` block the caller owns: query `q` against candidate `c` lands at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and being at least the candidate count.
 A stride wider than the candidate count is what lets one round fill a sub-block of a larger matrix.
+A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `limit + 1` for every candidate past it, on every backend, so a round can stop early; `None` keeps every distance exact.
 
 ```rust
 use stringzilla::sz::{Capabilities, LevenshteinEngine, LevenshteinSymbol, Stream, StringsView};
@@ -718,20 +720,24 @@ let mut engine = LevenshteinEngine::new(&["kitten", "saturday"], LevenshteinSymb
 
 let mut distances = [0usize; 4];
 let candidates = StringsView::from_slices(&["sitting", "sunday"]);
-cpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 2)).unwrap();
+cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2)).unwrap();
 assert_eq!(distances[0], 3); // kitten vs sitting
 assert_eq!(distances[3], 3); // saturday vs sunday
 
 // The same engine, a second round over an Arrow tape, no preparation repeated.
 let mut again = [0usize; 4];
 let arrow = StringsView::from_u32_tape(b"mittenkitten", &[0, 6, 12]).unwrap();
-cpu.scope(|scope| engine.distances(scope, arrow, &mut again, 2)).unwrap();
+cpu.scope(|scope| engine.distances(scope, arrow, None, &mut again, 2)).unwrap();
 assert_eq!(again[..2], [1, 0]); // kitten vs mitten and kitten
+
+// Bounded at 1, a candidate two edits away reports exactly 2.
+cpu.scope(|scope| engine.distances(scope, candidates, Some(1), &mut distances, 2)).unwrap();
+assert_eq!(distances[0], 2); // kitten vs sitting is 3, past the bound
 
 // Runes rather than bytes, for text where a codepoint is the unit.
 let mut unicode = LevenshteinEngine::new(&["café"], LevenshteinSymbol::Runes, &cpu).unwrap();
 let mut one = [0usize; 1];
-cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), &mut one, 1)).unwrap();
+cpu.scope(|scope| unicode.distances(scope, StringsView::from_slices(&["cafe"]), None, &mut one, 1)).unwrap();
 assert_eq!(one[0], 1);
 ```
 
@@ -746,13 +752,14 @@ fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget
     stream: &Stream) -> Result<OverlapEngine, Status>;
 
 fn scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, scores: &'scope mut [f32],
+    candidates: StringsView<'scope>, bound: Option<usize>, scores: &'scope mut [f32],
     scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
 ```
 
 Widths are in bytes and need not form a doubling chain, since a window hash comes from a prefix difference that costs one modular multiply-add at any width; a width past a text scores zero for every pair it spans.
 The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `scores[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
 The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
+A `bound` of `Some(limit)` is the most windows a pair may miss, summed over every width, and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
 ```rust
 use stringzilla::sz::{Capabilities, OverlapEngine, Stream, StringsView};
@@ -762,8 +769,12 @@ let mut engine = OverlapEngine::new(&["the quick brown fox"], &[4, 8], 0, &cpu).
 
 let mut scores = [0.0f32; 2];
 let candidates = StringsView::from_slices(&["the quick brown cat"]);
-cpu.scope(|scope| engine.scores(scope, candidates, &mut scores, 2, 2)).unwrap();
+cpu.scope(|scope| engine.scores(scope, candidates, None, &mut scores, 2, 2)).unwrap();
 assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
+
+// A pair missing more than 2 windows scores zero at every width.
+cpu.scope(|scope| engine.scores(scope, candidates, Some(2), &mut scores, 2, 2)).unwrap();
+assert_eq!(scores, [0.0, 0.0]);
 ```
 
 ## Multi-Pattern Search
@@ -1040,7 +1051,7 @@ let mut distances = Vec::new_in(unified);
 distances.resize(2, 0usize);
 
 let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-stream.scope(|scope| engine.distances(scope, candidates.view(), &mut distances, 2))?;
+stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances, 2))?;
 assert_eq!(distances[..], [3, 0]);
 ```
 

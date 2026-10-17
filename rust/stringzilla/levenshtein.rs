@@ -43,10 +43,17 @@ pub enum LevenshteinSymbol {
 /// // A `[queries, candidates]` block, query `q` starting at `q * stride`.
 /// let mut distances = [0usize; 4];
 /// let candidates = StringsView::from_slices(&["sitting", "sunday"]);
-/// cpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 2))
+/// cpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 2))
 ///     .unwrap();
 /// assert_eq!(distances[0], 3); // kitten vs sitting
 /// assert_eq!(distances[3], 3); // saturday vs sunday
+///
+/// // A candidate past a bound of 1 reports exactly 2.
+/// let candidates = StringsView::from_slices(&["sitting", "sunday"]);
+/// cpu.scope(|scope| engine.distances(scope, candidates, Some(1), &mut distances, 2))
+///     .unwrap();
+/// assert_eq!(distances[0], 2);
+/// assert_eq!(distances[3], 2);
 /// ```
 #[repr(C)]
 #[allow(dead_code)] // Every member is the C side's to write; the layout is what Rust keeps.
@@ -110,6 +117,10 @@ impl LevenshteinEngine {
     /// being at least the candidate count. The round's scratch grows here when a batch needs more
     /// than the last one did, and is never shrunk.
     ///
+    /// A `bound` of `Some(limit)` keeps a distance exact up to `limit` and reports `limit + 1` for
+    /// every candidate past it, on every backend, which lets a round stop early. `None` keeps every
+    /// distance exact.
+    ///
     /// A GPU engine takes candidates and `distances` in memory its device reaches, such as a
     /// [`Strings`] and a `Vec` in a [`UnifiedAllocator`]. A stream of another group than the
     /// engine's is refused with [`Status::DeviceMemoryMismatch`].
@@ -117,6 +128,7 @@ impl LevenshteinEngine {
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         candidates: StringsView<'scope>,
+        bound: Option<usize>,
         distances: &'scope mut [usize],
         distances_stride: usize,
     ) -> Result<(), Status> {
@@ -138,6 +150,9 @@ impl LevenshteinEngine {
             sz_levenshtein_distances(
                 self,
                 &candidates.view,
+                core::ptr::null(),
+                core::ptr::null(),
+                bound.unwrap_or(usize::MAX),
                 distances.as_mut_ptr(),
                 distances_stride,
                 stream.as_raw(),
@@ -150,5 +165,31 @@ impl LevenshteinEngine {
 impl Drop for LevenshteinEngine {
     fn drop(&mut self) {
         unsafe { sz_levenshtein_engine_free(self as *mut Self, core::ptr::null_mut()) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A candidate within the bound or at it is exact, and one past it reports the bound plus one.
+    #[test]
+    fn bound_clips_distances_past_it() {
+        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &cpu).unwrap();
+        let candidates = StringsView::from_slices(&["kitten", "mitten", "mittens", "sitting"]);
+        let distances_for = |engine: &mut LevenshteinEngine, bound: Option<usize>| {
+            let mut distances = [0usize; 4];
+            cpu.scope(|scope| engine.distances(scope, candidates, bound, &mut distances, 4))
+                .unwrap();
+            distances
+        };
+        let exact = [0, 1, 2, 3];
+        assert_eq!(distances_for(&mut engine, None), exact);
+        assert_eq!(distances_for(&mut engine, Some(usize::MAX)), exact);
+        assert_eq!(distances_for(&mut engine, Some(3)), exact);
+        assert_eq!(distances_for(&mut engine, Some(2)), exact);
+        assert_eq!(distances_for(&mut engine, Some(1)), [0, 1, 2, 2]);
+        assert_eq!(distances_for(&mut engine, Some(0)), [0, 1, 1, 1]);
     }
 }

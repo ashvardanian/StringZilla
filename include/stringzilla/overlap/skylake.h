@@ -561,7 +561,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                      sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
                                                       sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
@@ -572,80 +572,68 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
 
     sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
-    sz_status_t const grown = sz_overlap_engine_grow_(engine, sz_overlap_engine_round_bytes_(longest_candidate, chains),
-                                                      stream);
+    sz_status_t const grown = sz_overlap_engine_grow_(
+        engine, sz_overlap_engine_round_bytes_(engine, longest_candidate, chains), stream);
     if (grown != sz_success_k) return grown;
 
     sz_size_t const chain_stride = longest_candidate + 1;
     sz_f64_t *const prefix_hashes = (sz_f64_t *)engine->scratch;
     sz_u32_t *const window_hashes = (sz_u32_t *)(prefix_hashes + chain_stride * chains);
 
-    // Four candidates' chains advance together, each carrying its own prior, so their latency-bound steps overlap.
+    // Four candidates' chains advance together, each carrying its own prior, so their latency-bound
+    // steps overlap. A short last group repeats its first candidate in the spare chains, so every
+    // group runs the same four-chain loop.
     for (sz_size_t first = 0; first < candidates->count; first += chains) {
-        sz_size_t const interleaved = candidates->count - first < chains ? candidates->count - first : chains;
+        sz_size_t const interleaved = sz_min_of_two(candidates->count - first, chains);
         sz_cptr_t texts[sz_overlap_interleaved_chains_k];
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
-        sz_size_t shortest = STRINGZILLA_SIZE_MAX;
         sz_size_t indices[sz_overlap_interleaved_chains_k];
         sz_string_view_t views[sz_overlap_interleaved_chains_k];
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) indices[chain] = first + chain;
-        sz_strings_get_(candidates, indices, interleaved, views);
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
-            texts[chain] = views[chain].start;
-            lengths[chain] = views[chain].length;
+        sz_size_t chain, shortest = STRINGZILLA_SIZE_MAX;
+        for (chain = 0; chain != chains; ++chain) indices[chain] = first + (chain < interleaved ? chain : 0);
+        sz_strings_get_(candidates, indices, chains, views);
+        for (chain = 0; chain != chains; ++chain) {
+            texts[chain] = views[chain].start, lengths[chain] = views[chain].length;
             priors[chain] = prefix_hashes[chain * chain_stride] = 0.0;
-            if (lengths[chain] < shortest) shortest = lengths[chain];
+            shortest = sz_min_of_two(shortest, lengths[chain]);
         }
         sz_size_t walked = 0;
-        if (interleaved == chains)
-            for (; walked + step <= shortest; walked += step)
-                for (sz_size_t chain = 0; chain != chains; ++chain)
-                    priors[chain] = sz_overlap_f64x8_prefix_hash_step_skylake_(
-                        priors[chain], texts[chain] + walked, prefix_hashes + chain * chain_stride + walked + 1);
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
+        for (; walked + step <= shortest; walked += step)
+            for (chain = 0; chain != chains; ++chain)
+                priors[chain] = sz_overlap_f64x8_prefix_hash_step_skylake_(
+                    priors[chain], texts[chain] + walked, prefix_hashes + chain * chain_stride + walked + 1);
+
+        // One candidate's window hashes at every width serve every query's tree, so the hashing
+        // runs once here and the probes run once per query over what it wrote.
+        for (chain = 0; chain != interleaved; ++chain) {
             sz_f64_t *const chain_prefix_hashes = prefix_hashes + chain * chain_stride;
+            sz_size_t const length = lengths[chain];
             sz_f64_t running = priors[chain];
             sz_size_t own = walked;
-            for (; own + step <= lengths[chain]; own += step)
+            for (; own + step <= length; own += step)
                 running = sz_overlap_f64x8_prefix_hash_step_skylake_(running, texts[chain] + own,
                                                                      chain_prefix_hashes + own + 1);
-            if (own != lengths[chain])
-                sz_overlap_f64x8_prefix_hash_step_tail_skylake_(running, texts[chain] + own, lengths[chain] - own,
+            if (own != length)
+                sz_overlap_f64x8_prefix_hash_step_tail_skylake_(running, texts[chain] + own, length - own,
                                                                 chain_prefix_hashes + own + 1);
-        }
-
-        // One candidate's window hashes at one width serve every query's tree, so the hashing runs once here and
-        // the probe runs `count` times over what it wrote.
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
-            sz_f64_t const *const chain_prefix_hashes = prefix_hashes + chain * chain_stride;
-            sz_size_t const length = lengths[chain];
-            sz_f32_t *const candidate_scores = scores + (first + chain) * scores_candidate_stride;
+            sz_u32_t *keys = window_hashes;
             for (sz_size_t width_index = 0; width_index != engine->widths_count; ++width_index) {
                 sz_size_t const width = engine->widths[width_index];
                 sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
                 sz_f64_t const power = (sz_f64_t)engine->powers[width_index];
                 sz_size_t window = 0;
                 for (; window + step <= windows; window += step)
-                    sz_overlap_f64x8_window_hash_step_skylake_(chain_prefix_hashes + window,
-                                                               chain_prefix_hashes + window + width, power,
-                                                               window_hashes + window);
+                    sz_overlap_f64x8_window_hash_step_skylake_(
+                        chain_prefix_hashes + window, chain_prefix_hashes + window + width, power, keys + window);
                 if (window != windows)
                     sz_overlap_f64x8_window_hash_step_tail_skylake_(chain_prefix_hashes + window,
                                                                     chain_prefix_hashes + window + width, power,
-                                                                    windows - window, window_hashes + window);
-                for (sz_size_t query = 0; query != engine->count; ++query) {
-                    sz_size_t const query_length = engine->lengths[query];
-                    sz_f32_t *const slot = candidate_scores + query * scores_query_stride + width_index;
-                    if (!windows || width > query_length) {
-                        *slot = 0.0f;
-                        continue;
-                    }
-                    sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
-                    sz_size_t const matches = sz_overlap_u32x16_btree_probe_skylake_(&btree, window_hashes, windows);
-                    *slot = sz_overlap_share_(matches, windows, query_length - width + 1);
-                }
+                                                                    windows - window, keys + window);
+                keys += windows;
             }
+            sz_overlap_candidate_scores_(engine, window_hashes, length, bound, sz_overlap_u32x16_btree_probe_skylake_,
+                                         scores + (first + chain) * scores_candidate_stride, scores_query_stride);
         }
     }
     return sz_success_k;

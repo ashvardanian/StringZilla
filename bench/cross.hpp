@@ -1660,8 +1660,8 @@ struct levenshtein_distances_from_sz {
         }
         else candidates = std::get<sz_strings_view_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, runtime ? device_distances.data() : answers.data(), candidates.count,
-                     stream) != sz_success_k)
+        if (function(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                     runtime ? device_distances.data() : answers.data(), candidates.count, stream) != sz_success_k)
             throw std::runtime_error("The cross-product entry failed.");
         if (runtime) {
             if (copy_device_to_host(device_distances, std::span<sz_size_t>(answers), runtime->get()) != sz_success_k ||
@@ -1853,8 +1853,9 @@ struct scores_from_sz {
         }
         else candidates = std::get<sz_strings_view_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, device_scores.size() == 0 ? scores.data() : device_scores.data(),
-                     scores.size(), 1, stream) != sz_success_k)
+        if (function(&engine, &candidates, STRINGZILLA_SIZE_MAX,
+                     device_scores.size() == 0 ? scores.data() : device_scores.data(), scores.size(), 1,
+                     stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
         if (device_scores.size() != 0 &&
             copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)

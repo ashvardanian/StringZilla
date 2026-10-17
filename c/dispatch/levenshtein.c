@@ -123,11 +123,14 @@ STRINGZILLA_API void sz_levenshtein_engine_free(sz_levenshtein_engine_t *engine,
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_distances(sz_levenshtein_engine_t *engine,
-                                                     sz_strings_view_t const *candidates, sz_size_t *distances,
-                                                     sz_size_t distances_stride, sz_stream_t stream) {
+                                                     sz_strings_view_t const *candidates,
+                                                     sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                     sz_size_t bound, sz_size_t *distances, sz_size_t distances_stride,
+                                                     sz_stream_t stream) {
     sz_kernel_levenshtein_distances_t const kernel = (sz_kernel_levenshtein_distances_t)sz_kernel_pick_(
         engine->capability, sz_levenshtein_distances_capabilities());
-    return kernel ? kernel(engine, candidates, distances, distances_stride, stream) : sz_missing_kernel_k;
+    return kernel ? kernel(engine, candidates, symbol_counts, order, bound, distances, distances_stride, stream)
+                  : sz_missing_kernel_k;
 }
 
 STRINGZILLA_API sz_status_t sz_levenshtein_find_kernel(sz_kernel_kind_t kind, sz_capability_t capabilities,

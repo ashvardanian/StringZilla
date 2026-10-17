@@ -35,7 +35,7 @@ use super::*;
 /// // A `[queries, candidates, widths]` block with the width axis unit-strided.
 /// let mut scores = [0.0f32; 2];
 /// let candidates = StringsView::from_slices(&["the quick brown cat"]);
-/// cpu.scope(|scope| engine.scores(scope, candidates, &mut scores, 2, 2))
+/// cpu.scope(|scope| engine.scores(scope, candidates, None, &mut scores, 2, 2))
 ///     .unwrap();
 /// assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 /// ```
@@ -113,6 +113,10 @@ impl OverlapEngine {
     /// candidate stride being at least the width count and the query stride at least the
     /// candidates times that.
     ///
+    /// A `bound` of `Some(limit)` is the most windows a pair may miss, summed over every width, and
+    /// still score exactly: a pair past it scores `0.0` at every width, which lets a round skip it.
+    /// `None` keeps every score exact.
+    ///
     /// A GPU engine takes candidates and `scores` in memory its device reaches, such as a
     /// [`Strings`] and a `Vec` in a [`UnifiedAllocator`]. A stream of another group than the
     /// engine's is refused with [`Status::DeviceMemoryMismatch`].
@@ -120,6 +124,7 @@ impl OverlapEngine {
         &'scope mut self,
         scope: &'scope Scope<'scope, '_>,
         candidates: StringsView<'scope>,
+        bound: Option<usize>,
         scores: &'scope mut [f32],
         scores_query_stride: usize,
         scores_candidate_stride: usize,
@@ -158,6 +163,7 @@ impl OverlapEngine {
             sz_overlap_scores(
                 self,
                 &candidates.view,
+                bound.unwrap_or(usize::MAX),
                 scores.as_mut_ptr(),
                 scores_query_stride,
                 scores_candidate_stride,
@@ -171,5 +177,41 @@ impl OverlapEngine {
 impl Drop for OverlapEngine {
     fn drop(&mut self) {
         unsafe { sz_overlap_engine_free(self as *mut Self, core::ptr::null_mut()) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pair is exact while its misses summed over every width stay within the bound, and scores
+    /// zero at every width once they pass it.
+    #[test]
+    fn bound_zeroes_pairs_past_it() {
+        let cpu = Stream::default(Capabilities::cpu_enabled());
+        let mut engine = OverlapEngine::new(&["abcdefgh"], &[3, 4], 0, &cpu).unwrap();
+        // Misses summed over both widths: none, one per width, and four per width.
+        let candidates = StringsView::from_slices(&["abcdefgh", "abcdefgx", "abcdxxxx"]);
+        let scores_for = |engine: &mut OverlapEngine, bound: Option<usize>| {
+            let mut scores = [f32::NAN; 6];
+            cpu.scope(|scope| engine.scores(scope, candidates, bound, &mut scores, 6, 2))
+                .unwrap();
+            scores
+        };
+        let exact = scores_for(&mut engine, None);
+        assert_eq!(exact[..2], [1.0, 1.0]);
+        assert!(exact[2] > 0.0 && exact[2] < 1.0 && exact[3] > 0.0 && exact[3] < 1.0);
+        assert!(exact[4] > 0.0 && exact[5] > 0.0);
+        assert_eq!(scores_for(&mut engine, Some(usize::MAX)), exact);
+        assert_eq!(scores_for(&mut engine, Some(8)), exact);
+        let past_seven = scores_for(&mut engine, Some(7));
+        assert_eq!(past_seven[..4], exact[..4]);
+        assert_eq!(past_seven[4..], [0.0, 0.0]);
+        assert_eq!(
+            scores_for(&mut engine, Some(2)),
+            [1.0, 1.0, exact[2], exact[3], 0.0, 0.0]
+        );
+        assert_eq!(scores_for(&mut engine, Some(1)), [1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(scores_for(&mut engine, Some(0)), [1.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
     }
 }

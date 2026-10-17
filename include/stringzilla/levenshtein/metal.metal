@@ -38,7 +38,7 @@ constant uint sz_levenshtein_gpu_warp_lanes_metal_k = 32;
 struct sz_levenshtein_arguments_metal_t {
     ulong engine_host;
     ulong masks, masks_offsets, symbol_to_class, lengths, order;
-    ulong candidates_count, distances_stride, candidates_layout;
+    ulong candidates_count, distances_stride, bound, candidates_layout;
 };
 
 /** One prepared query, as @c sz_levenshtein_engine_row_ materializes it. */
@@ -86,6 +86,11 @@ inline uint sz_levenshtein_next_rune_metal_(device uchar const *text, ulong leng
 /** The class of @p rune under a rune query, zero for a rune the query lacks. */
 inline ulong sz_levenshtein_rune_class_metal_(thread sz_levenshtein_query_metal_t const &query, uint rune) {
     return query.class_rows[(ulong)query.page_rows[rune >> 8] * 256 + (rune & 255)];
+}
+
+/** What a candidate at @p distance stores under @p bound, as @c sz_levenshtein_bounded_ maps it. */
+inline ulong sz_levenshtein_bounded_metal_(ulong distance, ulong bound) {
+    return distance > bound ? bound + 1 : distance;
 }
 
 /** One Myers step over @c words_ verticals against the @p masks row of the stepped symbol's class,
@@ -152,7 +157,8 @@ kernel void sz_levenshtein_threaded_metal_kernel_(device uchar *engine [[buffer(
                                                query.masks + (ulong)query.byte_to_class[text[cursor]] * query.stride,
                                                last_symbol_bit);
     }
-    distances[query_index * arguments.distances_stride + candidate] = score;
+    distances[query_index * arguments.distances_stride + candidate] = sz_levenshtein_bounded_metal_(score,
+                                                                                                    arguments.bound);
 }
 
 /**
@@ -254,7 +260,9 @@ kernel void sz_levenshtein_warped_metal_kernel_(
     }
     deltas = simd_sum(deltas);
     ulong const length = runes_ ? symbols : text_length;
-    if (lane == 0) distances[query_index * arguments.distances_stride + candidate] = (ulong)((long)length + deltas);
+    if (lane == 0)
+        distances[query_index * arguments.distances_stride + candidate] = sz_levenshtein_bounded_metal_(
+            (ulong)((long)length + deltas), arguments.bound);
 }
 
 /*  One threaded entry point per word count below the warped rung, over bytes then runes, named as
@@ -476,7 +484,8 @@ kernel void sz_levenshtein_long_metal_kernel_(device uchar *engine [[buffer(0)]]
             }
         }
     }
-    distances[query_index * arguments.common.distances_stride + candidate] = score;
+    distances[query_index * arguments.common.distances_stride + candidate] = sz_levenshtein_bounded_metal_(
+        score, arguments.common.bound);
 }
 
 template [[host_name("sz_levenshtein_long_metal_kernel_")]] kernel void sz_levenshtein_long_metal_kernel_<false>(
@@ -588,7 +597,7 @@ kernel void sz_levenshtein_tiled_metal_kernel_(
                 current[column + 1] = cell;
                 if (first_row + micro_row * 4 + row + 1 == arguments.shorter_length &&
                     first_column + lane * 4 + column + 1 == arguments.longer_length)
-                    *distance = cell;
+                    *distance = sz_levenshtein_bounded_metal_(cell, batch.common.bound);
             }
             right_column[row] = current[4];
 #pragma unroll

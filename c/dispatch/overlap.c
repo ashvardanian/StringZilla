@@ -117,11 +117,11 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                              sz_f32_t *scores, sz_size_t scores_query_stride,
+                                              sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
                                               sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_kernel_overlap_scores_t const kernel = (sz_kernel_overlap_scores_t)sz_kernel_pick_(
         engine->capability, sz_overlap_scores_capabilities());
-    return kernel ? kernel(engine, candidates, scores, scores_query_stride, scores_candidate_stride, stream)
+    return kernel ? kernel(engine, candidates, bound, scores, scores_query_stride, scores_candidate_stride, stream)
                   : sz_missing_kernel_k;
 }
 

@@ -57,7 +57,7 @@ static void check_overlap_pair_(std::string const &query, std::string const &can
     verify(sz_overlap_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(), &heap.allocator,
                                   nullptr) == sz_success_k);
     sz_f32_t share = -1.0f;
-    verify(sz_overlap_scores(&engine, &candidate_strings, &share, 1, 1, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, &share, 1, 1, nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
     verify(share == expected);
@@ -82,7 +82,8 @@ void test_overlap_unit() {
     verify(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, sz::default_capabilities(),
                                   &heap.allocator, nullptr) == sz_success_k);
     sz_f32_t shares[4 * 7];
-    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7, 7, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7, 7, nullptr) ==
+           sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
         verify(shares[0 * 7 + width_index] == 1.0f);
         verify(shares[1 * 7 + width_index] == 0.0f);
@@ -101,7 +102,8 @@ void test_overlap_unit() {
     sz_strings_view_t const candidate_tape = strings_tape_from_(candidates, payload, offsets);
     sz_f32_t padded[4 * 9];
     for (sz_f32_t &slot : padded) slot = -1.0f;
-    verify(sz_overlap_scores(&engine, &candidate_tape, padded, 4 * 9, 9, nullptr) == sz_success_k);
+    verify(sz_overlap_scores(&engine, &candidate_tape, STRINGZILLA_SIZE_MAX, padded, 4 * 9, 9, nullptr) ==
+           sz_success_k);
     for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
         for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
             verify(padded[candidate * 9 + width_index] == shares[candidate * 7 + width_index]);
@@ -109,8 +111,10 @@ void test_overlap_unit() {
     }
 
     // A stride under the axis it spans would write one row into its neighbour's, so it is refused.
-    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7, 6, nullptr) == sz_unexpected_dimensions_k);
-    verify(sz_overlap_scores(&engine, &candidate_strings, shares, 4 * 7 - 1, 7, nullptr) == sz_unexpected_dimensions_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7, 6, nullptr) ==
+           sz_unexpected_dimensions_k);
+    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7 - 1, 7, nullptr) ==
+           sz_unexpected_dimensions_k);
     sz_overlap_engine_free(&engine, nullptr);
 
     // Zero widths answer nothing, and are refused before anything is prepared.

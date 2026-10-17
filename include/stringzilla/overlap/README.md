@@ -86,6 +86,12 @@ The GPU engines take every width the host ones do.
 Each thread rolls every width's window hash through its stretch of a candidate in registers, re-reading the byte that leaves the window from the text, so no width outgrows a buffer.
 Eight widths roll together, and an engine holding more walks each stretch once per group of eight.
 
+A bound on `sz_overlap_scores` caps a pair's misses, the longer side's windows the other leaves unmatched, summed over every width.
+Pairs within it score exactly and pairs past it score zero at every width, on every backend, so a caller ranking by distance gets the same answer whatever ran it.
+The host sweeps probe a pair's windows in runs of at most the misses it may still take, so an unbounded round probes each width in one run, and the lengths alone rule out many pairs before a window is probed.
+The GPU engines take every width in one bounded launch and give each candidate a warp, which stops rolling it once even every window left matching would leave it past the bound.
+Metal skips the walk of a pair its lengths rule out and zeroes the rest past the bound as it turns counts into shares.
+
 The width above which spurious window matches become rare follows from the alphabet's collision entropy $H_2$, the Rényi entropy of order two, in bits per symbol:
 
 $$w^{\ast} = \frac{\log_2 \left( n_\text{query} \cdot n_\text{candidate} \right)}{H_2}.$$

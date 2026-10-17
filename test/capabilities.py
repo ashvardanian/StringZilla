@@ -200,6 +200,54 @@ def test_cpu_copies_read_like_their_strings():
         sz.Strings(texts).copy()
 
 
+def test_levenshtein_bound_clips_distances_past_it():
+    """A candidate within the bound or at it is exact, and one past it reports the bound plus one."""
+    engine = sz.LevenshteinEngine(sz.Strings(["kitten"]))
+    candidates = sz.Strings(["kitten", "mitten", "mittens", "sitting"])
+
+    def distances_for(**kwargs):
+        distances = memoryview(bytearray(len(candidates) * 8)).cast("Q", (1, len(candidates)))
+        engine.distances(candidates, distances, **kwargs)
+        return distances.tolist()[0]
+
+    exact = [0, 1, 2, 3]
+    assert distances_for() == exact and distances_for(bound=None) == exact
+    assert distances_for(bound=3) == exact and distances_for(bound=2) == exact
+    assert distances_for(bound=1) == [0, 1, 2, 2]
+    assert distances_for(bound=0) == [0, 1, 1, 1]
+    assert distances_for(bound=2**64 - 1) == exact
+    with pytest.raises(TypeError):
+        distances_for(bound="1")
+    with pytest.raises(OverflowError):
+        distances_for(bound=-1)
+
+
+def test_overlap_bound_zeroes_pairs_past_it():
+    """A pair is exact while its misses summed over every width stay within the bound, else 0.0 at every width."""
+    engine = sz.OverlapEngine(sz.Strings(["abcdefgh"]), [3, 4])
+    # Misses summed over both widths: none, one per width, and four per width.
+    candidates = sz.Strings(["abcdefgh", "abcdefgx", "abcdxxxx"])
+
+    def scores_for(**kwargs):
+        scores = memoryview(bytearray(len(candidates) * 2 * 4)).cast("f", (1, len(candidates), 2))
+        engine.scores(candidates, scores, **kwargs)
+        return [list(row) for row in scores.tolist()[0]]
+
+    exact = scores_for()
+    assert exact[0] == [1.0, 1.0]
+    assert all(0.0 < share < 1.0 for share in exact[1] + exact[2])
+    assert scores_for(bound=None) == exact and scores_for(bound=2**64 - 1) == exact
+    assert scores_for(bound=8) == exact
+    assert scores_for(bound=7) == [exact[0], exact[1], [0.0, 0.0]]
+    assert scores_for(bound=2) == [exact[0], exact[1], [0.0, 0.0]]
+    assert scores_for(bound=1) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    assert scores_for(bound=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    with pytest.raises(TypeError):
+        scores_for(bound=1.5)
+    with pytest.raises(OverflowError):
+        scores_for(bound=-1)
+
+
 def test_engine_calls_from_many_threads_agree():
     """Threads scoring through one shared engine and through engines of their own all get the one-thread answer."""
     queries = sz.Strings(["kitten", "saturday", "sunday"])

@@ -72,7 +72,8 @@ struct levenshtein_pair_from_sz {
             sz_success_k)
             throw std::runtime_error("The engine could not be prepared.");
         sz_size_t distance = 0;
-        sz_status_t const status = sz_levenshtein_distances(&engine, &candidates, &distance, 1, nullptr);
+        sz_status_t const status = sz_levenshtein_distances(&engine, &candidates, nullptr, nullptr,
+                                                            STRINGZILLA_SIZE_MAX, &distance, 1, nullptr);
         sz_levenshtein_engine_free(&engine, nullptr);
         if (status != sz_success_k) throw std::runtime_error("The one-pair round failed.");
         return call_result_t(query.size() + candidate.size(), distance, query.size() * candidate.size());

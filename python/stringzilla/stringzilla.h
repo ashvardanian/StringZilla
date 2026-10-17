@@ -102,6 +102,13 @@ extern sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz
  */
 extern int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, Py_ssize_t *result_out);
 
+/**
+ *  @brief Parses an optional non-negative size argument, like a @c bound.
+ *  @return 1 with the result written to @p result_out, or 0 with a Python exception set.
+ */
+extern int sz_py_export_optional_size(PyObject *size_object, char const *name, sz_size_t default_size,
+                                      sz_size_t *result_out);
+
 extern PyTypeObject FileType;
 extern PyTypeObject StringType;
 extern PyTypeObject StringsType;

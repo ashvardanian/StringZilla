@@ -715,7 +715,7 @@ impl Stream {
     /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
     /// let mut distances = [0usize; 1];
     /// let candidates = StringsView::from_slices(&["sitting"]);
-    /// stream.scope(|scope| engine.distances(scope, candidates, &mut distances, 1))?;
+    /// stream.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 1))?;
     /// assert_eq!(distances[0], 3);
     /// # Ok::<(), stringzilla::sz::Status>(())
     /// ```
@@ -795,7 +795,7 @@ impl Scope<'_, '_> {
 /// distances.resize(2, 0usize);
 ///
 /// let mut engine = LevenshteinEngine::new(&["kitten"], LevenshteinSymbol::Bytes, &stream)?;
-/// stream.scope(|scope| engine.distances(scope, candidates.view(), &mut distances, 2))?;
+/// stream.scope(|scope| engine.distances(scope, candidates.view(), None, &mut distances, 2))?;
 /// assert_eq!(distances[..], [3, 0]);
 /// # Ok::<(), stringzilla::sz::Status>(())
 /// ```
@@ -1145,11 +1145,11 @@ mod tests {
         let mut from_arrow = [0usize; 4];
         let mut from_column = Vec::new_in(unified);
         from_column.resize(words.len(), usize::MAX);
-        cpu.scope(|scope| engine.distances(scope, slices, &mut from_slices, words.len()))
+        cpu.scope(|scope| engine.distances(scope, slices, None, &mut from_slices, words.len()))
             .unwrap();
-        cpu.scope(|scope| engine.distances(scope, arrow, &mut from_arrow, words.len()))
+        cpu.scope(|scope| engine.distances(scope, arrow, None, &mut from_arrow, words.len()))
             .unwrap();
-        cpu.scope(|scope| engine.distances(scope, column.view(), &mut from_column, words.len()))
+        cpu.scope(|scope| engine.distances(scope, column.view(), None, &mut from_column, words.len()))
             .unwrap();
         assert_eq!(from_arrow, from_slices);
         assert_eq!(from_column[..], from_slices);
@@ -1164,7 +1164,7 @@ mod tests {
         let mut distances = [0usize; 1];
         let gpu = Stream::default(Capability::Metal.into());
         let candidates = sz::StringsView::from_slices(&["sitting"]);
-        let refused = gpu.scope(|scope| engine.distances(scope, candidates, &mut distances, 1));
+        let refused = gpu.scope(|scope| engine.distances(scope, candidates, None, &mut distances, 1));
         assert_eq!(refused, Err(Status::DeviceMemoryMismatch));
     }
 
@@ -1191,18 +1191,18 @@ mod tests {
         let mut host = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &cpu).unwrap();
         let mut host_distances = [0usize; 15];
         let mut column_distances = [0usize; 15];
-        cpu.scope(|scope| host.distances(scope, words, &mut host_distances, words.len()))
+        cpu.scope(|scope| host.distances(scope, words, None, &mut host_distances, words.len()))
             .unwrap();
-        cpu.scope(|scope| host.distances(scope, candidates.view(), &mut column_distances, words.len()))
+        cpu.scope(|scope| host.distances(scope, candidates.view(), None, &mut column_distances, words.len()))
             .unwrap();
         assert_eq!(column_distances, host_distances);
 
         let mut device = sz::LevenshteinEngine::new(&queries, sz::LevenshteinSymbol::Bytes, &gpu).unwrap();
-        gpu.scope(|scope| device.distances(scope, candidates.view(), &mut device_distances, words.len()))
+        gpu.scope(|scope| device.distances(scope, candidates.view(), None, &mut device_distances, words.len()))
             .unwrap();
         assert_eq!(device_distances[..], host_distances[..]);
         assert_eq!(
-            gpu.scope(|scope| device.distances(scope, words, &mut device_distances, words.len())),
+            gpu.scope(|scope| device.distances(scope, words, None, &mut device_distances, words.len())),
             Err(Status::DeviceMemoryMismatch)
         );
     }

@@ -83,7 +83,7 @@ typedef struct sz_overlap_btree_t {
     sz_size_t level_bases[sz_overlap_btree_levels_max_k];
 } sz_overlap_btree_t;
 
-STRINGZILLA_INLINE sz_size_t sz_overlap_btree_sorted_capacity_(sz_size_t count) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_btree_sorted_capacity_(sz_size_t count) {
     sz_size_t capacity = 64;
     while (capacity < count) capacity *= 2;
     return capacity;
@@ -102,7 +102,7 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_btree_leaves_(sz_size_t keys_count) {
     return leaves ? leaves : 1;
 }
 
-STRINGZILLA_INLINE sz_size_t sz_overlap_btree_entries_(sz_size_t keys_count) {
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_btree_entries_(sz_size_t keys_count) {
     sz_size_t const sorted = sz_overlap_btree_sorted_capacity_(keys_count);
     sz_size_t nodes = 0;
     for (sz_size_t level_nodes = sz_overlap_btree_leaves_(keys_count);;
@@ -118,6 +118,44 @@ STRINGZILLA_INLINE sz_size_t sz_overlap_btree_entries_(sz_size_t keys_count) {
  *  padded capacity or every level's nodes, whichever is larger. */
 STRINGZILLA_INLINE sz_size_t sz_overlap_btree_entries(sz_size_t keys_count) {
     return sz_overlap_btree_entries_(keys_count);
+}
+
+/** Windows a text of @p length bytes holds, summed over @p widths_count @p widths; a width of zero
+ *  or past the text holds none. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_windows(sz_size_t length, sz_u32_t const *widths, sz_size_t widths_count) {
+    sz_size_t windows = 0;
+    for (sz_size_t index = 0; index != widths_count; ++index)
+        if (widths[index] && widths[index] <= length) windows += length - widths[index] + 1;
+    return windows;
+}
+
+/** One query prepared where a device walk scores it, inside a span its caller owns: the tree
+ *  over its window hashes at every width, and what a candidate's share needs beside it. */
+typedef struct sz_overlap_query_t {
+
+    /** The tree over the query's distinct window hashes, at the head of the span. */
+    sz_overlap_btree_t btree;
+
+    /** The @b [widths_count] window widths, in bytes, read where the caller keeps them. */
+    sz_u32_t const *widths;
+
+    /** The @b [widths_count] @ref sz_overlap_window_power values, at the tail of the span. */
+    sz_u32_t const *powers;
+
+    /** Entries in @c widths and @c powers. */
+    sz_size_t widths_count;
+
+    /** The query's windows summed over every width, repeats included, as @ref sz_overlap_windows
+     *  counts them. */
+    sz_size_t windows;
+} sz_overlap_query_t;
+
+/** Bytes of the span a device walk prepares one query of @p length bytes into at @p widths: the
+ *  tree's @ref sz_overlap_btree_entries over every width's windows, then a power per width. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_overlap_query_span_bytes(sz_size_t length, sz_u32_t const *widths,
+                                                            sz_size_t widths_count) {
+    return (sz_overlap_btree_entries_(sz_overlap_windows(length, widths, widths_count)) + widths_count) *
+           sizeof(sz_u32_t);
 }
 
 /** Drops repeats from @p count ascending keys in place, answering how many distinct ones remain. */
@@ -301,6 +339,8 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_strings_view_t const *
                                                        sz_allocator_t const *allocator, sz_stream_t stream,
                                                        sz_overlap_engine_t *engine) {
     if (!window_widths_count) return sz_unexpected_dimensions_k;
+    for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index)
+        if (window_widths[width_index] > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
     sz_size_t const count = queries->count;
     sz_size_t const head = (head_bytes + 63) & ~(sz_size_t)63;
 
@@ -311,6 +351,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_strings_view_t const *
         sz_size_t const block_count = sz_strings_get_block_(queries, block_start, views);
         for (sz_size_t position = 0; position != block_count; ++position) {
             sz_size_t const length = views[position].length;
+            if (length > 0xFFFFFFFFu) return sz_unexpected_dimensions_k;
             sz_size_t keys = 0;
             for (sz_size_t width_index = 0; width_index != window_widths_count; ++width_index)
                 if (window_widths[width_index] && window_widths[width_index] <= length)
@@ -364,10 +405,12 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_open_(sz_strings_view_t const *
     return sz_success_k;
 }
 
-/** Bytes one round's @p chains interleaved chains and its window hashes need over
- *  its longest candidate. */
-STRINGZILLA_INLINE sz_size_t sz_overlap_engine_round_bytes_(sz_size_t longest_candidate, sz_size_t chains) {
-    return (longest_candidate + 1) * chains * sizeof(sz_f64_t) + (longest_candidate + 1) * sizeof(sz_u32_t);
+/** Bytes one round's @p chains interleaved chains need over its longest candidate, and its window
+ *  hashes at every width of @p engine, width after width. */
+STRINGZILLA_INLINE sz_size_t sz_overlap_engine_round_bytes_(sz_overlap_engine_t const *engine,
+                                                            sz_size_t longest_candidate, sz_size_t chains) {
+    return (longest_candidate + 1) * chains * sizeof(sz_f64_t) +
+           (sz_overlap_windows(longest_candidate, engine->widths, engine->widths_count) + 1) * sizeof(sz_u32_t);
 }
 
 /** Grows @p engine 's round block to @p bytes on the device of @p stream, keeping whatever it
@@ -389,6 +432,95 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t co
     if (scores_candidate_stride < engine->widths_count) return sz_unexpected_dimensions_k;
     if (scores_query_stride < candidates_count * scores_candidate_stride) return sz_unexpected_dimensions_k;
     return sz_success_k;
+}
+
+/** Signature of every backend's tree probe, such as @ref sz_overlap_u32x1_btree_probe_serial. */
+typedef sz_size_t (*sz_overlap_btree_probe_t)(sz_overlap_btree_t const *, sz_u32_t const *, sz_size_t);
+
+/** Keys a bounded probe takes at least between two checks of its pair's misses, so a pair close to
+ *  its bound still probes whole registers rather than a key at a time. */
+enum { sz_overlap_keys_per_check_k = 64 };
+
+/**
+ *  @brief Scores one candidate against every query of @p engine at every width, the bound and the
+ *      shares being those of @ref sz_overlap_scores.
+ *
+ *  A pair's windows go to @p probe in runs of at most the misses it may still take under @p bound,
+ *  so the bound is checked once per run rather than once per window. Windows past either text are
+ *  misses before any probe, so a pair whose lengths alone put it past @p bound probes nothing.
+ *
+ *  A pair whose texts are both short enough to span no more windows than @p bound can never pass
+ *  it, so it needs no runs and no count of misses: such pairs, every pair when unbounded, probe
+ *  width after width in one run each, back-to-back probes sharing their key count. Only the rest
+ *  walk pair by pair.
+ *
+ *  @param[in] window_hashes The candidate's window hashes, width after width, as
+ *      @ref sz_overlap_windows counts them.
+ *  @param[out] scores The candidate's first share, of query zero at width zero.
+ */
+STRINGZILLA_INLINE void sz_overlap_candidate_scores_(sz_overlap_engine_t const *engine, sz_u32_t const *window_hashes,
+                                                     sz_size_t length, sz_size_t bound, sz_overlap_btree_probe_t probe,
+                                                     sz_f32_t *scores, sz_size_t scores_query_stride) {
+    // A text spans at most its length in windows at every width, so a pair of texts both within
+    // this length spans at most the bound.
+    sz_size_t const widths_count = engine->widths_count, loose_length = bound / widths_count;
+    sz_size_t query, width_index;
+    sz_u32_t const *keys = window_hashes;
+    for (width_index = 0; width_index != widths_count && length <= loose_length; ++width_index) {
+        sz_size_t const width = engine->widths[width_index];
+        sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
+        for (query = 0; query != engine->count; ++query) {
+            sz_size_t const query_length = engine->lengths[query];
+            sz_f32_t *const slot = scores + query * scores_query_stride + width_index;
+            if (query_length > loose_length) continue;
+            if (!windows || width > query_length) {
+                *slot = 0.0f;
+                continue;
+            }
+            sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
+            *slot = sz_overlap_share_(probe(&btree, keys, windows), windows, query_length - width + 1);
+        }
+        keys += windows;
+    }
+
+    for (query = 0; query != engine->count; ++query) {
+        sz_size_t const query_length = engine->lengths[query];
+        if (sz_max_of_two(length, query_length) <= loose_length) continue;
+        sz_f32_t *const row = scores + query * scores_query_stride;
+        sz_size_t longer = 0, reachable = 0;
+        for (width_index = 0; width_index != widths_count; ++width_index) {
+            sz_size_t const width = engine->widths[width_index];
+            sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
+            sz_size_t const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+            longer += sz_max_of_two(windows, query_windows);
+            reachable += query_windows ? windows : 0;
+        }
+
+        sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
+        sz_size_t misses = longer - reachable;
+        keys = window_hashes;
+        for (width_index = 0; width_index != widths_count && misses <= bound; ++width_index) {
+            sz_size_t const width = engine->widths[width_index];
+            sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
+            sz_size_t const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+            sz_size_t const probed_windows = query_windows ? windows : 0;
+            // Within the slack a run takes every window left, past it the slack and one more.
+            sz_size_t matches = 0, probed = 0;
+            while (probed != probed_windows && misses + probed - matches <= bound) {
+                sz_size_t const slack = bound - (misses + probed - matches);
+                sz_size_t const run = sz_min_of_two(probed_windows - probed,
+                                                    sz_max_of_two(slack + 1, (sz_size_t)sz_overlap_keys_per_check_k));
+                matches += probe(&btree, keys + probed, run);
+                probed += run;
+            }
+            misses += probed - matches;
+            row[width_index] = sz_overlap_share_(matches, windows, query_windows);
+            keys += windows;
+        }
+        // Whichever check stopped the pair, past the bound every width scores zero.
+        if (misses > bound)
+            for (width_index = 0; width_index != widths_count; ++width_index) row[width_index] = 0.0f;
+    }
 }
 
 /** Returns both of @p engine 's blocks to the allocator they were built with, once the work queued
@@ -464,7 +596,7 @@ STRINGZILLA_INLINE void sz_overlap_f64x1_window_hash_step_tail_serial(sz_f64_t c
 }
 
 /** Branchless compare-exchange: @p lower keeps the smaller key, unsigned. */
-STRINGZILLA_INLINE void sz_overlap_exchange_serial_(sz_u32_t *lower, sz_u32_t *upper) {
+STRINGZILLA_CONSTEXPR void sz_overlap_exchange_serial_(sz_u32_t *lower, sz_u32_t *upper) {
     sz_u32_t const first = *lower, second = *upper;
     *lower = first < second ? first : second;
     *upper = first < second ? second : first;
@@ -623,7 +755,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *e
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                     sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
                                                      sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
@@ -633,72 +765,60 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
 
     sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
-    sz_status_t const grown = sz_overlap_engine_grow_(engine, sz_overlap_engine_round_bytes_(longest_candidate, chains),
-                                                      stream);
+    sz_status_t const grown = sz_overlap_engine_grow_(
+        engine, sz_overlap_engine_round_bytes_(engine, longest_candidate, chains), stream);
     if (grown != sz_success_k) return grown;
 
     sz_size_t const chain_stride = longest_candidate + 1;
     sz_f64_t *const prefix_hashes = (sz_f64_t *)engine->scratch;
     sz_u32_t *const window_hashes = (sz_u32_t *)(prefix_hashes + chain_stride * chains);
 
-    // One chain per candidate, not one per candidate per width, and four chains at a time: each step's modular
-    // multiply-add waits on the last, so four independent chains fill the pipeline one alone leaves idle.
+    // One chain per candidate, not one per candidate per width, and four chains at a time: each
+    // step's modular multiply-add waits on the last, so four independent chains fill the pipeline
+    // one alone leaves idle. A short last group repeats its first candidate in the spare chains, so
+    // every group runs the same four-chain loop.
     for (sz_size_t first = 0; first < candidates->count; first += chains) {
-        sz_size_t const interleaved = candidates->count - first < chains ? candidates->count - first : chains;
+        sz_size_t const interleaved = sz_min_of_two(candidates->count - first, chains);
         sz_cptr_t texts[sz_overlap_interleaved_chains_k];
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
-        sz_size_t shortest = STRINGZILLA_SIZE_MAX;
         sz_size_t indices[sz_overlap_interleaved_chains_k];
         sz_string_view_t views[sz_overlap_interleaved_chains_k];
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) indices[chain] = first + chain;
-        sz_strings_get_(candidates, indices, interleaved, views);
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
-            texts[chain] = views[chain].start;
-            lengths[chain] = views[chain].length;
+        sz_size_t chain, shortest = STRINGZILLA_SIZE_MAX;
+        for (chain = 0; chain != chains; ++chain) indices[chain] = first + (chain < interleaved ? chain : 0);
+        sz_strings_get_(candidates, indices, chains, views);
+        for (chain = 0; chain != chains; ++chain) {
+            texts[chain] = views[chain].start, lengths[chain] = views[chain].length;
             priors[chain] = prefix_hashes[chain * chain_stride] = 0.0;
-            if (lengths[chain] < shortest) shortest = lengths[chain];
+            shortest = sz_min_of_two(shortest, lengths[chain]);
         }
         sz_size_t position = 0;
-        if (interleaved == chains)
-            for (; position != shortest; ++position)
-                for (sz_size_t chain = 0; chain != chains; ++chain)
-                    priors[chain] = sz_overlap_f64x1_prefix_hash_step_serial_(
-                        priors[chain], texts[chain] + position, prefix_hashes + chain * chain_stride + position + 1);
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
+        for (; position != shortest; ++position)
+            for (chain = 0; chain != chains; ++chain)
+                priors[chain] = sz_overlap_f64x1_prefix_hash_step_serial_(
+                    priors[chain], texts[chain] + position, prefix_hashes + chain * chain_stride + position + 1);
+
+        // One candidate's window hashes at every width serve every query's tree, so the hashing
+        // runs once here and the probes run once per query over what it wrote.
+        for (chain = 0; chain != interleaved; ++chain) {
             sz_f64_t *const chain_prefix_hashes = prefix_hashes + chain * chain_stride;
+            sz_size_t const length = lengths[chain];
             sz_f64_t running = priors[chain];
-            for (sz_size_t walked = position; walked != lengths[chain]; ++walked)
+            for (sz_size_t walked = position; walked != length; ++walked)
                 running = sz_overlap_f64x1_prefix_hash_step_serial_(running, texts[chain] + walked,
                                                                     chain_prefix_hashes + walked + 1);
-        }
-
-        // One candidate's window hashes at one width serve every query's tree, so the hashing runs once here and
-        // the probe runs `count` times over what it wrote.
-        for (sz_size_t chain = 0; chain != interleaved; ++chain) {
-            sz_f64_t const *const chain_prefix_hashes = prefix_hashes + chain * chain_stride;
-            sz_size_t const length = lengths[chain];
-            sz_f32_t *const candidate_scores = scores + (first + chain) * scores_candidate_stride;
+            sz_u32_t *keys = window_hashes;
             for (sz_size_t width_index = 0; width_index != engine->widths_count; ++width_index) {
                 sz_size_t const width = engine->widths[width_index];
                 sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
                 sz_f64_t const power = (sz_f64_t)engine->powers[width_index];
                 for (sz_size_t window = 0; window != windows; ++window)
-                    sz_overlap_f64x1_window_hash_step_serial(chain_prefix_hashes + window,
-                                                             chain_prefix_hashes + window + width, power,
-                                                             window_hashes + window);
-                for (sz_size_t query = 0; query != engine->count; ++query) {
-                    sz_size_t const query_length = engine->lengths[query];
-                    sz_f32_t *const slot = candidate_scores + query * scores_query_stride + width_index;
-                    if (!windows || width > query_length) {
-                        *slot = 0.0f;
-                        continue;
-                    }
-                    sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
-                    sz_size_t const matches = sz_overlap_u32x1_btree_probe_serial_(&btree, window_hashes, windows);
-                    *slot = sz_overlap_share_(matches, windows, query_length - width + 1);
-                }
+                    sz_overlap_f64x1_window_hash_step_serial(
+                        chain_prefix_hashes + window, chain_prefix_hashes + window + width, power, keys + window);
+                keys += windows;
             }
+            sz_overlap_candidate_scores_(engine, window_hashes, length, bound, sz_overlap_u32x1_btree_probe_serial_,
+                                         scores + (first + chain) * scores_candidate_stride, scores_query_stride);
         }
     }
     return sz_success_k;

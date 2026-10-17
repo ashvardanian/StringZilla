@@ -558,8 +558,8 @@ Each engine writes into a writable buffer the caller supplies as `out`, so nothi
 
 | Engine                     | Constructed from                                  | Scores with                                                     |
 | :------------------------- | :------------------------------------------------ | :--------------------------------------------------------------- |
-| `LevenshteinEngine`        | a batch of query strings and a symbol alphabet    | `distances(candidates, out)`                                     |
-| `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out)`                                        |
+| `LevenshteinEngine`        | a batch of query strings and a symbol alphabet    | `distances(candidates, out, bound=None)`                         |
+| `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out, bound=None)`                            |
 | `SubstringsEngine`         | a vocabulary of needles and an overlap policy     | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
 
 Queries, candidates, and haystacks all arrive as `sz.Strings`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
@@ -570,7 +570,8 @@ Engine calls release the GIL, and calls into one engine take turns on its lock, 
 `LevenshteinEngine(queries, symbol='bytes')` computes unit-cost Levenshtein distances from every prepared query to every candidate.
 `symbol='bytes'` counts byte edits, `symbol='runes'` counts UTF-8 rune edits, and the choice is fixed at construction because it picks the mask layout as well as the tier.
 
-`distances(candidates, out)` fills a `[queries, candidates]` block of pointer-width unsigned integers, contiguous along its candidate axis.
+`distances(candidates, out, *, bound=None)` fills a `[queries, candidates]` block of pointer-width unsigned integers, contiguous along its candidate axis.
+A `bound` keeps a distance exact up to it and reports `bound + 1` for every candidate past it, on every backend, so a round can stop early; `None` keeps every distance exact.
 
 ```python
 import stringzilla as sz
@@ -579,6 +580,10 @@ engine = sz.LevenshteinEngine(sz.Strings(["hello", "world"]))
 out = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
 engine.distances(sz.Strings(["hallo", "word"]), out)
 assert out[0, 0] == 1           # hello -> hallo
+
+# Bounded at 0, any candidate that differs reports exactly 1.
+engine.distances(sz.Strings(["hallo", "word"]), out, bound=0)
+assert out[0, 0] == 1 and out[0, 1] == 1
 
 # UTF-8 rune distances, where one accented codepoint is one edit rather than two.
 runes = sz.LevenshteinEngine(sz.Strings(["café"]), symbol="runes")
@@ -593,7 +598,8 @@ assert out[0, 0] == 1
 A score is the share of a candidate's windows the query also spells, in `[0, 1]`, so it is asymmetric: swapping the two sides changes the answer when either repeats a window.
 Widths need not form a doubling chain, and a width past a text scores zero for every pair it spans.
 
-`scores(candidates, out)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
+`scores(candidates, out, *, bound=None)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
+A `bound` is the most windows a pair may miss, summed over every width, and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
 ```python
 import stringzilla as sz

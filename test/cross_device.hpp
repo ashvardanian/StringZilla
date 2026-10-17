@@ -242,8 +242,8 @@ inline std::vector<sz_size_t> levenshtein_serial_reference_(levenshtein_device_c
            sz_success_k);
     std::vector<sz_size_t> expected(corpus.distances.size());
     sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-    verify(sz_levenshtein_distances_serial(&engine, &corpus_device_tape_strings, expected.data(), corpus.count(),
-                                           nullptr) == sz_success_k);
+    verify(sz_levenshtein_distances_serial(&engine, &corpus_device_tape_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                           expected.data(), corpus.count(), nullptr) == sz_success_k);
     sz_levenshtein_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
     return expected;
@@ -295,18 +295,20 @@ inline void check_levenshtein_device_equivalence_(auto const &backend, levenshte
                 fail_backend_(backend.name, "a device batch drew a status the rungs do not imply");
             if (prepared != sz_success_k) continue;
             sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-            sz_status_t const produced = backend.levenshtein_distances(
-                &engine, &corpus_device_tape_strings, corpus.distances.data(), corpus.count(), backend.runtime.stream);
-            // The planes the round reads live in the engine's block, so the join comes before
-            // it is released.
-            join_(backend.runtime, backend.runtime.stream);
-            sz_levenshtein_engine_free(&engine, backend.runtime.stream);
-            if (produced != sz_success_k) fail_backend_(backend.name, "a device-resident round was refused");
-
             std::vector<sz_size_t> const expected = levenshtein_serial_reference_(corpus, symbol);
-            for (std::size_t index = 0; index != expected.size(); ++index)
-                if (corpus.distances[index] != expected[index])
-                    fail_backend_(backend.name, "a distance differs from serial");
+            // Unbounded, then half the query's length, which leaves candidates on both sides.
+            for (sz_size_t const bound : {STRINGZILLA_SIZE_MAX, (sz_size_t)(query_symbols / 2)}) {
+                sz_status_t const produced = backend.levenshtein_distances(
+                    &engine, &corpus_device_tape_strings, nullptr, nullptr, bound, corpus.distances.data(),
+                    corpus.count(), backend.runtime.stream);
+                join_(backend.runtime, backend.runtime.stream);
+                if (produced != sz_success_k) fail_backend_(backend.name, "a device-resident round was refused");
+                for (std::size_t index = 0; index != expected.size(); ++index)
+                    if (corpus.distances[index] != (expected[index] > bound ? bound + 1 : expected[index]))
+                        fail_backend_(backend.name, "a distance differs from serial under its bound");
+            }
+            // The planes the rounds read live in the engine's block, released after the joins.
+            sz_levenshtein_engine_free(&engine, backend.runtime.stream);
         }
 }
 
@@ -343,7 +345,8 @@ inline void check_levenshtein_device_short_queries_(std::mt19937 &generator, aut
         verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                           STRINGZILLA_NULL, backend.runtime.stream) == sz_success_k);
         sz_strings_view_t const candidate_strings = candidates.view().raw;
-        sz_status_t const produced = backend.levenshtein_distances(&engine, &candidate_strings, distances.data(), count,
+        sz_status_t const produced = backend.levenshtein_distances(&engine, &candidate_strings, nullptr, nullptr,
+                                                                   STRINGZILLA_SIZE_MAX, distances.data(), count,
                                                                    backend.runtime.stream);
         // The planes the round reads live in the engine's block, so the join comes before
         // it is released.
@@ -355,8 +358,8 @@ inline void check_levenshtein_device_short_queries_(std::mt19937 &generator, aut
         verify(sz_levenshtein_engine_init_serial(&host_engine, &queries, sz_levenshtein_bytes_k, &heap.allocator,
                                                  nullptr) == sz_success_k);
         std::vector<sz_size_t> expected(count);
-        verify(sz_levenshtein_distances_serial(&host_engine, &host_candidates, expected.data(), count, nullptr) ==
-               sz_success_k);
+        verify(sz_levenshtein_distances_serial(&host_engine, &host_candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                               expected.data(), count, nullptr) == sz_success_k);
         sz_levenshtein_engine_free(&host_engine, nullptr);
         for (std::size_t index = 0; index != count; ++index)
             if (distances[index] != expected[index])
@@ -387,7 +390,8 @@ inline void check_levenshtein_device_skewed_(std::mt19937 &generator, auto const
                                               STRINGZILLA_NULL, backend.runtime.stream) == sz_success_k);
             sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
             sz_status_t const produced = backend.levenshtein_distances(
-                &engine, &corpus_device_tape_strings, corpus.distances.data(), corpus.count(), backend.runtime.stream);
+                &engine, &corpus_device_tape_strings, nullptr, nullptr, STRINGZILLA_SIZE_MAX, corpus.distances.data(),
+                corpus.count(), backend.runtime.stream);
             join_(backend.runtime, backend.runtime.stream);
             sz_levenshtein_engine_free(&engine, backend.runtime.stream);
             if (produced != sz_success_k) fail_backend_(backend.name, "a skewed batch was refused");
@@ -456,14 +460,14 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
             sz_strings_view_t const candidates = tape.view().raw;
             std::fill(distances.begin(), distances.end(), STRINGZILLA_SIZE_MAX);
             if (!reverse)
-                verify(sz_levenshtein_distances_serial(&host, &reference, expected.data(), stride, nullptr) ==
-                       sz_success_k);
+                verify(sz_levenshtein_distances_serial(&host, &reference, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                                       expected.data(), stride, nullptr) == sz_success_k);
             else
                 for (std::size_t row = 0; row != texts.size(); ++row)
                     std::reverse(expected.begin() + row * stride,
                                  expected.begin() + row * stride + candidate_views.size());
-            verify(backend.levenshtein_distances(&device, &candidates, distances.data(), stride,
-                                                 backend.runtime.stream) == sz_success_k);
+            verify(backend.levenshtein_distances(&device, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                                 distances.data(), stride, backend.runtime.stream) == sz_success_k);
             join_(backend.runtime, backend.runtime.stream);
             verify(std::equal(distances.begin(), distances.end(), expected.begin()));
         }
@@ -491,8 +495,8 @@ inline void check_levenshtein_device_mixed_(auto const &backend) {
         sz_levenshtein_engine_t engine {};
         verify(sz_levenshtein_engine_init(&engine, &queries, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                           nullptr, backend.runtime.stream) == sz_success_k);
-        verify(backend.levenshtein_distances(&engine, &candidates, distances.data(), stride, backend.runtime.stream) ==
-               sz_success_k);
+        verify(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                             distances.data(), stride, backend.runtime.stream) == sz_success_k);
         join_(backend.runtime, backend.runtime.stream);
         for (std::size_t row = 0; row != texts.size(); ++row) {
             for (std::size_t column = 0; column != candidate_views.size(); ++column) {
@@ -524,16 +528,20 @@ inline void check_levenshtein_device_memory_safety_(std::mt19937 &generator, aut
     sz_strings_from_string_views(host_views.data(), host_views.size(), &host_candidates);
     std::vector<sz_size_t> host_distances(corpus.distances.size(), STRINGZILLA_SIZE_MAX);
     sz_strings_view_t const candidates = corpus.device_tape.view().raw;
-    verify(backend.levenshtein_distances(&engine, &candidates, host_distances.data(), corpus.count(),
+    verify(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                         host_distances.data(), corpus.count(),
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
-    verify(backend.levenshtein_distances(&engine, &host_candidates, corpus.distances.data(), corpus.count(),
+    verify(backend.levenshtein_distances(&engine, &host_candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                         corpus.distances.data(), corpus.count(),
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
-    verify(backend.levenshtein_distances(&engine, &candidates, corpus.distances.data(), corpus.count() - 1,
+    verify(backend.levenshtein_distances(&engine, &candidates, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                         corpus.distances.data(), corpus.count() - 1,
                                          backend.runtime.stream) == sz_unexpected_dimensions_k);
     // An accessor is host code, so it is refused even over bytes the device reaches.
     sz_strings_view_t resident_accessor;
     sz_strings_from_string_views(corpus.views.data(), corpus.views.size(), &resident_accessor);
-    verify(backend.levenshtein_distances(&engine, &resident_accessor, corpus.distances.data(), corpus.count(),
+    verify(backend.levenshtein_distances(&engine, &resident_accessor, nullptr, nullptr, STRINGZILLA_SIZE_MAX,
+                                         corpus.distances.data(), corpus.count(),
                                          backend.runtime.stream) == sz_device_memory_mismatch_k);
     join_(backend.runtime, backend.runtime.stream);
     sz_levenshtein_engine_free(&engine, backend.runtime.stream);
@@ -567,7 +575,8 @@ inline void check_levenshtein_device_threads_(auto const &backend) {
     join_(backend.runtime, queue);
     auto const round = [&](sz_stream_t stream, sz_strings_view_t const &inputs, sz_size_t *output,
                            std::vector<sz_size_t> const &reference) {
-        verify(sz_levenshtein_distances(&engine, &inputs, output, corpus.count(), stream) == sz_success_k);
+        verify(sz_levenshtein_distances(&engine, &inputs, nullptr, nullptr, STRINGZILLA_SIZE_MAX, output,
+                                        corpus.count(), stream) == sz_success_k);
         join_(backend.runtime, stream);
         if (!std::equal(reference.begin(), reference.end(), output))
             fail_backend_("dispatched", "concurrent scoring of one engine differs from serial");
@@ -589,7 +598,8 @@ inline void check_levenshtein_device_deferred_free_(auto const &backend) {
     verify(sz_levenshtein_engine_init(&engine, &query_strings, sz_levenshtein_bytes_k, backend.runtime.capabilities,
                                       STRINGZILLA_NULL, queue) == sz_success_k);
     sz_strings_view_t const freed = corpus.device_tape.view().raw;
-    verify(sz_levenshtein_distances(&engine, &freed, corpus.distances.data(), corpus.count(), queue) == sz_success_k);
+    verify(sz_levenshtein_distances(&engine, &freed, nullptr, nullptr, STRINGZILLA_SIZE_MAX, corpus.distances.data(),
+                                    corpus.count(), queue) == sz_success_k);
     corpus.device_tape = unified_strings_t {};
     verify(sz_stream_synchronize_best(backend.runtime.capabilities, queue) == sz_success_k);
     for (std::size_t index = 0; index != expected.size(); ++index)
@@ -693,7 +703,8 @@ struct overlap_device_corpus_t {
 
 /** The serial backend's answers for the same corpus, read off the very bytes the device reads. */
 inline std::vector<sz_f32_t> overlap_serial_reference_(overlap_device_corpus_t const &corpus,
-                                                       std::span<sz_size_t const> widths) {
+                                                       std::span<sz_size_t const> widths,
+                                                       sz_size_t bound = STRINGZILLA_SIZE_MAX) {
     sz_strings_view_t const query_strings = corpus.query_strings();
     handle_checked_heap_t heap;
     sz_overlap_engine_t engine {};
@@ -701,7 +712,7 @@ inline std::vector<sz_f32_t> overlap_serial_reference_(overlap_device_corpus_t c
                                          nullptr) == sz_success_k);
     std::vector<sz_f32_t> expected(corpus.scores.size(), -1.0f);
     sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-    verify(sz_overlap_scores_serial(&engine, &corpus_device_tape_strings, expected.data(), corpus.query_stride(),
+    verify(sz_overlap_scores_serial(&engine, &corpus_device_tape_strings, bound, expected.data(), corpus.query_stride(),
                                     corpus.candidate_stride(), nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
@@ -712,7 +723,8 @@ inline std::vector<sz_f32_t> overlap_serial_reference_(overlap_device_corpus_t c
 
 #pragma region Overlap Checks
 
-/** One backend's scores against serial's, on a corpus that never leaves the device. */
+/** One backend's scores against serial's, on a corpus that never leaves the device, unbounded and
+ *  at bounds that keep every pair, some, and only identical ones. */
 inline void check_overlap_device_equivalence_(std::mt19937 &generator, auto const &backend) {
     std::array<sz_size_t, 3> const widths {4, 6, 8};
 
@@ -722,23 +734,25 @@ inline void check_overlap_device_equivalence_(std::mt19937 &generator, auto cons
                 overlap_device_corpus_t corpus(backend.runtime, generator, queries_count, count, query_length,
                                                widths.size());
                 sz_strings_view_t const query_strings = corpus.query_strings();
-                std::vector<sz_f32_t> const expected = overlap_serial_reference_(corpus,
-                                                                                 {widths.data(), widths.size()});
                 sz_overlap_engine_t engine {};
                 if (sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0,
                                            backend.runtime.capabilities, STRINGZILLA_NULL,
                                            backend.runtime.stream) != sz_success_k)
                     fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
                 sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-                if (backend.overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(),
-                                           corpus.query_stride(), corpus.candidate_stride(),
-                                           backend.runtime.stream) != sz_success_k)
-                    fail_backend_(backend.name, "a device-resident batch was refused");
-                join_(backend.runtime, backend.runtime.stream);
+                for (sz_size_t const bound : {STRINGZILLA_SIZE_MAX, sz_size_t(0), sz_size_t(700)}) {
+                    std::vector<sz_f32_t> const expected = overlap_serial_reference_(
+                        corpus, {widths.data(), widths.size()}, bound);
+                    if (backend.overlap_scores(&engine, &corpus_device_tape_strings, bound, corpus.scores.data(),
+                                               corpus.query_stride(), corpus.candidate_stride(),
+                                               backend.runtime.stream) != sz_success_k)
+                        fail_backend_(backend.name, "a device-resident batch was refused");
+                    join_(backend.runtime, backend.runtime.stream);
+                    for (std::size_t slot = 0; slot != expected.size(); ++slot)
+                        if (corpus.scores[slot] != expected[slot])
+                            fail_backend_(backend.name, "a share differs from serial");
+                }
                 sz_overlap_engine_free(&engine, backend.runtime.stream);
-                for (std::size_t slot = 0; slot != expected.size(); ++slot)
-                    if (corpus.scores[slot] != expected[slot])
-                        fail_backend_(backend.name, "a share differs from serial");
             }
 }
 
@@ -758,8 +772,9 @@ inline void check_overlap_device_skewed_(std::mt19937 &generator, auto const &ba
                                    backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a device engine was refused for a well-formed batch");
         sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-        if (backend.overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
-                                   corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
+        if (backend.overlap_scores(&engine, &corpus_device_tape_strings, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                                   corpus.query_stride(), corpus.candidate_stride(),
+                                   backend.runtime.stream) != sz_success_k)
             fail_backend_(backend.name, "a skewed batch was refused");
         join_(backend.runtime, backend.runtime.stream);
         sz_overlap_engine_free(&engine, backend.runtime.stream);
@@ -789,25 +804,29 @@ inline void check_overlap_device_memory_safety_(std::mt19937 &generator, auto co
 
     std::vector<sz_f32_t> host_scores(corpus.scores.size(), -1.0f);
     sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-    if (backend.overlap_scores(&engine, &corpus_device_tape_strings, host_scores.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
+    if (backend.overlap_scores(&engine, &corpus_device_tape_strings, STRINGZILLA_SIZE_MAX, host_scores.data(),
+                               corpus.query_stride(), corpus.candidate_stride(),
+                               backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host scores were not refused");
-    if (backend.overlap_scores(&engine, &host_candidates, corpus.scores.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_device_memory_mismatch_k)
+    if (backend.overlap_scores(&engine, &host_candidates, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                               corpus.query_stride(), corpus.candidate_stride(),
+                               backend.runtime.stream) != sz_device_memory_mismatch_k)
         fail_backend_(backend.name, "host-resident candidates were not refused");
     // An accessor is host code, so it is refused even over bytes the device reaches.
     sz_strings_view_t resident_accessor;
     sz_strings_from_string_views(corpus.views.data(), corpus.views.size(), &resident_accessor);
-    verify(backend.overlap_scores(&engine, &resident_accessor, corpus.scores.data(), corpus.query_stride(),
-                                  corpus.candidate_stride(), backend.runtime.stream) == sz_device_memory_mismatch_k);
+    verify(backend.overlap_scores(&engine, &resident_accessor, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                                  corpus.query_stride(), corpus.candidate_stride(),
+                                  backend.runtime.stream) == sz_device_memory_mismatch_k);
     // Metal reserves per-candidate storage; CUDA and ROCm ignore this budget.
     if (backend.runtime.selected.kind() == sz::device_kind_t::metal_k) {
         sz_overlap_engine_t narrow {};
         verify(sz_overlap_engine_init(&narrow, &query_strings, widths.data(), widths.size(), corpus.views.size() - 1,
                                       backend.runtime.capabilities, STRINGZILLA_NULL,
                                       backend.runtime.stream) == sz_success_k);
-        verify(backend.overlap_scores(&narrow, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
-                                      corpus.candidate_stride(), backend.runtime.stream) == sz_unexpected_dimensions_k);
+        verify(backend.overlap_scores(&narrow, &corpus_device_tape_strings, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                                      corpus.query_stride(), corpus.candidate_stride(),
+                                      backend.runtime.stream) == sz_unexpected_dimensions_k);
         sz_overlap_engine_free(&narrow, backend.runtime.stream);
     }
     join_(backend.runtime, backend.runtime.stream);
@@ -841,8 +860,9 @@ inline void check_overlap_device_width_safety_(std::mt19937 &generator, auto con
                                STRINGZILLA_NULL, backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device engine refused widths the host takes");
     sz_strings_view_t const itself_strings = itself.view().raw;
-    if (backend.overlap_scores(&engine, &itself_strings, corpus.scores.data(), corpus.query_stride(),
-                               corpus.candidate_stride(), backend.runtime.stream) != sz_success_k)
+    if (backend.overlap_scores(&engine, &itself_strings, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                               corpus.query_stride(), corpus.candidate_stride(),
+                               backend.runtime.stream) != sz_success_k)
         fail_backend_(backend.name, "a device-resident batch was refused");
     join_(backend.runtime, backend.runtime.stream);
     sz_overlap_engine_free(&engine, backend.runtime.stream);
@@ -870,10 +890,12 @@ inline void check_overlap_device_streams_(std::mt19937 &generator, auto const &b
                                   backend.runtime.stream) == sz_success_k);
     try {
         sz_strings_view_t const corpus_device_tape_strings = corpus.device_tape.view().raw;
-        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, corpus.scores.data(), corpus.query_stride(),
-                                 corpus.candidate_stride(), first_stream.handle) == sz_success_k);
-        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, second.data(), corpus.query_stride(),
-                                 corpus.candidate_stride(), second_stream.handle) == sz_success_k);
+        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, STRINGZILLA_SIZE_MAX, corpus.scores.data(),
+                                 corpus.query_stride(), corpus.candidate_stride(),
+                                 first_stream.handle) == sz_success_k);
+        verify(sz_overlap_scores(&engine, &corpus_device_tape_strings, STRINGZILLA_SIZE_MAX, second.data(),
+                                 corpus.query_stride(), corpus.candidate_stride(),
+                                 second_stream.handle) == sz_success_k);
         join_(backend.runtime, first_stream.handle);
         join_(backend.runtime, second_stream.handle);
         sz_overlap_engine_free(&engine, backend.runtime.stream);

@@ -49,11 +49,8 @@ enum { sz_overlap_candidates_per_group_metal_k = 512 };
 /** Bytes of a candidate one thread scores, and the scan's threads, as in the kernels. */
 enum { sz_overlap_segment_bytes_metal_k = 128, sz_overlap_scan_threads_metal_k = 1024 };
 
-/** The share of the 32 KB of threadgroup memory a staged tree may take, as on CUDA. */
-enum { sz_overlap_staged_tree_share_metal_k = 3 };
-
-/** Bytes of the per-query membership filter every threadgroup keeps beside the staged tree. */
-enum { sz_overlap_filter_bytes_metal_k = 16384 };
+/** The share of the 32 KB of threadgroup memory a staged tree may take: up to half (16 KB). */
+enum { sz_overlap_staged_tree_share_metal_k = 2 };
 
 /** Threads a scoring grid carries before further queries fold into each thread's own loop, which
  *  finds its segment's candidate once for all of them: several times what any Apple GPU keeps
@@ -88,7 +85,7 @@ typedef struct {
     sz_u64_t nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     sz_u64_t segments, counts;
     sz_u64_t queries_count, widths_count, candidates_count, segments_count;
-    sz_u64_t scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout;
+    sz_u64_t scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout, bound;
 } sz_overlap_arguments_metal_t;
 
 /** Encodes kernel @p name over @p groups of @p threads into @p call, with the round's @p buffers. */
@@ -100,10 +97,7 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_enqueue_metal_(sz_metal_call_t *call, 
     void *const pipeline = sz_metal_pipeline_(call->context, sz_overlap_source_metal_, name);
     void *const encoder = pipeline ? call->encoder : STRINGZILLA_NULL;
     if (!encoder) return sz_device_code_mismatch_k;
-    if (staged_bytes) {
-        sz_metal_threadgroup_memory_(encoder, staged_bytes, 0);
-        sz_metal_threadgroup_memory_(encoder, sz_overlap_filter_bytes_metal_k, 1);
-    }
+    if (staged_bytes) sz_metal_threadgroup_memory_(encoder, staged_bytes, 0);
     sz_metal_enqueue_(encoder, pipeline, buffers, 5, arguments, sizeof(*arguments), groups, threads);
     return sz_success_k;
 }
@@ -182,15 +176,15 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     geometry->candidates_per_group = ceiling < sz_overlap_candidates_per_group_metal_k
                                          ? ceiling
                                          : sz_overlap_candidates_per_group_metal_k;
-    geometry->staged_nodes_count =
-        widest_nodes * sizeof(sz_u32_t) * sz_overlap_staged_tree_share_metal_k <= threadgroup_bytes ? widest_nodes : 0;
+    geometry->staged_nodes_count = sz_min_of_two(
+        widest_nodes, threadgroup_bytes / (sz_overlap_staged_tree_share_metal_k * sizeof(sz_u32_t)));
     geometry->candidates_budget = candidates_budget;
     engine->capability = sz_cap_metal_k;
     return sz_metal_commit_(&call, sz_success_k);
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_f32_t *scores, sz_size_t scores_query_stride,
+                                                    sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
                                                     sz_size_t scores_candidate_stride, sz_stream_t stream) {
     sz_status_t status = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
                                                     scores_candidate_stride);
@@ -242,6 +236,7 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
     arguments.scores_candidate_stride = scores_candidate_stride;
     arguments.staged_nodes_count = geometry->staged_nodes_count;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;
+    arguments.bound = bound;
     arguments.widest_width = 0;
     for (sz_size_t index = 0; index != engine->widths_count; ++index)
         if (engine->widths[index] > arguments.widest_width) arguments.widest_width = engine->widths[index];

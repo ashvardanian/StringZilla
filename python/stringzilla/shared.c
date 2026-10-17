@@ -89,6 +89,26 @@ int sz_py_export_optional_index(PyObject *index_obj, Py_ssize_t default_index, P
     return !(*result_out == -1 && PyErr_Occurred());
 }
 
+/**
+ *  @brief Parses an optional non-negative size argument, like a @c bound.
+ *  @return 1 with the result written to @p result_out, or 0 with a Python exception set.
+ *
+ *  A @c NULL or @c None object yields @p default_size. A non-integer leaves a @c TypeError set,
+ *  and a negative or oversized integer an @c OverflowError.
+ */
+int sz_py_export_optional_size(PyObject *size_object, char const *name, sz_size_t default_size, sz_size_t *result_out) {
+    if (size_object == NULL || size_object == Py_None) {
+        *result_out = default_size;
+        return 1;
+    }
+    if (!PyLong_Check(size_object)) {
+        PyErr_Format(PyExc_TypeError, "%s must be an int or None", name);
+        return 0;
+    }
+    *result_out = (sz_size_t)PyLong_AsSize_t(size_object);
+    return !(*result_out == (sz_size_t)-1 && PyErr_Occurred());
+}
+
 /** Helper function to export a Python string-like object into a @c sz_string_view_t. On failure,
  *  sets a Python exception and returns 0. */
 sz_bool_t sz_py_export_string_like(PyObject *object, sz_cptr_t *start, sz_size_t *length) {
