@@ -51,10 +51,11 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_sve2_(sz_u8_
                                                                           sz_subdocuments_carry_t *carry) {
     svbool_t const all_b64x = svptrue_b64();
     // MATCH tests each byte against its 128-bit segment's set, so short sets repeat to fill one.
+    // `/` joins both the separators and the blanks, as the class tables give it both bits.
     svuint8_t const opens_set_u8x = svreinterpret_u8_u16(svdup_n_u16(0x5B7B));
     svuint8_t const closes_set_u8x = svreinterpret_u8_u16(svdup_n_u16(0x5D7D));
-    svuint8_t const separators_set_u8x = svreinterpret_u8_u16(svdup_n_u16(0x2C3A));
-    svuint8_t const blanks_set_u8x = svreinterpret_u8_u32(svdup_n_u32(0x0D0A0920));
+    svuint8_t const separators_set_u8x = svreinterpret_u8_u32(svdup_n_u32(0x2F2F2C3A));
+    svuint8_t const blanks_set_u8x = svreinterpret_u8_u64(svdup_n_u64(0x2F2F2F2F0D0A0920ull));
     svuint64_t quotes_u64x = svdup_n_u64(0), backslashes_u64x = svdup_n_u64(0), opens_u64x = svdup_n_u64(0),
                closes_u64x = svdup_n_u64(0), separators_u64x = svdup_n_u64(0), blanks_u64x = svdup_n_u64(0);
     sz_size_t offset;
@@ -100,8 +101,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_sve2(sz_subdocuments_engine_t
                                                         sz_size_t counts_stride, sz_size_t *malformed_index,
                                                         sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_sve2_, &sz_find_byte_sve_, documents, counts,
-                                        counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_sve2_, &sz_subdocuments_classify_sve2_,
+                                        &sz_find_byte_sve_, documents, counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_sve2(sz_subdocuments_engine_t *engine,
@@ -109,8 +110,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_sve2(sz_subdocuments_engine_t *
                                                       sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                       sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_sve2_, &sz_find_byte_sve_, documents, matches,
-                                      matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_sve2_, &sz_subdocuments_classify_sve2_,
+                                      &sz_find_byte_sve_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #endif // STRINGZILLA_TARGET_SVE2

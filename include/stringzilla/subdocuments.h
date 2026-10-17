@@ -119,9 +119,10 @@ STRINGZILLA_API void sz_subdocuments_engine_free(sz_subdocuments_engine_t *engin
  *      the depth stack could not grow; or @c sz_invalid_syntax_k for a malformed document.
  *
  *  A document is malformed with unbalanced brackets or tags, an unterminated string, attribute
- *  value, comment or CDATA section, broken structure where the walk reads it, or an XML DOCTYPE
- *  with an internal subset, and leaves the counts unspecified. A container or element no live step
- *  can enter is skipped by counting its nesting, so what it holds is never validated beyond that.
+ *  value, comment or CDATA section, a `/` outside the strings of JSON, broken structure where the
+ *  walk reads it, or an XML DOCTYPE with an internal subset, and leaves the counts unspecified. A
+ *  container or element no live step can enter is skipped by counting its nesting, so nothing else
+ *  it holds is validated.
  */
 STRINGZILLA_API sz_status_t sz_subdocuments_counts(sz_subdocuments_engine_t *engine, sz_strings_view_t const *documents,
                                                    sz_size_t *counts, sz_size_t counts_stride,

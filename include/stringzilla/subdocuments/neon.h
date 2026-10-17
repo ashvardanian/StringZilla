@@ -35,6 +35,24 @@ extern "C" {
 
 #pragma region NEON
 
+/** The class bits of 16 bytes, one pair of nibble lookups. */
+STRINGZILLA_INLINE uint8x16_t sz_subdocuments_classes_neon_(uint8x16_t text_u8x16) {
+    uint8x16_t const low_nibbles_u8x16 = vld1q_u8(sz_subdocuments_low_nibble_classes_k);
+    uint8x16_t const high_nibbles_u8x16 = vld1q_u8(sz_subdocuments_high_nibble_classes_k);
+    return vandq_u8(vqtbl1q_u8(low_nibbles_u8x16, vandq_u8(text_u8x16, vdupq_n_u8(0x0F))),
+                    vqtbl1q_u8(high_nibbles_u8x16, vshrq_n_u8(text_u8x16, 4)));
+}
+
+/** Two vectors of nibbles, each lane holding one class's bits of four bytes, as one class's mask
+ *  in each half of the two 64-bit words: the low word's classes first, then the high word's. */
+STRINGZILLA_INLINE void sz_subdocuments_masks_neon_(uint8x16_t first_u8x16, uint8x16_t second_u8x16,
+                                                    uint64x2_t *low_u64x2, uint64x2_t *high_u64x2) {
+    uint8x16_t const evens_u8x16 = vuzp1q_u8(first_u8x16, second_u8x16);
+    uint8x16_t const odds_u8x16 = vuzp2q_u8(first_u8x16, second_u8x16);
+    *low_u64x2 = vreinterpretq_u64_u8(vsliq_n_u8(evens_u8x16, odds_u8x16, 4));
+    *high_u64x2 = vreinterpretq_u64_u8(vsriq_n_u8(odds_u8x16, evens_u8x16, 4));
+}
+
 /**
  *  @brief Classifies a block from a deinterleaved load: lane @c l of vector @c k is byte `4l + k`.
  *
@@ -43,41 +61,34 @@ extern "C" {
  */
 STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_neon_(sz_u8_t const *text,
                                                                           sz_subdocuments_carry_t *carry) {
-    uint8x16_t const low_nibbles_u8x16 = vld1q_u8(sz_subdocuments_low_nibble_classes_k);
-    uint8x16_t const high_nibbles_u8x16 = vld1q_u8(sz_subdocuments_high_nibble_classes_k);
-    uint8x16_t const nibble_u8x16 = vdupq_n_u8(0x0F);
     uint8x16x4_t const text_u8x16x4 = vld4q_u8(text);
-    uint8x16_t classes_u8x16[4], even_u8x16[2], odd_u8x16[2], nibbles_u8x16[4];
-    sz_u64_t masks[8];
-    sz_size_t part;
-    for (part = 0; part != 4; ++part)
-        classes_u8x16[part] = vandq_u8(vqtbl1q_u8(low_nibbles_u8x16, vandq_u8(text_u8x16x4.val[part], nibble_u8x16)),
-                                       vqtbl1q_u8(high_nibbles_u8x16, vshrq_n_u8(text_u8x16x4.val[part], 4)));
+    uint8x16_t const first_u8x16 = sz_subdocuments_classes_neon_(text_u8x16x4.val[0]);
+    uint8x16_t const second_u8x16 = sz_subdocuments_classes_neon_(text_u8x16x4.val[1]);
+    uint8x16_t const third_u8x16 = sz_subdocuments_classes_neon_(text_u8x16x4.val[2]);
+    uint8x16_t const fourth_u8x16 = sz_subdocuments_classes_neon_(text_u8x16x4.val[3]);
 
     // Pairs of vectors trade single bits, leaving even classes in one and odd classes in the other.
-    for (part = 0; part != 2; ++part) {
-        even_u8x16[part] = vbslq_u8(vdupq_n_u8(0x55), classes_u8x16[2 * part],
-                                    vshlq_n_u8(classes_u8x16[2 * part + 1], 1));
-        odd_u8x16[part] = vbslq_u8(vdupq_n_u8(0xAA), classes_u8x16[2 * part + 1],
-                                   vshrq_n_u8(classes_u8x16[2 * part], 1));
-    }
+    uint8x16_t const low_evens_u8x16 = vbslq_u8(vdupq_n_u8(0x55), first_u8x16, vshlq_n_u8(second_u8x16, 1));
+    uint8x16_t const low_odds_u8x16 = vbslq_u8(vdupq_n_u8(0xAA), second_u8x16, vshrq_n_u8(first_u8x16, 1));
+    uint8x16_t const high_evens_u8x16 = vbslq_u8(vdupq_n_u8(0x55), third_u8x16, vshlq_n_u8(fourth_u8x16, 1));
+    uint8x16_t const high_odds_u8x16 = vbslq_u8(vdupq_n_u8(0xAA), fourth_u8x16, vshrq_n_u8(third_u8x16, 1));
     // Then bit pairs, leaving the nibbles of classes 0 and 4, 2 and 6, 1 and 5, and 3 and 7.
-    nibbles_u8x16[0] = vbslq_u8(vdupq_n_u8(0x33), even_u8x16[0], vshlq_n_u8(even_u8x16[1], 2));
-    nibbles_u8x16[1] = vbslq_u8(vdupq_n_u8(0xCC), even_u8x16[1], vshrq_n_u8(even_u8x16[0], 2));
-    nibbles_u8x16[2] = vbslq_u8(vdupq_n_u8(0x33), odd_u8x16[0], vshlq_n_u8(odd_u8x16[1], 2));
-    nibbles_u8x16[3] = vbslq_u8(vdupq_n_u8(0xCC), odd_u8x16[1], vshrq_n_u8(odd_u8x16[0], 2));
+    uint8x16_t const opens_quotes_u8x16 = vbslq_u8(vdupq_n_u8(0x33), low_evens_u8x16, vshlq_n_u8(high_evens_u8x16, 2));
+    uint8x16_t const colons_spaces_u8x16 = vbslq_u8(vdupq_n_u8(0xCC), high_evens_u8x16, vshrq_n_u8(low_evens_u8x16, 2));
+    uint8x16_t const closes_backslashes_u8x16 = vbslq_u8(vdupq_n_u8(0x33), low_odds_u8x16,
+                                                         vshlq_n_u8(high_odds_u8x16, 2));
+    uint8x16_t const commas_blanks_u8x16 = vbslq_u8(vdupq_n_u8(0xCC), high_odds_u8x16, vshrq_n_u8(low_odds_u8x16, 2));
 
     // Masks by class bit: opens, closes, colons, commas, quotes, backslashes, spaces, other blanks.
-    for (part = 0; part != 2; ++part) {
-        uint8x16_t const evens_u8x16 = vuzp1q_u8(nibbles_u8x16[2 * part], nibbles_u8x16[2 * part + 1]);
-        uint8x16_t const odds_u8x16 = vuzp2q_u8(nibbles_u8x16[2 * part], nibbles_u8x16[2 * part + 1]);
-        uint64x2_t const low_u64x2 = vreinterpretq_u64_u8(vsliq_n_u8(evens_u8x16, odds_u8x16, 4));
-        uint64x2_t const high_u64x2 = vreinterpretq_u64_u8(vsriq_n_u8(odds_u8x16, evens_u8x16, 4));
-        masks[part] = vgetq_lane_u64(low_u64x2, 0), masks[part + 2] = vgetq_lane_u64(low_u64x2, 1);
-        masks[part + 4] = vgetq_lane_u64(high_u64x2, 0), masks[part + 6] = vgetq_lane_u64(high_u64x2, 1);
-    }
-    return sz_subdocuments_block_settle_(masks[4], masks[5], masks[0], masks[1], masks[2] | masks[3],
-                                         masks[6] | masks[7], carry);
+    uint64x2_t even_low_u64x2, even_high_u64x2, odd_low_u64x2, odd_high_u64x2;
+    sz_subdocuments_masks_neon_(opens_quotes_u8x16, colons_spaces_u8x16, &even_low_u64x2, &even_high_u64x2);
+    sz_subdocuments_masks_neon_(closes_backslashes_u8x16, commas_blanks_u8x16, &odd_low_u64x2, &odd_high_u64x2);
+    sz_u64_t const opens = vgetq_lane_u64(even_low_u64x2, 0), colons = vgetq_lane_u64(even_low_u64x2, 1);
+    sz_u64_t const closes = vgetq_lane_u64(odd_low_u64x2, 0), commas = vgetq_lane_u64(odd_low_u64x2, 1);
+    sz_u64_t const quotes = vgetq_lane_u64(even_high_u64x2, 0), spaces = vgetq_lane_u64(even_high_u64x2, 1);
+    sz_u64_t const backslashes = vgetq_lane_u64(odd_high_u64x2, 0), other_blanks = vgetq_lane_u64(odd_high_u64x2, 1);
+    return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, colons | commas, spaces | other_blanks,
+                                         carry);
 }
 
 #if STRINGZILLA_TARGET_NEON
@@ -95,8 +106,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_neon(sz_subdocuments_engine_t
                                                         sz_size_t counts_stride, sz_size_t *malformed_index,
                                                         sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_neon_, &sz_find_byte_neon_, documents, counts,
-                                        counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_neon_, &sz_subdocuments_classify_neon_,
+                                        &sz_find_byte_neon_, documents, counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_neon(sz_subdocuments_engine_t *engine,
@@ -104,8 +115,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_neon(sz_subdocuments_engine_t *
                                                       sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                       sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_neon_, &sz_find_byte_neon_, documents, matches,
-                                      matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_neon_, &sz_subdocuments_classify_neon_,
+                                      &sz_find_byte_neon_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #endif // STRINGZILLA_TARGET_NEON

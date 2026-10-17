@@ -34,35 +34,50 @@ extern "C" {
 
 #pragma region LASX
 
-/** Classifies a block in halves, moving each class bit to the top of its byte for a movemask. */
+/** The sign bits of a 64-byte block held as two halves, the lower half in the lower 32 bits. */
+STRINGZILLA_INLINE sz_u64_t sz_subdocuments_movemask_loongsonasx_(__m256i low_u8x32, __m256i high_u8x32) {
+    sz_u64_t const low = sz_xvmovemask_b_find_loongsonasx_(low_u8x32);
+    sz_u64_t const high = sz_xvmovemask_b_find_loongsonasx_(high_u8x32);
+    return high << 32 | low;
+}
+
+/** The class bits of 32 bytes, one pair of nibble lookups within each 128-bit lane. */
+STRINGZILLA_INLINE __m256i sz_subdocuments_classes_loongsonasx_(sz_u8_t const *text, __m256i low_nibbles_u8x32,
+                                                                __m256i high_nibbles_u8x32) {
+    __m256i const text_u8x32 = __lasx_xvld(text, 0);
+    return __lasx_xvand_v(__lasx_xvshuf_b(low_nibbles_u8x32, low_nibbles_u8x32, __lasx_xvandi_b(text_u8x32, 0x0F)),
+                          __lasx_xvshuf_b(high_nibbles_u8x32, high_nibbles_u8x32, __lasx_xvsrli_b(text_u8x32, 4)));
+}
+
+/** Classifies a block as two halves, moving each class bit to the top of its byte for a
+ *  movemask. */
 STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_loongsonasx_(sz_u8_t const *text,
                                                                                  sz_subdocuments_carry_t *carry) {
     // Each table fills both 128-bit lanes, as `__lasx_xvshuf_b` looks up within a lane.
     sz_u8_t tables[64];
-    sz_u64_t quotes = 0, backslashes = 0, opens = 0, closes = 0, separators = 0, blanks = 0;
-    sz_size_t index, half;
+    sz_size_t index;
     for (index = 0; index != 16; ++index)
         tables[index] = tables[index + 16] = sz_subdocuments_low_nibble_classes_k[index],
         tables[index + 32] = tables[index + 48] = sz_subdocuments_high_nibble_classes_k[index];
     __m256i const low_nibbles_u8x32 = __lasx_xvld(tables, 0);
     __m256i const high_nibbles_u8x32 = __lasx_xvld(tables, 32);
-    for (half = 0; half != 2; ++half) {
-        __m256i const text_u8x32 = __lasx_xvld(text + half * 32, 0);
-        __m256i const classes_u8x32 = __lasx_xvand_v(
-            __lasx_xvshuf_b(low_nibbles_u8x32, low_nibbles_u8x32, __lasx_xvandi_b(text_u8x32, 0x0F)),
-            __lasx_xvshuf_b(high_nibbles_u8x32, high_nibbles_u8x32, __lasx_xvsrli_b(text_u8x32, 4)));
-        sz_size_t const shift = half * 32;
-        opens |= (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(__lasx_xvslli_b(classes_u8x32, 7)) << shift;
-        closes |= (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(__lasx_xvslli_b(classes_u8x32, 6)) << shift;
-        separators |= (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(
-                          __lasx_xvor_v(__lasx_xvslli_b(classes_u8x32, 5), __lasx_xvslli_b(classes_u8x32, 4)))
-                      << shift;
-        quotes |= (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(__lasx_xvslli_b(classes_u8x32, 3)) << shift;
-        backslashes |= (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(__lasx_xvslli_b(classes_u8x32, 2)) << shift;
-        blanks |=
-            (sz_u64_t)sz_xvmovemask_b_find_loongsonasx_(__lasx_xvor_v(__lasx_xvslli_b(classes_u8x32, 1), classes_u8x32))
-            << shift;
-    }
+    __m256i const low_u8x32 = sz_subdocuments_classes_loongsonasx_(text, low_nibbles_u8x32, high_nibbles_u8x32);
+    __m256i const high_u8x32 = sz_subdocuments_classes_loongsonasx_(text + 32, low_nibbles_u8x32, high_nibbles_u8x32);
+    // Bit 2 then holds colons or commas and bit 6 spaces or other blanks; bytes shift alone.
+    __m256i const low_pairs_u8x32 = __lasx_xvor_v(low_u8x32, __lasx_xvsrli_b(low_u8x32, 1));
+    __m256i const high_pairs_u8x32 = __lasx_xvor_v(high_u8x32, __lasx_xvsrli_b(high_u8x32, 1));
+    sz_u64_t const opens = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_u8x32, 7),
+                                                                 __lasx_xvslli_b(high_u8x32, 7));
+    sz_u64_t const closes = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_u8x32, 6),
+                                                                  __lasx_xvslli_b(high_u8x32, 6));
+    sz_u64_t const separators = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_pairs_u8x32, 5),
+                                                                      __lasx_xvslli_b(high_pairs_u8x32, 5));
+    sz_u64_t const quotes = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_u8x32, 3),
+                                                                  __lasx_xvslli_b(high_u8x32, 3));
+    sz_u64_t const backslashes = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_u8x32, 2),
+                                                                       __lasx_xvslli_b(high_u8x32, 2));
+    sz_u64_t const blanks = sz_subdocuments_movemask_loongsonasx_(__lasx_xvslli_b(low_pairs_u8x32, 1),
+                                                                  __lasx_xvslli_b(high_pairs_u8x32, 1));
     return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
 }
 
@@ -80,8 +95,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_loongsonasx(sz_subdocuments_e
                                                                sz_size_t counts_stride, sz_size_t *malformed_index,
                                                                sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_loongsonasx_, &sz_find_byte_loongsonasx_,
-                                        documents, counts, counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_loongsonasx_,
+                                        &sz_subdocuments_classify_loongsonasx_, &sz_find_byte_loongsonasx_, documents,
+                                        counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_loongsonasx(sz_subdocuments_engine_t *engine,
@@ -89,8 +105,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_loongsonasx(sz_subdocuments_eng
                                                              sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                              sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_loongsonasx_, &sz_find_byte_loongsonasx_,
-                                      documents, matches, matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_loongsonasx_,
+                                      &sz_subdocuments_classify_loongsonasx_, &sz_find_byte_loongsonasx_, documents,
+                                      matches, matches_capacity, matches_offsets, malformed_index);
 }
 
 #pragma endregion LASX

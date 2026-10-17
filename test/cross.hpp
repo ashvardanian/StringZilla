@@ -5340,6 +5340,27 @@ inline void check_subdocuments_safety_(subdocuments_tier_t const &tier) {
     verify(subdocuments_walk_status_(tier, "//*", {"<a><b><c></d></b></a>"}, xml, malformed_index) ==
            sz_invalid_syntax_k);
 
+    // But a `/` outside strings, which starts every comment, fails a JSON document wherever it
+    // lies: in the block a skip starts in, a block it skims whole, the block it ends in, or the
+    // walked part, while slashes in strings pass.
+    for (char const *document :
+         {R"({"a":{"x":1 /* } */},"b":1})", "{\"a\":[1, // ]\n 2],\"b\":1}", R"({"a":{"x":"/"} /**/,"b":1})",
+          "// c\n{\"b\":1}", R"({"b":1} //)", R"({"a":[\/],"b":1})", R"({"b":1/2})"})
+        for (char const *path : {"$.b", "$..*", "$..[-1]"}) {
+            verify(subdocuments_walk_status_(tier, path, {"[0]", document}, json, malformed_index) ==
+                   sz_invalid_syntax_k);
+            verify(malformed_index == 1);
+        }
+    for (std::size_t offset = 0; offset != 200; ++offset) {
+        std::string const before(offset, 'f'), after(200 - offset, 'f');
+        std::string const strict = "{\"a\":[\"" + before + "\",\"/\",\"" + after + "\"],\"b\":1}";
+        std::string const commented = "{\"a\":[\"" + before + "\",/**/\"" + after + "\"],\"b\":1}";
+        verify(subdocuments_walk_status_(tier, "$.b", {strict}, json, malformed_index) == sz_success_k);
+        verify(subdocuments_walk_status_(tier, "$.b", {"[0]", commented}, json, malformed_index) ==
+               sz_invalid_syntax_k);
+        verify(malformed_index == 1);
+    }
+
     // Every proper prefix of a document spanning several blocks is malformed, walked or skipped.
     std::string const json_document =
         "{\"store\": {\"book\": [{\"title\": \"Sayings \\\"of\\\" the [Century]\", \"price\": 8.95, "        //

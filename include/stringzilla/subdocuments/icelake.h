@@ -73,8 +73,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_icelake(sz_subdocuments_engin
                                                            sz_size_t counts_stride, sz_size_t *malformed_index,
                                                            sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_icelake_, &sz_find_byte_skylake_, documents,
-                                        counts, counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_icelake_, &sz_subdocuments_classify_icelake_,
+                                        &sz_find_byte_skylake_, documents, counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_icelake(sz_subdocuments_engine_t *engine,
@@ -82,8 +82,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_icelake(sz_subdocuments_engine_
                                                          sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                          sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_icelake_, &sz_find_byte_skylake_, documents,
-                                      matches, matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_icelake_, &sz_subdocuments_classify_icelake_,
+                                      &sz_find_byte_skylake_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #pragma endregion Ice Lake

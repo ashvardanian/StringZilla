@@ -23,7 +23,9 @@ A descendant segment `..s` applies `s` to a node and to all its descendants, so 
 A value whose set holds a final step is a match, once per path, however many routes reach it; matches come in document order, by path within one node, so a container precedes what it holds.
 A key is looked up once per member in an open-addressed table of every name the paths spell, hashed with one multiply and shift per 8 bytes, and confirmed against the stored bytes; a key holding escapes is unescaped first, and a key longer than every name matches none.
 Keys are short and many: `sz_hash`, whose AES rounds the serial tier emulates, would take a third of the NEON walk's time.
+So the hash and the comparisons read a word at a time, a key no name matches in length is never hashed, and a key the classified block holds whole is known free of escapes from the block's mask of backslashes.
 Since the set of a node depends only on its ancestors' keys and positions, the walk needs one live set per open container and nothing else, kept on a stack that grows on demand.
+A vocabulary of at most 64 steps, nearly every one, runs a walk specialized for a single word, where no loop over words remains.
 
 ## Pending Runs
 
@@ -62,11 +64,13 @@ Quotes, backslashes, brackets, colons, commas and blank space each get a mask.
 A quote is escaped when an odd run of backslashes precedes it, which one carry-propagating subtraction finds for the whole block at once.
 The in-string mask is the prefix XOR of the remaining quotes, computed with a six-step shift ladder, and every bracket, colon and comma inside a string is cleared with it.
 The first byte of each run of scalar bytes, outside strings and neither blank nor structural, is marked too, so numbers, `true`, `false` and `null` are visited once each.
+The run's end is the first byte the block's mask of scalar bytes leaves out, and an integer of at most 16 bytes is checked by two word tests for digits, with no loop per byte.
 Three carries cross from block to block: a pending escape, being inside a string, and being inside a scalar.
-The serial tier builds these masks eight bytes at a time with SWAR compares, and a SIMD tier replaces only that classifier, leaving the walk shared.
+The serial tier builds these masks eight bytes at a time with SWAR compares, and a SIMD tier replaces only that classifier and the skim of [Skipping](#skipping), leaving the walk shared.
 
 Most SIMD tiers classify with one pair of nibble lookups per byte: the entries of the low and high nibble are ANDed, and each of eight bits marks a class, `{[`, `}]`, `:`, `,`, `"`, `\`, space, and the other blanks.
 Every class is a product of a set of low nibbles and a set of high nibbles, so no other byte gets a bit.
+`/` alone gets two, the comma's and the space's, so the settle finds every slash outside strings without a ninth class.
 On Ice Lake each class mask is then one byte test into a mask register.
 Haswell, WASM, LASX and VSX shift each class bit to the top of its byte instead, so a class mask is one movemask per register.
 NEON has no such test, and one movemask per class, four tests and a tree of pairwise additions each, classifies at 8.0 GB/s on M5.
@@ -79,14 +83,17 @@ RVV compares too, since a lookup across the four registers a 64-byte block takes
 
 A container whose live set holds no step that can advance is never entered.
 Its end is found by counting brackets: while a block's closing brackets cannot outnumber the depth, the depth just moves by the difference of the opening and closing popcounts, and only the block where it may reach zero is walked bit by bit.
+The blocks before that one are only skimmed: a tier's skim masks quotes, backslashes, brackets and slashes, five classes instead of the walk's six, and the block where the depth may reach zero is classified again, in full, from the carries it started with.
+A tier without a skim of its own hands its classifier instead.
 Strings cost nothing extra either way, since the walk's next structural byte after an opening quote is always the closing one.
 On a corpus where a path touches a handful of values per document, nearly all of the work is the classification itself.
 
 ## Validation
 
 A document is checked where the walk reads it: bracket kinds, the order of keys, colons, values and commas, scalar grammar, unescaped keys it compares, and blank space after the root.
-Every byte is classified, so an unterminated string or unbalanced brackets fail the call wherever they are, with `sz_invalid_syntax_k` and the first such document's index.
-A skipped container is only counted, so a malformed scalar or mismatched bracket kinds inside it go unnoticed, and string bodies are never validated beyond the escapes of a compared key.
+Every byte is classified, so an unterminated string, unbalanced brackets or a `/` outside strings fail the call wherever they are, with `sz_invalid_syntax_k` and the first such document's index.
+No JSON document holds such a slash, and every comment of the lenient dialects starts with one, so a comment never hides brackets or members inside a skipped container.
+A skipped container is otherwise only counted, so a malformed scalar or mismatched bracket kinds inside it go unnoticed, and string bodies are never validated beyond the escapes of a compared key.
 
 ## XML and XPath
 

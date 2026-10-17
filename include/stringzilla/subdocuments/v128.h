@@ -30,29 +30,52 @@ extern "C" {
 
 #pragma region V128
 
-/** Classifies a block in quarters, moving each class bit to the top of its byte for a bitmask. */
-STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_v128_(sz_u8_t const *text,
-                                                                          sz_subdocuments_carry_t *carry) {
+/** One class bit of a 64-byte block held as four quarters of classes, the first quarter in the
+ *  lowest bits: each quarter's bit moves to the top of its bytes for a bitmask. */
+STRINGZILLA_INLINE sz_u64_t sz_subdocuments_class_v128_(v128_t first_u8x16, v128_t second_u8x16, v128_t third_u8x16,
+                                                        v128_t fourth_u8x16, sz_u32_t bit) {
+    sz_u64_t const first = wasm_i8x16_bitmask(wasm_i8x16_shl(first_u8x16, 7 - bit));
+    sz_u64_t const second = wasm_i8x16_bitmask(wasm_i8x16_shl(second_u8x16, 7 - bit));
+    sz_u64_t const third = wasm_i8x16_bitmask(wasm_i8x16_shl(third_u8x16, 7 - bit));
+    sz_u64_t const fourth = wasm_i8x16_bitmask(wasm_i8x16_shl(fourth_u8x16, 7 - bit));
+    return fourth << 48 | third << 32 | second << 16 | first;
+}
+
+/** The class bits of 16 bytes, one pair of nibble lookups. */
+STRINGZILLA_INLINE v128_t sz_subdocuments_classes_v128_(sz_u8_t const *text) {
     v128_t const low_nibbles_u8x16 = wasm_v128_load(sz_subdocuments_low_nibble_classes_k);
     v128_t const high_nibbles_u8x16 = wasm_v128_load(sz_subdocuments_high_nibble_classes_k);
-    v128_t const nibble_u8x16 = wasm_i8x16_splat(0x0F);
-    sz_u64_t quotes = 0, backslashes = 0, opens = 0, closes = 0, separators = 0, blanks = 0;
-    sz_size_t part;
-    for (part = 0; part != 4; ++part) {
-        v128_t const text_u8x16 = wasm_v128_load(text + part * 16);
-        v128_t const classes_u8x16 = wasm_v128_and(
-            wasm_i8x16_swizzle(low_nibbles_u8x16, wasm_v128_and(text_u8x16, nibble_u8x16)),
-            wasm_i8x16_swizzle(high_nibbles_u8x16, wasm_u8x16_shr(text_u8x16, 4)));
-        sz_size_t const shift = part * 16;
-        opens |= (sz_u64_t)wasm_i8x16_bitmask(wasm_i8x16_shl(classes_u8x16, 7)) << shift;
-        closes |= (sz_u64_t)wasm_i8x16_bitmask(wasm_i8x16_shl(classes_u8x16, 6)) << shift;
-        separators |= (sz_u64_t)wasm_i8x16_bitmask(
-                          wasm_v128_or(wasm_i8x16_shl(classes_u8x16, 5), wasm_i8x16_shl(classes_u8x16, 4)))
-                      << shift;
-        quotes |= (sz_u64_t)wasm_i8x16_bitmask(wasm_i8x16_shl(classes_u8x16, 3)) << shift;
-        backslashes |= (sz_u64_t)wasm_i8x16_bitmask(wasm_i8x16_shl(classes_u8x16, 2)) << shift;
-        blanks |= (sz_u64_t)wasm_i8x16_bitmask(wasm_v128_or(wasm_i8x16_shl(classes_u8x16, 1), classes_u8x16)) << shift;
-    }
+    v128_t const text_u8x16 = wasm_v128_load(text);
+    return wasm_v128_and(wasm_i8x16_swizzle(low_nibbles_u8x16, wasm_v128_and(text_u8x16, wasm_i8x16_splat(0x0F))),
+                         wasm_i8x16_swizzle(high_nibbles_u8x16, wasm_u8x16_shr(text_u8x16, 4)));
+}
+
+/** The classes of 16 bytes ORed with themselves shifted down by one, so bit 2 holds colons or
+ *  commas and bit 6 spaces or other blanks; bytes shift alone, so no neighbour leaks in. */
+STRINGZILLA_INLINE v128_t sz_subdocuments_pairs_v128_(v128_t classes_u8x16) {
+    return wasm_v128_or(classes_u8x16, wasm_u8x16_shr(classes_u8x16, 1));
+}
+
+/** Classifies a block as four quarters, moving each class bit to the top of its byte for a
+ *  bitmask. */
+STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_v128_(sz_u8_t const *text,
+                                                                          sz_subdocuments_carry_t *carry) {
+    v128_t const first_u8x16 = sz_subdocuments_classes_v128_(text);
+    v128_t const second_u8x16 = sz_subdocuments_classes_v128_(text + 16);
+    v128_t const third_u8x16 = sz_subdocuments_classes_v128_(text + 32);
+    v128_t const fourth_u8x16 = sz_subdocuments_classes_v128_(text + 48);
+    v128_t const first_pairs_u8x16 = sz_subdocuments_pairs_v128_(first_u8x16);
+    v128_t const second_pairs_u8x16 = sz_subdocuments_pairs_v128_(second_u8x16);
+    v128_t const third_pairs_u8x16 = sz_subdocuments_pairs_v128_(third_u8x16);
+    v128_t const fourth_pairs_u8x16 = sz_subdocuments_pairs_v128_(fourth_u8x16);
+    sz_u64_t const opens = sz_subdocuments_class_v128_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 0);
+    sz_u64_t const closes = sz_subdocuments_class_v128_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 1);
+    sz_u64_t const separators = sz_subdocuments_class_v128_(first_pairs_u8x16, second_pairs_u8x16, third_pairs_u8x16,
+                                                            fourth_pairs_u8x16, 2);
+    sz_u64_t const quotes = sz_subdocuments_class_v128_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 4);
+    sz_u64_t const backslashes = sz_subdocuments_class_v128_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 5);
+    sz_u64_t const blanks = sz_subdocuments_class_v128_(first_pairs_u8x16, second_pairs_u8x16, third_pairs_u8x16,
+                                                        fourth_pairs_u8x16, 6);
     return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
 }
 
@@ -71,8 +94,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_v128(sz_subdocuments_engine_t
                                                         sz_size_t counts_stride, sz_size_t *malformed_index,
                                                         sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_v128_, &sz_find_byte_v128_, documents, counts,
-                                        counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_v128_, &sz_subdocuments_classify_v128_,
+                                        &sz_find_byte_v128_, documents, counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_v128(sz_subdocuments_engine_t *engine,
@@ -80,8 +103,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_v128(sz_subdocuments_engine_t *
                                                       sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                       sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_v128_, &sz_find_byte_v128_, documents, matches,
-                                      matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_v128_, &sz_subdocuments_classify_v128_,
+                                      &sz_find_byte_v128_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #endif // STRINGZILLA_TARGET_V128

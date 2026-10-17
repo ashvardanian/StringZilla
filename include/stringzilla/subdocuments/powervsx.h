@@ -33,31 +33,56 @@ extern "C" {
 
 #pragma region VSX
 
-/** Classifies a block in quarters, moving each class bit to the top of its byte for a movemask. */
-STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_powervsx_(sz_u8_t const *text,
-                                                                              sz_subdocuments_carry_t *carry) {
+/** One class bit of a 64-byte block held as four quarters of classes, the first quarter in the
+ *  lowest bits: each quarter's bit moves to the top of its bytes for a movemask. */
+STRINGZILLA_INLINE sz_u64_t sz_subdocuments_class_powervsx_(__vector unsigned char first_u8x16,
+                                                            __vector unsigned char second_u8x16,
+                                                            __vector unsigned char third_u8x16,
+                                                            __vector unsigned char fourth_u8x16, unsigned char bit) {
+    __vector unsigned char const shift_u8x16 = vec_splats((unsigned char)(7 - bit));
+    sz_u64_t const first = sz_movemask_powervsx_(vec_sl(first_u8x16, shift_u8x16));
+    sz_u64_t const second = sz_movemask_powervsx_(vec_sl(second_u8x16, shift_u8x16));
+    sz_u64_t const third = sz_movemask_powervsx_(vec_sl(third_u8x16, shift_u8x16));
+    sz_u64_t const fourth = sz_movemask_powervsx_(vec_sl(fourth_u8x16, shift_u8x16));
+    return fourth << 48 | third << 32 | second << 16 | first;
+}
+
+/** The class bits of 16 bytes, one pair of nibble lookups. */
+STRINGZILLA_INLINE __vector unsigned char sz_subdocuments_classes_powervsx_(sz_u8_t const *text) {
     __vector unsigned char const low_nibbles_u8x16 = vec_xl(0, sz_subdocuments_low_nibble_classes_k);
     __vector unsigned char const high_nibbles_u8x16 = vec_xl(0, sz_subdocuments_high_nibble_classes_k);
-    __vector unsigned char const nibble_u8x16 = vec_splats((unsigned char)0x0F);
-    __vector unsigned char const four_u8x16 = vec_splats((unsigned char)4);
-    sz_u64_t quotes = 0, backslashes = 0, opens = 0, closes = 0, separators = 0, blanks = 0;
-    sz_size_t part;
-    for (part = 0; part != 4; ++part) {
-        __vector unsigned char const text_u8x16 = vec_xl(0, text + part * 16);
-        __vector unsigned char const classes_u8x16 = vec_and(
-            vec_perm(low_nibbles_u8x16, low_nibbles_u8x16, vec_and(text_u8x16, nibble_u8x16)),
-            vec_perm(high_nibbles_u8x16, high_nibbles_u8x16, vec_sr(text_u8x16, four_u8x16)));
-        sz_size_t const shift = part * 16;
-        opens |= sz_movemask_powervsx_(vec_sl(classes_u8x16, vec_splats((unsigned char)7))) << shift;
-        closes |= sz_movemask_powervsx_(vec_sl(classes_u8x16, vec_splats((unsigned char)6))) << shift;
-        separators |= sz_movemask_powervsx_(vec_or(vec_sl(classes_u8x16, vec_splats((unsigned char)5)),
-                                                   vec_sl(classes_u8x16, four_u8x16)))
-                      << shift;
-        quotes |= sz_movemask_powervsx_(vec_sl(classes_u8x16, vec_splats((unsigned char)3))) << shift;
-        backslashes |= sz_movemask_powervsx_(vec_sl(classes_u8x16, vec_splats((unsigned char)2))) << shift;
-        blanks |= sz_movemask_powervsx_(vec_or(vec_sl(classes_u8x16, vec_splats((unsigned char)1)), classes_u8x16))
-                  << shift;
-    }
+    __vector unsigned char const text_u8x16 = vec_xl(0, text);
+    return vec_and(vec_perm(low_nibbles_u8x16, low_nibbles_u8x16, vec_and(text_u8x16, vec_splats((unsigned char)0x0F))),
+                   vec_perm(high_nibbles_u8x16, high_nibbles_u8x16, vec_sr(text_u8x16, vec_splats((unsigned char)4))));
+}
+
+/** The classes of 16 bytes ORed with themselves shifted down by one, so bit 2 holds colons or
+ *  commas and bit 6 spaces or other blanks; bytes shift alone, so no neighbour leaks in. */
+STRINGZILLA_INLINE __vector unsigned char sz_subdocuments_pairs_powervsx_(__vector unsigned char classes_u8x16) {
+    return vec_or(classes_u8x16, vec_sr(classes_u8x16, vec_splats((unsigned char)1)));
+}
+
+/** Classifies a block as four quarters, moving each class bit to the top of its byte for a
+ *  movemask. */
+STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_powervsx_(sz_u8_t const *text,
+                                                                              sz_subdocuments_carry_t *carry) {
+    __vector unsigned char const first_u8x16 = sz_subdocuments_classes_powervsx_(text);
+    __vector unsigned char const second_u8x16 = sz_subdocuments_classes_powervsx_(text + 16);
+    __vector unsigned char const third_u8x16 = sz_subdocuments_classes_powervsx_(text + 32);
+    __vector unsigned char const fourth_u8x16 = sz_subdocuments_classes_powervsx_(text + 48);
+    __vector unsigned char const first_pairs_u8x16 = sz_subdocuments_pairs_powervsx_(first_u8x16);
+    __vector unsigned char const second_pairs_u8x16 = sz_subdocuments_pairs_powervsx_(second_u8x16);
+    __vector unsigned char const third_pairs_u8x16 = sz_subdocuments_pairs_powervsx_(third_u8x16);
+    __vector unsigned char const fourth_pairs_u8x16 = sz_subdocuments_pairs_powervsx_(fourth_u8x16);
+    sz_u64_t const opens = sz_subdocuments_class_powervsx_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 0);
+    sz_u64_t const closes = sz_subdocuments_class_powervsx_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 1);
+    sz_u64_t const separators = sz_subdocuments_class_powervsx_(first_pairs_u8x16, second_pairs_u8x16,
+                                                                third_pairs_u8x16, fourth_pairs_u8x16, 2);
+    sz_u64_t const quotes = sz_subdocuments_class_powervsx_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16, 4);
+    sz_u64_t const backslashes = sz_subdocuments_class_powervsx_(first_u8x16, second_u8x16, third_u8x16, fourth_u8x16,
+                                                                 5);
+    sz_u64_t const blanks = sz_subdocuments_class_powervsx_(first_pairs_u8x16, second_pairs_u8x16, third_pairs_u8x16,
+                                                            fourth_pairs_u8x16, 6);
     return sz_subdocuments_block_settle_(quotes, backslashes, opens, closes, separators, blanks, carry);
 }
 
@@ -75,8 +100,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_powervsx(sz_subdocuments_engi
                                                             sz_size_t counts_stride, sz_size_t *malformed_index,
                                                             sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_powervsx_, &sz_find_byte_powervsx_, documents,
-                                        counts, counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_powervsx_,
+                                        &sz_subdocuments_classify_powervsx_, &sz_find_byte_powervsx_, documents, counts,
+                                        counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_powervsx(sz_subdocuments_engine_t *engine,
@@ -84,8 +110,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_powervsx(sz_subdocuments_engine
                                                           sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                           sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_powervsx_, &sz_find_byte_powervsx_, documents,
-                                      matches, matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_powervsx_, &sz_subdocuments_classify_powervsx_,
+                                      &sz_find_byte_powervsx_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #pragma endregion VSX

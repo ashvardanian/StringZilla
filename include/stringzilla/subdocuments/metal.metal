@@ -194,14 +194,14 @@ struct sz_subdocuments_cursor_metal_t {
     device uchar const *text;
     ulong length, block_offset;
     ulong opens, closes, pending;
-    ulong escaped, in_string, scalar;
+    ulong escaped, in_string, scalar, slashes;
 };
 
 /** Classifies the block at @p offset, padding a partial last one with blanks, as
  *  @c sz_subdocuments_load_simt_ does. */
 inline void sz_subdocuments_load_metal_(thread sz_subdocuments_cursor_metal_t &cursor, ulong offset) {
     ulong const available = min(cursor.length - offset, 64ul);
-    ulong quotes = 0, backslashes = 0, opens = 0, closes = 0, separators = 0, blanks = 0;
+    ulong quotes = 0, backslashes = 0, opens = 0, closes = 0, separators = 0, blanks = 0, slashes = 0;
     ulong escaped, in_string, scalars;
     for (ulong index = 0; index != 64; ++index) {
         uchar const byte = index < available ? cursor.text[offset + index] : ' ';
@@ -213,6 +213,7 @@ inline void sz_subdocuments_load_metal_(thread sz_subdocuments_cursor_metal_t &c
         if (folded == '}') closes |= bit;
         if (byte == ':' || byte == ',') separators |= bit;
         if (byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r') blanks |= bit;
+        if (byte == '/') slashes |= bit;
     }
     if (!backslashes) escaped = cursor.escaped, cursor.escaped = 0;
     else {
@@ -228,6 +229,7 @@ inline void sz_subdocuments_load_metal_(thread sz_subdocuments_cursor_metal_t &c
     in_string ^= in_string << 8, in_string ^= in_string << 16, in_string ^= in_string << 32;
     in_string ^= cursor.in_string;
     cursor.in_string = 0 - (in_string >> 63);
+    cursor.slashes |= slashes & ~in_string;
     opens &= ~in_string, closes &= ~in_string, separators &= ~in_string;
     scalars = ~(in_string | quotes | blanks | opens | closes | separators);
     cursor.block_offset = offset, cursor.opens = opens, cursor.closes = closes;
@@ -890,6 +892,7 @@ inline int sz_subdocuments_walk_metal_(thread sz_subdocuments_engine_metal_t con
     sz_subdocuments_cursor_metal_t cursor;
     for (uint word = 0; word != words; ++word) stack[header_words + word] = engine.root_steps[word];
     cursor.text = text, cursor.length = length, cursor.escaped = 0, cursor.in_string = 0, cursor.scalar = 0;
+    cursor.slashes = 0;
     sz_subdocuments_load_metal_(cursor, 0);
 
     while (sz_subdocuments_next_metal_(cursor, position)) {
@@ -1031,7 +1034,7 @@ inline int sz_subdocuments_walk_metal_(thread sz_subdocuments_engine_metal_t con
         expect = current != sz_subdocuments_no_slot_metal_k ? sz_subdocuments_expect_comma_or_close_metal_k
                                                             : sz_subdocuments_expect_end_metal_k;
     }
-    return current != sz_subdocuments_no_slot_metal_k || expect != sz_subdocuments_expect_end_metal_k
+    return current != sz_subdocuments_no_slot_metal_k || expect != sz_subdocuments_expect_end_metal_k || cursor.slashes
                ? sz_subdocuments_malformed_metal_k
                : sz_subdocuments_walked_metal_k;
 }
@@ -1326,6 +1329,7 @@ inline ulong sz_subdocuments_frames_metal_(thread sz_subdocuments_engine_metal_t
         return deepest + 3;
     }
     cursor.text = text, cursor.length = length, cursor.escaped = 0, cursor.in_string = 0, cursor.scalar = 0;
+    cursor.slashes = 0;
     for (; position < length; position += 64) {
         sz_subdocuments_load_metal_(cursor, position);
         structurals += popcount(cursor.pending);
@@ -1606,7 +1610,7 @@ inline void sz_subdocuments_chunk_cursor_metal_(thread sz_subdocuments_view_meta
     ulong const before = chunk != place.first ? view.transfers[chunk] : 0, in_string = before >> 3 & 1;
     cursor.text = text, cursor.length = place.length;
     cursor.escaped = before >> 1 & 1, cursor.in_string = 0 - in_string;
-    cursor.scalar = (before >> 5 & 1) & (in_string ^ 1);
+    cursor.scalar = (before >> 5 & 1) & (in_string ^ 1), cursor.slashes = 0;
 }
 
 /** Whether the last byte of the chunk `[start, end)` belongs to a scalar outside strings, as
@@ -1811,7 +1815,7 @@ kernel void sz_subdocuments_large_summary_metal_kernel_(device uchar *scratch [[
         ulong const end = min(start + sz_subdocuments_chunk_bytes_metal_k, place.length);
         ulong transfer = chunk == place.first ? 0x81 : 1;
         sz_subdocuments_cursor_metal_t cursor;
-        cursor.text = text, cursor.length = place.length, cursor.scalar = 0;
+        cursor.text = text, cursor.length = place.length, cursor.scalar = 0, cursor.slashes = 0;
         for (ulong escape = 0; escape != 2; ++escape) {
             cursor.escaped = escape, cursor.in_string = 0;
             for (ulong offset = start; offset < end; offset += 64) sz_subdocuments_load_metal_(cursor, offset);
@@ -1889,7 +1893,7 @@ kernel void sz_subdocuments_large_apply_metal_kernel_(device uchar *scratch [[bu
 }
 
 /** Counts each chunk's tokens and opening brackets, the depth it ends at, and how far its
- *  depth dips and rises. */
+ *  depth dips and rises, marking its document malformed for a `/` outside strings. */
 kernel void sz_subdocuments_large_count_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                       device uchar const *documents [[buffer(2)]],
                                                       device uchar const *documents_offsets [[buffer(3)]],
@@ -1921,11 +1925,13 @@ kernel void sz_subdocuments_large_count_metal_kernel_(device uchar *scratch [[bu
         }
         view.tokens[chunk] = tokens, view.opens[chunk] = opens, view.depths[chunk] = ulong(depth);
         view.extremes[chunk] = ulong(-lowest) | ulong(highest) << 32;
+        if (cursor.slashes) view.malformed[place.slot] = 1;
     }
 }
 
-/** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it, or
- *  ends inside a string, as @c sz_subdocuments_large_check_simt_kernel_ does. */
+/** Refuses a document whose depth dips below zero, counted from its first chunk, ends above it,
+ *  ends inside a string, or that the count marked, as @c sz_subdocuments_large_check_simt_kernel_
+ *  does for the CUDA and ROCm walks. */
 kernel void sz_subdocuments_large_check_metal_kernel_(device uchar *scratch [[buffer(1)]],
                                                       constant sz_subdocuments_arguments_metal_t &arguments
                                                       [[buffer(8)]],
@@ -1940,7 +1946,8 @@ kernel void sz_subdocuments_large_check_metal_kernel_(device uchar *scratch [[bu
         long const depth = long(view.depths[chunk] - base);
         bool malformed = depth - long(view.extremes[chunk] & 0xFFFFFFFFul) < 0;
         if (chunk == place.first)
-            malformed |= view.depths[place.next] != base || (view.transfers[place.next] >> 3 & 1) != 0;
+            malformed |= view.depths[place.next] != base || (view.transfers[place.next] >> 3 & 1) != 0 ||
+                         view.malformed[place.slot];
         if (malformed) {
             view.malformed[place.slot] = 1;
             atomic_fetch_min_explicit(header, uint(place.document), memory_order_relaxed);

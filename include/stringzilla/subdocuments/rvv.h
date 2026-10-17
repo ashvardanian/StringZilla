@@ -47,15 +47,19 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_rvv_(sz_u8_t
     vuint8m4_t const text_u8m4 = __riscv_vle8_v_u8m4(text, vector_length);
     // `[` and `]` differ from `{` and `}` only in the 0x20 bit, and no other byte folds there.
     vuint8m4_t const folded_u8m4 = __riscv_vor_vx_u8m4(text_u8m4, 0x20, vector_length);
-    vbool2_t const separators_b2 = __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, ':', vector_length),
-                                                      __riscv_vmseq_vx_u8m4_b2(text_u8m4, ',', vector_length),
-                                                      vector_length);
+    // `/` joins both the separators and the blanks, as the class tables give it both bits.
+    vbool2_t const slashes_b2 = __riscv_vmseq_vx_u8m4_b2(text_u8m4, '/', vector_length);
+    vbool2_t const separators_b2 = __riscv_vmor_mm_b2(
+        __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, ':', vector_length),
+                           __riscv_vmseq_vx_u8m4_b2(text_u8m4, ',', vector_length), vector_length),
+        slashes_b2, vector_length);
     vbool2_t const blanks_b2 = __riscv_vmor_mm_b2(
-        __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, ' ', vector_length),
-                           __riscv_vmseq_vx_u8m4_b2(text_u8m4, '\t', vector_length), vector_length),
-        __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, '\n', vector_length),
-                           __riscv_vmseq_vx_u8m4_b2(text_u8m4, '\r', vector_length), vector_length),
-        vector_length);
+        __riscv_vmor_mm_b2(__riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, ' ', vector_length),
+                                              __riscv_vmseq_vx_u8m4_b2(text_u8m4, '\t', vector_length), vector_length),
+                           __riscv_vmor_mm_b2(__riscv_vmseq_vx_u8m4_b2(text_u8m4, '\n', vector_length),
+                                              __riscv_vmseq_vx_u8m4_b2(text_u8m4, '\r', vector_length), vector_length),
+                           vector_length),
+        slashes_b2, vector_length);
     return sz_subdocuments_block_settle_(
         sz_subdocuments_mask_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(text_u8m4, '"', vector_length)),
         sz_subdocuments_mask_bits_rvv_(__riscv_vmseq_vx_u8m4_b2(text_u8m4, '\\', vector_length)),
@@ -78,8 +82,8 @@ STRINGZILLA_API sz_status_t sz_subdocuments_counts_rvv(sz_subdocuments_engine_t 
                                                        sz_size_t counts_stride, sz_size_t *malformed_index,
                                                        sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_rvv_, &sz_find_byte_rvv_, documents, counts,
-                                        counts_stride, malformed_index);
+    return sz_subdocuments_counts_with_(engine, &sz_subdocuments_classify_rvv_, &sz_subdocuments_classify_rvv_,
+                                        &sz_find_byte_rvv_, documents, counts, counts_stride, malformed_index);
 }
 
 STRINGZILLA_API sz_status_t sz_subdocuments_find_rvv(sz_subdocuments_engine_t *engine,
@@ -87,8 +91,9 @@ STRINGZILLA_API sz_status_t sz_subdocuments_find_rvv(sz_subdocuments_engine_t *e
                                                      sz_size_t matches_capacity, sz_size_t *matches_offsets,
                                                      sz_size_t *malformed_index, sz_stream_t stream) {
     sz_unused_(stream);
-    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_rvv_, &sz_find_byte_rvv_, documents, matches,
-                                      matches_capacity, matches_offsets, malformed_index);
+    return sz_subdocuments_find_with_(engine, &sz_subdocuments_classify_rvv_, &sz_subdocuments_classify_rvv_,
+                                      &sz_find_byte_rvv_, documents, matches, matches_capacity, matches_offsets,
+                                      malformed_index);
 }
 
 #endif // STRINGZILLA_TARGET_RVV
