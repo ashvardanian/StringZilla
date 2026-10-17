@@ -425,10 +425,26 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_scan_sized_rocm_(sz_size_t *chunk_s
                                       0, stream);
 }
 
-/** Takes the one arena every round of this engine runs out of, sized for its haystacks budget, so
- *  no compute verb ever allocates. */
+/** Takes the walk arena every non-scoring round of this engine runs out of, sized for its haystacks
+ *  budget; the BM25 pairs table and overflow rows are reserved lazily on the first scoring call. */
 STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_rocm_(sz_substrings_engine_t *engine, sz_stream_t stream) {
     sz_substrings_arena_rocm_t const arena = sz_substrings_arena_rocm_(engine, engine->haystacks_budget);
+    sz_allocator_t *const allocator = &engine->allocator;
+    void *const block = allocator->allocate(arena.pairs, allocator->handle, stream);
+    if (!block) return sz_bad_alloc_k;
+    if (!sz_memory_accessible_rocm_(block)) {
+        allocator->free(block, arena.pairs, allocator->handle, stream);
+        return sz_device_memory_mismatch_k;
+    }
+    engine->scratch = block, engine->scratch_bytes = arena.pairs;
+    engine->report = (sz_substrings_report_t *)((sz_ptr_t)block + arena.report);
+    return sz_success_k;
+}
+
+/** Grows the arena to include the BM25 pairs table and overflow rows on the first scoring round. */
+STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_reserve_rocm_(sz_substrings_engine_t *engine, sz_stream_t stream) {
+    sz_substrings_arena_rocm_t const arena = sz_substrings_arena_rocm_(engine, engine->haystacks_budget);
+    if (engine->scratch_bytes >= arena.total) return sz_success_k;
     sz_allocator_t *const allocator = &engine->allocator;
     void *const block = allocator->allocate(arena.total, allocator->handle, stream);
     if (!block) return sz_bad_alloc_k;
@@ -436,6 +452,7 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_arena_reserve_rocm_(sz_substrings_e
         allocator->free(block, arena.total, allocator->handle, stream);
         return sz_device_memory_mismatch_k;
     }
+    if (engine->scratch) allocator->free(engine->scratch, engine->scratch_bytes, allocator->handle, stream);
     engine->scratch = block, engine->scratch_bytes = arena.total;
     engine->report = (sz_substrings_report_t *)((sz_ptr_t)block + arena.report);
     // A scoring round leaves the pairs table as clear as it found it, so only here is it zeroed.
@@ -836,6 +853,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_bm25_scores_rocm_(sz_substrings_eng
     if (needles_count && !sz_memory_accessible_rocm_(needle_weights)) return sz_device_memory_mismatch_k;
     if (document_lengths && !sz_memory_accessible_rocm_(document_lengths)) return sz_device_memory_mismatch_k;
     if (haystacks->count > engine->haystacks_budget) return sz_unexpected_dimensions_k;
+    status = sz_substrings_bm25_reserve_rocm_(engine, stream);
+    if (status != sz_success_k) return status;
     engine_copy = *engine;
 
     // The acceptance bitmap is read on every step, so it is staged whenever it fits without costing a block.

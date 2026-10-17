@@ -93,27 +93,32 @@ enum {
     sz_substrings_buffers_metal_k,
 };
 
+/** Matches the sizing walk keeps in each chunk's own slots; a busier chunk's others spill into a
+ *  pool the round shares. */
+enum { sz_substrings_kept_matches_metal_k = 4 };
+
+/** One match that overflowed its chunk's inline kept slots, laid out as the kernel's struct. */
+typedef struct sz_substrings_spill_metal_t {
+    sz_u64_t chunk_index;
+    sz_u64_t byte_offset;
+    sz_u32_t slot;
+    sz_u32_t needle_index;
+    sz_u32_t byte_length;
+    sz_u32_t padding;
+} sz_substrings_spill_metal_t;
+
 /** Every kernel of `metal.metal`, built at init so no round compiles one. */
 static char const *const sz_substrings_kernels_metal_[] = {
-    "sz_substrings_clear_metal_kernel_",
-    "sz_substrings_scan_reduce_metal_kernel_",
-    "sz_substrings_scan_carry_metal_kernel_",
-    "sz_substrings_scan_apply_metal_kernel_",
-    "sz_substrings_chunk_bytes_metal_kernel_",
-    "sz_substrings_chunk_counts_metal_kernel_",
-    "sz_substrings_walk_metal_kernel_",
-    "sz_substrings_sized_metal_kernel_",
-    "sz_substrings_link_metal_kernel_",
-    "sz_substrings_double_metal_kernel_",
-    "sz_substrings_compact_metal_kernel_",
-    "sz_substrings_covered_metal_kernel_",
-    "sz_substrings_haystack_offsets_metal_kernel_",
-    "sz_substrings_counts_metal_kernel_",
-    "sz_substrings_store_matches_metal_kernel_",
-    "sz_substrings_stored_metal_kernel_",
-    "sz_substrings_rewrite_offsets_metal_kernel_",
-    "sz_substrings_rewrite_copy_metal_kernel_",
-    "sz_substrings_target_metal_kernel_",
+    "sz_substrings_clear_metal_kernel_",        "sz_substrings_scan_reduce_metal_kernel_",
+    "sz_substrings_scan_carry_metal_kernel_",   "sz_substrings_scan_apply_metal_kernel_",
+    "sz_substrings_chunk_bytes_metal_kernel_",  "sz_substrings_chunk_counts_metal_kernel_",
+    "sz_substrings_walk_metal_kernel_",         "sz_substrings_sized_metal_kernel_",
+    "sz_substrings_gather_metal_kernel_",       "sz_substrings_link_metal_kernel_",
+    "sz_substrings_double_metal_kernel_",       "sz_substrings_compact_metal_kernel_",
+    "sz_substrings_covered_metal_kernel_",      "sz_substrings_haystack_offsets_metal_kernel_",
+    "sz_substrings_counts_metal_kernel_",       "sz_substrings_store_matches_metal_kernel_",
+    "sz_substrings_stored_metal_kernel_",       "sz_substrings_rewrite_offsets_metal_kernel_",
+    "sz_substrings_rewrite_copy_metal_kernel_", "sz_substrings_target_metal_kernel_",
     "sz_substrings_bm25_metal_kernel_",
 };
 
@@ -122,7 +127,7 @@ typedef struct {
     sz_u64_t engine_host, scratch_host;
     sz_u64_t hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
     sz_u64_t hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
-    sz_u64_t report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
+    sz_u64_t report, chunk_bytes, spilled, chunk_offsets, chunk_slots, tile_sums, kept, spills;
     sz_u64_t emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows;
     sz_u64_t slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
     sz_u64_t haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
@@ -133,7 +138,7 @@ typedef struct {
 
 /** Byte offsets of the round block every round runs out of, as the CUDA tier lays it out. */
 typedef struct sz_substrings_arena_metal_t {
-    sz_size_t report, chunk_bytes, chunk_offsets, haystack_offsets, chunk_slots, tile_sums;
+    sz_size_t report, chunk_bytes, spilled, chunk_offsets, haystack_offsets, chunk_slots, tile_sums, kept, spills;
     sz_size_t emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows, slots_count, total;
 } sz_substrings_arena_metal_t;
 
@@ -150,13 +155,18 @@ STRINGZILLA_INLINE sz_substrings_arena_metal_t sz_substrings_arena_metal_(sz_sub
     // A chunk is at least the corpus over the budget wide, so the corpus contributes at most
     // `chunk_budget` chunks and each haystack's own remainder at most one more.
     arena.slots_count = engine->chunk_budget + haystacks_count + 1;
+    sz_size_t const kept_bytes =
+        ((sz_substrings_kept_matches_metal_k * 3 * arena.slots_count * sizeof(sz_u32_t)) + 7u) & ~(sz_size_t)7u;
     arena.report = 0;
     arena.chunk_bytes = arena.report + sizeof(sz_substrings_report_t);
-    arena.chunk_offsets = arena.chunk_bytes + sizeof(sz_size_t);
+    arena.spilled = arena.chunk_bytes + sizeof(sz_size_t);
+    arena.chunk_offsets = arena.spilled + sizeof(sz_size_t);
     arena.haystack_offsets = arena.chunk_offsets + boundaries * sizeof(sz_size_t);
     arena.chunk_slots = arena.haystack_offsets + boundaries * sizeof(sz_size_t);
     arena.tile_sums = arena.chunk_slots + arena.slots_count * sizeof(sz_size_t);
-    arena.emitted = arena.tile_sums + sz_substrings_gpu_scan_tiles_max_k * sizeof(sz_size_t);
+    arena.kept = arena.tile_sums + sz_substrings_gpu_scan_tiles_max_k * sizeof(sz_size_t);
+    arena.spills = arena.kept + kept_bytes;
+    arena.emitted = arena.spills + matches * sizeof(sz_substrings_spill_metal_t);
     arena.reported = arena.emitted + match_bytes;
     arena.keep_offsets = arena.reported + (covering ? match_bytes : 0);
     arena.gap_offsets = arena.keep_offsets + (covering ? (matches + 1) * sizeof(sz_size_t) : 0);
@@ -265,8 +275,8 @@ STRINGZILLA_INLINE void sz_substrings_arguments_metal_(sz_substrings_engine_t co
 }
 
 /**
- *  @brief Walks every chunk and settles the cover, leaving @p arguments holding what the verbs'
- *      own dispatches read, all in the open @p call. @p arguments comes from
+ *  @brief Walks every chunk once and settles the cover, leaving @p arguments holding what the
+ *      verbs' own dispatches read, all in the open @p call. @p arguments comes from
  *      @ref sz_substrings_arguments_metal_.
  *
  *  @param[in] emitting Whether the caller reads the matches, since an overlapping count answers
@@ -293,9 +303,12 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
 
     arguments->report = (sz_u64_t)(block + arena.report);
     arguments->chunk_bytes = (sz_u64_t)(block + arena.chunk_bytes);
+    arguments->spilled = (sz_u64_t)(block + arena.spilled);
     arguments->chunk_offsets = (sz_u64_t)(block + arena.chunk_offsets);
     arguments->chunk_slots = (sz_u64_t)(block + arena.chunk_slots),
     arguments->tile_sums = (sz_u64_t)(block + arena.tile_sums);
+    arguments->kept = (sz_u64_t)(block + arena.kept);
+    arguments->spills = (sz_u64_t)(block + arena.spills);
     arguments->emitted = (sz_u64_t)(block + arena.emitted);
     arguments->reported = (sz_u64_t)(block + (covering ? arena.reported : arena.emitted));
     arguments->keep_offsets = covering ? (sz_u64_t)(block + arena.keep_offsets) : 0;
@@ -327,8 +340,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
     if (status == sz_success_k)
         status = sz_substrings_scan_metal_(call, buffers, arguments, block + arena.chunk_offsets, boundaries);
 
-    // The sizing walk, over the chunk budget rather than a discovered chunk count, and
-    // what it found.
+    // Single walk over the chunk budget: keeps inline matches and spills the rest when `emitting`,
+    // then scans the chunk slots and gathers the matches into `emitted` without a second walk.
     arguments->pass = sz_substrings_gpu_sizing_k;
     if (status == sz_success_k)
         status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_walk_metal_kernel_", arguments,
@@ -337,12 +350,8 @@ STRINGZILLA_INLINE sz_status_t sz_substrings_walk_metal_(sz_substrings_engine_t 
         status = sz_substrings_scan_metal_(call, buffers, arguments, block + arena.chunk_slots, arena.slots_count);
     if (status == sz_success_k)
         status = sz_substrings_encode_one_metal_(call, buffers, "sz_substrings_sized_metal_kernel_", arguments);
-
-    // The writing walk, the cover over what it wrote, and the boundaries both feed, each retiring
-    // at its first instruction when the sizing walk outran the budget.
-    arguments->pass = sz_substrings_gpu_writing_k;
     if (status == sz_success_k && arguments->emitting)
-        status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_walk_metal_kernel_", arguments,
+        status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_gather_metal_kernel_", arguments,
                                              sz_substrings_groups_metal_(arena.slots_count));
     if (status == sz_success_k && covering) {
         status = sz_substrings_encode_metal_(call, buffers, "sz_substrings_link_metal_kernel_", arguments,
@@ -389,7 +398,7 @@ STRINGZILLA_API sz_status_t sz_substrings_engine_init_metal(
     engine->chunk_budget = sz_substrings_chunk_budget_metal_k;
     engine->haystacks_budget = haystacks_budget;
 
-    sz_size_t const scratch_bytes = sz_substrings_arena_metal_(engine, haystacks_budget).total;
+    sz_size_t const scratch_bytes = sz_substrings_arena_metal_(engine, haystacks_budget).overflow_rows;
     engine->scratch = unified.allocate(scratch_bytes, unified.handle, stream);
     engine->scratch_bytes = engine->scratch ? scratch_bytes : 0;
     if (!engine->scratch) status = sz_bad_alloc_k;
@@ -535,6 +544,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
                                                             sz_size_t scores_stride, sz_stream_t stream) {
     sz_metal_bound_t buffers[sz_substrings_buffers_metal_k] = {{STRINGZILLA_NULL, 0}};
     sz_substrings_arena_metal_t const arena = sz_substrings_arena_metal_(engine, haystacks->count);
+    sz_substrings_arena_metal_t const full_arena = sz_substrings_arena_metal_(engine, engine->haystacks_budget);
     sz_bool_t const hashed = (sz_bool_t)(engine->needles_count > sz_substrings_tally_slots_metal_k);
     sz_substrings_arguments_metal_t arguments;
     sz_metal_size_t groups = {1, 1, 1};
@@ -543,6 +553,14 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     if (status != sz_success_k) return status;
     if (!scores_stride) return sz_unexpected_dimensions_k;
     if (!haystacks->count) return sz_success_k;
+    if (engine->scratch_bytes < full_arena.total) {
+        void *const scratch = engine->allocator.allocate(full_arena.total, engine->allocator.handle, stream);
+        if (!scratch) return sz_bad_alloc_k;
+        if (engine->scratch)
+            engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, stream);
+        engine->scratch = scratch, engine->scratch_bytes = full_arena.total;
+        engine->report = (sz_substrings_report_t *)scratch;
+    }
     status = sz_device_enter_metal_(stream, &call);
     if (status == sz_success_k) status = sz_substrings_resident_metal_(engine, &call, haystacks, buffers);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
@@ -565,8 +583,7 @@ STRINGZILLA_API sz_status_t sz_substrings_bm25_scores_metal(sz_substrings_engine
     arguments.normalization = parameters->length_normalization;
     arguments.average_length = parameters->average_document_length;
 
-    // A hashed tally spills into one row per threadgroup, which the round block was sized for at
-    // init.
+    // A hashed tally spills into one row per threadgroup, in the block the first scoring call grew.
     status = sz_substrings_clear_metal_(&call, buffers, &arguments, engine->report, sizeof(sz_substrings_report_t));
     if (status == sz_success_k && hashed)
         status = sz_substrings_clear_metal_(&call, buffers, &arguments, (char *)engine->scratch + arena.overflow_rows,

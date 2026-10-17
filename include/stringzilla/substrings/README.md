@@ -1,7 +1,7 @@
 # Substrings: Multi-Pattern Search Over One Automaton
 
 This directory holds the kernels behind `sz_substrings_engine_init`, `sz_substrings_counts`, `sz_substrings_find`, `sz_substrings_replace` and `sz_substrings_bm25_scores`, on the host and on the device alike.
-One engine owns the compiled vocabulary, the overlap policy it was sized for, the round's arena and the report every verb writes, so a compute verb allocates nothing and joins nothing.
+One engine owns the compiled vocabulary, the overlap policy it was sized for, the round's arena and the report every verb writes, so a compute verb joins nothing, and only BM25 scoring grows that arena, on its first call.
 A vocabulary of needles compiles once into a byte-level Aho-Corasick automaton, and every haystack then streams through it in one pass whatever the needle count, since the alternative is one search per needle per haystack.
 Nothing here assumes what the bytes mean: the same automaton serves nucleotides, binary records and multilingual UTF-8, and adapts to each through the classes its own vocabulary spells.
 

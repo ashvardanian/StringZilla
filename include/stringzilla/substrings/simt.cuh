@@ -427,38 +427,79 @@ static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_eng
 enum { sz_substrings_kept_matches_simt_k = 4 };
 
 /** Keeps the chunk's match @p slot in its own slots, its offset cut to 32 bits, which the chunk's
- *  start restores, or past them in the spill pool. */
-STRINGZILLA_DEVICE void sz_substrings_keep_simt_(sz_substrings_sink_simt_t const *sink, sz_size_t slot,
-                                                 sz_u32_t needle_index, sz_size_t byte_offset, sz_size_t byte_length) {
+ *  start restores, or past them in the spill pool, returning the spill index when spilled. */
+STRINGZILLA_DEVICE sz_size_t sz_substrings_keep_simt_(sz_substrings_sink_simt_t const *sink, sz_size_t slot,
+                                                      sz_u32_t needle_index, sz_size_t byte_offset,
+                                                      sz_size_t byte_length) {
     sz_size_t spill;
     if (slot < sz_substrings_kept_matches_simt_k) {
         sz_u32_t *const entry = sink->kept + slot * 3 * sink->stride;
         entry[0] = needle_index, entry[sink->stride] = (sz_u32_t)byte_offset;
         entry[2 * sink->stride] = (sz_u32_t)byte_length;
-        return;
+        return STRINGZILLA_SIZE_MAX;
     }
     spill = (sz_size_t)atomicAdd((unsigned long long *)sink->spilled, 1ull);
-    if (spill >= sink->spills_capacity) return; // ? Past the budget, which the round's shortfall reports.
+    if (spill >= sink->spills_capacity) return spill; // ? Past the budget, which the round's shortfall reports.
     sink->spills[spill].chunk_index = sink->chunk_index, sink->spills[spill].byte_offset = byte_offset;
     sink->spills[spill].slot = (sz_u32_t)slot, sink->spills[spill].needle_index = needle_index;
     sink->spills[spill].byte_length = (sz_u32_t)byte_length;
+    return spill;
+}
+
+/** The chunk walk's most recently kept match, so consecutive prefix matches sharing a start offset
+ *  collapse in-place under leftmost overlap policies without consuming kept or spill slots. */
+typedef struct sz_substrings_last_simt_t {
+    sz_size_t byte_offset;
+    sz_u32_t byte_length;
+    sz_u32_t needle_index;
+    sz_size_t spill;
+} sz_substrings_last_simt_t;
+
+STRINGZILLA_DEVICE void sz_substrings_record_simt_(sz_substrings_engine_t const *engine,
+                                                   sz_substrings_sink_simt_t const *sink, sz_size_t *found,
+                                                   sz_substrings_last_simt_t *last, sz_u32_t needle_index,
+                                                   sz_size_t byte_offset, sz_size_t byte_length) {
+    if (engine->overlap_policy != sz_substrings_overlapping_k && byte_offset == last->byte_offset) {
+        sz_bool_t const better = engine->overlap_policy == sz_substrings_leftmost_longest_k
+                                     ? (sz_bool_t)(byte_length > last->byte_length ||
+                                                   (byte_length == last->byte_length &&
+                                                    needle_index < last->needle_index))
+                                     : (sz_bool_t)(needle_index < last->needle_index);
+        if (!better) return;
+        last->byte_length = (sz_u32_t)byte_length, last->needle_index = needle_index;
+        if (!sink->kept) return;
+        sz_size_t const slot = *found - 1;
+        if (slot < sz_substrings_kept_matches_simt_k) {
+            sz_u32_t *const entry = sink->kept + slot * 3 * sink->stride;
+            entry[0] = needle_index, entry[sink->stride] = (sz_u32_t)byte_offset;
+            entry[2 * sink->stride] = (sz_u32_t)byte_length;
+        }
+        else if (last->spill < sink->spills_capacity) {
+            sink->spills[last->spill].needle_index = needle_index;
+            sink->spills[last->spill].byte_length = (sz_u32_t)byte_length;
+        }
+        return;
+    }
+    last->byte_offset = byte_offset, last->byte_length = (sz_u32_t)byte_length, last->needle_index = needle_index;
+    if (sink->kept) last->spill = sz_substrings_keep_simt_(sink, *found, needle_index, byte_offset, byte_length);
+    ++*found;
 }
 
 /**
- *  @brief Reports every match ending at @p delta, the chunk's matches from @p found_before on,
- *      keeping or tallying them as @p pass asks, and returns how many.
+ *  @brief Reports every match ending at @p delta, the chunk's matches from @p found on,
+ *      keeping or tallying them as @p pass asks.
  *
  *  The acceptance bit answers "does anything end here" without touching the counts array, which at
  *  scale costs nearly as much as the haystack read itself.
  */
-STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t const *engine,
-                                                      sz_substrings_staged_simt_t const *staged, sz_u32_t state,
-                                                      sz_size_t walk_begin, sz_u32_t delta,
-                                                      sz_substrings_gpu_pass_t pass,
-                                                      sz_substrings_sink_simt_t const *sink, sz_size_t found_before) {
-    sz_size_t output_offset, found = 0, index;
+STRINGZILLA_DEVICE void sz_substrings_emit_simt_(sz_substrings_engine_t const *engine,
+                                                 sz_substrings_staged_simt_t const *staged, sz_u32_t state,
+                                                 sz_size_t walk_begin, sz_u32_t delta, sz_substrings_gpu_pass_t pass,
+                                                 sz_substrings_sink_simt_t const *sink, sz_size_t *found,
+                                                 sz_substrings_last_simt_t *last) {
+    sz_size_t output_offset, index;
     sz_u32_t output_count;
-    if (!sz_substrings_accepts_simt_(staged, state)) return 0;
+    if (!sz_substrings_accepts_simt_(staged, state)) return;
     output_count = __ldg(engine->outputs_counts + state);
     output_offset = (sz_size_t)__ldg((unsigned long long const *)engine->outputs_offsets + state);
     for (index = 0; index != output_count; ++index) {
@@ -472,13 +513,12 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_emit_simt_(sz_substrings_engine_t con
         if (pass == sz_substrings_gpu_tallying_k) {
             if (sink->tally) sz_substrings_tally_simt_(sink->tally, output.needle_index);
             else sz_substrings_pair_simt_(sink, output.needle_index);
+            ++*found;
         }
-        else if (sink->kept)
-            sz_substrings_keep_simt_(sink, found_before + found, output.needle_index,
-                                     walk_begin + delta + 1 - output.folded_match_bytes, output.folded_match_bytes);
-        ++found;
+        else
+            sz_substrings_record_simt_(engine, sink, found, last, output.needle_index,
+                                       walk_begin + delta + 1 - output.folded_match_bytes, output.folded_match_bytes);
     }
-    return found;
 }
 
 /**
@@ -503,6 +543,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_cased_simt_(sz_substrings_
     sz_u32_t const walk_span = (sz_u32_t)(chunk_end - walk_begin);
     sz_u32_t const emit_from = (sz_u32_t)(chunk_begin - walk_begin);
     sz_size_t found = 0;
+    sz_substrings_last_simt_t last = {STRINGZILLA_SIZE_MAX, 0, 0, STRINGZILLA_SIZE_MAX};
     sz_u32_t delta = 0, lane;
     sz_u32_t state = engine->root; // ? Fresh at `walk_begin`; no state crosses a haystack boundary.
     sz_unused_(length);
@@ -513,19 +554,19 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_cased_simt_(sz_substrings_
     // transition chain stays strictly serial, only the haystack reads widen.
     for (; delta < walk_span && (((sz_size_t)(walk_base + delta)) & 3u) != 0; ++delta) {
         state = sz_substrings_step_simt_(engine, staged, state, walk_base[delta]);
-        found += sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta, pass, sink, found);
+        sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta, pass, sink, &found, &last);
     }
     for (; delta + 4 <= walk_span; delta += 4) {
         sz_u32_t const quad = sz_substrings_load_quad_simt_(walk_base + delta);
 #pragma unroll
         for (lane = 0; lane != 4; ++lane) {
             state = sz_substrings_step_simt_(engine, staged, state, (sz_u8_t)(quad >> (lane * 8)));
-            found += sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta + lane, pass, sink, found);
+            sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta + lane, pass, sink, &found, &last);
         }
     }
     for (; delta < walk_span; ++delta) {
         state = sz_substrings_step_simt_(engine, staged, state, walk_base[delta]);
-        found += sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta, pass, sink, found);
+        sz_substrings_emit_simt_(engine, staged, state, walk_begin, delta, pass, sink, &found, &last);
     }
     return found;
 }
@@ -609,6 +650,7 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
     sz_utf8_folded_image_t image;
     sz_u32_t state = engine->root;
     sz_size_t folded = 0, last_break_folded_end = 0, found = 0, position;
+    sz_substrings_last_simt_t last = {STRINGZILLA_SIZE_MAX, 0, 0, STRINGZILLA_SIZE_MAX};
     sz_u8_t image_index = 0, previous_rune_end = 0;
     sz_bool_t breaks_boundary = sz_false_k;
     // The aligned word under the cursor, so an ASCII run costs one load per four bytes.
@@ -671,11 +713,12 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
             if (pass == sz_substrings_gpu_tallying_k) {
                 if (sink->tally) sz_substrings_tally_simt_(sink->tally, output.needle_index);
                 else sz_substrings_pair_simt_(sink, output.needle_index);
+                ++found;
             }
-            else if (sink->kept)
-                sz_substrings_keep_simt_(sink, found, output.needle_index, walk_begin + resolved.source_offset,
-                                         step.codepoint_end - resolved.source_offset);
-            ++found;
+            else
+                sz_substrings_record_simt_(engine, sink, &found, &last, output.needle_index,
+                                           walk_begin + resolved.source_offset,
+                                           step.codepoint_end - resolved.source_offset);
         }
     }
     return found;

@@ -108,8 +108,8 @@ typedef struct sz_substrings_report_t {
  *  that goto completion would otherwise have folded away. States are numbered so the hot ones come
  *  first, which makes the tier test state < hot_count with no lookup.
  *
- *  Both blocks are built by an init kernel and live until @ref sz_substrings_engine_free, so a
- *  compute verb allocates nothing and a device backend has no host clone to stage.
+ *  Both blocks are built by an init kernel and live until @ref sz_substrings_engine_free, so no
+ *  compute verb rebuilds them and a device backend has no host clone to stage.
  */
 typedef struct sz_substrings_engine_t {
 

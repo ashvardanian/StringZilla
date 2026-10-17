@@ -59,8 +59,9 @@ extern "C" {
  *  @param[in] matches_budget Matches one round may emit, read by a device tier only; a host tier
  *      walks straight into the caller's output and ignores it. Zero asks for a tier-chosen default.
  *  @param[in] haystacks_budget Haystacks one round may carry, read by a device tier only, zero
- *      asking for its default. Its arena is sized for it here, so no compute verb allocates, and a
- *      round carrying more is refused with @c sz_unexpected_dimensions_k.
+ *      asking for its default. The arena of counts, find and replace is sized for it here, so they
+ *      allocate nothing; @ref sz_substrings_bm25_scores grows it for its tables on its first call
+ *      only. A round carrying more is refused with @c sz_unexpected_dimensions_k.
  *  @param[in] capabilities One device's capabilities, like @c sz_capabilities_enabled_cpu or
  *      @c sz_capabilities_enabled_cuda report; its group picks the CPU or a GPU vendor.
  *  @param[in] allocator Where both blocks come from, or @c STRINGZILLA_NULL for
@@ -183,7 +184,8 @@ STRINGZILLA_API sz_status_t sz_substrings_replace(sz_substrings_engine_t *engine
  *  @param[in] stream As @ref sz_substrings_counts takes it.
  *  @return @c sz_success_k once every haystack was scored, or on a device the scoring enqueued;
  *      @c sz_unexpected_dimensions_k for invalid arguments, as below; @c sz_missing_kernel_k for an
- *      empty engine; or @c sz_device_memory_mismatch_k for an argument a device cannot address.
+ *      empty engine; @c sz_bad_alloc_k if a device engine's first call could not grow its arena; or
+ *      @c sz_device_memory_mismatch_k for an argument or grown arena a device cannot address.
  *
  *  The arguments are invalid when @p needle_weights is @c STRINGZILLA_NULL, @p scores_stride is
  *  zero, or @c length_normalization is positive while @c average_document_length is not.

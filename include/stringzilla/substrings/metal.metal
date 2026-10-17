@@ -70,13 +70,23 @@ struct sz_substrings_report_metal_t {
     ulong matches_emitted, matches_stored, target_length, shortfall;
 };
 
+/** Matches the sizing walk keeps in each chunk's own slots; a busier chunk's others spill into a
+ *  pool the round shares. */
+constant ulong sz_substrings_kept_matches_metal_k = 4;
+
+/** One match that overflowed its chunk's inline kept slots, as @c sz_substrings_spill_metal_t. */
+struct sz_substrings_spill_metal_t {
+    ulong chunk_index, byte_offset;
+    uint slot, needle_index, byte_length, padding;
+};
+
 /** The launch record the host copies in: host addresses inside the automaton and the round block,
  *  and the round's shape. */
 struct sz_substrings_arguments_metal_t {
     ulong engine_host, scratch_host;
     ulong hot_rows, byte_to_class, base, check, fail, accepts_words, outputs, outputs_counts, outputs_offsets;
     ulong hot_count, classes_count, root, needles_count, max_source_match_bytes, overlap_policy, case_sensitivity;
-    ulong report, chunk_bytes, chunk_offsets, chunk_slots, tile_sums;
+    ulong report, chunk_bytes, spilled, chunk_offsets, chunk_slots, tile_sums, kept, spills;
     ulong emitted, reported, keep_offsets, gap_offsets, jumps, doubled, overflow_rows;
     ulong slots_count, chunk_budget, chunk_floor, matches_budget, emitting;
     ulong haystacks_count, haystacks_layout, replacements_layout, counts_stride, matches_capacity, target_ceiling;
@@ -93,6 +103,7 @@ struct sz_substrings_automaton_metal_t {
     device sz_substrings_output_metal_t const *outputs;
     device ulong const *outputs_offsets;
     uint hot_count, classes_count, root, max_source_match_bytes;
+    sz_substrings_overlap_policy_metal_t overlap_policy;
     bool uncased;
 };
 
@@ -111,6 +122,7 @@ inline sz_substrings_automaton_metal_t sz_substrings_automaton_metal_(
     automaton.outputs_offsets = sz_reach_metal_<ulong>(engine, engine_host, arguments.outputs_offsets);
     automaton.hot_count = (uint)arguments.hot_count, automaton.classes_count = (uint)arguments.classes_count;
     automaton.root = (uint)arguments.root, automaton.max_source_match_bytes = (uint)arguments.max_source_match_bytes;
+    automaton.overlap_policy = sz_substrings_overlap_policy_metal_t(arguments.overlap_policy);
     automaton.uncased = arguments.case_sensitivity != 0;
     return automaton;
 }
@@ -133,6 +145,65 @@ struct sz_substrings_tally_metal_t {
     device atomic_uint *overflow;
     bool hashed;
 };
+
+/** Where a sizing walk stores inline kept matches and spills. */
+struct sz_substrings_sink_metal_t {
+    device uint *kept;
+    ulong stride, chunk_index, spills_capacity;
+    device sz_substrings_spill_metal_t *spills;
+    device atomic_uint *spilled;
+};
+
+/** The chunk walk's most recently kept match, so consecutive prefix matches sharing a start offset
+ *  collapse in-place under leftmost overlap policies without consuming kept or spill slots. */
+struct sz_substrings_last_metal_t {
+    ulong byte_offset;
+    uint byte_length, needle_index;
+    ulong spill;
+};
+
+inline ulong sz_substrings_keep_metal_(thread sz_substrings_sink_metal_t const *sink, ulong slot, uint needle_index,
+                                       ulong byte_offset, ulong byte_length) {
+    if (slot < sz_substrings_kept_matches_metal_k) {
+        device uint *entry = sink->kept + slot * 3 * sink->stride;
+        entry[0] = needle_index, entry[sink->stride] = (uint)byte_offset;
+        entry[2 * sink->stride] = (uint)byte_length;
+        return ~0ul;
+    }
+    ulong const spill = (ulong)atomic_fetch_add_explicit(sink->spilled, 1u, memory_order_relaxed);
+    if (spill >= sink->spills_capacity) return spill;
+    sink->spills[spill] = {sink->chunk_index, byte_offset, (uint)slot, needle_index, (uint)byte_length, 0u};
+    return spill;
+}
+
+inline void sz_substrings_record_metal_(thread sz_substrings_automaton_metal_t const &automaton,
+                                        thread sz_substrings_sink_metal_t const *sink, thread ulong &found,
+                                        thread sz_substrings_last_metal_t &last, uint needle_index, ulong byte_offset,
+                                        ulong byte_length) {
+    if (automaton.overlap_policy != sz_substrings_overlapping_metal_k && byte_offset == last.byte_offset) {
+        bool const better = automaton.overlap_policy == sz_substrings_leftmost_longest_metal_k
+                                ? (byte_length > last.byte_length ||
+                                   (byte_length == last.byte_length && needle_index < last.needle_index))
+                                : (needle_index < last.needle_index);
+        if (!better) return;
+        last.byte_length = (uint)byte_length, last.needle_index = needle_index;
+        if (!sink || !sink->kept) return;
+        ulong const slot = found - 1;
+        if (slot < sz_substrings_kept_matches_metal_k) {
+            device uint *entry = sink->kept + slot * 3 * sink->stride;
+            entry[0] = needle_index, entry[sink->stride] = (uint)byte_offset;
+            entry[2 * sink->stride] = (uint)byte_length;
+        }
+        else if (last.spill < sink->spills_capacity) {
+            sink->spills[last.spill].needle_index = needle_index;
+            sink->spills[last.spill].byte_length = (uint)byte_length;
+        }
+        return;
+    }
+    last.byte_offset = byte_offset, last.byte_length = (uint)byte_length, last.needle_index = needle_index;
+    if (sink && sink->kept) last.spill = sz_substrings_keep_metal_(sink, found, needle_index, byte_offset, byte_length);
+    ++found;
+}
 
 /** Counts one match of @p needle into @p tally, in its slots first, as @c sz_substrings_tally_simt_
  *  does. */
@@ -207,14 +278,15 @@ inline ulong sz_substrings_resolve_match_metal_(device uchar const *haystack, ul
 
 inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automaton_metal_t const &automaton,
                                                      device uchar const *haystack, ulong length, ulong chunk_begin,
-                                                     ulong chunk_end, ulong haystack_index, ulong pass,
-                                                     device sz_match_metal_t *matches_at_chunk,
+                                                     ulong chunk_end, ulong pass,
+                                                     thread sz_substrings_sink_metal_t const *sink,
                                                      thread sz_substrings_tally_metal_t const *tally) {
     ulong const warm_up = automaton.max_source_match_bytes ? automaton.max_source_match_bytes - 1 : 0;
     ulong walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
     for (uint back = 0; back != 3 && walk_begin && (haystack[walk_begin] & 0xc0) == 0x80; ++back) --walk_begin;
     uint state = automaton.root;
     ulong folded = 0, last_break_folded_end = 0, found = 0;
+    sz_substrings_last_metal_t last = {~0ul, 0u, 0u, ~0ul};
     for (ulong position = walk_begin; position < length;) {
         sz_utf8_folded_image_metal_t image;
         uint const source_bytes = sz_utf8_fold_next_metal_(haystack + position, haystack + length, image);
@@ -250,12 +322,13 @@ inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automa
                                                                                      trailing, folded_length, shift,
                                                                                      repeats);
                 if (repeats) continue;
-                if (pass == sz_substrings_gpu_writing_metal_k)
-                    matches_at_chunk[found] = {haystack_index, output.needle_index, walk_begin + source_offset,
-                                               source_end - source_offset};
-                else if (pass == sz_substrings_gpu_tallying_metal_k)
+                if (pass == sz_substrings_gpu_tallying_metal_k) {
                     sz_substrings_tally_metal_(tally, output.needle_index);
-                ++found;
+                    ++found;
+                }
+                else
+                    sz_substrings_record_metal_(automaton, sink, found, last, output.needle_index,
+                                                walk_begin + source_offset, source_end - source_offset);
             }
         }
     }
@@ -263,8 +336,8 @@ inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automa
 }
 
 /**
- *  @brief Walks one chunk of a haystack in the pass @p pass names, sizing, writing to
- *      @p matches_at_chunk, or tallying into @p tally every match ending inside it.
+ *  @brief Walks one chunk of a haystack in the pass @p pass names, sizing (and keeping inline or
+ *      spilling into @p sink) or tallying into @p tally every match ending inside it.
  *  @return The matches the chunk holds.
  *
  *  The warm-up primes the state from the @c max_source_match_bytes-1 bytes before the chunk,
@@ -272,13 +345,13 @@ inline ulong sz_substrings_walk_chunk_uncased_metal_(thread sz_substrings_automa
  */
 inline ulong sz_substrings_walk_chunk_metal_(thread sz_substrings_automaton_metal_t const &automaton,
                                              device uchar const *haystack, ulong chunk_begin, ulong chunk_end,
-                                             ulong haystack_index, ulong pass,
-                                             device sz_match_metal_t *matches_at_chunk,
+                                             ulong pass, thread sz_substrings_sink_metal_t const *sink,
                                              thread sz_substrings_tally_metal_t const *tally) {
     ulong const warm_up = automaton.max_source_match_bytes > 0 ? automaton.max_source_match_bytes - 1 : 0;
     ulong const walk_begin = chunk_begin >= warm_up ? chunk_begin - warm_up : 0;
     uint state = automaton.root;
     ulong position = walk_begin, found = 0;
+    sz_substrings_last_metal_t last = {~0ul, 0u, 0u, ~0ul};
     for (; position < chunk_begin; ++position) state = sz_substrings_step_metal_(automaton, state, haystack[position]);
     for (; position < chunk_end; ++position) {
         state = sz_substrings_step_metal_(automaton, state, haystack[position]);
@@ -290,11 +363,13 @@ inline ulong sz_substrings_walk_chunk_metal_(thread sz_substrings_automaton_meta
             // `walk_begin` is clamped to the haystack's own start, so underflowing either
             // is one test.
             if (position + 1 - walk_begin < output.folded_match_bytes) continue;
-            if (pass == sz_substrings_gpu_writing_metal_k)
-                matches_at_chunk[found] = {haystack_index, output.needle_index,
-                                           position + 1 - output.folded_match_bytes, output.folded_match_bytes};
-            else if (pass == sz_substrings_gpu_tallying_metal_k) sz_substrings_tally_metal_(tally, output.needle_index);
-            ++found;
+            if (pass == sz_substrings_gpu_tallying_metal_k) {
+                sz_substrings_tally_metal_(tally, output.needle_index);
+                ++found;
+            }
+            else
+                sz_substrings_record_metal_(automaton, sink, found, last, output.needle_index,
+                                            position + 1 - output.folded_match_bytes, output.folded_match_bytes);
         }
     }
     return found;
@@ -447,13 +522,9 @@ kernel void sz_substrings_chunk_counts_metal_kernel_(device uchar *scratch [[buf
     }
 }
 
-/**
- *  @brief Walks every chunk of every haystack, one thread per chunk, in the pass @c pass names.
- *
- *  Both passes share @c chunk_slots: sizing writes each chunk's match count into its slot, and
- *  writing reads the exclusive offset the scan left there, so every chunk owns a private output
- *  range and a write needs no atomic.
- */
+/** Walks every chunk of every haystack once, one thread per chunk, keeping the first
+ *  @c sz_substrings_kept_matches_metal_k matches per chunk inline and spilling the rest when
+ *  @c emitting is set, and writing the chunk's match count into @c chunk_slots. */
 kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
                                              device uchar const *haystacks [[buffer(2)]],
                                              device uchar const *haystacks_offsets [[buffer(14)]],
@@ -461,16 +532,15 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
                                              uint position [[thread_position_in_grid]],
                                              uint threads [[threads_per_grid]]) {
     ulong const scratch_host = arguments.scratch_host;
-    device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
-        scratch, scratch_host, arguments.report);
-    // The writing pass has nowhere to write once the sizing pass outran the budget, so
-    // it retires whole.
-    if (arguments.pass == sz_substrings_gpu_writing_metal_k && report->shortfall) return;
     sz_substrings_automaton_metal_t const automaton = sz_substrings_automaton_metal_(engine, arguments);
     sz_strings_tape_metal_t const tape = {haystacks, haystacks_offsets, arguments.haystacks_layout};
     device ulong const *chunk_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_offsets);
     device ulong *chunk_slots = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_slots);
-    device sz_match_metal_t *emitted = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host, arguments.emitted);
+    device uint *kept = arguments.emitting ? sz_reach_metal_<uint>(scratch, scratch_host, arguments.kept) : nullptr;
+    sz_substrings_sink_metal_t sink;
+    sink.stride = arguments.slots_count, sink.spills_capacity = arguments.matches_budget;
+    sink.spills = sz_reach_metal_<sz_substrings_spill_metal_t>(scratch, scratch_host, arguments.spills);
+    sink.spilled = sz_reach_metal_<atomic_uint>(scratch, scratch_host, arguments.spilled);
     ulong const chunk_count = chunk_offsets[arguments.haystacks_count];
     ulong const chunk_bytes = *sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_bytes);
 
@@ -480,19 +550,15 @@ kernel void sz_substrings_walk_metal_kernel_(device uchar *engine [[buffer(0)]],
         ulong const length = sz_strings_length_metal_(tape, haystack_index);
         ulong const chunk_begin = (chunk_index - chunk_offsets[haystack_index]) * chunk_bytes;
         ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
-        device sz_match_metal_t *matches_at_chunk = arguments.pass == sz_substrings_gpu_writing_metal_k
-                                                        ? emitted + chunk_slots[chunk_index]
-                                                        : nullptr;
         device uchar const *haystack = sz_strings_start_metal_(tape, haystack_index);
+        sink.kept = kept ? kept + chunk_index : nullptr, sink.chunk_index = chunk_index;
         ulong const found = chunk_begin >= chunk_end ? 0
                             : automaton.uncased
                                 ? sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin,
-                                                                          chunk_end, haystack_index, arguments.pass,
-                                                                          matches_at_chunk, nullptr)
+                                                                          chunk_end, arguments.pass, &sink, nullptr)
                                 : sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end,
-                                                                  haystack_index, arguments.pass, matches_at_chunk,
-                                                                  nullptr);
-        if (arguments.pass == sz_substrings_gpu_sizing_metal_k) chunk_slots[chunk_index] = found;
+                                                                  arguments.pass, &sink, nullptr);
+        chunk_slots[chunk_index] = found;
     }
 }
 
@@ -507,6 +573,50 @@ kernel void sz_substrings_sized_metal_kernel_(device uchar *scratch [[buffer(1)]
     report->matches_emitted = emitted, report->matches_stored = emitted, report->target_length = 0;
     report->shortfall = arguments.emitting && emitted > arguments.matches_budget ? emitted - arguments.matches_budget
                                                                                  : 0;
+}
+
+/** Gathers every match the sizing walk kept or spilled into @c emitted at the offset the scan left
+ *  in its chunk's slot, so a round walks its haystacks once. */
+kernel void sz_substrings_gather_metal_kernel_(device uchar *scratch [[buffer(1)]],
+                                               constant sz_substrings_arguments_metal_t &arguments [[buffer(16)]],
+                                               uint position [[thread_position_in_grid]],
+                                               uint threads [[threads_per_grid]]) {
+    ulong const scratch_host = arguments.scratch_host;
+    device sz_substrings_report_metal_t const *report = sz_reach_metal_<sz_substrings_report_metal_t>(
+        scratch, scratch_host, arguments.report);
+    if (report->shortfall) return;
+    device ulong const *chunk_offsets = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_offsets);
+    device ulong const *chunk_slots = sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_slots);
+    device uint const *kept = sz_reach_metal_<uint>(scratch, scratch_host, arguments.kept);
+    device sz_substrings_spill_metal_t const *spills = sz_reach_metal_<sz_substrings_spill_metal_t>(
+        scratch, scratch_host, arguments.spills);
+    device atomic_uint const *spilled = sz_reach_metal_<atomic_uint>(scratch, scratch_host, arguments.spilled);
+    device sz_match_metal_t *matches = sz_reach_metal_<sz_match_metal_t>(scratch, scratch_host, arguments.emitted);
+    ulong const chunk_count = chunk_offsets[arguments.haystacks_count];
+    ulong const chunk_bytes = *sz_reach_metal_<ulong>(scratch, scratch_host, arguments.chunk_bytes);
+    ulong const slots_count = arguments.slots_count;
+
+    for (ulong index = position; index < chunk_count; index += threads) {
+        ulong const offset = chunk_slots[index];
+        ulong const found = min(chunk_slots[index + 1] - offset, sz_substrings_kept_matches_metal_k);
+        if (!found) continue;
+        ulong const haystack_index = sz_substrings_last_not_above_metal_(chunk_offsets, arguments.haystacks_count,
+                                                                         index);
+        ulong const chunk_begin = (index - chunk_offsets[haystack_index]) * chunk_bytes;
+        for (ulong slot = 0; slot != found; ++slot) {
+            device uint const *entry = kept + slot * 3 * slots_count + index;
+            ulong const byte_offset = chunk_begin + ulong(long(int(entry[slots_count] - uint(chunk_begin))));
+            matches[offset + slot] = {haystack_index, entry[0], byte_offset, entry[2 * slots_count]};
+        }
+    }
+    uint const spilled_count = atomic_load_explicit(spilled, memory_order_relaxed);
+    for (ulong index = position; index < spilled_count; index += threads) {
+        sz_substrings_spill_metal_t const spill = spills[index];
+        ulong const haystack_index = sz_substrings_last_not_above_metal_(chunk_offsets, arguments.haystacks_count,
+                                                                         spill.chunk_index);
+        matches[chunk_slots[spill.chunk_index] + spill.slot] = {haystack_index, spill.needle_index, spill.byte_offset,
+                                                                spill.byte_length};
+    }
 }
 
 /** Whether @p candidate is the one a leftmost @p policy takes over @p incumbent, as
@@ -807,9 +917,8 @@ kernel void sz_substrings_rewrite_copy_metal_kernel_(
 /** Walks one haystack's share of chunks, the @p thread_index th of @p threads, into @p tally, as
  *  @c sz_substrings_bm25_walk_simt_ does. */
 inline void sz_substrings_bm25_walk_metal_(thread sz_substrings_automaton_metal_t const &automaton,
-                                           device uchar const *haystack, ulong length, ulong haystack_index,
-                                           ulong thread_index, ulong threads,
-                                           thread sz_substrings_tally_metal_t const *tally) {
+                                           device uchar const *haystack, ulong length, ulong thread_index,
+                                           ulong threads, thread sz_substrings_tally_metal_t const *tally) {
     // Never narrower than the longest match, past which a chunk re-walks more warm-up than it owns.
     ulong const warm_up = max((ulong)automaton.max_source_match_bytes, 1ul);
     ulong const chunk_bytes = max(sz_size_divide_round_up_metal_<ulong>(length, threads), warm_up);
@@ -817,11 +926,11 @@ inline void sz_substrings_bm25_walk_metal_(thread sz_substrings_automaton_metal_
     if (chunk_begin >= length) return;
     ulong const chunk_end = min(chunk_begin + chunk_bytes, length);
     if (automaton.uncased)
-        sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin, chunk_end, haystack_index,
+        sz_substrings_walk_chunk_uncased_metal_(automaton, haystack, length, chunk_begin, chunk_end,
                                                 sz_substrings_gpu_tallying_metal_k, nullptr, tally);
     else
-        sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end, haystack_index,
-                                        sz_substrings_gpu_tallying_metal_k, nullptr, tally);
+        sz_substrings_walk_chunk_metal_(automaton, haystack, chunk_begin, chunk_end, sz_substrings_gpu_tallying_metal_k,
+                                        nullptr, tally);
 }
 
 /** Sums the terms of the threadgroup's own @p tally in fixed point into @p score, zeroing every
@@ -905,8 +1014,8 @@ kernel void sz_substrings_bm25_metal_kernel_(
         float const norm = normalization > 0
                                ? 1 - normalization + normalization * document_length / arguments.average_length
                                : 1.0f;
-        sz_substrings_bm25_walk_metal_(automaton, sz_strings_start_metal_(tape, haystack_index), length, haystack_index,
-                                       lane, width, &tally);
+        sz_substrings_bm25_walk_metal_(automaton, sz_strings_start_metal_(tape, haystack_index), length, lane, width,
+                                       &tally);
         threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
         sz_substrings_bm25_score_metal_(&tally, table_slots, needles_count, saturation, norm, weights, partials, lane,
                                         width, scores + haystack_index * arguments.scores_stride);
