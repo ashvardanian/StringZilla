@@ -625,6 +625,8 @@ jobs:
           # Testable once the extension delay-loads `nvcuda.dll`.
           CIBW_TEST_SKIP: "*-win_amd64"
           SZ_TARGET: stringzillas-cuda
+          # CUDA 12.9 predates the hosted runner's MSVC; scope the override to these wheels.
+          NVCC_PREPEND_FLAGS: "-allow-unsupported-compiler"
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
