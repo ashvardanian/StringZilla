@@ -65,7 +65,6 @@ assert isinstance(text.address, int)
 It is produced by the splitting and sorting methods, and can also be built directly from a `list`, `tuple`, generator, or a `pyarrow.Array`.
 With `view=True` it references the original data instead of copying it.
 
-
 `Strs` keeps its parts on a single contiguous "tape" with an offsets array, so `sorted`, `argsort`, `intersect`, `sample`, and `shuffled` reorder offsets rather than bytes.
 This layout is also dramatically more memory-efficient than a Python `list` of `str`.
 Every part lives on one shared byte tape alongside a compact offsets array, so N substrings cost roughly one allocation, whereas a `list` of `str` holds N separately heap-allocated objects, each carrying a PyObject header, a hash cache, and per-object allocator overhead.
@@ -263,10 +262,14 @@ assert sz.Str("hi!!").rstrip("!") == "hi"
 
 ### Translating
 
-`translate(table, inplace=False, start=0, end=len)` applies a byte-to-byte mapping in a single pass.
+`translate(table, inplace=False, start=0, end=len, *, out=None)` applies a byte-to-byte mapping in a single pass.
 `table` is either a 256-byte string/bytes lookup table or a `dict` mapping bytes to bytes.
-With `inplace=True` the buffer is rewritten in place and `None` is returned; otherwise a new `bytes`/`str` is returned.
 A non-256-byte table raises `ValueError`; a non-string, non-dict table raises `TypeError`.
+
+Without `out`, the call returns a new `bytes`/`str`, or rewrites the input and returns `None` with `inplace=True`.
+Pass a writable, C-contiguous byte buffer as `out` to write into caller-owned storage and return that same object.
+It must hold at least the selected input length; extra bytes remain untouched.
+Exact aliasing is supported, but partial overlap and combining `out` with `inplace=True` raise `ValueError`.
 
 ```python
 import stringzilla as sz
@@ -275,6 +278,10 @@ assert sz.Str("abc").translate({"a": "A"}) == b"Abc"
 
 table = bytes(range(256)).translate(bytes.maketrans(b"abc", b"ABC"))
 assert sz.Str("cabbage").translate(table) == b"CABBAge"
+
+out = bytearray(7)
+assert sz.translate(b"cabbage", table, out=out) is out
+assert out == b"CABBAge"
 ```
 
 ### Decoding
