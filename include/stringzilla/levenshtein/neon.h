@@ -52,7 +52,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_steps_neon_(sz_levenshtein_u64x2_st
         for (sz_size_t reg = 0; reg != registers; ++reg) {
             sz_levenshtein_u64x2_state_neon_t *state = states + reg;
             sz_levenshtein_u64x2_vertical_neon_t *vertical = verticals + reg * words + word;
-            sz_u64_t const masks[2] = {rows[reg * 2][word], rows[reg * 2 + 1][word]};
+            sz_u64_t const masks[2] = {rows[reg * 2][word * query->stride], rows[reg * 2 + 1][word * query->stride]};
             uint64x2_t const equality_u64x2 = vld1q_u64(masks);
             uint64x2_t const vertical_carry_u64x2 = vorrq_u64(equality_u64x2, vertical->negative_vec.u64x2);
             uint64x2_t const matched_u64x2 = vorrq_u64(equality_u64x2, negative_carry_u64x2[reg]);
@@ -89,8 +89,8 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_step_neon_(sz_levenshtein_u64x2_sta
                                                         sz_levenshtein_u64x2_vertical_neon_t *verticals,
                                                         sz_size_t words, sz_levenshtein_query_t const *query,
                                                         sz_u128_vec_t classes_vec) {
-    sz_u64_t const *rows[2] = {query->masks + vgetq_lane_u64(classes_vec.u64x2, 0) * query->stride,
-                               query->masks + vgetq_lane_u64(classes_vec.u64x2, 1) * query->stride};
+    sz_u64_t const *rows[2] = {query->masks + vgetq_lane_u64(classes_vec.u64x2, 0),
+                               query->masks + vgetq_lane_u64(classes_vec.u64x2, 1)};
     sz_levenshtein_u64x2_steps_neon_(state, verticals, words, query, rows, 1);
 }
 
@@ -264,7 +264,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t 
             for (; position != run_end; ++position) {
                 sz_u64_t const *rows[candidates_per_position_k];
                 for (sz_size_t candidate = 0; candidate != registers * 2; ++candidate)
-                    rows[candidate] = query->masks + transpose_classes[position][candidate] * query->stride;
+                    rows[candidate] = query->masks + transpose_classes[position][candidate];
                 sz_levenshtein_u64x2_steps_neon_(states, verticals, words, query, rows, registers);
             }
             if (position == filled) break;
@@ -318,9 +318,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_distances_neon_(sz_levenshtein_quer
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 sweep_symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, sweep_symbol_counts, distances);
+        if (!sweep_count) continue;
         if (words == 1)
             sz_levenshtein_u64x2_sweep_neon_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
                                              radius, resident_verticals, 1, sweep_distances);

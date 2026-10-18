@@ -95,17 +95,17 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x8_step_skylake_(sz_levenshtein_u64x8_
                                                            sz_size_t words, sz_levenshtein_query_t const *query,
                                                            sz_u512_vec_t classes_vec) {
     enum { ternary_xor_or_k = 0xBE, ternary_or_nor_k = 0xF1 };
-    sz_u512_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
+    sz_u512_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec;
     last_symbol_bit_vec.zmm = _mm512_set1_epi64((long long)sz_levenshtein_last_symbol_bit_(query->length));
     last_symbol_shift_vec.zmm = _mm512_set1_epi64((long long)sz_levenshtein_last_symbol_shift_(query->length));
     positive_carry_vec.zmm = _mm512_set1_epi64(1);
     negative_carry_vec.zmm = _mm512_setzero_si512();
-    rows_vec.zmm = _mm512_mul_epu32(classes_vec.zmm, _mm512_set1_epi64((long long)query->stride));
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x8_vertical_skylake_t *const vertical = verticals + word;
         sz_u512_vec_t equality_vec, vertical_carry_vec, matched_vec, sum_vec, diagonal_vec;
         sz_u512_vec_t horizontal_positive_vec, horizontal_negative_vec, next_positive_vec, next_negative_vec;
-        equality_vec.zmm = _mm512_i64gather_epi64(rows_vec.zmm, query->masks + word, 8);
+        // A word's classes sit side by side, so a lane's class indexes that word's table directly.
+        equality_vec.zmm = _mm512_i64gather_epi64(classes_vec.zmm, query->masks + word * query->stride, 8);
         vertical_carry_vec.zmm = _mm512_or_si512(equality_vec.zmm, vertical->negative_vec.zmm);
         matched_vec.zmm = _mm512_or_si512(equality_vec.zmm, negative_carry_vec.zmm);
         sum_vec.zmm = _mm512_add_epi64(_mm512_and_si512(matched_vec.zmm, vertical->positive_vec.zmm),
@@ -325,9 +325,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x8_distances_skylake_(
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 sweep_symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, sweep_symbol_counts, distances);
+        if (!sweep_count) continue;
         if (words == 1)
             sz_levenshtein_u64x8_sweep_skylake_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
                                                 width, radius, resident_verticals, 1, sweep_distances);

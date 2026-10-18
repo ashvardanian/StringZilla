@@ -95,17 +95,18 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_step_haswell_(sz_levenshtein_u64x4_
                                                            sz_levenshtein_u64x4_vertical_haswell_t *verticals,
                                                            sz_size_t words, sz_levenshtein_query_t const *query,
                                                            sz_u256_vec_t classes_vec) {
-    sz_u256_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec, rows_vec;
+    sz_u256_vec_t last_symbol_bit_vec, last_symbol_shift_vec, positive_carry_vec, negative_carry_vec;
     last_symbol_bit_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_bit_(query->length));
     last_symbol_shift_vec.ymm = _mm256_set1_epi64x((long long)sz_levenshtein_last_symbol_shift_(query->length));
     positive_carry_vec.ymm = _mm256_set1_epi64x(1);
     negative_carry_vec.ymm = _mm256_setzero_si256();
-    rows_vec.ymm = _mm256_mul_epu32(classes_vec.ymm, _mm256_set1_epi64x((long long)query->stride));
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x4_vertical_haswell_t *const vertical = verticals + word;
         sz_u256_vec_t equality_vec, vertical_carry_vec, matched_vec, sum_vec, diagonal_vec;
         sz_u256_vec_t horizontal_positive_vec, horizontal_negative_vec, next_positive_vec, next_negative_vec;
-        equality_vec.ymm = _mm256_i64gather_epi64((long long const *)(query->masks + word), rows_vec.ymm, 8);
+        // A word's classes sit side by side, so a lane's class indexes that word's table directly.
+        equality_vec.ymm = _mm256_i64gather_epi64((long long const *)(query->masks + word * query->stride),
+                                                  classes_vec.ymm, 8);
         vertical_carry_vec.ymm = _mm256_or_si256(equality_vec.ymm, vertical->negative_vec.ymm);
         matched_vec.ymm = _mm256_or_si256(equality_vec.ymm, negative_carry_vec.ymm);
         sum_vec.ymm = _mm256_add_epi64(_mm256_and_si256(matched_vec.ymm, vertical->positive_vec.ymm),
@@ -325,9 +326,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_distances_haswell_(
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 sweep_symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, sweep_symbol_counts, distances);
+        if (!sweep_count) continue;
         if (words == 1)
             sz_levenshtein_u64x4_sweep_haswell_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
                                                 width, radius, resident_verticals, 1, sweep_distances);

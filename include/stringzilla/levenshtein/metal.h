@@ -245,8 +245,8 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     if (aligned_head_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes ||
         text_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes - aligned_head_bytes)
         return sz_metal_commit_(&call, sz_unexpected_dimensions_k);
-    status = sz_levenshtein_engine_build_(queries, symbol, aligned_head_bytes + offsets_bytes + text_bytes, &unified,
-                                          stream, engine);
+    status = sz_levenshtein_engine_build_(queries, symbol, sz_cap_metal_k,
+                                          aligned_head_bytes + offsets_bytes + text_bytes, &unified, stream, engine);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
     sz_metal_bound_t memory;
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &memory))
@@ -273,7 +273,6 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_metal(sz_levenshtein_engi
     }
     offsets[queries->count] = cursor;
     sz_levenshtein_engine_fill_(engine, queries);
-    engine->capability = sz_cap_metal_k;
     return sz_metal_commit_(&call, sz_success_k);
 }
 

@@ -84,7 +84,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u8x64_pack_icelake_(sz_levenshtein_query_
     sz_u512_vec_t masks_vec;
     masks_vec.zmm = _mm512_setzero_si512();
     for (sz_size_t class_id = 0; class_id != query->classes; ++class_id)
-        masks_vec.u8s[class_id] = (sz_u8_t)query->masks[class_id * query->stride];
+        masks_vec.u8s[class_id] = (sz_u8_t)query->masks[class_id];
     packed->masks_vec = masks_vec;
     packed->last_symbol_bit_vec.zmm = _mm512_set1_epi8((char)sz_levenshtein_last_symbol_bit_(query->length));
 }
@@ -327,9 +327,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u8x64_distances_icelake_(sz_levenshtein_q
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, symbol_counts, distances);
+        if (!sweep_count) continue;
         sz_levenshtein_u8x64_sweep_icelake_(query, texts, byte_counts, sweep_count, radius, sweep_distances);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
             distances[indices[candidate]] = sz_levenshtein_bounded_(sweep_distances[candidate], bound);
@@ -378,7 +379,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u16x32_pack_icelake_(sz_levenshtein_query
     sz_u512_vec_t masks_vec;
     masks_vec.zmm = _mm512_setzero_si512();
     for (sz_size_t class_id = 0; class_id != query->classes; ++class_id)
-        masks_vec.u16s[class_id] = (sz_u16_t)query->masks[class_id * query->stride];
+        masks_vec.u16s[class_id] = (sz_u16_t)query->masks[class_id];
     packed->masks_vec = masks_vec;
     packed->last_symbol_bit_vec.zmm = _mm512_set1_epi16((short)sz_levenshtein_last_symbol_bit_(query->length));
 }
@@ -595,9 +596,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u16x32_distances_icelake_(sz_levenshtein_
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, symbol_counts, distances);
+        if (!sweep_count) continue;
         sz_levenshtein_u16x32_sweep_icelake_(query, texts, byte_counts, sweep_count, radius, sweep_distances);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
             distances[indices[candidate]] = sz_levenshtein_bounded_(sweep_distances[candidate], bound);

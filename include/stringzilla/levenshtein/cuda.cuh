@@ -523,10 +523,9 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cuda_(sz_levenshtein_e
     if (head_bytes > STRINGZILLA_SIZE_MAX - offsets_bytes ||
         text_bytes > STRINGZILLA_SIZE_MAX - head_bytes - offsets_bytes)
         return sz_unexpected_dimensions_k;
-    sz_status_t status = sz_levenshtein_engine_build_(queries, symbol, head_bytes + offsets_bytes + text_bytes,
-                                                      &unified, stream, engine);
+    sz_status_t status = sz_levenshtein_engine_build_(
+        queries, symbol, entry_points->capability, head_bytes + offsets_bytes + text_bytes, &unified, stream, engine);
     if (status != sz_success_k) return status;
-    engine->capability = entry_points->capability;
     sz_levenshtein_bind_head_cuda_(engine, buckets_bound, entry_points);
     sz_levenshtein_head_cuda_t *const head = (sz_levenshtein_head_cuda_t *)engine->memory;
     head->query_offsets = (sz_size_t *)((sz_ptr_t)engine->memory + head_bytes);

@@ -3634,6 +3634,16 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
     }
     check_levenshtein_case_(backend, {wide_query},
                             {wide_query, wide_query.substr(0, 150), wide_query.substr(300), "abc", ""});
+    // Queries holding 3 to 65 distinct bytes, the absent class beside them: either edge of every
+    // width a host word's table takes, 8, 32, 64 and past it.
+    for (std::size_t const distinct : {3, 7, 8, 20, 31, 32, 39, 63, 64, 65}) {
+        std::string alphabet;
+        for (std::size_t symbol = 0; symbol != distinct; ++symbol) alphabet += static_cast<char>('!' + symbol);
+        std::string const query = alphabet + random_string(generator, 70, alphabet);
+        check_levenshtein_case_(backend, {query},
+                                {query, random_string(generator, 90, alphabet), random_string(generator, 40, "xyz~"),
+                                 query.substr(distinct)});
+    }
     check_levenshtein_case_(backend, {"abc"}, {});
     for (std::size_t round = 0; round != context.iterations(8); ++round) {
         std::vector<std::string> queries;

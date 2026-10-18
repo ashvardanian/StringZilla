@@ -674,7 +674,7 @@ check_docblock_brackets_match_content() {
                 for (closing = line; closing <= last; ++closing) {
                     if (closing in added) touched = 1
                     if (lines[closing] ~ /^[[:space:]]*(\/\*\*|\*)[[:space:]]*@(brief|param|tparam|return|returns|retval|sa|see|note|warning|throws|pre|post|file|author|date|section|subsection|code|verbatim|par|details|deprecated|warning|li)([^a-z{]|\{|$)/) tagged = 1
-                    if (lines[closing] ~ /^[[:space:]]*\*[[:space:]]+[A-Z][A-Za-z]*( [A-Za-z]+){0,2}: /) tagged = 1
+                    if (lines[closing] ~ /^[[:space:]]*\*[[:space:]]+[A-Z][A-Za-z]*( [A-Za-z]+)?( [A-Za-z]+)?: /) tagged = 1
                     if (lines[closing] ~ /^[[:space:]]*\*[[:space:]]*(```|@example)/) tagged = 1
                     if (lines[closing] ~ /\*\//) break
                 }
@@ -899,7 +899,7 @@ check_prose_paragraph_filled() {
             note_marker = ""; if (match(body, /^[?!][[:space:]]+/)) { note_marker = substr(body, 1, 1); body = substr(body, RLENGTH + 1) }
             flowing = (inside || slashed) && !in_code && body != "" && body !~ /^\||https?:\/\// &&
                 body !~ /[^[:space:]]   *[^[:space:]]/ && text !~ /@end(code|verbatim)/ && text !~ /^[[:space:]]*\/\/[[:space:]]{4,}/
-            continues = flowing && body !~ /^(@|- |[0-9]+\. |[A-Z][A-Za-z]*( [A-Za-z]+){0,2}: )/ && !opens
+            continues = flowing && body !~ /^(@|- |[0-9]+\. |[A-Z][A-Za-z]*( [A-Za-z]+)?( [A-Za-z]+)?: )/ && !opens
             if (!(continues && previous_flowing && previous_kind == (slashed ? "slashed" : "block") && previous_marker == note_marker))
                 report_paragraph_room()
             if (flowing) hold_paragraph_line(FNR, body, characters(text))
@@ -1026,7 +1026,7 @@ check_region_note_above_pragma() {
         opener_line && !indented_allowed && /^[[:space:]]*#[[:space:]]*endif/ { if (--depth == 0) { opener_line = 0; next } }
         opener_line && (/^[[:space:]]*$/ || /^[[:space:]]*#/) { guard = ""; next }
         opener_line && (indented_allowed ? /^[[:space:]]*\/\*([^*]|$)/ : /^\/\*([^*]|$)/) &&
-            $0 !~ /^[[:space:]]*\/\*[[:space:]]+[A-Z][A-Za-z-]*( [A-Za-z-]+){0,3}:[[:space:]]/ {
+            $0 !~ /^[[:space:]]*\/\*[[:space:]]+[A-Z][A-Za-z-]*( [A-Za-z-]+)?( [A-Za-z-]+)?( [A-Za-z-]+)?:[[:space:]]/ {
             pending_line = FNR; pending_opener = opener_line; note_closed = ($0 ~ /\*\//); opener_line = 0; next
         }
         { opener_line = 0 }')
@@ -1229,7 +1229,7 @@ check_no_orphan_last_line() {
             }
             previous_continues = is_comment && !in_code && previous_comment && previous_body != "" && current_body != "" &&
                 $0 !~ /^[[:space:]]*\/\/[[:space:]]{4,}/ &&
-                current_body !~ /^[[:space:]]*(@|- |[0-9]+\. |\||[A-Z][A-Za-z]*( [A-Za-z]+){0,2}: )/ && current_body !~ /[^[:space:]]   *[^[:space:]]/
+                current_body !~ /^[[:space:]]*(@|- |[0-9]+\. |\||[A-Z][A-Za-z]*( [A-Za-z]+)?( [A-Za-z]+)?: )/ && current_body !~ /[^[:space:]]   *[^[:space:]]/
             previous_comment = is_comment; previous_body = current_body; previous_line = FNR
             if ($0 ~ /@end(code|verbatim)/) in_code = 0
         }')
@@ -1394,7 +1394,7 @@ check_binding_prose_filled() {
         '"$paragraph_room_awk"'
         {
             note_marker = ""; if (match(body, /^[?!][[:space:]]+/)) { note_marker = substr(body, 1, 1); body = substr(body, RLENGTH + 1) }
-            starts_entry = (body ~ /^([-*+] |[0-9]+\. |@|#|\||[A-Z][A-Za-z]*( [A-Za-z]+){0,2}: )/) || note_marker != previous_marker
+            starts_entry = (body ~ /^([-*+] |[0-9]+\. |@|#|\||[A-Z][A-Za-z]*( [A-Za-z]+)?( [A-Za-z]+)?: )/) || note_marker != previous_marker
             flowing = commented && !in_fence && !fence_edge && body != "" && body !~ /[^[:space:]]   *[^[:space:]]/ &&
                       body !~ /https?:\/\// && body !~ /^[[:space:]]/ && body !~ /^[A-Za-z0-9_.-]+\/[^[:space:]]*$/ &&
                       body !~ /^(swift-tools-version|go:|\+build|@ts-|eslint|nolint|noqa|type: ?ignore|region |endregion|MARK:|-\*-)/

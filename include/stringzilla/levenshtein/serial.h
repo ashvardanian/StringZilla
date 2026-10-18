@@ -24,11 +24,11 @@ extern "C" {
 #pragma region Generic Public Helpers
 
 /** One query's bit-parallel state, prepared once and read by every candidate: every symbol maps to
- *  a class that indexes the match masks, a view over caller-owned memory of @c classes × stride
- *  entries with no length ceiling. */
+ *  a class that indexes the match masks, a view over caller-owned memory with no length ceiling. */
 typedef struct sz_levenshtein_query_t {
 
-    /** Row @c class * stride + word, bit @c i: symbol @c word * 64 + i is that class. */
+    /** Entry @c word * stride + class on a host tier, @c class * stride + word on a device; bit
+     *  @c i of either: symbol @c word * 64 + i is that class. */
     sz_u64_t const *masks;
 
     /** Bytes only: the mask row each of the 256 byte values reads. */
@@ -40,10 +40,12 @@ typedef struct sz_levenshtein_query_t {
     /** UTF-8 only: the rows the page table indexes, 256 classes each. */
     sz_u32_t const *class_rows;
 
-    /** Mask rows: one per distinct symbol, plus the row an absent symbol reads. */
+    /** Mask rows: one per distinct symbol, plus the row an absent symbol reads; on a host tier as
+     *  many as a word's table holds, the rows past the query's own reading zero. */
     sz_size_t classes;
 
-    /** Words from one class's row to the next: the query's words, warp padded. */
+    /** The classes of one word's table on a host tier, @ref sz_levenshtein_table_width ; the
+     *  words of one class's row on a device, warp padded. */
     sz_size_t stride;
 
     /** In symbols: bytes, or runes for a UTF-8 query. */
@@ -71,30 +73,61 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_stride(sz_size_t length) {
            ~(sz_size_t)(sz_levenshtein_words_stride_k - 1);
 }
 
-/** Mask entries a byte query of @p length bytes can take: a row per distinct byte, plus the
- *  absent byte's row. */
-STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_mask_entries(sz_size_t length) {
-    return sz_min_of_two(length + 1, (sz_size_t)sz_levenshtein_byte_classes_k) * sz_levenshtein_query_stride(length);
+/** Classes one word's mask table holds on a host tier: the query's classes rounded up to the
+ *  next of 8, 32 and 64 a register table takes, so a lookup is one, two or four table shuffles,
+ *  or to a multiple of 8 past 64, read by loads. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_table_width(sz_size_t classes) {
+    return classes <= 8 ? 8 : classes <= 32 ? 32 : classes <= 64 ? 64 : sz_size_divide_round_up(classes, 8) * 8;
 }
 
-/** Mask entries a UTF-8 query of @p runes runes can take: a row per distinct rune, plus the
- *  absent rune's row. */
+/** The stride of the mask plane of a query of @p length symbols and @p classes classes prepared for
+ *  @p capability : a host tier reads a word's classes side by side, a device a class's words. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_plane_stride_(sz_capability_t capability, sz_size_t length,
+                                                             sz_size_t classes) {
+    return (capability & sz_cap_cpus_k) != 0 ? sz_levenshtein_table_width(classes)
+                                             : sz_levenshtein_query_stride(length);
+}
+
+/** Entries the mask plane of a query of @p length symbols and @p classes classes takes on
+ *  @p capability . */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_plane_entries_(sz_capability_t capability, sz_size_t length,
+                                                              sz_size_t classes) {
+    return (capability & sz_cap_cpus_k) != 0 ? sz_levenshtein_query_words(length) * sz_levenshtein_table_width(classes)
+                                             : classes * sz_levenshtein_query_stride(length);
+}
+
+/** The entry of @p class_id 's mask at @p word in a plane of @p stride for @p capability . */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_plane_entry_(sz_capability_t capability, sz_size_t stride,
+                                                            sz_size_t class_id, sz_size_t word) {
+    return (capability & sz_cap_cpus_k) != 0 ? word * stride + class_id : class_id * stride + word;
+}
+
+/** Mask entries a byte query of @p length bytes can take on the host: a word's table holding a
+ *  class per distinct byte, plus the absent byte's. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_mask_entries(sz_size_t length) {
+    return sz_levenshtein_plane_entries_(sz_cap_serial_k, length,
+                                         sz_min_of_two(length + 1, (sz_size_t)sz_levenshtein_byte_classes_k));
+}
+
+/** Mask entries a UTF-8 query of @p runes runes can take on the host: a word's table holding a
+ *  class per distinct rune, plus the absent rune's. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_mask_entries_utf8(sz_size_t runes) {
-    return (runes + 1) * sz_levenshtein_query_stride(runes);
+    return sz_levenshtein_plane_entries_(sz_cap_serial_k, runes, runes + 1);
 }
 
 /**
- *  @brief Builds the match masks of the byte string @p text into @p masks and points
- *      @p query at them.
+ *  @brief Builds the match masks of the byte string @p text into @p masks, a host tier's word-major
+ *      tables, and points @p query at them.
  *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries(length) entries, of which
- *      the first @c classes × stride are written.
+ *      the first @c words × stride are written.
  *  @param[out] byte_to_class Caller-owned, @c sz_levenshtein_byte_classes_k entries; the
  *      transposes read it.
  *  @return @c sz_success_k, or @c sz_unexpected_dimensions_k for an empty query, whose distance is
  *      every candidate's length.
  */
-STRINGZILLA_CONSTEXPR sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
-                                                               sz_u8_t *byte_to_class, sz_levenshtein_query_t *query) {
+STRINGZILLA_CONSTEXPR sz_status_t sz_levenshtein_query_prepare_(sz_cptr_t text, sz_size_t length,
+                                                                sz_capability_t capability, sz_u64_t *masks,
+                                                                sz_u8_t *byte_to_class, sz_levenshtein_query_t *query) {
     if (length == 0) return sz_unexpected_dimensions_k;
     // First pass: flag the byte values the query holds, then hand them dense classes in byte order. The row past
     // them is what a byte the query lacks reads, and a query holding all 256 values has no such byte.
@@ -105,21 +138,26 @@ STRINGZILLA_CONSTEXPR sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, s
     sz_size_t const classes = sz_min_of_two(distinct + 1, (sz_size_t)sz_levenshtein_byte_classes_k);
     for (sz_size_t byte = 0, next_class = 0; byte != sz_levenshtein_byte_classes_k; ++byte)
         byte_to_class[byte] = byte_to_class[byte] ? (sz_u8_t)next_class++ : (sz_u8_t)(classes - 1);
-    // Second pass: the row stride is known, so every byte sets its bit in its class's row.
-    sz_size_t const stride = sz_levenshtein_query_stride(length);
-    for (sz_size_t entry = 0; entry != classes * stride; ++entry) masks[entry] = 0;
-    for (sz_size_t position = 0; position != length; ++position) {
-        sz_u64_t *const row = masks + (sz_size_t)byte_to_class[(sz_u8_t)text[position]] * stride;
-        row[position >> 6] |= (sz_u64_t)1 << (position & 63);
-    }
+    // Second pass: the plane's stride is known, so every byte sets its bit in its class's mask.
+    sz_size_t const stride = sz_levenshtein_plane_stride_(capability, length, classes);
+    sz_size_t const entries = sz_levenshtein_plane_entries_(capability, length, classes);
+    for (sz_size_t entry = 0; entry != entries; ++entry) masks[entry] = 0;
+    for (sz_size_t position = 0; position != length; ++position)
+        masks[sz_levenshtein_plane_entry_(capability, stride, byte_to_class[(sz_u8_t)text[position]], position >> 6)] |=
+            (sz_u64_t)1 << (position & 63);
     query->masks = masks;
     query->byte_to_class = byte_to_class;
     query->page_rows = STRINGZILLA_NULL;
     query->class_rows = STRINGZILLA_NULL;
-    query->classes = classes;
+    query->classes = (capability & sz_cap_cpus_k) != 0 ? stride : classes;
     query->stride = stride;
     query->length = length;
     return sz_success_k;
+}
+
+STRINGZILLA_CONSTEXPR sz_status_t sz_levenshtein_query_prepare(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
+                                                               sz_u8_t *byte_to_class, sz_levenshtein_query_t *query) {
+    return sz_levenshtein_query_prepare_(text, length, sz_cap_serial_k, masks, byte_to_class, query);
 }
 
 /** Unicode as 256-rune pages: the page table a UTF-8 query indexes by @c rune >> 8. Its
@@ -147,6 +185,15 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_runes(sz_cptr_t text, sz_size_t
     return sz_levenshtein_utf8_runes_(text, length);
 }
 
+/** The fewest edits between a query of @p query_length symbols and a text of @p bytes bytes
+ *  under @p symbol: their lengths' difference, as a UTF-8 text holds between a quarter of its
+ *  bytes and all of them in runes. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_length_gap(sz_levenshtein_symbol_t symbol, sz_size_t query_length,
+                                                          sz_size_t bytes) {
+    sz_size_t const fewest = symbol == sz_levenshtein_runes_k ? sz_size_divide_round_up(bytes, 4) : bytes;
+    return fewest > query_length ? fewest - query_length : query_length > bytes ? query_length - bytes : 0;
+}
+
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_pages_bytes_(sz_size_t runes) {
     sz_size_t const rows = sz_min_of_two(runes, (sz_size_t)sz_levenshtein_utf8_pages_k) + 1;
     return sz_levenshtein_utf8_pages_k * sizeof(sz_u16_t) + rows * 256 * sizeof(sz_u32_t);
@@ -162,7 +209,8 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_pages_bytes(sz_size_t runes) {
     return sz_levenshtein_utf8_pages_bytes_(runes);
 }
 
-STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
+STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text, sz_size_t length,
+                                                                  sz_capability_t capability, sz_u64_t *masks,
                                                                   void *pages, sz_levenshtein_query_t *query) {
     if (length == 0) return sz_unexpected_dimensions_k;
     sz_u16_t *const page_rows = (sz_u16_t *)pages;
@@ -182,15 +230,16 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
     }
     query->page_rows = page_rows;
     query->class_rows = class_rows;
-    query->classes = classes;
-    sz_size_t const stride = sz_levenshtein_query_stride(count);
-    for (sz_size_t entry = 0; entry != classes * stride; ++entry) masks[entry] = 0;
-    // Second pass: the row stride is known, so every rune sets its bit in its class's row.
+    sz_size_t const stride = sz_levenshtein_plane_stride_(capability, count, classes);
+    sz_size_t const entries = sz_levenshtein_plane_entries_(capability, count, classes);
+    query->classes = (capability & sz_cap_cpus_k) != 0 ? stride : classes;
+    for (sz_size_t entry = 0; entry != entries; ++entry) masks[entry] = 0;
+    // Second pass: the plane's stride is known, so every rune sets its bit in its class's mask.
     sz_size_t rune_index = 0;
     for (sz_size_t position = 0; position < length; ++rune_index) {
         sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
-        sz_u64_t *const row = masks + (sz_size_t)sz_levenshtein_utf8_class(query, rune) * stride;
-        row[rune_index >> 6] |= (sz_u64_t)1 << (rune_index & 63);
+        masks[sz_levenshtein_plane_entry_(capability, stride, sz_levenshtein_utf8_class(query, rune),
+                                          rune_index >> 6)] |= (sz_u64_t)1 << (rune_index & 63);
     }
     query->masks = masks;
     query->byte_to_class = STRINGZILLA_NULL;
@@ -200,10 +249,11 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
 }
 
 /**
- *  @brief Builds the match masks of the UTF-8 string @p text into @p masks, its rune classes into
- *      the page table at @p pages, and points @p query at both. Classes follow first appearance.
+ *  @brief Builds the match masks of the UTF-8 string @p text into @p masks, a host tier's
+ *      word-major tables, its rune classes into the page table at @p pages, and points @p query at
+ *      both. Classes follow first appearance.
  *  @param[out] masks Caller-owned, @c sz_levenshtein_query_mask_entries_utf8(runes) entries for a
- *      query of @c runes runes, of which the first @c classes × stride are written.
+ *      query of @c runes runes, of which the first @c words × stride are written.
  *  @param[out] pages Caller-owned, @c sz_levenshtein_utf8_pages_bytes(runes)
  *      bytes, cache-line aligned.
  *  @return @c sz_success_k, or @c sz_unexpected_dimensions_k for an empty query, whose distance is
@@ -211,7 +261,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
  */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8(sz_cptr_t text, sz_size_t length, sz_u64_t *masks,
                                                                  void *pages, sz_levenshtein_query_t *query) {
-    return sz_levenshtein_query_prepare_utf8_(text, length, masks, pages, query);
+    return sz_levenshtein_query_prepare_utf8_(text, length, sz_cap_serial_k, masks, pages, query);
 }
 
 /** Positions one transpose spans: a candidate's classes are emitted this many at
@@ -555,8 +605,11 @@ STRINGZILLA_CONSTEXPR sz_levenshtein_query_t sz_levenshtein_engine_row_(sz_leven
     sz_levenshtein_query_t row = {STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
     row.masks = engine->masks + engine->masks_offsets[index];
     row.length = engine->lengths[index];
-    row.stride = sz_levenshtein_query_stride(row.length);
-    row.classes = row.stride ? (engine->masks_offsets[index + 1] - engine->masks_offsets[index]) / row.stride : 0;
+    // A host plane holds a table per query word, a device plane a row per class.
+    sz_size_t const entries = engine->masks_offsets[index + 1] - engine->masks_offsets[index];
+    sz_size_t const words = sz_levenshtein_query_words(row.length);
+    if ((engine->capability & sz_cap_cpus_k) != 0) row.stride = words ? entries / words : 0, row.classes = row.stride;
+    else row.stride = sz_levenshtein_query_stride(row.length), row.classes = row.stride ? entries / row.stride : 0;
     if (engine->symbol == sz_levenshtein_bytes_k) {
         row.byte_to_class = (sz_u8_t const *)engine->symbol_to_class + index * sz_levenshtein_byte_classes_k;
         row.page_rows = STRINGZILLA_NULL, row.class_rows = STRINGZILLA_NULL;
@@ -601,18 +654,13 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_engine_verticals_bytes_(sz_size_t
     return 64 + registers_per_position * words * vertical_bytes;
 }
 
-/** Minimum candidate count at which a host round buckets candidates by length before sweeping. */
-enum { sz_levenshtein_order_candidates_min_k = 64 };
-
-/** Bytes one round's scratch takes: the aligned verticals, then the candidate length order unless
- *  the caller brought its own @p order. */
+/** Bytes one round's scratch takes: the aligned verticals, then the candidates' byte lengths and
+ *  the two halves their ascending order bounces between, unless the caller brought its own
+ *  @p order. */
 STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_engine_round_bytes_(sz_size_t verticals_bytes,
                                                                    sz_size_t candidates_count, sz_size_t const *order) {
     sz_size_t const aligned_verticals = sz_levenshtein_align64_(verticals_bytes);
-    sz_size_t const order_bytes = !order && candidates_count > sz_levenshtein_order_candidates_min_k
-                                      ? candidates_count * sizeof(sz_size_t)
-                                      : 0;
-    return aligned_verticals + order_bytes;
+    return aligned_verticals + (order ? 0 : 3 * candidates_count * sizeof(sz_size_t));
 }
 
 /** The round's verticals, cache-line aligned inside the block the round grew for them. */
@@ -620,35 +668,42 @@ STRINGZILLA_INLINE void *sz_levenshtein_engine_verticals_(sz_levenshtein_engine_
     return (void *)sz_levenshtein_align64_((sz_size_t)engine->scratch);
 }
 
-/** The caller's @p order, or @p candidates ordered by @ref sz_levenshtein_length_bucket_ into the
- *  round's scratch past its verticals, or @c STRINGZILLA_NULL when the batch is narrow enough to
- *  sweep in place. */
+/** The caller's @p order, or @p candidates ascending by byte length in the round's scratch past
+ *  its verticals: a stable LSD radix visiting only the bytes of the lengths that differ across the
+ *  round, so lengths under 256 cost one counting pass and one scatter. */
 STRINGZILLA_INLINE sz_size_t const *sz_levenshtein_engine_order_(sz_levenshtein_engine_t const *engine,
                                                                  sz_size_t verticals_bytes,
                                                                  sz_strings_view_t const *candidates,
                                                                  sz_size_t const *order) {
     if (order) return order;
-    if (candidates->count <= sz_levenshtein_order_candidates_min_k) return STRINGZILLA_NULL;
-    sz_size_t const aligned_verticals = sz_levenshtein_align64_(verticals_bytes);
-    sz_size_t *const length_order = (sz_size_t *)((sz_ptr_t)engine->scratch + aligned_verticals);
-    sz_size_t counts[sz_levenshtein_length_buckets_k] = {0};
+    sz_size_t const count = candidates->count;
+    sz_size_t *const lengths = (sz_size_t *)((sz_ptr_t)engine->scratch + sz_levenshtein_align64_(verticals_bytes));
+    sz_size_t *source = lengths + count, *target = source + count;
+    sz_size_t all_ones = ~(sz_size_t)0, any_ones = 0;
     sz_string_view_t views[64];
-    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
+    for (sz_size_t block_start = 0; block_start < count; block_start += 64) {
         sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
-        for (sz_size_t position = 0; position != block_count; ++position)
-            ++counts[sz_levenshtein_length_bucket_(views[position].length)];
+        for (sz_size_t position = 0; position != block_count; ++position) {
+            sz_size_t const length = views[position].length;
+            lengths[block_start + position] = length, source[block_start + position] = block_start + position;
+            all_ones &= length, any_ones |= length;
+        }
     }
-    sz_size_t cursors[sz_levenshtein_length_buckets_k];
-    for (sz_size_t bucket = 0, offset = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket) {
-        cursors[bucket] = offset;
-        offset += counts[bucket];
+    sz_size_t const varying = all_ones ^ any_ones;
+    for (sz_size_t shift = 0; shift != sizeof(sz_size_t) * 8; shift += 8) {
+        if (((varying >> shift) & 0xFF) == 0) continue;
+        sz_size_t offsets[256] = {0};
+        for (sz_size_t rank = 0; rank != count; ++rank) ++offsets[(lengths[source[rank]] >> shift) & 0xFF];
+        for (sz_size_t digit = 0, running = 0; digit != 256; ++digit) {
+            sz_size_t const bucket = offsets[digit];
+            offsets[digit] = running, running += bucket;
+        }
+        for (sz_size_t rank = 0; rank != count; ++rank)
+            target[offsets[(lengths[source[rank]] >> shift) & 0xFF]++] = source[rank];
+        sz_size_t *const sorted = target;
+        target = source, source = sorted;
     }
-    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
-        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
-        for (sz_size_t position = 0; position != block_count; ++position)
-            length_order[cursors[sz_levenshtein_length_bucket_(views[position].length)]++] = block_start + position;
-    }
-    return length_order;
+    return source;
 }
 
 /** Grows @p engine 's round block to @p bytes, which a round does once and never undoes. */
@@ -761,18 +816,19 @@ STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_engine_layout_add_(sz_size_t byte
 }
 
 /** Lays @p count queries of the given @p shapes out inside one block, after a tier's
- *  own @p head_bytes. */
+ *  own @p head_bytes, their mask planes as @p capability reads them. */
 STRINGZILLA_CONSTEXPR sz_bool_t sz_levenshtein_engine_layout_(sz_size_t count, sz_levenshtein_symbol_t symbol,
+                                                              sz_capability_t capability,
                                                               sz_levenshtein_engine_shape_t const *shapes,
                                                               sz_size_t head_bytes,
                                                               sz_levenshtein_engine_layout_t *layout) {
     if (count > STRINGZILLA_SIZE_MAX / sizeof(sz_size_t) - 1) return sz_false_k;
     sz_size_t words = 0, rows = 0;
     for (sz_size_t index = 0; index != count; ++index) {
-        sz_size_t const stride = sz_levenshtein_query_stride(shapes[index].length);
-        if (stride && shapes[index].classes > (STRINGZILLA_SIZE_MAX / sizeof(sz_u64_t) - words) / stride)
-            return sz_false_k;
-        words += (sz_size_t)shapes[index].classes * stride;
+        sz_size_t const entries = sz_levenshtein_plane_entries_(capability, shapes[index].length,
+                                                                shapes[index].classes);
+        if (entries > STRINGZILLA_SIZE_MAX / sizeof(sz_u64_t) - words) return sz_false_k;
+        words += entries;
         if (shapes[index].rows > STRINGZILLA_SIZE_MAX / (256 * sizeof(sz_u32_t)) - rows) return sz_false_k;
         rows += shapes[index].rows;
     }
@@ -818,7 +874,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_bind_(sz_levenshtein_engine_t *eng
     for (sz_size_t index = 0; index != engine->count; ++index) {
         offsets[index] = words;
         lengths[index] = shapes[index].length;
-        words += (sz_size_t)shapes[index].classes * sz_levenshtein_query_stride(shapes[index].length);
+        words += sz_levenshtein_plane_entries_(engine->capability, shapes[index].length, shapes[index].classes);
     }
     offsets[engine->count] = words;
     engine->masks = (sz_u64_t const *)(block + layout->masks_offset);
@@ -855,21 +911,22 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
             if (engine->symbol == sz_levenshtein_bytes_k) {
                 sz_u8_t *const byte_to_class = (sz_u8_t *)engine->symbol_to_class +
                                                index * sz_levenshtein_byte_classes_k;
-                sz_levenshtein_query_prepare(text, bytes, plane, byte_to_class, &prepared);
+                sz_levenshtein_query_prepare_(text, bytes, engine->capability, plane, byte_to_class, &prepared);
                 continue;
             }
             sz_levenshtein_query_t const row = sz_levenshtein_engine_row_(engine, index);
-            sz_levenshtein_query_prepare_utf8_(text, bytes, plane, (void *)row.page_rows, &prepared);
+            sz_levenshtein_query_prepare_utf8_(text, bytes, engine->capability, plane, (void *)row.page_rows,
+                                               &prepared);
         }
     }
 }
 
-/** Sizes @p engine 's batch block through @p allocator and binds its tensors, leaving
- *  the planes unwritten. */
+/** Sizes @p engine 's batch block through @p allocator and binds its tensors, leaving the planes
+ *  unwritten and laid out as @p capability , which the engine records, reads them. */
 STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_strings_view_t const *queries,
-                                                            sz_levenshtein_symbol_t symbol, sz_size_t head_bytes,
-                                                            sz_allocator_t const *allocator, sz_stream_t stream,
-                                                            sz_levenshtein_engine_t *engine) {
+                                                            sz_levenshtein_symbol_t symbol, sz_capability_t capability,
+                                                            sz_size_t head_bytes, sz_allocator_t const *allocator,
+                                                            sz_stream_t stream, sz_levenshtein_engine_t *engine) {
     sz_size_t const count = queries->count;
     if (count > STRINGZILLA_SIZE_MAX / sizeof(sz_levenshtein_engine_shape_t)) return sz_unexpected_dimensions_k;
     sz_size_t const shapes_bytes = (count != 0 ? count : 1) * sizeof(sz_levenshtein_engine_shape_t);
@@ -883,7 +940,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_strings_view_t co
     }
 
     sz_levenshtein_engine_layout_t layout;
-    if (!sz_levenshtein_engine_layout_(count, symbol, shapes, head_bytes, &layout)) {
+    if (!sz_levenshtein_engine_layout_(count, symbol, capability, shapes, head_bytes, &layout)) {
         allocator->free(shapes, shapes_bytes, allocator->handle, stream);
         return sz_unexpected_dimensions_k;
     }
@@ -895,7 +952,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_build_(sz_strings_view_t co
 
     engine->count = count;
     engine->symbol = symbol;
-    engine->capability = sz_cap_serial_k;
+    engine->capability = capability;
     engine->allocator = *allocator;
     engine->memory = block;
     engine->memory_bytes = layout.total_bytes;
@@ -920,10 +977,9 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_init_cpu_(sz_levenshtein_en
         sz_status_t const status = sz_allocator_init_heap(&host);
         if (status != sz_success_k) return status;
     }
-    sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, 0, &host, stream, engine);
+    sz_status_t const built = sz_levenshtein_engine_build_(queries, symbol, capability, 0, &host, stream, engine);
     if (built != sz_success_k) return built;
     sz_levenshtein_engine_fill_(engine, queries);
-    engine->capability = capability;
     return sz_success_k;
 }
 
@@ -986,13 +1042,13 @@ STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1
                                                             sz_levenshtein_u64x1_vertical_serial_t *verticals,
                                                             sz_size_t words, sz_levenshtein_query_t const *query,
                                                             sz_u32_t class_id) {
-    sz_u64_t const *const masks = query->masks + (sz_size_t)class_id * query->stride;
+    sz_u64_t const *const masks = query->masks + class_id;
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query->length);
     // The top boundary: the row above the first word is one edit higher than the cell to its left.
     sz_u64_t positive_carry = 1, negative_carry = 0;
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x1_vertical_serial_t *const vertical = verticals + word;
-        sz_u64_t const equality = masks[word];
+        sz_u64_t const equality = masks[word * query->stride];
         sz_u64_t const vertical_carry = equality | vertical->negative;
         sz_u64_t const matched = equality | negative_carry;
         sz_u64_t const diagonal = (((matched & vertical->positive) + vertical->positive) ^ vertical->positive) |
@@ -1115,23 +1171,34 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_sweep_serial_(sz_levenshtein_query_
     }
 }
 
-/** Seeds one sweep of up to @p capacity candidates, taken in @p order from @p candidates past
- *  @p sweep_first: their texts, their byte counts, and their symbol counts, the caller's when it
- *  has them and the byte counts otherwise. Answers the sweep's candidate count. */
+/** Seeds one sweep from the next @p capacity candidates in @p order from @p candidates past
+ *  @p sweep_first, answering how many it holds: their texts, their byte counts, and their symbol
+ *  counts, the caller's when it has them and the byte counts otherwise. A candidate whose length
+ *  alone puts it past @p bound from @p query reports @p bound + 1 into @p distances instead. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_sweep_seed_(sz_strings_view_t const *candidates,
                                                         sz_size_t const *symbol_counts, sz_size_t const *order,
+                                                        sz_levenshtein_query_t const *query, sz_size_t bound,
                                                         sz_size_t sweep_first, sz_size_t capacity, sz_size_t *indices,
                                                         sz_cptr_t *texts, sz_u64_t *byte_counts,
-                                                        sz_u64_t *sweep_symbol_counts) {
-    sz_size_t const sweep_count = sz_min_of_two(capacity, candidates->count - sweep_first);
+                                                        sz_u64_t *sweep_symbol_counts, sz_size_t *distances) {
+    sz_size_t const offered = sz_min_of_two(capacity, candidates->count - sweep_first);
+    sz_levenshtein_symbol_t const symbol = query->page_rows ? sz_levenshtein_runes_k : sz_levenshtein_bytes_k;
+    sz_size_t offered_indices[64];
     sz_string_view_t views[64];
-    for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
-        indices[candidate] = order ? order[sweep_first + candidate] : sweep_first + candidate;
-    sz_strings_get_(candidates, indices, sweep_count, views);
-    for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate) {
-        texts[candidate] = views[candidate].start;
-        byte_counts[candidate] = views[candidate].length;
-        sweep_symbol_counts[candidate] = symbol_counts ? symbol_counts[indices[candidate]] : views[candidate].length;
+    for (sz_size_t candidate = 0; candidate != offered; ++candidate)
+        offered_indices[candidate] = order ? order[sweep_first + candidate] : sweep_first + candidate;
+    sz_strings_get_(candidates, offered_indices, offered, views);
+    sz_size_t sweep_count = 0;
+    for (sz_size_t candidate = 0; candidate != offered; ++candidate) {
+        sz_size_t const index = offered_indices[candidate];
+        if (sz_levenshtein_length_gap(symbol, query->length, views[candidate].length) > bound) {
+            distances[index] = bound + 1;
+            continue;
+        }
+        indices[sweep_count] = index, texts[sweep_count] = views[candidate].start;
+        byte_counts[sweep_count] = views[candidate].length;
+        sweep_symbol_counts[sweep_count] = symbol_counts ? symbol_counts[index] : views[candidate].length;
+        ++sweep_count;
     }
     for (sz_size_t candidate = sweep_count; candidate != capacity; ++candidate)
         texts[candidate] = STRINGZILLA_NULL, byte_counts[candidate] = 0, sweep_symbol_counts[candidate] = 0;
@@ -1158,9 +1225,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_qu
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k] = {0};
-        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, sweep_first,
-                                                                 candidates_per_position_k, indices, texts, byte_counts,
-                                                                 sweep_symbol_counts);
+        sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
+                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 byte_counts, sweep_symbol_counts, distances);
+        if (!sweep_count) continue;
         if (words == 1)
             sz_levenshtein_u64x1_sweep_serial_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
                                                radius, resident_verticals, 1, sweep_distances);
