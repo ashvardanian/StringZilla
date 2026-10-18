@@ -309,6 +309,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_neon(sz_sequence_t const *sequen
     sz_size_t count = sequence->count;
     for (sz_size_t sequence_index = 0; sequence_index != count; ++sequence_index)
         order[sequence_index] = sequence_index;
+    if (count < 2) return sz_success_k;
 
     if (count <= 32 && !reverse) {
         sz_sequence_argsort_with_insertion(sequence, order);

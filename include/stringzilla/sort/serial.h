@@ -592,6 +592,7 @@ SZ_API_COMPTIME sz_status_t sz_sequence_argsort_serial(sz_sequence_t const *sequ
     // First, initialize the `order` with `std::iota`-like behavior.
     for (sz_size_t sequence_index = 0; sequence_index != sequence->count; ++sequence_index)
         order[sequence_index] = sequence_index;
+    if (sequence->count < 2) return sz_success_k;
 
     // On very small ascending collections - just use the quadratic-complexity @b stable insertion sort
     // without any smart optimizations or memory allocations. Fully ordering up to 32 elements trivially
