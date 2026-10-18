@@ -818,11 +818,7 @@ struct strings {
     iterator begin() const noexcept { return {*this, 0}; }
     iterator end() const noexcept { return {*this, size()}; }
 
-    strings_view_t view() const noexcept {
-        sz_strings_view_t strings;
-        sz_strings_from_span(&raw, &strings);
-        return strings_view_t(strings);
-    }
+    strings_view_t view() const noexcept;
 
     /**
      *  @brief Splits @p text at the bytes of @p delimiters into its parts, like `bytes.split`.
