@@ -161,6 +161,15 @@ static void check_find_unit_(                      //
 void test_find_unit() {
     std::printf("  - testing search & comparison known-answer vectors...\n");
 
+    // Default views use a null pointer, which must not turn an empty match into npos.
+    for (sz::string_view empty : {sz::string_view(), sz::string_view("")}) {
+        verify(empty.find("") == 0);
+        verify(empty.rfind("") == 0);
+        verify(empty.rfind("", sz::string_view::npos) == 0);
+        verify(empty.contains(""));
+        verify(empty.find("a") == sz::string_view::npos);
+    }
+
     char const *hello = "hello world";
     sz_size_t const hello_length = (sz_size_t)std::strlen(hello); // 11 bytes
 
