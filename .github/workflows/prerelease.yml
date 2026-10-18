@@ -19,6 +19,8 @@ env:
   PYTHON_VERSION: 3.13
   SWIFT_VERSION: 6.2
   PYTHONUTF8: 1
+  PYTHONFAULTHANDLER: 1
+  PYTHONMALLOC: debug
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:

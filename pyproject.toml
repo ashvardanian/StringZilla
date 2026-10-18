@@ -75,9 +75,9 @@ enable = []
 # `CIBW_ENVIRONMENT_LINUX` instead would replace the whole `environment` option, taking the
 # `SZ_IS_64BIT_*` overrides below with it - which is why the jobs pass these as plain
 # variables. `SZ_TARGET` selects the package, and the two `SZ_*` test knobs thin the fuzzing
-# on emulated runners.
+# on emulated runners. Forward the Python diagnostics into wheel-test containers as well.
 # https://cibuildwheel.readthedocs.io/en/stable/options/#environment-pass
-environment-pass = ["SZ_TARGET", "SZ_IS_QEMU_", "SZ_TESTS_MULTIPLIER"]
+environment-pass = ["SZ_TARGET", "SZ_IS_QEMU_", "SZ_TESTS_MULTIPLIER", "PYTHONFAULTHANDLER", "PYTHONMALLOC"]
 
 [tool.cibuildwheel.linux]
 before-build = ["rm -rf {project}/build"]
