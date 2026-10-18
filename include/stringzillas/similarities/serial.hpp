@@ -3481,8 +3481,15 @@ status_t cross_product_candidate_lanes_range_( //
                                       ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
                                                       wide_kernel.scratch_space_needed(longest_candidate, specs))
                                       : 0;
+    // Align the score rows independently of the transposed candidate lengths.
+    size_t walker_offset = transpose_bytes;
+    if (walker_scratch) {
+        std::uintptr_t const walker_address = (std::uintptr_t)scratch.data() + transpose_bytes;
+        walker_offset = (size_t)(round_up_to_multiple<std::uintptr_t>(walker_address, 16) -
+                                 (std::uintptr_t)scratch.data());
+    }
     element_t *transposed = reinterpret_cast<element_t *>(scratch.data());
-    scratch_space_t walker_scratch_space = scratch.subspan(transpose_bytes, walker_scratch);
+    scratch_space_t walker_scratch_space = scratch.subspan(walker_offset, walker_scratch);
     scratch_space_t fallback_scratch_space = scratch;
 
     auto const destination_for = [&](size_t query_index, size_t candidate_index) noexcept {
@@ -3644,11 +3651,13 @@ size_t cross_product_candidate_lanes_scratch_( //
                                       ? sz_max_of_two(narrow_kernel.scratch_space_needed(longest_candidate, specs),
                                                       wide_kernel.scratch_space_needed(longest_candidate, specs))
                                       : 0;
+    // Reserve alignment padding, retaining the scalar alignment of subsequent worker slices.
+    size_t const walker_alignment_slack = 16;
     size_t fallback_scratch = 0;
     if (queries.size() && candidates.size() && reach.of(longest_query, longest_candidate) > wide_t::capacity_k)
         fallback_scratch = fallback.scratch_space_needed(to_view(queries[longest_query_index]),
                                                          to_view(candidates[longest_candidate_index]), specs);
-    return sz_max_of_two(transpose_bytes + walker_scratch, fallback_scratch);
+    return sz_max_of_two(transpose_bytes + walker_alignment_slack + walker_scratch, fallback_scratch);
 }
 
 /**
