@@ -2656,7 +2656,8 @@ class basic_string_slice {
      *  @return For an @b empty `other`, `min(until, size())`.
      */
     size_type rfind(string_view other, size_type until) const noexcept(false) {
-        return until + other.size() < length_ ? substr(0, until + other.size()).rfind(other) : rfind(other);
+        return other.size() < length_ && until < length_ - other.size() ? substr(0, until + other.size()).rfind(other)
+                                                                        : rfind(other);
     }
 
     /**
@@ -2775,7 +2776,7 @@ class basic_string_slice {
      *  @param until The offset of the last character to be considered.
      */
     size_type find_last_of(byteset set, size_type until) const noexcept {
-        auto len = sz_min_of_two(until + 1, length_);
+        auto len = until < length_ ? until + 1 : length_;
         auto ptr = sz_rfind_byteset(start_, len, &set.raw());
         return ptr ? ptr - start_ : npos;
     }
