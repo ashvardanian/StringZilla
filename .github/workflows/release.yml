@@ -65,8 +65,8 @@ jobs:
           create-release: "true"
           github-token: ${{ secrets.SEMANTIC_RELEASE_TOKEN }}
 
-  rebase:
-    name: Rebase Dev. Branch
+  sync_dev:
+    name: Sync Development Branch
     runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/main'
     needs: versioning
@@ -75,25 +75,14 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          submodules: recursive
-          # Checkout persists its credential as an `extraheader`, which the push below inherits and
-          # which outranks the token handed to `push-protected`. Left unset, the force-push arrives as
-          # `github-actions[bot]`, which holds no repository role to bypass the `main*` ruleset with.
+          # Use the maintainer token for the main-dev ruleset bypass.
           token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
 
-      - name: Perform rebase
+      - name: Sync development branch with released main
         run: |
           git fetch origin main
-          git checkout main-dev
-          git rebase origin/main
-
-      - name: Push changes
-        uses: CasperWA/push-protected@v2
-        with:
-          token: ${{ secrets.SEMANTIC_REBASE_TOKEN }}
-          branch: main-dev
-          unprotect_reviews: True
-          force: True
+          # Fast-forward only; preserve any development work absent from main.
+          git push origin refs/remotes/origin/main:refs/heads/main-dev
 
   # Native x86_64 - full SIMD, full test depth, single image.
   build_wheels_stringzilla_linux_x86:
