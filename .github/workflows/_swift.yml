@@ -256,6 +256,7 @@ jobs:
   merge_artifact_bundle:
     name: Merge Swift Artifact Bundle
     needs: [build_linux, build_windows, build_android, build_wasi]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
