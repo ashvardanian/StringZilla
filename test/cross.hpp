@@ -18,7 +18,7 @@
 #include <stringzilla/stringzilla.h>
 
 #include <cctype>  // `std::toupper`
-#include <cmath>   // `std::fabs`
+#include <cmath>   // `std::fabs`, `std::nextafter`
 #include <cstdint> // `std::uint64_t`
 #include <cstring> // `std::memcmp`, `std::memset`
 
@@ -3746,23 +3746,21 @@ struct overlap_backend_t {
     sz_kernel_overlap_scores_t scores;
 };
 
-/** The share of @p candidate windows among the distinct @p query windows, through @c std::set. */
-inline sz_f32_t overlap_reference_score_(std::string const &query, std::string const &candidate, std::size_t width) {
+/** The @p candidate windows among the distinct @p query windows, through @c std::set. */
+inline sz_u32_t overlap_reference_matches_(std::string const &query, std::string const &candidate, std::size_t width) {
     std::size_t const query_windows = width <= query.size() ? query.size() - width + 1 : 0;
     std::size_t const candidate_windows = width <= candidate.size() ? candidate.size() - width + 1 : 0;
     std::set<std::string> present;
     for (std::size_t window = 0; window != query_windows; ++window) present.insert(query.substr(window, width));
-    std::size_t matches = 0;
+    sz_u32_t matches = 0;
     for (std::size_t window = 0; window != candidate_windows; ++window)
-        matches += present.count(candidate.substr(window, width));
-    std::size_t const longer = std::max(query_windows, candidate_windows);
-    return longer ? static_cast<sz_f32_t>(static_cast<double>(matches) / static_cast<double>(longer)) : 0.0f;
+        matches += (sz_u32_t)present.count(candidate.substr(window, width));
+    return matches;
 }
 
-inline std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
+inline std::vector<sz_u32_t> overlap_tensor_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                              std::vector<std::string> const &candidates,
-                                             std::vector<std::size_t> const &widths,
-                                             sz_size_t bound = STRINGZILLA_SIZE_MAX) {
+                                             std::vector<std::size_t> const &widths, sz_f32_t radius = 1.0f) {
     handle_checked_heap_t heap;
     sz_strings_view_t const query_strings = strings_from_(queries);
     sz_strings_view_t const candidate_strings = strings_from_(candidates);
@@ -3770,42 +3768,39 @@ inline std::vector<sz_f32_t> overlap_tensor_(overlap_backend_t const &backend, s
     if (backend.init(&engine, &query_strings, widths.data(), widths.size(), 0, &heap.allocator, nullptr) !=
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
-    std::vector<sz_f32_t> scores(queries.size() * candidates.size() * widths.size(), -1.0f);
-    if (backend.scores(&engine, &candidate_strings, bound, scores.data(), candidates.size() * widths.size(),
+    std::vector<sz_u32_t> matches(queries.size() * candidates.size() * widths.size(), 0xFFFFFFFFu);
+    if (backend.scores(&engine, &candidate_strings, radius, matches.data(), candidates.size() * widths.size(),
                        widths.size(), nullptr) != sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of candidates");
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
-    return scores;
+    return matches;
 }
 
-/** Runs @p queries against @p candidates through @p backend at @p widths, asserting each share
- *  matches the oracle to within one rounding. */
+/** Runs @p queries against @p candidates through @p backend at @p widths, asserting each count
+ *  is the oracle's. */
 inline void check_overlap_scores_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                   std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths) {
-    std::vector<sz_f32_t> const computed = overlap_tensor_(backend, queries, candidates, widths);
+    std::vector<sz_u32_t> const computed = overlap_tensor_(backend, queries, candidates, widths);
     std::size_t const candidate_stride = widths.size(), query_stride = candidates.size() * widths.size();
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate)
-            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-                sz_f32_t const expected = overlap_reference_score_(queries[query], candidates[candidate],
-                                                                   widths[width_index]);
-                sz_f32_t const produced = computed[query * query_stride + candidate * candidate_stride + width_index];
-                if (std::fabs(produced - expected) > 1e-6f)
-                    fail_backend_(backend.name, "a share differs from the std::set oracle by more than one rounding");
-            }
+            for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
+                if (computed[query * query_stride + candidate * candidate_stride + width_index] !=
+                    overlap_reference_matches_(queries[query], candidates[candidate], widths[width_index]))
+                    fail_backend_(backend.name, "a count differs from the std::set oracle");
 }
 
-/** Each pair's misses, read back off its exact @p shares: every width's longer window count, less
- *  the matches its share stands for. */
-inline std::vector<std::size_t> overlap_misses_(std::vector<sz_f32_t> const &shares,
-                                                std::vector<std::string> const &queries,
-                                                std::vector<std::string> const &candidates,
-                                                std::vector<std::size_t> const &widths) {
-    std::vector<std::size_t> misses;
+/** Each pair's misses and its longer side's windows, both summed over every width, off its exact
+ *  @p matches. */
+inline std::vector<std::pair<sz_u64_t, sz_u64_t>> overlap_misses_(std::vector<sz_u32_t> const &matches,
+                                                                  std::vector<std::string> const &queries,
+                                                                  std::vector<std::string> const &candidates,
+                                                                  std::vector<std::size_t> const &widths) {
+    std::vector<std::pair<sz_u64_t, sz_u64_t>> misses;
     for (std::size_t query = 0; query != queries.size(); ++query)
         for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
-            std::size_t pair_misses = 0;
+            sz_u64_t longer = 0, found = 0;
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
                 std::size_t const width = widths[width_index];
                 std::size_t const query_windows = width <= queries[query].size() ? queries[query].size() - width + 1
@@ -3813,33 +3808,38 @@ inline std::vector<std::size_t> overlap_misses_(std::vector<sz_f32_t> const &sha
                 std::size_t const candidate_windows = width <= candidates[candidate].size()
                                                           ? candidates[candidate].size() - width + 1
                                                           : 0;
-                std::size_t const longer = std::max(query_windows, candidate_windows);
-                sz_f32_t const share = shares[(query * candidates.size() + candidate) * widths.size() + width_index];
-                pair_misses += longer - static_cast<std::size_t>(std::lround(share * static_cast<double>(longer)));
+                longer += std::max(query_windows, candidate_windows);
+                found += matches[(query * candidates.size() + candidate) * widths.size() + width_index];
             }
-            misses.push_back(pair_misses);
+            misses.emplace_back(longer - found, longer);
         }
     return misses;
 }
 
-/** One backend's bounded rounds against @p exact, its own unbounded tensor: at each bound, a pair
- *  within it keeps every exact share and a pair past it scores zero at every width. */
+/** One backend's bounded rounds against @p exact, its own unbounded tensor: at each radius, a pair
+ *  within it keeps every exact count, a pair 2⁻²⁴ or more past it counts zero at every width, and
+ *  a pair between may do either. */
 inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<std::string> const &queries,
                                   std::vector<std::string> const &candidates, std::vector<std::size_t> const &widths,
-                                  std::vector<sz_f32_t> const &exact) {
-    std::vector<std::size_t> const misses = overlap_misses_(exact, queries, candidates, widths);
-    std::vector<std::size_t> sorted = misses;
-    std::sort(sorted.begin(), sorted.end());
-    for (sz_size_t const bound : {sz_size_t(0), sorted[sorted.size() / 4], sorted[sorted.size() / 2],
-                                  sorted.back() ? sorted.back() - 1 : sorted.back()}) {
-        std::vector<sz_f32_t> const bounded = overlap_tensor_(backend, queries, candidates, widths, bound);
-        for (std::size_t pair = 0; pair != misses.size(); ++pair)
+                                  std::vector<sz_u32_t> const &exact) {
+    std::vector<std::pair<sz_u64_t, sz_u64_t>> const misses = overlap_misses_(exact, queries, candidates, widths);
+    std::vector<sz_f32_t> shares;
+    for (auto const [missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
+    std::sort(shares.begin(), shares.end());
+    for (sz_f32_t const radius :
+         {0.0f, shares[shares.size() / 4], shares[shares.size() / 2], std::nextafter(shares.back(), 0.0f)}) {
+        std::vector<sz_u32_t> const bounded = overlap_tensor_(backend, queries, candidates, widths, radius);
+        for (std::size_t pair = 0; pair != misses.size(); ++pair) {
+            auto const [missed, longer] = misses[pair];
+            bool const within = missed <= (double)radius * longer;
+            bool const past = missed >= ((double)radius + 0x1p-24) * longer;
             for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
                 std::size_t const slot = pair * widths.size() + width_index;
-                sz_f32_t const expected = misses[pair] <= bound ? exact[slot] : 0.0f;
-                if (std::memcmp(&bounded[slot], &expected, sizeof(sz_f32_t)) != 0)
-                    fail_backend_(backend.name, "a bounded share is neither the exact one nor zero past the bound");
+                bool const kept = bounded[slot] == exact[slot], dropped = bounded[slot] == 0;
+                if (within ? !kept : past ? !dropped : !kept && !dropped)
+                    fail_backend_(backend.name, "a bounded count is neither the exact one nor zero past the radius");
             }
+        }
     }
 }
 
@@ -3867,12 +3867,12 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
         std::vector<std::string> const queries = {query, random_string(generator, query_length, "ab"), std::string()};
         check_overlap_scores_(backend, queries, candidates, widths);
 
-        std::vector<sz_f32_t> const batched = overlap_tensor_(backend, queries, candidates, widths);
+        std::vector<sz_u32_t> const batched = overlap_tensor_(backend, queries, candidates, widths);
         std::size_t const query_stride = candidates.size() * widths.size();
         for (std::size_t index = 0; index != queries.size(); ++index) {
             std::vector<std::string> const alone = {queries[index]};
-            std::vector<sz_f32_t> const lone = overlap_tensor_(backend, alone, candidates, widths);
-            if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_f32_t)) != 0)
+            std::vector<sz_u32_t> const lone = overlap_tensor_(backend, alone, candidates, widths);
+            if (std::memcmp(batched.data() + index * query_stride, lone.data(), query_stride * sizeof(sz_u32_t)) != 0)
                 fail_backend_(backend.name, "a query's row differs between a batched engine and its own");
         }
     }
@@ -3887,17 +3887,16 @@ inline void check_overlap_equivalence_(test_context_t &context, overlap_backend_
         candidates.push_back(query.substr(query.size() / 3));
         std::vector<std::string> const queries = {query, query.substr(query.size() / 2), std::string()};
 
-        std::vector<sz_f32_t> const from_reference = overlap_tensor_(reference, queries, candidates, widths);
-        std::vector<sz_f32_t> const from_candidate = overlap_tensor_(backend, queries, candidates, widths);
-        if (std::memcmp(from_reference.data(), from_candidate.data(), from_reference.size() * sizeof(sz_f32_t)) != 0)
-            fail_backend_(backend.name, "the engine's scores disagreed with serial");
+        std::vector<sz_u32_t> const from_reference = overlap_tensor_(reference, queries, candidates, widths);
+        std::vector<sz_u32_t> const from_candidate = overlap_tensor_(backend, queries, candidates, widths);
+        if (from_reference != from_candidate) fail_backend_(backend.name, "the engine's counts disagreed with serial");
         check_overlap_bounds_(backend, queries, candidates, widths, from_reference);
     }
 }
 
 /** One backend's engine on degenerate inputs: empties on either side, both, and none survive, as
  *  does a candidate narrower than the width; zero widths, a refused allocation and a stride under
- *  its own axis are reported without touching the outputs; and known answers at two bounds. */
+ *  its own axis are reported without touching the outputs; and known answers at three radii. */
 inline void check_overlap_safety_(overlap_backend_t const &backend) {
     handle_checked_heap_t heap;
     sz_allocator_t refusing = refusing_allocator_();
@@ -3933,27 +3932,32 @@ inline void check_overlap_safety_(overlap_backend_t const &backend) {
         sz_success_k)
         fail_backend_(backend.name, "the engine refused a well-formed batch of queries");
 
-    sz_f32_t refused[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
-    if (backend.scores(&engine, &words_strings, STRINGZILLA_SIZE_MAX, refused, words.size() * widths.size(),
-                       widths.size() - 1, nullptr) != sz_unexpected_dimensions_k)
+    sz_u32_t refused[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    if (backend.scores(&engine, &words_strings, 1.0f, refused, words.size() * widths.size(), widths.size() - 1,
+                       nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a candidate stride under its widths");
-    if (backend.scores(&engine, &words_strings, STRINGZILLA_SIZE_MAX, refused, words.size() * widths.size() - 1,
-                       widths.size(), nullptr) != sz_unexpected_dimensions_k)
+    if (backend.scores(&engine, &words_strings, 1.0f, refused, words.size() * widths.size() - 1, widths.size(),
+                       nullptr) != sz_unexpected_dimensions_k)
         fail_backend_(backend.name, "the engine accepted a query stride under its candidates");
 
     // "sitting" holds one of the five windows "kitten" could match at width three, so it misses
-    // four, and "kitten" misses none of its own; no text holds a window of eight.
-    sz_f32_t bounded[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
-    verify(backend.scores(&engine, &words_strings, 0, bounded, words.size() * widths.size(), widths.size(), nullptr) ==
-           sz_success_k);
-    if (bounded[0] != 0.0f || bounded[1] != 0.0f || bounded[2] != 1.0f || bounded[3] != 0.0f)
-        fail_backend_(backend.name, "a zero bound kept a pair past it or dropped an identical one");
-    verify(backend.scores(&engine, &words_strings, 4, bounded, words.size() * widths.size(), widths.size(), nullptr) ==
-           sz_success_k);
-    if (bounded[0] != 0.2f || bounded[1] != 0.0f || bounded[2] != 1.0f || bounded[3] != 0.0f)
-        fail_backend_(backend.name, "a bound of four dropped a pair missing exactly four windows");
-    for (sz_f32_t const untouched : refused)
-        if (untouched != -1.0f) fail_backend_(backend.name, "a refused call still wrote a score");
+    // four of five, and "kitten" misses none of its four; no text holds a window of eight.
+    sz_f32_t const four_fifths = 0.8f;
+    sz_u32_t bounded[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    verify(backend.scores(&engine, &words_strings, 0.0f, bounded, words.size() * widths.size(), widths.size(),
+                          nullptr) == sz_success_k);
+    if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+        fail_backend_(backend.name, "a zero radius kept a pair past it or dropped an identical one");
+    verify(backend.scores(&engine, &words_strings, std::nextafter(four_fifths, 0.0f), bounded,
+                          words.size() * widths.size(), widths.size(), nullptr) == sz_success_k);
+    if (bounded[0] != 0 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+        fail_backend_(backend.name, "a radius just short of four fifths kept a pair missing four of five");
+    verify(backend.scores(&engine, &words_strings, four_fifths, bounded, words.size() * widths.size(), widths.size(),
+                          nullptr) == sz_success_k);
+    if (bounded[0] != 1 || bounded[1] != 0 || bounded[2] != 4 || bounded[3] != 0)
+        fail_backend_(backend.name, "a radius of four fifths dropped a pair missing four of five");
+    for (sz_u32_t const untouched : refused)
+        if (untouched != 0xFFFFFFFFu) fail_backend_(backend.name, "a refused call still wrote a count");
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
 }

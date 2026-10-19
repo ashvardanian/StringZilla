@@ -215,12 +215,14 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_btree_prepare(sz_u32_t *nodes, sz_size
     return sz_overlap_btree_prepare_(nodes, keys_count, btree);
 }
 
-/** @p matches over the longer side's window count, zero when both are empty; only the longer side
- *  keeps the share within [0, 1]. */
-STRINGZILLA_CONSTEXPR sz_f32_t sz_overlap_share_(sz_size_t matches, sz_size_t candidate_windows,
-                                                 sz_size_t query_windows) {
-    sz_size_t const longer = candidate_windows > query_windows ? candidate_windows : query_windows;
-    return longer ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)longer) : 0.0f;
+/** The share of its longer side's windows a pair may miss within @p radius, rounded up to 24
+ *  fractional bits and full at 1 or more, so a pair's budget of misses is this times its longer
+ *  side's windows, shifted down by 24, in integers alone. */
+STRINGZILLA_INLINE sz_u32_t sz_overlap_misses_bound_(sz_f32_t radius) {
+    if (!(radius < 1.0f)) return 1u << 24;
+    if (!(radius > 0.0f)) return 0;
+    sz_f32_t const scaled = radius * 16777216.0f;
+    return (sz_u32_t)scaled + ((sz_f32_t)(sz_u32_t)scaled != scaled);
 }
 
 #pragma endregion Generic Public Helpers
@@ -427,10 +429,10 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_grow_(sz_overlap_engine_t *engi
 
 /** Refuses a stride under the axis it spans, so no row can be written into its neighbour's. */
 STRINGZILLA_INLINE sz_status_t sz_overlap_engine_strides_(sz_overlap_engine_t const *engine, sz_size_t candidates_count,
-                                                          sz_size_t scores_query_stride,
-                                                          sz_size_t scores_candidate_stride) {
-    if (scores_candidate_stride < engine->widths_count) return sz_unexpected_dimensions_k;
-    if (scores_query_stride < candidates_count * scores_candidate_stride) return sz_unexpected_dimensions_k;
+                                                          sz_size_t matches_query_stride,
+                                                          sz_size_t matches_candidate_stride) {
+    if (matches_candidate_stride < engine->widths_count) return sz_unexpected_dimensions_k;
+    if (matches_query_stride < candidates_count * matches_candidate_stride) return sz_unexpected_dimensions_k;
     return sz_success_k;
 }
 
@@ -442,52 +444,27 @@ typedef sz_size_t (*sz_overlap_btree_probe_t)(sz_overlap_btree_t const *, sz_u32
 enum { sz_overlap_keys_per_check_k = 64 };
 
 /**
- *  @brief Scores one candidate against every query of @p engine at every width, the bound and the
- *      shares being those of @ref sz_overlap_scores.
+ *  @brief Counts one candidate's matches against every query of @p engine at every width, as
+ *      @ref sz_overlap_scores counts them.
  *
- *  A pair's windows go to @p probe in runs of at most the misses it may still take under @p bound,
- *  so the bound is checked once per run rather than once per window. Windows past either text are
- *  misses before any probe, so a pair whose lengths alone put it past @p bound probes nothing.
- *
- *  A pair whose texts are both short enough to span no more windows than @p bound can never pass
- *  it, so it needs no runs and no count of misses: such pairs, every pair when unbounded, probe
- *  width after width in one run each, back-to-back probes sharing their key count. Only the rest
- *  walk pair by pair.
+ *  A pair may miss @p misses_bound of its own longer side, as @ref sz_overlap_misses_bound_ rounds
+ *  the radius, and its windows go to @p probe in runs of at most the misses it may still take, so
+ *  that budget is checked once per run rather than once per window. Windows past either text are
+ *  misses before any probe, so a pair whose lengths alone put it past its budget probes nothing.
  *
  *  @param[in] window_hashes The candidate's window hashes, width after width, as
  *      @ref sz_overlap_windows counts them.
- *  @param[out] scores The candidate's first share, of query zero at width zero.
+ *  @param[out] matches The candidate's first count, of query zero at width zero.
  */
 STRINGZILLA_INLINE void sz_overlap_candidate_scores_(sz_overlap_engine_t const *engine, sz_u32_t const *window_hashes,
-                                                     sz_size_t length, sz_size_t bound, sz_overlap_btree_probe_t probe,
-                                                     sz_f32_t *scores, sz_size_t scores_query_stride) {
-    // A text spans at most its length in windows at every width, so a pair of texts both within
-    // this length spans at most the bound.
-    sz_size_t const widths_count = engine->widths_count, loose_length = bound / widths_count;
-    sz_size_t query, width_index;
-    sz_u32_t const *keys = window_hashes;
-    for (width_index = 0; width_index != widths_count && length <= loose_length; ++width_index) {
-        sz_size_t const width = engine->widths[width_index];
-        sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
-        for (query = 0; query != engine->count; ++query) {
-            sz_size_t const query_length = engine->lengths[query];
-            sz_f32_t *const slot = scores + query * scores_query_stride + width_index;
-            if (query_length > loose_length) continue;
-            if (!windows || width > query_length) {
-                *slot = 0.0f;
-                continue;
-            }
-            sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
-            *slot = sz_overlap_share_(probe(&btree, keys, windows), windows, query_length - width + 1);
-        }
-        keys += windows;
-    }
-
-    for (query = 0; query != engine->count; ++query) {
+                                                     sz_size_t length, sz_u32_t misses_bound,
+                                                     sz_overlap_btree_probe_t probe, sz_u32_t *matches,
+                                                     sz_size_t matches_query_stride) {
+    sz_size_t const widths_count = engine->widths_count;
+    for (sz_size_t query = 0; query != engine->count; ++query) {
         sz_size_t const query_length = engine->lengths[query];
-        if (sz_max_of_two(length, query_length) <= loose_length) continue;
-        sz_f32_t *const row = scores + query * scores_query_stride;
-        sz_size_t longer = 0, reachable = 0;
+        sz_u32_t *const row = matches + query * matches_query_stride;
+        sz_size_t longer = 0, reachable = 0, width_index;
         for (width_index = 0; width_index != widths_count; ++width_index) {
             sz_size_t const width = engine->widths[width_index];
             sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
@@ -496,30 +473,30 @@ STRINGZILLA_INLINE void sz_overlap_candidate_scores_(sz_overlap_engine_t const *
             reachable += query_windows ? windows : 0;
         }
 
+        sz_size_t const bound = (sz_size_t)(((sz_u64_t)misses_bound * longer) >> 24);
         sz_overlap_btree_t const btree = sz_overlap_engine_row_(engine, query);
         sz_size_t misses = longer - reachable;
-        keys = window_hashes;
+        sz_u32_t const *keys = window_hashes;
         for (width_index = 0; width_index != widths_count && misses <= bound; ++width_index) {
             sz_size_t const width = engine->widths[width_index];
             sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
-            sz_size_t const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
-            sz_size_t const probed_windows = query_windows ? windows : 0;
+            sz_size_t const probed_windows = width && width <= query_length ? windows : 0;
             // Within the slack a run takes every window left, past it the slack and one more.
-            sz_size_t matches = 0, probed = 0;
-            while (probed != probed_windows && misses + probed - matches <= bound) {
-                sz_size_t const slack = bound - (misses + probed - matches);
+            sz_size_t found = 0, probed = 0;
+            while (probed != probed_windows && misses + probed - found <= bound) {
+                sz_size_t const slack = bound - (misses + probed - found);
                 sz_size_t const run = sz_min_of_two(probed_windows - probed,
                                                     sz_max_of_two(slack + 1, (sz_size_t)sz_overlap_keys_per_check_k));
-                matches += probe(&btree, keys + probed, run);
+                found += probe(&btree, keys + probed, run);
                 probed += run;
             }
-            misses += probed - matches;
-            row[width_index] = sz_overlap_share_(matches, windows, query_windows);
+            misses += probed - found;
+            row[width_index] = (sz_u32_t)found;
             keys += windows;
         }
-        // Whichever check stopped the pair, past the bound every width scores zero.
+        // Whichever check stopped the pair, past its budget every width counts zero.
         if (misses > bound)
-            for (width_index = 0; width_index != widths_count; ++width_index) row[width_index] = 0.0f;
+            for (width_index = 0; width_index != widths_count; ++width_index) row[width_index] = 0;
     }
 }
 
@@ -755,14 +732,15 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *e
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                     sz_size_t scores_candidate_stride, sz_stream_t stream) {
+                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                     sz_size_t matches_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
-                                                              scores_candidate_stride);
+    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, matches_query_stride,
+                                                              matches_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
     if (!candidates->count || !engine->count) return sz_success_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
+    sz_u32_t const misses_bound = sz_overlap_misses_bound_(radius);
 
     sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
     sz_status_t const grown = sz_overlap_engine_grow_(
@@ -817,8 +795,9 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine
                         chain_prefix_hashes + window, chain_prefix_hashes + window + width, power, keys + window);
                 keys += windows;
             }
-            sz_overlap_candidate_scores_(engine, window_hashes, length, bound, sz_overlap_u32x1_btree_probe_serial_,
-                                         scores + (first + chain) * scores_candidate_stride, scores_query_stride);
+            sz_overlap_candidate_scores_(engine, window_hashes, length, misses_bound,
+                                         sz_overlap_u32x1_btree_probe_serial_,
+                                         matches + (first + chain) * matches_candidate_stride, matches_query_stride);
         }
     }
     return sz_success_k;

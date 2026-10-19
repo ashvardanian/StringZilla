@@ -15,7 +15,6 @@
 #ifndef STRINGZILLA_BENCH_CROSS_HPP_
 #define STRINGZILLA_BENCH_CROSS_HPP_
 
-#include <bit>     // `std::bit_cast`
 #include <cstdint> // `std::uintptr_t`
 #include <cstring> // `std::memcpy`
 
@@ -1780,15 +1779,9 @@ struct overlap_corpus_t {
     }
 };
 
-inline check_value_t overlap_check_value_bits_(std::span<sz_f32_t const> scores) {
+inline check_value_t overlap_check_value_(std::span<sz_u32_t const> matches) {
     check_value_t mixed = 0;
-    for (sz_f32_t const score : scores) mixed = mixed * 31u + std::bit_cast<sz_u32_t>(score);
-    return mixed;
-}
-
-inline check_value_t overlap_check_value_quantized_(std::span<sz_f32_t const> scores) {
-    check_value_t mixed = 0;
-    for (sz_f32_t const score : scores) mixed = mixed * 31u + static_cast<check_value_t>(score * 1048576.0f);
+    for (sz_u32_t const count : matches) mixed = mixed * 31u + count;
     return mixed;
 }
 
@@ -1805,14 +1798,13 @@ inline sz_status_t overlap_engine_init_cpu_(sz_overlap_engine_t *engine, sz_stri
 template <typename function_type_>
 struct scores_from_sz {
     function_type_ function;
-    check_value_t (*check)(std::span<sz_f32_t const>);
     std::variant<std::reference_wrapper<corpus_t const>, sz_strings_view_t> source;
     std::vector<sz_string_view_t> views;
 
     /** Host lengths keep timed metrics from migrating device tape offsets. */
     std::span<sz_string_view_t const> fixed_views;
-    device_vector<sz_f32_t> device_scores;
-    pinned_vector<sz_f32_t> scores;
+    device_vector<sz_u32_t> device_matches;
+    pinned_vector<sz_u32_t> matches;
     std::size_t width;
     std::optional<std::reference_wrapper<device_backend_t const>> runtime;
     sz_kernel_overlap_engine_init_t init;
@@ -1821,18 +1813,18 @@ struct scores_from_sz {
 
     scores_from_sz(sz_kernel_overlap_engine_init_t init, function_type_ function, corpus_t const &corpus,
                    overlap_query_t const &query, std::size_t candidates)
-        : function(function), check(overlap_check_value_bits_), source(std::cref(corpus)), views(candidates),
-          width(query.width), init(init), query(query.text) {}
+        : function(function), source(std::cref(corpus)), views(candidates), width(query.width), init(init),
+          query(query.text) {}
 
     /** The candidate descriptor and the query borrow their memory for the arm's lifetime. */
     scores_from_sz(sz_kernel_overlap_engine_init_t init, function_type_ function, std::string_view query,
                    std::size_t width, sz_strings_view_t candidates, std::span<sz_string_view_t const> candidate_views,
                    std::optional<std::reference_wrapper<device_backend_t const>> runtime = {})
-        : function(function), check(overlap_check_value_quantized_), source(candidates), fixed_views(candidate_views),
-          width(width), runtime(runtime), init(init), query(query) {
+        : function(function), source(candidates), fixed_views(candidate_views), width(width), runtime(runtime),
+          init(init), query(query) {
         if (runtime && runtime->get().separate())
-            device_scores = device_vector<sz_f32_t>(
-                device_alloc<sz_f32_t>(runtime->get().device, runtime->get().stream));
+            device_matches = device_vector<sz_u32_t>(
+                device_alloc<sz_u32_t>(runtime->get().device, runtime->get().stream));
     }
 
     ~scores_from_sz() noexcept { sz_overlap_engine_free(&engine, runtime ? runtime->get().stream : nullptr); }
@@ -1853,13 +1845,12 @@ struct scores_from_sz {
         }
         else candidates = std::get<sz_strings_view_t>(source);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
-        if (function(&engine, &candidates, STRINGZILLA_SIZE_MAX,
-                     device_scores.size() == 0 ? scores.data() : device_scores.data(), scores.size(), 1,
-                     stream) != sz_success_k)
+        if (function(&engine, &candidates, 1.0f, device_matches.size() == 0 ? matches.data() : device_matches.data(),
+                     matches.size(), 1, stream) != sz_success_k)
             throw std::runtime_error("The engine's round failed.");
-        if (device_scores.size() != 0 &&
-            copy_device_to_host(device_scores, std::span<sz_f32_t>(scores), runtime->get()) != sz_success_k)
-            throw std::runtime_error("The scores would not come back.");
+        if (device_matches.size() != 0 &&
+            copy_device_to_host(device_matches, std::span<sz_u32_t>(matches), runtime->get()) != sz_success_k)
+            throw std::runtime_error("The counts would not come back.");
         if (runtime && sz_stream_synchronize_best(runtime->get().capabilities, stream) != sz_success_k)
             throw std::runtime_error("The GPU round did not finish.");
         std::size_t bytes = 0, windows = 0;
@@ -1868,10 +1859,10 @@ struct scores_from_sz {
             bytes += length;
             windows += width <= length ? length - width + 1 : 0;
         }
-        return call_result_t(bytes, check(scores), windows);
+        return call_result_t(bytes, overlap_check_value_(matches), windows);
     }
 
-    /** Builds the forest and its score buffers, once the filter keeps the row. */
+    /** Builds the forest and its count buffers, once the filter keeps the row. */
     void preprocess() {
         if (engine.memory) return;
         std::size_t const candidates = std::holds_alternative<sz_strings_view_t>(source)
@@ -1886,10 +1877,10 @@ struct scores_from_sz {
         sz_strings_from_string_views(&view, 1, &queries);
         sz_stream_t const stream = runtime ? runtime->get().stream : nullptr;
         bool const separate = runtime && runtime->get().separate();
-        scores = pinned_vector<sz_f32_t>(candidates, 0.0f,
-                                         pinned_alloc<sz_f32_t>(separate ? runtime->get().pinned : allocator, stream));
-        if (separate && device_scores.resize_uninitialized(candidates) != sz::status_t::success_k)
-            throw std::runtime_error("The device would not hold the scores.");
+        matches = pinned_vector<sz_u32_t>(candidates, 0u,
+                                          pinned_alloc<sz_u32_t>(separate ? runtime->get().pinned : allocator, stream));
+        if (separate && device_matches.resize_uninitialized(candidates) != sz::status_t::success_k)
+            throw std::runtime_error("The device would not hold the counts.");
         if (init(&engine, &queries, &width, 1, runtime ? std::get<sz_strings_view_t>(source).count : 0, &allocator,
                  stream) != sz_success_k) {
             sz_overlap_engine_free(&engine, stream);

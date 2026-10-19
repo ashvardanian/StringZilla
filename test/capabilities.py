@@ -222,10 +222,10 @@ def test_levenshtein_bound_clips_distances_past_it():
         distances_for(bound=-1)
 
 
-def test_overlap_bound_zeroes_pairs_past_it():
-    """A pair is exact while its misses summed over every width stay within the bound, else 0.0 at every width."""
+def test_overlap_radius_zeroes_pairs_past_it():
+    """A pair is exact while its misses over its longer side's windows stay within the radius, else 0.0 everywhere."""
     engine = sz.OverlapEngine(sz.Strings(["abcdefgh"]), [3, 4])
-    # Misses summed over both widths: none, one per width, and four per width.
+    # Misses over the longer side's eleven windows at both widths: none, two, and eight.
     candidates = sz.Strings(["abcdefgh", "abcdefgx", "abcdxxxx"])
 
     def scores_for(**kwargs):
@@ -236,16 +236,16 @@ def test_overlap_bound_zeroes_pairs_past_it():
     exact = scores_for()
     assert exact[0] == [1.0, 1.0]
     assert all(0.0 < share < 1.0 for share in exact[1] + exact[2])
-    assert scores_for(bound=None) == exact and scores_for(bound=2**64 - 1) == exact
-    assert scores_for(bound=8) == exact
-    assert scores_for(bound=7) == [exact[0], exact[1], [0.0, 0.0]]
-    assert scores_for(bound=2) == [exact[0], exact[1], [0.0, 0.0]]
-    assert scores_for(bound=1) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
-    assert scores_for(bound=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    assert scores_for(radius=None) == exact and scores_for(radius=1.0) == exact and scores_for(radius=2) == exact
+    assert scores_for(radius=8 / 11) == exact
+    assert scores_for(radius=7 / 11) == [exact[0], exact[1], [0.0, 0.0]]
+    assert scores_for(radius=2 / 11) == [exact[0], exact[1], [0.0, 0.0]]
+    assert scores_for(radius=1 / 11) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
+    assert scores_for(radius=0) == [exact[0], [0.0, 0.0], [0.0, 0.0]]
     with pytest.raises(TypeError):
-        scores_for(bound=1.5)
-    with pytest.raises(OverflowError):
-        scores_for(bound=-1)
+        scores_for(radius="1")
+    with pytest.raises(ValueError):
+        scores_for(radius=-0.5)
 
 
 def test_engine_calls_from_many_threads_agree():

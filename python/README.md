@@ -559,7 +559,7 @@ Each engine writes into a writable buffer the caller supplies as `out`, so nothi
 | Engine                     | Constructed from                                  | Scores with                                                     |
 | :------------------------- | :------------------------------------------------ | :--------------------------------------------------------------- |
 | `LevenshteinEngine`        | a batch of query strings and a symbol alphabet    | `distances(candidates, out, bound=None)`                         |
-| `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out, bound=None)`                            |
+| `OverlapEngine`            | a batch of query strings and window widths        | `scores(candidates, out, radius=None)`                           |
 | `SubstringsEngine`         | a vocabulary of needles and an overlap policy     | `counts`, `find`, `replace`, and `bm25_scores` over haystacks    |
 
 Queries, candidates, and haystacks all arrive as `sz.Strings`, and every `out` buffer is any writable object supporting the buffer protocol — a NumPy array, an `array.array`, or a plain `memoryview`.
@@ -598,8 +598,8 @@ assert out[0, 0] == 1
 A score is the share of a candidate's windows the query also spells, in `[0, 1]`, so it is asymmetric: swapping the two sides changes the answer when either repeats a window.
 Widths need not form a doubling chain, and a width past a text scores zero for every pair it spans.
 
-`scores(candidates, out, *, bound=None)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
-A `bound` is the most windows a pair may miss, summed over every width, and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+`scores(candidates, out, *, radius=None)` fills a `[queries, candidates, widths]` block of 32-bit floats, contiguous along its width axis.
+A pair's distance is the windows it misses over its longer side's, summed over every width, and a `radius` in `[0, 1]` keeps every pair within it exact; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
 ```python
 import stringzilla as sz

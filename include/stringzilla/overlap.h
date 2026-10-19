@@ -19,7 +19,7 @@
  *
  *  - @ref sz_overlap_engine_init → prepares a batch of queries for the best capability of a mask,
  *    on the host or on one device;
- *  - @ref sz_overlap_scores → the @b [queries,candidates,widths] shares of one round, on the
+ *  - @ref sz_overlap_scores → the @b [queries,candidates,widths] match counts of one round, on the
  *    capability its engine was prepared for;
  *  - @ref sz_overlap_engine_free → returns both of the engine's blocks;
  *  - @ref sz_overlap_find_kernel → the kernel either would run, for a caller that keeps it.
@@ -83,13 +83,16 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
 
 /**
  *  @brief Window overlap of every prepared query with every candidate, at every width of the batch,
- *      by the kernel of the capability @p engine was prepared for, exact up to @p bound.
+ *      by the kernel of the capability @p engine was prepared for, exact within @p radius.
  *
  *  A batch of queries prepared once scores any number of candidate batches, and a host round block
- *  only grows, so a batch within the longest seen allocates nothing. A pair's misses are the
- *  longer side's windows the other leaves unmatched, summed over every width, which at each width
- *  is its longer window count less the share of it matched. A pair is dropped once its misses
- *  provably pass @p bound, often from the two lengths alone, before a byte is read.
+ *  only grows, so a batch within the longest seen allocates nothing. A width's count is the
+ *  candidate's windows the query also holds. A pair's misses are the longer side's windows the
+ *  other leaves unmatched, summed over every width, and its distance is those misses over the
+ *  longer side's windows in all. A pair within @p radius is counted exactly; a pair past it counts
+ *  zero at every width, on every backend, or exactly when within rounding of the share, less than
+ *  2⁻²⁴ past it. A pair is dropped once its misses provably pass that share of its longer side,
+ *  often from the two lengths alone, before a byte is read.
  *
  *  @param[in] engine The prepared forest; a host round block grows here and is never shrunk. A
  *      device engine keeps no stream, so on CUDA any number of streams may score it at once; on
@@ -97,12 +100,13 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
  *  @param[in] candidates The texts whose windows are probed against the forest's, on the residency
  *      the engine was built for: any layout on the CPU, and on a device a tape
  *      @ref sz_strings_to_tape_best wrote into a unified allocator.
- *  @param[in] bound The most misses a pair is scored exactly with; a pair past it scores zero at
- *      every width, on every backend. @c STRINGZILLA_SIZE_MAX keeps every share exact.
- *  @param[out] scores Shares in [0, 1] with a unit-strided width axis, laid out as shown below.
- *  @param[in] scores_query_stride Entries from one query's plane to the next, at least the
- *      candidates times @p scores_candidate_stride.
- *  @param[in] scores_candidate_stride Entries between candidate rows, at least the engine's widths.
+ *  @param[in] radius The share of its longer side's windows a pair may miss, in [0, 1]; 1 or more
+ *      keeps every count exact.
+ *  @param[out] matches Counts with a unit-strided width axis, laid out as shown below.
+ *  @param[in] matches_query_stride Entries from one query's plane to the next, at least the
+ *      candidates times @p matches_candidate_stride.
+ *  @param[in] matches_candidate_stride Entries between candidate rows, at least the widths the
+ *      engine was prepared at.
  *  @param[in] stream Null on the CPU. On a GPU, the stream to queue on, which also names the device
  *      the round runs on; null for the default.
  *  @return @c sz_success_k, on a device once enqueued; @c sz_unexpected_dimensions_k when either
@@ -111,18 +115,18 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
  *      @c sz_device_memory_mismatch_k for an engine, an output, an accessor, a tape or a stream
  *      the device of @p stream cannot use, and @c sz_device_code_mismatch_k for a refused launch.
  *  @note Asymmetric: a candidate's window occurrences count against a query's distinct windows, so
- *      swapping sides changes the score when either repeats a window.
- *  @note Never joins, so the caller joins @p stream before reading @p scores.
+ *      swapping sides changes the count when either repeats a window.
+ *  @note Never joins, so the caller joins @p stream before reading @p matches.
  *
- *  The share of query q, candidate c and width w sits at:
+ *  The count of query q, candidate c and width w sits at:
  *
  *  @verbatim
- *  scores[q * scores_query_stride + c * scores_candidate_stride + w]
+ *  matches[q * matches_query_stride + c * matches_candidate_stride + w]
  *  @endverbatim
  */
 STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                              sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                              sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                              sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                              sz_size_t matches_candidate_stride, sz_stream_t stream);
 
 /** @copydoc sz_overlap_engine_init */
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,
@@ -131,8 +135,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_serial(sz_overlap_engine_t *e
                                                           sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_serial(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                     sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                     sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                     sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                     sz_size_t matches_candidate_stride, sz_stream_t stream);
 
 #if STRINGZILLA_TARGET_HASWELL
 /** @copydoc sz_overlap_engine_init */
@@ -143,8 +147,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_haswell(sz_overlap_engine_t *
                                                            sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                      sz_f32_t radius, sz_u32_t *matches,
+                                                      sz_size_t matches_query_stride,
+                                                      sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_SKYLAKE
@@ -156,8 +161,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *
                                                            sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                      sz_f32_t radius, sz_u32_t *matches,
+                                                      sz_size_t matches_query_stride,
+                                                      sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_NEON
@@ -168,8 +174,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_neon(sz_overlap_engine_t *eng
                                                         sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_neon(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                   sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                   sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                   sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_CUDA
@@ -180,8 +186,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *eng
                                                         sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_cuda(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                   sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                   sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                   sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_BLACKWELL
@@ -193,9 +199,9 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t
                                                              sz_allocator_t *allocator, sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *engine,
-                                                        sz_strings_view_t const *candidates, sz_size_t bound,
-                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                        sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                        sz_strings_view_t const *candidates, sz_f32_t radius,
+                                                        sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                        sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_ROCM
@@ -206,8 +212,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *eng
                                                         sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                   sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                   sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                   sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 #if STRINGZILLA_TARGET_METAL
@@ -218,8 +224,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
                                                          sz_stream_t stream);
 /** @copydoc sz_overlap_scores */
 STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                    sz_size_t scores_candidate_stride, sz_stream_t stream);
+                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                    sz_size_t matches_candidate_stride, sz_stream_t stream);
 #endif
 
 /**
@@ -259,10 +265,10 @@ STRINGZILLA_API void sz_overlap_engine_free(sz_overlap_engine_t *engine, sz_stre
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                              sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                              sz_size_t scores_candidate_stride, sz_stream_t stream) {
-    sz_unused_(engine), sz_unused_(candidates), sz_unused_(bound), sz_unused_(scores), sz_unused_(scores_query_stride),
-        sz_unused_(scores_candidate_stride), sz_unused_(stream);
+                                              sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                              sz_size_t matches_candidate_stride, sz_stream_t stream) {
+    sz_unused_(engine), sz_unused_(candidates), sz_unused_(radius), sz_unused_(matches),
+        sz_unused_(matches_query_stride), sz_unused_(matches_candidate_stride), sz_unused_(stream);
     return sz_missing_library_k;
 }
 

@@ -78,19 +78,22 @@ This prime's weight is twenty-four, which `test/overlap.cpp` certifies by the sa
 
 ## Window Widths
 
-Every width's query window hashes share one B-tree: the step primitives are told a width and know nothing about why, while the engine takes the whole `window_widths` list at construction and `sz_overlap_scores` answers one score per query per candidate per width.
+Every width's query window hashes share one B-tree: the step primitives are told a width and know nothing about why, while the engine takes the whole `window_widths` list at construction and `sz_overlap_scores` answers one match count per query per candidate per width.
 A candidate window hash is produced at a known width, so a hit is attributed to that width, and a coincidence with another width's window hash runs at $2^{-32}$.
-What to do with those scores — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
+What to do with those counts — weight them, or pick one per pair from the two texts' lengths — stays with the caller.
 
 The GPU engines take every width the host ones do.
 Each thread rolls every width's window hash through its stretch of a candidate in registers, re-reading the byte that leaves the window from the text, so no width outgrows a buffer.
 Eight widths roll together, and an engine holding more walks each stretch once per group of eight.
 
-A bound on `sz_overlap_scores` caps a pair's misses, the longer side's windows the other leaves unmatched, summed over every width.
-Pairs within it score exactly and pairs past it score zero at every width, on every backend, so a caller ranking by distance gets the same answer whatever ran it.
+A pair's distance is its misses, the longer side's windows the other leaves unmatched summed over every width, over the longer side's windows in all.
+A radius on `sz_overlap_scores` is an `f32` share in `[0, 1]` that gives each pair its own budget of misses, so a long pair never loosens a short one's.
+Each call rounds the share up to 24 fractional bits once, and a pair's budget is that times its longer side's windows, shifted down by 24, so pruning stays in integers on GPUs without FP64.
+Pairs within the share count exactly and pairs past it count zero at every width, on every backend, except that a pair less than 2⁻²⁴ past it may still count exactly.
+Every backend rounds alike, so a caller ranking by distance gets the same answer whatever ran it.
 The host sweeps probe a pair's windows in runs of at most the misses it may still take, so an unbounded round probes each width in one run, and the lengths alone rule out many pairs before a window is probed.
-The GPU engines take every width in one bounded launch and give each candidate a warp, which stops rolling it once even every window left matching would leave it past the bound.
-Metal skips the walk of a pair its lengths rule out and zeroes the rest past the bound as it turns counts into shares.
+The GPU engines take every width in one bounded launch and give each candidate a warp, which stops rolling it once even every window left matching would leave it past its budget.
+Metal skips the walk of a pair its lengths rule out and zeroes the rest past their budgets as it copies the counts out.
 
 The width above which spurious window matches become rare follows from the alphabet's collision entropy $H_2$, the Rényi entropy of order two, in bits per symbol:
 

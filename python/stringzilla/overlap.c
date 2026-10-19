@@ -136,26 +136,53 @@ static int OverlapEngine_init(OverlapEngine *self, PyObject *args, PyObject *kwa
 
 #pragma region Operations
 
-static char const doc_OverlapEngine_scores[] =                                                         //
-    "scores(candidates, out, *, bound=None, stream=None) -> None\n"                                    //
-    "\n"                                                                                               //
-    "Score every prepared query against every candidate, at every width, into `out`.\n"                //
-    "\n"                                                                                               //
-    "Args:\n"                                                                                          //
-    "  candidates (Strings): Texts whose windows probe the forest, from `Strings.copy` on a GPU.\n"    //
-    "  out (buffer): Writable 3-D buffer of 32-bit floats, at least\n"                                 //
-    "    (len(queries), len(candidates), len(widths)), contiguous along its width axis.\n"             //
-    "  bound (int, optional): The most windows a pair may miss, summed over every width, and still\n"  //
-    "    score exactly. A pair past it scores 0.0 at every width, and None keeps every score exact.\n" //
-    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"       //
-    "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n"     //
-    "    and read only after the caller joins the stream; a host engine ignores it.\n"                 //
-    "Example:\n"                                                                                       //
-    "  >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3])\n"                                   //
-    "  >>> out = memoryview(bytearray(4)).cast('f', (1, 1, 1))\n"                                      //
-    "  >>> engine.scores(sz.Strings(['abcdef']), out)\n"                                               //
-    "  >>> out[0, 0, 0]\n"                                                                             //
+static char const doc_OverlapEngine_scores[] =                                                       //
+    "scores(candidates, out, *, radius=None, stream=None) -> None\n"                                 //
+    "\n"                                                                                             //
+    "Score every prepared query against every candidate, at every width, into `out`.\n"              //
+    "\n"                                                                                             //
+    "Args:\n"                                                                                        //
+    "  candidates (Strings): Texts whose windows probe the forest, from `Strings.copy` on a GPU.\n"  //
+    "  out (buffer): Writable 3-D buffer of 32-bit floats, at least\n"                               //
+    "    (len(queries), len(candidates), len(widths)), contiguous along its width axis.\n"           //
+    "  radius (float, optional): The furthest distance a pair may lie at and still score exactly,\n" //
+    "    a distance being the windows it misses over its longer side's, summed over every width.\n"  //
+    "    A pair past it scores 0.0 at every width, and None or 1.0 keep every score exact.\n"        //
+    "  stream (int, optional): A stream of the engine's device as an integer, or None for the\n"     //
+    "    default. A device engine joins it before returning, so `out` must be device-reachable;\n"   //
+    "    a host engine ignores it.\n"                                                                //
+    "Example:\n"                                                                                     //
+    "  >>> engine = sz.OverlapEngine(sz.Strings(['abcdef']), [3])\n"                                 //
+    "  >>> out = memoryview(bytearray(4)).cast('f', (1, 1, 1))\n"                                    //
+    "  >>> engine.scores(sz.Strings(['abcdef']), out)\n"                                             //
+    "  >>> out[0, 0, 0]\n"                                                                           //
     "  1.0";
+
+/** Turns the counts in @p out into shares in place: each width's count over the longer side's
+ *  windows at that width, zero where neither side has one. */
+static void OverlapEngine_shares_(sz_overlap_engine_t const *engine, sz_strings_view_t const *candidates, void *out,
+                                  sz_size_t const *strides) {
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            for (sz_size_t query = 0; query != engine->count; ++query) {
+                sz_size_t const length = views[position].length, query_length = engine->lengths[query];
+                char *const row = (char *)out +
+                                  (query * strides[0] + (block_start + position) * strides[1]) * sizeof(sz_f32_t);
+                for (sz_size_t index = 0; index != engine->widths_count; ++index) {
+                    sz_size_t const width = engine->widths[index];
+                    sz_size_t const windows = width && width <= length ? length - width + 1 : 0;
+                    sz_size_t const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+                    sz_size_t const longer = windows > query_windows ? windows : query_windows;
+                    sz_u32_t matches;
+                    memcpy(&matches, row + index * sizeof(sz_f32_t), sizeof(matches));
+                    sz_f32_t const share = longer ? (sz_f32_t)((sz_f64_t)matches / (sz_f64_t)longer) : 0.0f;
+                    memcpy(row + index * sizeof(sz_f32_t), &share, sizeof(share));
+                }
+            }
+    }
+}
 
 static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args, Py_ssize_t positional_args_count,
                                       PyObject *args_names_tuple) {
@@ -165,7 +192,7 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
     }
     PyObject *const candidates_obj = args[0];
     PyObject *out_obj = positional_args_count > 1 ? args[1] : NULL;
-    PyObject *bound_object = NULL;
+    PyObject *radius_object = NULL;
     PyObject *stream_object = NULL;
     Py_ssize_t const args_names_count = args_names_tuple ? PyTuple_GET_SIZE(args_names_tuple) : 0;
     for (Py_ssize_t keyword_index = 0; keyword_index < args_names_count; ++keyword_index) {
@@ -178,7 +205,7 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
             }
             out_obj = value;
         }
-        else if (PyUnicode_CompareWithASCIIString(key, "bound") == 0) { bound_object = value; }
+        else if (PyUnicode_CompareWithASCIIString(key, "radius") == 0) { radius_object = value; }
         else if (PyUnicode_CompareWithASCIIString(key, "stream") == 0) { stream_object = value; }
         else {
             PyErr_Format(PyExc_TypeError, "scores() got an unexpected keyword argument '%U'", key);
@@ -197,8 +224,16 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
     sz_capability_t const capability = self->engine.capability;
     sz_strings_view_t candidates;
     sz_stream_t stream = NULL;
-    sz_size_t bound = STRINGZILLA_SIZE_MAX;
-    if (!sz_py_export_optional_size(bound_object, "bound", STRINGZILLA_SIZE_MAX, &bound)) return NULL;
+    sz_f32_t radius = 1.0f;
+    if (radius_object && radius_object != Py_None) {
+        double const share = PyFloat_AsDouble(radius_object);
+        if (PyErr_Occurred()) return NULL;
+        if (!(share >= 0.0)) {
+            PyErr_SetString(PyExc_ValueError, "radius must be a share of at least 0.0");
+            return NULL;
+        }
+        radius = (sz_f32_t)share;
+    }
     if (sz_py_export_stream(stream_object, &stream) != 0) return NULL;
     if (!(capability & sz_cap_gpus_k)) stream = NULL;
     if (sz_py_export_strings(candidates_obj, "candidates", &candidates) != 0) return NULL;
@@ -214,7 +249,6 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
         return NULL;
     }
 
-    sz_f32_t *const scores = (sz_f32_t *)out_view.buf;
     sz_status_t status;
     Py_BEGIN_ALLOW_THREADS;
     sz_py_mutex_lock_(&self->mutex);
@@ -222,7 +256,12 @@ static PyObject *OverlapEngine_scores(OverlapEngine *self, PyObject *const *args
     if (self->engine.capability != capability || self->engine.count != extents[0] ||
         self->engine.widths_count != extents[2])
         status = sz_unexpected_dimensions_k;
-    else status = sz_overlap_scores(&self->engine, &candidates, bound, scores, strides[0], strides[1], stream);
+    else {
+        status = sz_overlap_scores(&self->engine, &candidates, radius, (sz_u32_t *)out_view.buf, strides[0], strides[1],
+                                   stream);
+        if (status == sz_success_k && stream) status = sz_stream_synchronize_best(capability, stream);
+        if (status == sz_success_k) OverlapEngine_shares_(&self->engine, &candidates, out_view.buf, strides);
+    }
     sz_py_mutex_unlock_(&self->mutex);
     Py_END_ALLOW_THREADS;
     PyBuffer_Release(&out_view);

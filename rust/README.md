@@ -752,14 +752,14 @@ fn new<Q: AsRef<[u8]>>(queries: &[Q], window_widths: &[usize], candidates_budget
     stream: &Stream) -> Result<OverlapEngine, Status>;
 
 fn scores<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
-    candidates: StringsView<'scope>, bound: Option<usize>, scores: &'scope mut [f32],
+    candidates: StringsView<'scope>, radius: Option<f32>, scores: &'scope mut [f32],
     scores_query_stride: usize, scores_candidate_stride: usize) -> Result<(), Status>;
 ```
 
 Widths are in bytes and need not form a doubling chain, since a window hash comes from a prefix difference that costs one modular multiply-add at any width; a width past a text scores zero for every pair it spans.
 The output is a `[queries, candidates, widths]` block with the width axis unit-strided: share `[q, c, w]` lands at `scores[q * query_stride + c * candidate_stride + w]`, each in `[0, 1]`.
 The score is asymmetric — a candidate's window occurrences count against a query's distinct windows — so swapping the two sides changes the answer whenever either repeats a window.
-A `bound` of `Some(limit)` is the most windows a pair may miss, summed over every width, and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
+A `radius` of `Some(share)` is the share of the longer side's windows, summed over every width, a pair may miss and still score exactly; a pair past it scores `0.0` at every width, on every backend, and `None` keeps every score exact.
 
 ```rust
 use stringzilla::sz::{Capabilities, OverlapEngine, Stream, StringsView};
@@ -772,8 +772,8 @@ let candidates = StringsView::from_slices(&["the quick brown cat"]);
 cpu.scope(|scope| engine.scores(scope, candidates, None, &mut scores, 2, 2)).unwrap();
 assert!(scores.iter().all(|share| (0.0..=1.0).contains(share)));
 
-// A pair missing more than 2 windows scores zero at every width.
-cpu.scope(|scope| engine.scores(scope, candidates, Some(2), &mut scores, 2, 2)).unwrap();
+// A pair missing more than a tenth of its windows scores zero at every width.
+cpu.scope(|scope| engine.scores(scope, candidates, Some(0.1), &mut scores, 2, 2)).unwrap();
 assert_eq!(scores, [0.0, 0.0]);
 ```
 

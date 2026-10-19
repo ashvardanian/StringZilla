@@ -15,9 +15,8 @@
  *
  *  The CUDA kernel reaches the serial helpers through `--expt-relaxed-constexpr`; MSL cannot
  *  include the C headers, whose pointers carry no address space, so the four helpers this needs -
- *  the branch step, the leaf step, the tree's level bases and the share - are mirrored here, and
- *  the tests hold every score bit-identical to serial's. The share divides in @c f64, which Apple
- *  GPUs lack, so its double rounding is emulated with integer long division.
+ *  the branch step, the leaf step, the tree's level bases and the misses bound - are mirrored here,
+ *  and the tests hold every count to serial's.
  *
  *  Apple GPUs have no 64-bit divider either, so a remainder over @c ulong compiles to a long
  *  emulated sequence. The window hashes are reduced with Montgomery products instead, which need
@@ -25,12 +24,12 @@
  *
  *  The forest and the round block each point inside themselves by host address, turned into the
  *  kernel's own by @ref sz_reach_metal_ against the block's host address, while the candidates'
- *  tape and the scores are bound directly.
+ *  tape and the matches are bound directly.
  *
  *  A round is three dispatches. One thread per candidate would leave most of a simdgroup idle while
  *  its longest lane finishes, so candidates are cut into segments of equal length instead: the
  *  first dispatch scans their segment counts into offsets, the second scores one segment per thread
- *  and adds its matches to the candidate's counters, and the third turns them into shares.
+ *  and adds its matches to the candidate's counters, and the third copies them out.
  */
 
 /** The 32-bit prime every window hash is reduced by, as @c sz_overlap_modulus_k. */
@@ -67,7 +66,8 @@ struct sz_overlap_arguments_metal_t {
     ulong nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     ulong segments, counts;
     ulong queries_count, widths_count, candidates_count, segments_count;
-    ulong scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout, bound;
+    ulong matches_query_stride, matches_candidate_stride, staged_nodes_count, widest_width, candidates_layout,
+        misses_bound;
 };
 
 /**
@@ -159,44 +159,9 @@ inline uint sz_overlap_levels_metal_(uint keys_count, thread uint *level_bases) 
     return levels;
 }
 
-/**
- *  @brief @p matches over the longer window count as @c sz_overlap_share_ rounds it: the quotient
- *      rounded to an @c f64, and that rounded again to an @c f32.
- *
- *  Long division yields the quotient's first 54 significant bits and a sticky bit, which is exactly
- *  what the @c f64 rounding looks at; the @c f32 rounding then reads the 53 bits it produced. Doing
- *  both steps keeps the rare double-rounding cases identical to the host's.
- */
-inline float sz_overlap_share_metal_(ulong matches, ulong candidate_windows, ulong query_windows) {
-    ulong const longer = candidate_windows > query_windows ? candidate_windows : query_windows;
-    if (!longer || !matches) return 0.0f;
-
-    // Matches never exceed the longer side, so doubling the remainder until it reaches `longer`
-    // puts it in [longer, 2 × longer), where the first quotient bit is the leading one.
-    int exponent = 0;
-    ulong remainder = matches;
-    while (remainder < longer) remainder <<= 1, --exponent;
-    ulong bits = 0;
-    for (uint step = 0; step != 54; ++step) {
-        bits <<= 1;
-        if (remainder >= longer) bits |= 1, remainder -= longer;
-        remainder <<= 1;
-    }
-    bool const sticky = remainder != 0;
-
-    // Round to 53 bits, nearest-even, as the `f64` quotient does.
-    ulong significand = bits >> 1;
-    bool const guard = (bits & 1) != 0;
-    if (guard && (sticky || (significand & 1))) ++significand;
-    if (significand == (1ul << 53)) significand >>= 1, ++exponent;
-
-    // Round those 53 bits to 24, nearest-even, as the `f32` conversion does.
-    ulong fraction = significand >> 29;
-    ulong const dropped = significand & ((1ul << 29) - 1), tie = 1ul << 28;
-    if (dropped > tie || (dropped == tie && (fraction & 1))) ++fraction;
-    if (fraction == (1ul << 24)) fraction >>= 1, ++exponent;
-    return as_type<float>((uint)((exponent + 127) << 23) | (uint)(fraction & 0x7FFFFFu));
-}
+/** The most of its @p longer side's windows a pair may miss under @p misses_bound, the radius as
+ *  @c sz_overlap_misses_bound_ rounds it, in integers alone. */
+inline ulong sz_overlap_misses_bound_metal_(ulong misses_bound, ulong longer) { return (misses_bound * longer) >> 24; }
 
 /** Segments a text of @p length bytes is cut into. */
 inline uint sz_overlap_segments_of_metal_(ulong length) {
@@ -215,10 +180,10 @@ inline ulong sz_overlap_owner_metal_(device uint const *offsets, ulong candidate
     return low;
 }
 
-/** Windows of the longer side no probe can match, summed over every width: a window past either
- *  text, and every window past the shorter one. */
-inline ulong sz_overlap_unreachable_metal_(device uint const *widths, ulong widths_count, ulong query_length,
-                                           ulong length) {
+/** Whether a pair's lengths alone put it past its budget under @p misses_bound: a window past
+ *  either text, and every window past the shorter one, is a miss no probe can match. */
+inline bool sz_overlap_unreachable_metal_(device uint const *widths, ulong widths_count, ulong query_length,
+                                          ulong length, ulong misses_bound) {
     ulong longer = 0, reachable = 0;
     for (ulong index = 0; index != widths_count; ++index) {
         ulong const width = widths[index];
@@ -227,7 +192,7 @@ inline ulong sz_overlap_unreachable_metal_(device uint const *widths, ulong widt
         longer += max(windows, query_windows);
         reachable += query_windows ? windows : 0;
     }
-    return longer - reachable;
+    return longer - reachable > sz_overlap_misses_bound_metal_(misses_bound, longer);
 }
 
 /**
@@ -258,9 +223,10 @@ inline void sz_overlap_sweep_metal_(device uchar *engine, device uchar *scratch,
     device atomic_uint *counts = sz_reach_metal_<atomic_uint>(scratch, arguments.scratch_host, arguments.counts) +
                                  (query * arguments.candidates_count + candidate) * arguments.widths_count;
 
-    // A pair whose lengths alone put it past the bound rolls nothing; the shares kernel zeroes it.
+    // A pair its lengths alone put past its budget rolls nothing; the matches kernel zeroes it.
     device uint const *lengths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.lengths);
-    if (sz_overlap_unreachable_metal_(widths, arguments.widths_count, lengths[query], text_length) > arguments.bound)
+    if (sz_overlap_unreachable_metal_(widths, arguments.widths_count, lengths[query], text_length,
+                                      arguments.misses_bound))
         return;
 
     for (ulong first_width = 0; first_width < arguments.widths_count;
@@ -379,13 +345,14 @@ kernel void sz_overlap_scores_metal_kernel_(
     }
 }
 
-/** One thread per candidate and query: the counters become shares, cleared for the next round. */
-kernel void sz_overlap_shares_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
-                                            device uchar const *candidates [[buffer(2)]],
-                                            device uchar const *candidates_offsets [[buffer(3)]],
-                                            device float *scores [[buffer(4)]],
-                                            constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]],
-                                            uint2 position [[thread_position_in_grid]]) {
+/** One thread per candidate and query: the counters land in the output, zeros for a pair past its
+ *  budget, and are cleared for the next round. */
+kernel void sz_overlap_matches_metal_kernel_(device uchar *engine [[buffer(0)]], device uchar *scratch [[buffer(1)]],
+                                             device uchar const *candidates [[buffer(2)]],
+                                             device uchar const *candidates_offsets [[buffer(3)]],
+                                             device uint *matches [[buffer(4)]],
+                                             constant sz_overlap_arguments_metal_t &arguments [[buffer(5)]],
+                                             uint2 position [[thread_position_in_grid]]) {
     ulong const candidate = position.x, query = position.y;
     if (candidate >= arguments.candidates_count || query >= arguments.queries_count) return;
     sz_strings_tape_metal_t const tape = {candidates, candidates_offsets, arguments.candidates_layout};
@@ -393,23 +360,23 @@ kernel void sz_overlap_shares_metal_kernel_(device uchar *engine [[buffer(0)]], 
     device uint const *lengths = sz_reach_metal_<uint>(engine, arguments.engine_host, arguments.lengths);
     device uint *counts = sz_reach_metal_<uint>(scratch, arguments.scratch_host, arguments.counts) +
                           (query * arguments.candidates_count + candidate) * arguments.widths_count;
-    device float *candidate_scores = scores + query * arguments.scores_query_stride +
-                                     candidate * arguments.scores_candidate_stride;
+    device uint *candidate_matches = matches + query * arguments.matches_query_stride +
+                                     candidate * arguments.matches_candidate_stride;
     ulong const length = sz_strings_length_metal_(tape, candidate), query_length = lengths[query];
-    ulong misses = 0, index;
+    ulong longer = 0, misses = 0, index;
     for (index = 0; index != arguments.widths_count; ++index) {
         ulong const width = widths[index];
         ulong const windows = width && width <= length ? length - width + 1 : 0;
         ulong const query_windows = width && width <= query_length ? query_length - width + 1 : 0;
+        longer += max(windows, query_windows);
         misses += max(windows, query_windows) - (windows && query_windows ? counts[index] : 0);
     }
-    // One epilogue for every pair: exact shares within the bound, zeros past it.
-    bool const within = misses <= arguments.bound;
+    // One epilogue for every pair: exact counts within its budget, zeros past it.
+    bool const within = misses <= sz_overlap_misses_bound_metal_(arguments.misses_bound, longer);
     for (index = 0; index != arguments.widths_count; ++index) {
         ulong const width = widths[index];
-        bool const scored = within && width && width <= query_length && width <= length;
-        candidate_scores[index] =
-            scored ? sz_overlap_share_metal_(counts[index], length - width + 1, query_length - width + 1) : 0.0f;
+        bool const counted = within && width && width <= query_length && width <= length;
+        candidate_matches[index] = counted ? counts[index] : 0u;
         counts[index] = 0;
     }
 }

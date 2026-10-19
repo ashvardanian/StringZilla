@@ -531,15 +531,17 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_haswell(sz_overlap_engine_t *
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, sz_stream_t stream) {
+                                                      sz_f32_t radius, sz_u32_t *matches,
+                                                      sz_size_t matches_query_stride,
+                                                      sz_size_t matches_candidate_stride, sz_stream_t stream) {
     sz_assert_(stream == STRINGZILLA_NULL);
-    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
-                                                              scores_candidate_stride);
+    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, matches_query_stride,
+                                                              matches_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
     if (!candidates->count || !engine->count) return sz_success_k;
     sz_size_t const step = sz_overlap_f64x4_positions_per_step_haswell_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
+    sz_u32_t const misses_bound = sz_overlap_misses_bound_(radius);
 
     sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
     sz_status_t const grown = sz_overlap_engine_grow_(
@@ -602,8 +604,9 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_haswell(sz_overlap_engine_t *engin
                                                                     windows - window, keys + window);
                 keys += windows;
             }
-            sz_overlap_candidate_scores_(engine, window_hashes, length, bound, sz_overlap_u32x8_btree_probe_haswell_,
-                                         scores + (first + chain) * scores_candidate_stride, scores_query_stride);
+            sz_overlap_candidate_scores_(engine, window_hashes, length, misses_bound,
+                                         sz_overlap_u32x8_btree_probe_haswell_,
+                                         matches + (first + chain) * matches_candidate_stride, matches_query_stride);
         }
     }
     return sz_success_k;

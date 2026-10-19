@@ -175,15 +175,16 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_engine_init_scoped_rocm_(
 /** Enqueues one round of the tier's @p kernel on the device the caller already made current,
  *  which is every step of @ref sz_overlap_scores_scoped_rocm_ but the device scope. */
 STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                       sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                       sz_size_t scores_candidate_stride, void const *kernel,
+                                                       sz_f32_t radius, sz_u32_t *matches,
+                                                       sz_size_t matches_query_stride,
+                                                       sz_size_t matches_candidate_stride, void const *kernel,
                                                        void const *bounded_kernel, sz_stream_t stream) {
-    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
-                                                              scores_candidate_stride);
+    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, matches_query_stride,
+                                                              matches_candidate_stride);
     if (dimensions != sz_success_k) return dimensions;
     if (!candidates->count || !engine->count) return sz_success_k;
     if (!sz_memory_accessible_rocm_(engine->memory)) return sz_device_memory_mismatch_k;
-    if (!sz_memory_accessible_rocm_(scores)) return sz_device_memory_mismatch_k;
+    if (!sz_memory_accessible_rocm_(matches)) return sz_device_memory_mismatch_k;
     if (!sz_strings_accessible_rocm_(candidates)) return sz_device_memory_mismatch_k;
 
     sz_overlap_geometry_rocm_t const *const geometry = (sz_overlap_geometry_rocm_t const *)sz_overlap_engine_head_(
@@ -207,26 +208,27 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
     launched_engine.scratch = STRINGZILLA_NULL, launched_engine.scratch_bytes = 0;
 
     sz_strings_view_t launched_candidates = *candidates;
-    sz_f32_t *launched_scores = scores;
+    sz_u32_t *launched_matches = matches;
     dim3 grid, block;
     grid.x = (unsigned)blocks, grid.y = (unsigned)rows, grid.z = 1;
     block.x = (unsigned)per_block, block.y = 1, block.z = 1;
+    sz_u32_t misses_bound = sz_overlap_misses_bound_(radius);
     void *arguments[7];
-    arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &launched_scores;
-    arguments[3] = &scores_query_stride, arguments[4] = &scores_candidate_stride, arguments[5] = &staged_nodes_count;
-    arguments[6] = &bound;
+    arguments[0] = &launched_engine, arguments[1] = &launched_candidates, arguments[2] = &launched_matches;
+    arguments[3] = &matches_query_stride, arguments[4] = &matches_candidate_stride, arguments[5] = &staged_nodes_count;
+    arguments[6] = &misses_bound;
 
-    // One launch per group of widths one walk rolls, each over its own slice of every score row; a
+    // One launch per group of widths one walk rolls, each over its own slice of every row; a
     // bounded round sums a pair's misses over every width, so it takes them all in one launch.
-    sz_size_t const widths_per_launch = bound == STRINGZILLA_SIZE_MAX ? (sz_size_t)sz_overlap_gpu_widths_per_walk_k
-                                                                      : engine->widths_count;
-    void const *const launched_kernel = bound == STRINGZILLA_SIZE_MAX ? kernel : bounded_kernel;
+    sz_bool_t const bounded = radius < 1.0f ? sz_true_k : sz_false_k;
+    sz_size_t const widths_per_launch = bounded ? engine->widths_count : (sz_size_t)sz_overlap_gpu_widths_per_walk_k;
+    void const *const launched_kernel = bounded ? bounded_kernel : kernel;
     sz_status_t status = sz_success_k;
     for (sz_size_t first_width = 0; status == sz_success_k && first_width < engine->widths_count;
          first_width += widths_per_launch) {
         launched_engine.widths = engine->widths + first_width, launched_engine.powers = engine->powers + first_width;
         launched_engine.widths_count = sz_min_of_two(engine->widths_count - first_width, widths_per_launch);
-        launched_scores = scores + first_width;
+        launched_matches = matches + first_width;
         sz_size_t const shared_bytes = sz_overlap_shared_bytes_rocm_(staged_nodes_count, per_block,
                                                                      launched_engine.widths_count);
         status = sz_launch_rocm_(launched_kernel, grid, block, arguments, shared_bytes, stream);
@@ -235,25 +237,25 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_rocm_(sz_overlap_engine_t *engi
 }
 
 /**
- *  @brief The tier's @p kernel of @ref sz_overlap_scores, or its @p bounded_kernel under a bound,
+ *  @brief The tier's @p kernel of @ref sz_overlap_scores, or its @p bounded_kernel under a radius,
  *      on the engine's device.
  *  @pre @p candidates is a tape the device reaches, as @ref sz_strings_to_tape_best writes one with
  *      a unified allocator.
- *  @return @c sz_success_k, @c sz_device_memory_mismatch_k when the engine, the scores or the
+ *  @return @c sz_success_k, @c sz_device_memory_mismatch_k when the engine, the matches or the
  *      candidates are memory the device of @p stream cannot reach, or @c sz_device_code_mismatch_k
  *      when the launch itself is refused.
- *  @note Enqueues on @p stream and returns; the caller joins it before reading @p scores.
+ *  @note Enqueues on @p stream and returns; the caller joins it before reading @p matches.
  */
 STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_t *engine,
-                                                              sz_strings_view_t const *candidates, sz_size_t bound,
-                                                              sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                              sz_size_t scores_candidate_stride, void const *kernel,
+                                                              sz_strings_view_t const *candidates, sz_f32_t radius,
+                                                              sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                              sz_size_t matches_candidate_stride, void const *kernel,
                                                               void const *bounded_kernel, sz_stream_t stream) {
     int caller = 0;
     sz_status_t status = sz_device_enter_rocm_(stream, &caller);
     if (status != sz_success_k) return status;
-    status = sz_overlap_scores_rocm_(engine, candidates, bound, scores, scores_query_stride, scores_candidate_stride,
-                                     kernel, bounded_kernel, stream);
+    status = sz_overlap_scores_rocm_(engine, candidates, radius, matches, matches_query_stride,
+                                     matches_candidate_stride, kernel, bounded_kernel, stream);
     sz_device_leave_rocm_(caller);
     return status;
 }
@@ -261,19 +263,20 @@ STRINGZILLA_INLINE sz_status_t sz_overlap_scores_scoped_rocm_(sz_overlap_engine_
 #if STRINGZILLA_TARGET_ROCM
 
 static __global__ void sz_overlap_scores_rocm_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
-                                                      sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                      sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
-    sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
+                                                      sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                      sz_size_t matches_candidate_stride,
+                                                      sz_size_t staged_nodes_count) {
+    sz_overlap_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
                             staged_nodes_count, sz_shuffle_up_rocm_, sz_tile_queue_open_simt_,
                             sz_tile_queue_next_simt_);
 }
 
 static __global__ void sz_overlap_bounded_scores_rocm_kernel_(sz_overlap_engine_t engine, sz_strings_view_t candidates,
-                                                              sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                              sz_size_t scores_candidate_stride,
-                                                              sz_size_t staged_nodes_count, sz_size_t bound) {
-    sz_overlap_bounded_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
-                                    staged_nodes_count, bound, sz_shuffle_index_rocm_, sz_tile_queue_open_simt_,
+                                                              sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                              sz_size_t matches_candidate_stride,
+                                                              sz_size_t staged_nodes_count, sz_u32_t misses_bound) {
+    sz_overlap_bounded_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
+                                    staged_nodes_count, misses_bound, sz_shuffle_index_rocm_, sz_tile_queue_open_simt_,
                                     sz_tile_queue_next_simt_);
 }
 
@@ -287,10 +290,10 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_rocm(sz_overlap_engine_t *eng
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_rocm(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                   sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                   sz_size_t scores_candidate_stride, sz_stream_t stream) {
-    return sz_overlap_scores_scoped_rocm_(engine, candidates, bound, scores, scores_query_stride,
-                                          scores_candidate_stride, (void const *)sz_overlap_scores_rocm_kernel_,
+                                                   sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                   sz_size_t matches_candidate_stride, sz_stream_t stream) {
+    return sz_overlap_scores_scoped_rocm_(engine, candidates, radius, matches, matches_query_stride,
+                                          matches_candidate_stride, (void const *)sz_overlap_scores_rocm_kernel_,
                                           (void const *)sz_overlap_bounded_scores_rocm_kernel_, stream);
 }
 

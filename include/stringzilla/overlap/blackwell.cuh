@@ -32,19 +32,19 @@ enum { sz_overlap_blocks_per_multiprocessor_blackwell_k = 12 };
 static __global__ __launch_bounds__(
     sz_overlap_candidates_per_block_cuda_k,
     sz_overlap_blocks_per_multiprocessor_blackwell_k) void sz_overlap_scores_blackwell_kernel_( //
-    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_f32_t *scores, sz_size_t scores_query_stride,
-    sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count) {
-    sz_overlap_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
+    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
+    sz_size_t matches_candidate_stride, sz_size_t staged_nodes_count) {
+    sz_overlap_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
                             staged_nodes_count, sz_shuffle_up_cuda_, sz_tile_queue_open_simt_,
                             sz_tile_queue_next_simt_);
 }
 
 static __global__ __launch_bounds__(
     sz_overlap_candidates_per_block_cuda_k) void sz_overlap_bounded_scores_blackwell_kernel_( //
-    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_f32_t *scores, sz_size_t scores_query_stride,
-    sz_size_t scores_candidate_stride, sz_size_t staged_nodes_count, sz_size_t bound) {
-    sz_overlap_bounded_scores_simt_(engine, candidates, scores, scores_query_stride, scores_candidate_stride,
-                                    staged_nodes_count, bound, sz_shuffle_index_cuda_, sz_tile_queue_open_simt_,
+    sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
+    sz_size_t matches_candidate_stride, sz_size_t staged_nodes_count, sz_u32_t misses_bound) {
+    sz_overlap_bounded_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
+                                    staged_nodes_count, misses_bound, sz_shuffle_index_cuda_, sz_tile_queue_open_simt_,
                                     sz_tile_queue_next_simt_);
 }
 
@@ -59,11 +59,11 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_blackwell(sz_overlap_engine_t
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_blackwell(sz_overlap_engine_t *engine,
-                                                        sz_strings_view_t const *candidates, sz_size_t bound,
-                                                        sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                        sz_size_t scores_candidate_stride, sz_stream_t stream) {
-    return sz_overlap_scores_scoped_cuda_(engine, candidates, bound, scores, scores_query_stride,
-                                          scores_candidate_stride, (void const *)sz_overlap_scores_blackwell_kernel_,
+                                                        sz_strings_view_t const *candidates, sz_f32_t radius,
+                                                        sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                        sz_size_t matches_candidate_stride, sz_stream_t stream) {
+    return sz_overlap_scores_scoped_cuda_(engine, candidates, radius, matches, matches_query_stride,
+                                          matches_candidate_stride, (void const *)sz_overlap_scores_blackwell_kernel_,
                                           (void const *)sz_overlap_bounded_scores_blackwell_kernel_, stream);
 }
 

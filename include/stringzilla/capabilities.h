@@ -829,8 +829,8 @@ typedef sz_status_t (*sz_kernel_overlap_engine_init_t)(struct sz_overlap_engine_
                                                        sz_stream_t);
 
 /** Signature of every @c sz_overlap_scores kernel. */
-typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *, sz_size_t,
-                                                  sz_f32_t *, sz_size_t, sz_size_t, sz_stream_t);
+typedef sz_status_t (*sz_kernel_overlap_scores_t)(struct sz_overlap_engine_t *, sz_strings_view_t const *, sz_f32_t,
+                                                  sz_u32_t *, sz_size_t, sz_size_t, sz_stream_t);
 
 /** Signature of every @c sz_substrings_engine_init kernel. */
 typedef sz_status_t (*sz_kernel_substrings_engine_init_t)(struct sz_substrings_engine_t *, sz_strings_view_t const *,

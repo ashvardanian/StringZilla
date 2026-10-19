@@ -46,9 +46,9 @@ static sz_status_t overlap_engine_init_dispatched_(sz_overlap_engine_t *engine, 
 /** The dispatched constructor and the round that scores whatever capability it prepared for. */
 static overlap_backend_t const overlap_dispatched {"dispatched", overlap_engine_init_dispatched_, sz_overlap_scores};
 
-/** One pair through the dispatched engine at one width, asserting the literal @p expected share. */
+/** One pair through the dispatched engine at one width, asserting the literal @p expected count. */
 static void check_overlap_pair_(std::string const &query, std::string const &candidate, std::size_t width,
-                                sz_f32_t expected) {
+                                sz_u32_t expected) {
     handle_checked_heap_t heap;
     std::vector<std::string> const queries = {query}, candidates = {candidate};
     sz_strings_view_t const query_strings = strings_from_(queries);
@@ -56,18 +56,18 @@ static void check_overlap_pair_(std::string const &query, std::string const &can
     sz_overlap_engine_t engine {};
     verify(sz_overlap_engine_init(&engine, &query_strings, &width, 1, 0, sz::default_capabilities(), &heap.allocator,
                                   nullptr) == sz_success_k);
-    sz_f32_t share = -1.0f;
-    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, &share, 1, 1, nullptr) == sz_success_k);
+    sz_u32_t matches = 0xFFFFFFFFu;
+    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, &matches, 1, 1, nullptr) == sz_success_k);
     sz_overlap_engine_free(&engine, nullptr);
     verify(heap.live_allocations == 0);
-    verify(share == expected);
+    verify(matches == expected);
 }
 
 #pragma endregion Helpers
 
 #pragma region Unit
 
-/** Known answers: capacities, strides, and shares readable off the texts. */
+/** Known answers: capacities, strides, and counts readable off the texts. */
 void test_overlap_unit() {
     // Identical texts share every window, disjoint alphabets share none, and a candidate narrower than the width
     // has no windows to share; "the" holds three, two and one windows below that, over the query's 43 bytes.
@@ -81,39 +81,35 @@ void test_overlap_unit() {
     sz_overlap_engine_t engine {};
     verify(sz_overlap_engine_init(&engine, &query_strings, widths.data(), widths.size(), 0, sz::default_capabilities(),
                                   &heap.allocator, nullptr) == sz_success_k);
-    sz_f32_t shares[4 * 7];
-    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7, 7, nullptr) ==
-           sz_success_k);
+    sz_u32_t matches[4 * 7];
+    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 7, nullptr) == sz_success_k);
     for (std::size_t width_index = 0; width_index != widths.size(); ++width_index) {
-        verify(shares[0 * 7 + width_index] == 1.0f);
-        verify(shares[1 * 7 + width_index] == 0.0f);
-        verify(shares[3 * 7 + width_index] == 0.0f);
+        verify(matches[0 * 7 + width_index] == fox.size() - widths[width_index] + 1);
+        verify(matches[1 * 7 + width_index] == 0);
+        verify(matches[3 * 7 + width_index] == 0);
     }
-    verify(shares[2 * 7 + 0] == static_cast<sz_f32_t>(3.0 / 43.0));
-    verify(shares[2 * 7 + 1] == static_cast<sz_f32_t>(2.0 / 42.0));
-    verify(shares[2 * 7 + 2] == static_cast<sz_f32_t>(1.0 / 41.0));
+    verify(matches[2 * 7 + 0] == 3 && matches[2 * 7 + 1] == 2 && matches[2 * 7 + 2] == 1);
     for (std::size_t width_index = 3; width_index != widths.size(); ++width_index)
-        verify(shares[2 * 7 + width_index] == 0.0f);
+        verify(matches[2 * 7 + width_index] == 0);
 
-    // A candidate stride wider than the widths leaves the gap it names alone, and every share lands
+    // A candidate stride wider than the widths leaves the gap it names alone, and every count lands
     // where it says, read this time from a tape of the same candidates.
     std::string payload;
     std::vector<sz_u32_t> offsets;
     sz_strings_view_t const candidate_tape = strings_tape_from_(candidates, payload, offsets);
-    sz_f32_t padded[4 * 9];
-    for (sz_f32_t &slot : padded) slot = -1.0f;
-    verify(sz_overlap_scores(&engine, &candidate_tape, STRINGZILLA_SIZE_MAX, padded, 4 * 9, 9, nullptr) ==
-           sz_success_k);
+    sz_u32_t padded[4 * 9];
+    for (sz_u32_t &slot : padded) slot = 0xFFFFFFFFu;
+    verify(sz_overlap_scores(&engine, &candidate_tape, 1.0f, padded, 4 * 9, 9, nullptr) == sz_success_k);
     for (std::size_t candidate = 0; candidate != candidates.size(); ++candidate) {
         for (std::size_t width_index = 0; width_index != widths.size(); ++width_index)
-            verify(padded[candidate * 9 + width_index] == shares[candidate * 7 + width_index]);
-        verify(padded[candidate * 9 + 7] == -1.0f && padded[candidate * 9 + 8] == -1.0f);
+            verify(padded[candidate * 9 + width_index] == matches[candidate * 7 + width_index]);
+        verify(padded[candidate * 9 + 7] == 0xFFFFFFFFu && padded[candidate * 9 + 8] == 0xFFFFFFFFu);
     }
 
     // A stride under the axis it spans would write one row into its neighbour's, so it is refused.
-    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7, 6, nullptr) ==
+    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7, 6, nullptr) ==
            sz_unexpected_dimensions_k);
-    verify(sz_overlap_scores(&engine, &candidate_strings, STRINGZILLA_SIZE_MAX, shares, 4 * 7 - 1, 7, nullptr) ==
+    verify(sz_overlap_scores(&engine, &candidate_strings, 1.0f, matches, 4 * 7 - 1, 7, nullptr) ==
            sz_unexpected_dimensions_k);
     sz_overlap_engine_free(&engine, nullptr);
 
@@ -124,13 +120,13 @@ void test_overlap_unit() {
     verify(heap.live_allocations == 0);
 
     // "aaaa" holds one distinct window at width one, so "ab" finds one in four; the other way finds all four.
-    check_overlap_pair_("aaaa", "ab", 1, 0.25f);
-    check_overlap_pair_("ab", "aaaa", 1, 1.0f);
+    check_overlap_pair_("aaaa", "ab", 1, 1);
+    check_overlap_pair_("ab", "aaaa", 1, 4);
 
     // An empty side has no windows, on either side or both.
-    check_overlap_pair_("", "abc", 1, 0.0f);
-    check_overlap_pair_("abc", "", 1, 0.0f);
-    check_overlap_pair_("", "", 1, 0.0f);
+    check_overlap_pair_("", "abc", 1, 0);
+    check_overlap_pair_("abc", "", 1, 0);
+    check_overlap_pair_("", "", 1, 0);
 }
 
 #pragma endregion Unit

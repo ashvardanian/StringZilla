@@ -4,13 +4,13 @@
  *  @date September 24, 2026
  *  @brief Metal backend for window overlap on Apple7 and newer: the engine's forest built on the
  *      host into one shared block, and one call of three passes per round - a segment scan, the
- *      scoring, and the shares.
+ *      scoring, and the matches.
  *
  *  @sa include/stringzilla/overlap/metal.metal, the kernels this embeds
  *  @sa include/stringzilla/overlap/simt.cuh, the CUDA sibling
  *
  *  The verbs keep the CUDA tier's shape, with an @c id<MTLCommandQueue> as the stream. Every block
- *  the kernels read, the forest, the round block, the candidates' tape and the scores, must come
+ *  the kernels read, the forest, the round block, the candidates' tape and the matches, must come
  *  from @ref sz_allocator_init_unified_metal on that stream's device; memory outside the device's
  *  registry draws @c sz_device_memory_mismatch_k.
  *
@@ -85,7 +85,8 @@ typedef struct {
     sz_u64_t nodes, nodes_offsets, keys_counts, widths, powers, lengths;
     sz_u64_t segments, counts;
     sz_u64_t queries_count, widths_count, candidates_count, segments_count;
-    sz_u64_t scores_query_stride, scores_candidate_stride, staged_nodes_count, widest_width, candidates_layout, bound;
+    sz_u64_t matches_query_stride, matches_candidate_stride, staged_nodes_count, widest_width, candidates_layout,
+        misses_bound;
 } sz_overlap_arguments_metal_t;
 
 /** Encodes kernel @p name over @p groups of @p threads into @p call, with the round's @p buffers. */
@@ -145,7 +146,7 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
     host.free(chain, chain_bytes, host.handle, stream);
 
     // The round block holds the segment offsets, then one counter per query, candidate and width,
-    // which start at zero here and which the shares pass clears again after reading them.
+    // which start at zero here and which the matches pass clears again after reading them.
     if (!candidates_budget) candidates_budget = sz_overlap_candidates_budget_default_metal_k;
     sz_size_t const round_bytes = sz_overlap_offsets_bytes_metal_(candidates_budget) +
                                   engine->count * candidates_budget * engine->widths_count * sizeof(sz_u32_t);
@@ -164,8 +165,8 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
                                               "sz_overlap_segments_metal_kernel_");
     void *const pipeline = sz_metal_pipeline_(call.context, sz_overlap_source_metal_,
                                               "sz_overlap_scores_metal_kernel_");
-    void *const shares = sz_metal_pipeline_(call.context, sz_overlap_source_metal_, "sz_overlap_shares_metal_kernel_");
-    if (!segments || !pipeline || !shares ||
+    void *const counts = sz_metal_pipeline_(call.context, sz_overlap_source_metal_, "sz_overlap_matches_metal_kernel_");
+    if (!segments || !pipeline || !counts ||
         sz_metal_count_(segments, "maxTotalThreadsPerThreadgroup") < sz_overlap_scan_threads_metal_k) {
         sz_overlap_engine_close_(engine, stream);
         return sz_metal_commit_(&call, sz_device_code_mismatch_k);
@@ -184,24 +185,24 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_metal(sz_overlap_engine_t *en
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                    sz_size_t bound, sz_f32_t *scores, sz_size_t scores_query_stride,
-                                                    sz_size_t scores_candidate_stride, sz_stream_t stream) {
-    sz_status_t status = sz_overlap_engine_strides_(engine, candidates->count, scores_query_stride,
-                                                    scores_candidate_stride);
+                                                    sz_f32_t radius, sz_u32_t *matches, sz_size_t matches_query_stride,
+                                                    sz_size_t matches_candidate_stride, sz_stream_t stream) {
+    sz_status_t status = sz_overlap_engine_strides_(engine, candidates->count, matches_query_stride,
+                                                    matches_candidate_stride);
     if (status != sz_success_k) return status;
     if (!candidates->count || !engine->count) return sz_success_k;
 
-    // The forest, the round block, the candidates' payload and offsets, and the scores, as the
+    // The forest, the round block, the candidates' payload and offsets, and the matches, as the
     // kernels number them.
     sz_metal_bound_t buffers[5];
     sz_metal_call_t call;
     status = sz_device_enter_metal_(stream, &call);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
-    sz_size_t const scores_count = (engine->count - 1) * scores_query_stride +
-                                   (candidates->count - 1) * scores_candidate_stride + engine->widths_count;
+    sz_size_t const matches_count = (engine->count - 1) * matches_query_stride +
+                                    (candidates->count - 1) * matches_candidate_stride + engine->widths_count;
     if (!sz_metal_resolve_call_(&call, engine->memory, engine->memory_bytes, &buffers[0]) ||
         !sz_metal_resolve_call_(&call, engine->scratch, engine->scratch_bytes, &buffers[1]) ||
-        !sz_metal_resolve_call_(&call, scores, scores_count * sizeof(sz_f32_t), &buffers[4]))
+        !sz_metal_resolve_call_(&call, matches, matches_count * sizeof(sz_u32_t), &buffers[4]))
         return sz_metal_commit_(&call, sz_device_memory_mismatch_k);
     status = sz_metal_tape_call_(&call, candidates, &buffers[2], &buffers[3]);
     if (status != sz_success_k) return sz_metal_commit_(&call, status);
@@ -232,11 +233,11 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
     arguments.counts = (sz_u64_t)((char *)engine->scratch + offsets_bytes);
     arguments.queries_count = engine->count, arguments.widths_count = engine->widths_count;
     arguments.candidates_count = candidates->count, arguments.segments_count = segments_count;
-    arguments.scores_query_stride = scores_query_stride;
-    arguments.scores_candidate_stride = scores_candidate_stride;
+    arguments.matches_query_stride = matches_query_stride;
+    arguments.matches_candidate_stride = matches_candidate_stride;
     arguments.staged_nodes_count = geometry->staged_nodes_count;
     arguments.candidates_layout = (sz_u64_t)candidates->layout;
-    arguments.bound = bound;
+    arguments.misses_bound = sz_overlap_misses_bound_(radius);
     arguments.widest_width = 0;
     for (sz_size_t index = 0; index != engine->widths_count; ++index)
         if (engine->widths[index] > arguments.widest_width) arguments.widest_width = engine->widths[index];
@@ -259,11 +260,11 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_metal(sz_overlap_engine_t *engine,
                                            staged_bytes ? staged_bytes : 16, grid, threads);
     }
 
-    sz_metal_size_t const shares_grid = {sz_size_divide_round_up(candidates->count, 256), engine->count, 1},
-                          shares_threads = {256, 1, 1};
+    sz_metal_size_t const counts_grid = {sz_size_divide_round_up(candidates->count, 256), engine->count, 1},
+                          counts_threads = {256, 1, 1};
     if (status == sz_success_k)
-        status = sz_overlap_enqueue_metal_(&call, "sz_overlap_shares_metal_kernel_", buffers, &arguments, 0,
-                                           shares_grid, shares_threads);
+        status = sz_overlap_enqueue_metal_(&call, "sz_overlap_matches_metal_kernel_", buffers, &arguments, 0,
+                                           counts_grid, counts_threads);
     return sz_metal_commit_(&call, status);
 }
 
