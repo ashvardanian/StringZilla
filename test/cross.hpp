@@ -1494,9 +1494,9 @@ inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
  *  an allocator refusing everything leave a zeroed span empty. */
 inline void check_strings_arena_refusals_(strings_backend_t const &backend) {
     for (strings_verb_t const verb : strings_verbs_()) {
-        std::vector<std::string> const small = strings_input_for_(backend, verb, {"ab"});
+        std::vector<std::string> const small_input = strings_input_for_(backend, verb, {"ab"});
         std::vector<std::string> const large = strings_input_for_(backend, verb, {std::string(1024, '"')});
-        strings_layouts_t const small_layouts(small), large_layouts(large);
+        strings_layouts_t const small_layouts(small_input), large_layouts(large);
         alignas(64) char buffer[512];
         sz_allocator_t arena;
         verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
