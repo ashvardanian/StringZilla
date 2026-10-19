@@ -560,24 +560,11 @@ STRINGZILLA_API sz_status_t sz_overlap_engine_init_skylake(sz_overlap_engine_t *
     return sz_success_k;
 }
 
-STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
-                                                      sz_f32_t radius, sz_u32_t *matches,
-                                                      sz_size_t matches_query_stride,
-                                                      sz_size_t matches_candidate_stride, sz_stream_t stream) {
-    sz_assert_(stream == STRINGZILLA_NULL);
-    sz_status_t const dimensions = sz_overlap_engine_strides_(engine, candidates->count, matches_query_stride,
-                                                              matches_candidate_stride);
-    if (dimensions != sz_success_k) return dimensions;
-    if (!candidates->count || !engine->count) return sz_success_k;
+/** Hashes the candidates of @p round, four chains at a time, and scores each as @p round says. */
+STRINGZILLA_INLINE void sz_overlap_round_skylake_(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                  sz_size_t longest_candidate, sz_overlap_round_t const *round) {
     sz_size_t const step = sz_overlap_f64x8_positions_per_step_skylake_k;
     sz_size_t const chains = sz_overlap_interleaved_chains_k;
-    sz_u32_t const misses_bound = sz_overlap_misses_bound_(radius);
-
-    sz_size_t const longest_candidate = sz_overlap_longest_(candidates);
-    sz_status_t const grown = sz_overlap_engine_grow_(
-        engine, sz_overlap_engine_round_bytes_(engine, longest_candidate, chains), stream);
-    if (grown != sz_success_k) return grown;
-
     sz_size_t const chain_stride = longest_candidate + 1;
     sz_f64_t *const prefix_hashes = (sz_f64_t *)engine->scratch;
     sz_u32_t *const window_hashes = (sz_u32_t *)(prefix_hashes + chain_stride * chains);
@@ -585,15 +572,16 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
     // Four candidates' chains advance together, each carrying its own prior, so their latency-bound
     // steps overlap. A short last group repeats its first candidate in the spare chains, so every
     // group runs the same four-chain loop.
-    for (sz_size_t first = 0; first < candidates->count; first += chains) {
-        sz_size_t const interleaved = sz_min_of_two(candidates->count - first, chains);
+    for (sz_size_t first = 0; first < round->count; first += chains) {
+        sz_size_t const interleaved = sz_min_of_two(round->count - first, chains);
         sz_cptr_t texts[sz_overlap_interleaved_chains_k];
         sz_size_t lengths[sz_overlap_interleaved_chains_k];
         sz_f64_t priors[sz_overlap_interleaved_chains_k];
         sz_size_t indices[sz_overlap_interleaved_chains_k];
         sz_string_view_t views[sz_overlap_interleaved_chains_k];
         sz_size_t chain, shortest = STRINGZILLA_SIZE_MAX;
-        for (chain = 0; chain != chains; ++chain) indices[chain] = first + (chain < interleaved ? chain : 0);
+        for (chain = 0; chain != chains; ++chain)
+            indices[chain] = round->order[first + (chain < interleaved ? chain : 0)];
         sz_strings_get_(candidates, indices, chains, views);
         for (chain = 0; chain != chains; ++chain) {
             texts[chain] = views[chain].start, lengths[chain] = views[chain].length;
@@ -634,11 +622,24 @@ STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engin
                                                                     windows - window, keys + window);
                 keys += windows;
             }
-            sz_overlap_candidate_scores_(engine, window_hashes, length, misses_bound,
-                                         sz_overlap_u32x16_btree_probe_skylake_,
-                                         matches + (first + chain) * matches_candidate_stride, matches_query_stride);
+            sz_overlap_round_score_(engine, round, indices[chain], window_hashes, length,
+                                    sz_overlap_u32x16_btree_probe_skylake_);
         }
     }
+}
+
+STRINGZILLA_API sz_status_t sz_overlap_scores_skylake(sz_overlap_engine_t *engine, sz_strings_view_t const *candidates,
+                                                      sz_f32_t radius, sz_u32_t *matches,
+                                                      sz_size_t matches_query_stride,
+                                                      sz_size_t matches_candidate_stride, sz_stream_t stream) {
+    sz_assert_(stream == STRINGZILLA_NULL);
+    sz_overlap_round_t round;
+    sz_size_t longest_candidate = 0;
+    sz_status_t const prepared = sz_overlap_scores_round_(engine, candidates, radius, matches, matches_query_stride,
+                                                          matches_candidate_stride, sz_overlap_interleaved_chains_k,
+                                                          stream, &round, &longest_candidate);
+    if (prepared != sz_success_k) return prepared;
+    sz_overlap_round_skylake_(engine, candidates, longest_candidate, &round);
     return sz_success_k;
 }
 
