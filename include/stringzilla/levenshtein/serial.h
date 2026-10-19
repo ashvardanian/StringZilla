@@ -78,6 +78,10 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_query_stride(sz_size_t length) {
            ~(sz_size_t)(sz_levenshtein_words_stride_k - 1);
 }
 
+/** Words from one class's mask row to the next for a query a walk prepares in its own span: odd, so
+ *  lanes stepping different classes' rows at the same word spread over every bank pair. */
+STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_walk_stride(sz_size_t words) { return words | 1; }
+
 /** Classes one word's mask table holds on a host tier: the query's classes rounded up to the
  *  next of 8, 32 and 64 a register table takes, so a lookup is one, two or four table shuffles,
  *  or to a multiple of 8 past 64, read by loads. */

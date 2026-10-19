@@ -216,23 +216,21 @@ STRINGZILLA_INLINE sz_bool_t sz_levenshtein_byte_slots_haswell_(sz_u8_t const *b
     return sz_true_k;
 }
 
-/** Stores eight positions of four candidates' byte classes, @p classes_u8x32 holding each
- *  candidate's eight in turn, transposed so position @c p of candidate @c c lands at
- *  `p * 4 + c`, @p positions of them. */
-STRINGZILLA_INLINE void sz_levenshtein_u8x4_store_positions_haswell_(__m256i classes_u8x32, sz_size_t positions,
-                                                                     sz_u8_t *classes) {
-    // Within each half, the two candidates' bytes interleave; then the halves interleave by pairs.
-    __m256i const interleave_u8x32 = _mm256_setr_epi8(0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15, //
-                                                      0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15);
-    __m256i const pairs_u8x32 = _mm256_shuffle_epi8(classes_u8x32, interleave_u8x32);
-    __m128i const first_pairs_u8x16 = _mm256_castsi256_si128(pairs_u8x32);
-    __m128i const second_pairs_u8x16 = _mm256_extracti128_si256(pairs_u8x32, 1);
-    sz_u256_vec_t positions_vec;
-    positions_vec.ymm = _mm256_setr_m128i(_mm_unpacklo_epi16(first_pairs_u8x16, second_pairs_u8x16),
-                                          _mm_unpackhi_epi16(first_pairs_u8x16, second_pairs_u8x16));
-    if (positions == 8) _mm256_storeu_si256((__m256i *)classes, positions_vec.ymm);
-    else
-        for (sz_size_t byte = 0; byte != positions * 4; ++byte) classes[byte] = positions_vec.u8s[byte];
+/** Sixteen bytes of a @p length -byte @p text from @p cursor on, zeros past its end, never read
+ *  outside it: a text of sixteen bytes or more loads the sixteen ending at its own end once the
+ *  cursor nears it and shuffles out the ones passed; a shorter text reads two clamped octets. */
+STRINGZILLA_INLINE __m128i sz_levenshtein_sixteen_haswell_(sz_cptr_t text, sz_size_t length, sz_size_t cursor) {
+    if (length < 16)
+        return _mm_set_epi64x((long long)sz_levenshtein_octet_(text, length, cursor + 8),
+                              (long long)sz_levenshtein_octet_(text, length, cursor));
+    sz_size_t const start = sz_min_of_two(cursor, length - 16);
+    sz_size_t const passed = sz_min_of_two(cursor, length) - start;
+    // Byte `i` takes byte `i + passed`, and a control past fifteen has its top bit set, which
+    // zeroes the byte.
+    __m128i const control_u8x16 = _mm_add_epi8(_mm_setr_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+                                               _mm_set1_epi8((char)passed));
+    return _mm_shuffle_epi8(_mm_loadu_si128((__m128i const *)(text + start)),
+                            _mm_or_si128(control_u8x16, _mm_cmpgt_epi8(control_u8x16, _mm_set1_epi8(15))));
 }
 
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x4_transpose_haswell_(sz_levenshtein_query_t const *query,
@@ -255,36 +253,53 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x4_transpose_haswell_(sz_levenshte
         slot_classes_u8x32 = _mm256_broadcastsi128_si256(_mm_loadu_si128((__m128i const *)(byte_slots + 16)));
         absent_u8x32 = _mm256_set1_epi8((char)byte_slots[32]);
     }
-    for (sz_size_t position = 0; position < filled; position += 8) {
-        sz_u64_t const octets[4] = {sz_levenshtein_octet_(texts[0], (sz_size_t)byte_counts[0], cursors[0] + position),
-                                    sz_levenshtein_octet_(texts[1], (sz_size_t)byte_counts[1], cursors[1] + position),
-                                    sz_levenshtein_octet_(texts[2], (sz_size_t)byte_counts[2], cursors[2] + position),
-                                    sz_levenshtein_octet_(texts[3], (sz_size_t)byte_counts[3], cursors[3] + position)};
-        __m256i classes_u8x32;
-        // At most sixteen bytes differing in their low nibbles class in registers.
-        if (byte_slots) {
-            __m256i const bytes_u8x32 = _mm256_loadu_si256((__m256i const *)octets);
-            __m256i const nibbles_u8x32 = _mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(15));
-            __m256i const slot_matches_u8x32 = _mm256_cmpeq_epi8(_mm256_shuffle_epi8(slot_bytes_u8x32, nibbles_u8x32),
-                                                                 bytes_u8x32);
-            classes_u8x32 = _mm256_blendv_epi8(absent_u8x32, _mm256_shuffle_epi8(slot_classes_u8x32, nibbles_u8x32),
-                                               slot_matches_u8x32);
+    for (sz_size_t position = 0; position < filled; position += 16) {
+        __m128i lanes_u8x16[4];
+        for (sz_size_t candidate = 0; candidate != 4; ++candidate)
+            lanes_u8x16[candidate] = sz_levenshtein_sixteen_haswell_(
+                texts[candidate], (sz_size_t)byte_counts[candidate], cursors[candidate] + position);
+        // Two rounds of unpacks turn four lanes of sixteen bytes into sixteen positions of four.
+        __m128i const low_pairs_u8x16 = _mm_unpacklo_epi8(lanes_u8x16[0], lanes_u8x16[1]);
+        __m128i const high_pairs_u8x16 = _mm_unpackhi_epi8(lanes_u8x16[0], lanes_u8x16[1]);
+        __m128i const low_other_pairs_u8x16 = _mm_unpacklo_epi8(lanes_u8x16[2], lanes_u8x16[3]);
+        __m128i const high_other_pairs_u8x16 = _mm_unpackhi_epi8(lanes_u8x16[2], lanes_u8x16[3]);
+        sz_u256_vec_t halves_vec[2];
+        halves_vec[0].ymm = _mm256_setr_m128i(_mm_unpacklo_epi16(low_pairs_u8x16, low_other_pairs_u8x16),
+                                              _mm_unpackhi_epi16(low_pairs_u8x16, low_other_pairs_u8x16));
+        halves_vec[1].ymm = _mm256_setr_m128i(_mm_unpacklo_epi16(high_pairs_u8x16, high_other_pairs_u8x16),
+                                              _mm_unpackhi_epi16(high_pairs_u8x16, high_other_pairs_u8x16));
+        for (sz_size_t half = 0; half != 2; ++half) {
+            // At most sixteen bytes differing in their low nibbles class in registers.
+            if (byte_slots) {
+                __m256i const bytes_u8x32 = halves_vec[half].ymm;
+                __m256i const nibbles_u8x32 = _mm256_and_si256(bytes_u8x32, _mm256_set1_epi8(15));
+                __m256i const slot_matches_u8x32 = _mm256_cmpeq_epi8(
+                    _mm256_shuffle_epi8(slot_bytes_u8x32, nibbles_u8x32), bytes_u8x32);
+                halves_vec[half].ymm = _mm256_blendv_epi8(
+                    absent_u8x32, _mm256_shuffle_epi8(slot_classes_u8x32, nibbles_u8x32), slot_matches_u8x32);
+            }
+            else
+                for (sz_size_t octet = 0; octet != 4; ++octet)
+                    halves_vec[half].u64s[octet] = sz_levenshtein_octet_classes_(byte_to_class,
+                                                                                 halves_vec[half].u64s[octet]);
+        }
+        // A last chunk past `positions` stores only the rows the buffer holds.
+        sz_size_t const rows = sz_min_of_two(positions - position, (sz_size_t)16);
+        if (rows == 16) {
+            _mm256_storeu_si256((__m256i *)(classes + position * 4), halves_vec[0].ymm);
+            _mm256_storeu_si256((__m256i *)(classes + position * 4 + 32), halves_vec[1].ymm);
         }
         else
-            classes_u8x32 = _mm256_setr_epi64x((long long)sz_levenshtein_octet_classes_(byte_to_class, octets[0]),
-                                               (long long)sz_levenshtein_octet_classes_(byte_to_class, octets[1]),
-                                               (long long)sz_levenshtein_octet_classes_(byte_to_class, octets[2]),
-                                               (long long)sz_levenshtein_octet_classes_(byte_to_class, octets[3]));
-        sz_levenshtein_u8x4_store_positions_haswell_(classes_u8x32, sz_min_of_two(filled - position, (sz_size_t)8),
-                                                     classes + position * 4);
+            for (sz_size_t byte = 0; byte != rows * 4; ++byte)
+                classes[position * 4 + byte] = halves_vec[byte / 32].u8s[byte % 32];
     }
     for (sz_size_t candidate = 0; candidate != 4; ++candidate)
         cursors[candidate] += sz_min_of_two(filled, (sz_size_t)byte_counts[candidate] - cursors[candidate]);
     return filled;
 }
 
-/** The byte transpose for four candidates: eight positions per four loads, each clamped to its own
- *  candidate's end, classed by the query's byte slots when it has them and by its byte map
+/** The byte transpose for four candidates: sixteen positions per four loads, each clamped to its
+ *  own candidate's end, classed by the query's byte slots when it has them and by its byte map
  *  otherwise; emits the @c sz_u8_t class of every byte. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x4_transpose_haswell(sz_levenshtein_query_t const *query,
                                                                    sz_cptr_t const *texts, sz_u64_t const *byte_counts,
@@ -461,6 +476,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_recycle_haswell_(
     sz_cptr_t texts[lanes_k] = {STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL};
     sz_u64_t byte_counts[lanes_k] = {0, 0, 0, 0}, ends[lanes_k] = {0, 0, 0, 0};
     sz_size_t cursors[lanes_k] = {0, 0, 0, 0}, slots[lanes_k] = {0, 0, 0, 0};
+    // Candidates are seeded sixty-four at a time, so one seed's gap tests serve many refills.
+    sz_cptr_t fresh_texts[64];
+    sz_u64_t fresh_bytes[64], fresh_symbols[64];
+    sz_size_t fresh_slots[64], fresh_taken = 0, fresh_count = 0;
     sz_ssize_t const radius = sz_levenshtein_radius_(bound);
     sz_u32_t transpose_classes[block_k][lanes_k] = {{0}};
     sz_levenshtein_u64x4_state_haswell_t state;
@@ -468,24 +487,25 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x4_recycle_haswell_(
     sz_u64_t live = 0, idle = (1u << lanes_k) - 1;
     sz_size_t next_rank = 0;
     for (sz_size_t block_start = 0;; block_start += block_k) {
-        // Idle lanes take the next slots in order, starting at this block.
-        if (idle && next_rank != candidates->count) {
-            sz_cptr_t fresh_texts[lanes_k];
-            sz_u64_t fresh_bytes[lanes_k], fresh_symbols[lanes_k];
-            sz_size_t fresh_slots[lanes_k];
-            sz_size_t const fresh_count = sz_levenshtein_sweep_seed_(
-                candidates, symbol_counts, order, query, bound, &next_rank, (sz_size_t)_mm_popcnt_u64(idle),
-                fresh_slots, fresh_texts, fresh_bytes, fresh_symbols, distances);
-            sz_u64_t fresh = 0;
-            for (sz_size_t taken = 0; taken != fresh_count; ++taken) {
-                sz_size_t const lane = (sz_size_t)_tzcnt_u64(idle);
-                idle &= idle - 1, fresh |= (sz_u64_t)1 << lane;
-                texts[lane] = fresh_texts[taken], byte_counts[lane] = fresh_bytes[taken], cursors[lane] = 0;
-                slots[lane] = fresh_slots[taken], ends[lane] = block_start + fresh_symbols[taken];
+        // Idle lanes take the next seeded candidates in order, starting at this block.
+        sz_u64_t fresh = 0;
+        for (; idle; idle &= idle - 1) {
+            if (fresh_taken == fresh_count) {
+                if (next_rank == candidates->count) break;
+                fresh_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound, &next_rank, 64,
+                                                         fresh_slots, fresh_texts, fresh_bytes, fresh_symbols,
+                                                         distances);
+                fresh_taken = 0;
+                if (!fresh_count) break;
             }
-            sz_levenshtein_u64x4_restart_haswell_(&state, verticals, words, query, fresh);
-            live |= fresh;
+            sz_size_t const lane = (sz_size_t)_tzcnt_u64(idle);
+            fresh |= (sz_u64_t)1 << lane;
+            texts[lane] = fresh_texts[fresh_taken], byte_counts[lane] = fresh_bytes[fresh_taken], cursors[lane] = 0;
+            slots[lane] = fresh_slots[fresh_taken], ends[lane] = block_start + fresh_symbols[fresh_taken];
+            ++fresh_taken;
         }
+        if (fresh) sz_levenshtein_u64x4_restart_haswell_(&state, verticals, words, query, fresh);
+        live |= fresh;
         if (!live) break;
         for (sz_u64_t retired = idle; retired; retired &= retired - 1) {
             sz_size_t const lane = (sz_size_t)_tzcnt_u64(retired);

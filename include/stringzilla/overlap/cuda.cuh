@@ -287,8 +287,8 @@ static __global__ __launch_bounds__(
     sz_overlap_engine_t engine, sz_strings_view_t candidates, sz_u32_t *matches, sz_size_t matches_query_stride,
     sz_size_t matches_candidate_stride, sz_size_t staged_nodes_count, sz_u32_t misses_bound) {
     sz_overlap_bounded_scores_simt_(engine, candidates, matches, matches_query_stride, matches_candidate_stride,
-                                    staged_nodes_count, misses_bound, sz_shuffle_index_cuda_, sz_tile_queue_open_simt_,
-                                    sz_tile_queue_next_simt_);
+                                    staged_nodes_count, misses_bound, sz_group_shuffle_index_cuda_,
+                                    sz_tile_queue_open_simt_, sz_tile_queue_next_simt_);
 }
 
 STRINGZILLA_API sz_status_t sz_overlap_engine_init_cuda(sz_overlap_engine_t *engine, sz_strings_view_t const *queries,

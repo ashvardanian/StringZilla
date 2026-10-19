@@ -1039,7 +1039,8 @@ STRINGZILLA_DEVICE void sz_levenshtein_warp_sweep_utf8_simt_(
  *  which the ranks overwrite once every lane holds the union. A lane owns one word of every class
  *  row, so the masks fill without atomics. The warp is synchronized on return.
  *
- *  @param[in] stride Words from one class row to the next, at least the query's own words.
+ *  @param[in] stride Words from one class row to the next, at least the query's own words, as
+ *      @ref sz_levenshtein_walk_stride pads them.
  *  @param[out] span Eight-byte aligned: @c sz_levenshtein_byte_classes_k class bytes, then one row
  *      of @p stride words per class, a class per distinct byte plus the absent bytes' one.
  *  @param[in] lane The calling lane, below 32.
@@ -1095,12 +1096,13 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_simt_(sz_cptr_t text, sz_si
  *      every lane of the warp taking part, so a device walk prepares each query where it scores it.
  *
  *  The passes are @ref sz_levenshtein_query_prepare_utf8 's, but each class row is the query's own
- *  words long. Classes follow first appearance, which only a serial pass hands out, so the first
- *  lane decodes the runes and sets the bits while the warp zeroes the table and the masks.
+ *  words long, as @ref sz_levenshtein_walk_stride pads them. Classes follow first appearance, which
+ *  only a serial pass hands out, so the first lane decodes the runes and sets the bits while the
+ *  warp zeroes the table and the masks.
  *
  *  @param[out] span Eight-byte aligned: @c sz_levenshtein_utf8_span_header_k bytes, the
  *      @c sz_levenshtein_utf8_pages_k page rows, a class row of 256 entries per page the query
- *      touches plus the absent pages' one, then one mask row per class of the query's own words.
+ *      touches plus the absent pages' one, then one mask row per class of its walk stride.
  *  @param[in] lane The calling lane, below 32.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, sz_size_t length, sz_ptr_t span,
@@ -1130,7 +1132,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, 
     }
     __syncwarp();
     sz_size_t const classes = header[0], runes = header[2];
-    sz_size_t const stride = sz_levenshtein_query_words(runes);
+    sz_size_t const stride = sz_levenshtein_walk_stride(sz_levenshtein_query_words(runes));
     sz_u64_t *const masks = (sz_u64_t *)(class_rows + (sz_size_t)header[1] * 256);
     for (entry = lane; entry < classes * stride; entry += 32) masks[entry] = 0;
     __syncwarp();

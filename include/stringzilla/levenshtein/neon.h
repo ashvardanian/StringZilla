@@ -156,6 +156,21 @@ STRINGZILLA_INLINE sz_u128_vec_t sz_levenshtein_u64x2_classes_u32_neon(sz_u32_t 
     return sz_levenshtein_u64x2_classes_u32_neon_(classes);
 }
 
+/** Sixteen bytes of a @p length -byte @p text from @p cursor on, zeros past its end, never read
+ *  outside it: a text of sixteen bytes or more loads the sixteen ending at its own end once the
+ *  cursor nears it and shuffles out the ones passed; a shorter text reads two clamped octets. */
+STRINGZILLA_INLINE uint8x16_t sz_levenshtein_sixteen_neon_(sz_cptr_t text, sz_size_t length, sz_size_t cursor) {
+    if (length < 16)
+        return vcombine_u8(vcreate_u8(sz_levenshtein_octet_(text, length, cursor)),
+                           vcreate_u8(sz_levenshtein_octet_(text, length, cursor + 8)));
+    sz_size_t const start = sz_min_of_two(cursor, length - 16);
+    sz_size_t const passed = sz_min_of_two(cursor, length) - start;
+    // Byte `i` takes byte `i + passed`, and an index past fifteen reads zero.
+    uint8x16_t const indices_u8x16 = vaddq_u8(
+        vcombine_u8(vcreate_u8(0x0706050403020100ull), vcreate_u8(0x0F0E0D0C0B0A0908ull)), vdupq_n_u8((sz_u8_t)passed));
+    return vqtbl1q_u8(vld1q_u8((sz_u8_t const *)(text + start)), indices_u8x16);
+}
+
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon_(sz_levenshtein_query_t const *query,
                                                                  sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                                  sz_size_t candidates, sz_size_t *cursors,
@@ -168,50 +183,57 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon_(sz_levenshtein_
     for (sz_size_t candidate = 0; candidate != 8; ++candidate)
         filled = sz_max_of_two(filled,
                                sz_min_of_two(positions, (sz_size_t)byte_counts[candidate] - cursors[candidate]));
-    sz_size_t position = 0;
-    for (; position + 8 <= filled; position += 8) {
-        sz_bool_t all_full = sz_true_k;
-        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
-            all_full = all_full && cursors[candidate] + 8 <= byte_counts[candidate] ? sz_true_k : sz_false_k;
-        if (!all_full) break;
-        uint8x8_t candidates_u8x8[8];
-        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
-            candidates_u8x8[candidate] = vcreate_u8(
-                sz_levenshtein_octet_classes_(byte_to_class, sz_u64_load(texts[candidate] + cursors[candidate]).u64));
-        uint8x8x2_t const pair01_u8x8x2 = vtrn_u8(candidates_u8x8[0], candidates_u8x8[1]);
-        uint8x8x2_t const pair23_u8x8x2 = vtrn_u8(candidates_u8x8[2], candidates_u8x8[3]);
-        uint8x8x2_t const pair45_u8x8x2 = vtrn_u8(candidates_u8x8[4], candidates_u8x8[5]);
-        uint8x8x2_t const pair67_u8x8x2 = vtrn_u8(candidates_u8x8[6], candidates_u8x8[7]);
-        uint16x4x2_t const even03_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair01_u8x8x2.val[0]),
-                                                     vreinterpret_u16_u8(pair23_u8x8x2.val[0]));
-        uint16x4x2_t const odd03_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair01_u8x8x2.val[1]),
-                                                    vreinterpret_u16_u8(pair23_u8x8x2.val[1]));
-        uint16x4x2_t const even47_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair45_u8x8x2.val[0]),
-                                                     vreinterpret_u16_u8(pair67_u8x8x2.val[0]));
-        uint16x4x2_t const odd47_u16x4x2 = vtrn_u16(vreinterpret_u16_u8(pair45_u8x8x2.val[1]),
-                                                    vreinterpret_u16_u8(pair67_u8x8x2.val[1]));
-        // Position `p` lands in `positions_u32x2x2[p % 4].val[p / 4]`, for all eight candidates.
-        uint32x2x2_t const positions_u32x2x2[4] = {
-            vtrn_u32(vreinterpret_u32_u16(even03_u16x4x2.val[0]), vreinterpret_u32_u16(even47_u16x4x2.val[0])),
-            vtrn_u32(vreinterpret_u32_u16(odd03_u16x4x2.val[0]), vreinterpret_u32_u16(odd47_u16x4x2.val[0])),
-            vtrn_u32(vreinterpret_u32_u16(even03_u16x4x2.val[1]), vreinterpret_u32_u16(even47_u16x4x2.val[1])),
-            vtrn_u32(vreinterpret_u32_u16(odd03_u16x4x2.val[1]), vreinterpret_u32_u16(odd47_u16x4x2.val[1]))};
-        for (sz_size_t offset = 0; offset != 8; ++offset)
-            vst1_u8(classes + (position + offset) * 8,
-                    vreinterpret_u8_u32(positions_u32x2x2[offset % 4].val[offset / 4]));
-        for (sz_size_t candidate = 0; candidate != 8; ++candidate) cursors[candidate] += 8;
+    // Four 64-entry lookups class a byte, each answering zero outside its quarter of the values.
+    uint8x16x4_t const quarters_u8x16x4[4] = {vld1q_u8_x4(byte_to_class), vld1q_u8_x4(byte_to_class + 64),
+                                              vld1q_u8_x4(byte_to_class + 128), vld1q_u8_x4(byte_to_class + 192)};
+    for (sz_size_t position = 0; position < filled; position += 16) {
+        uint8x16_t lanes_u8x16[8];
+        for (sz_size_t candidate = 0; candidate != 8; ++candidate) {
+            uint8x16_t const bytes_u8x16 = sz_levenshtein_sixteen_neon_(
+                texts[candidate], (sz_size_t)byte_counts[candidate], cursors[candidate] + position);
+            lanes_u8x16[candidate] = vorrq_u8(
+                vorrq_u8(vqtbl4q_u8(quarters_u8x16x4[0], bytes_u8x16),
+                         vqtbl4q_u8(quarters_u8x16x4[1], veorq_u8(bytes_u8x16, vdupq_n_u8(0x40)))),
+                vorrq_u8(vqtbl4q_u8(quarters_u8x16x4[2], veorq_u8(bytes_u8x16, vdupq_n_u8(0x80))),
+                         vqtbl4q_u8(quarters_u8x16x4[3], veorq_u8(bytes_u8x16, vdupq_n_u8(0xC0)))));
+        }
+        // Three rounds of transposes at 8, 16 and 32 bits: register `q` ends with position `q` in
+        // its low half and position `q + 8` in its high half, all eight lanes in each.
+        uint8x16_t pairs_u8x16[8];
+        for (sz_size_t pair = 0; pair != 4; ++pair) {
+            pairs_u8x16[pair] = vtrn1q_u8(lanes_u8x16[2 * pair], lanes_u8x16[2 * pair + 1]);
+            pairs_u8x16[pair + 4] = vtrn2q_u8(lanes_u8x16[2 * pair], lanes_u8x16[2 * pair + 1]);
+        }
+        uint16x8_t quads_u16x8[8];
+        for (sz_size_t parity = 0; parity != 2; ++parity)
+            for (sz_size_t half = 0; half != 2; ++half) {
+                uint16x8_t const first_u16x8 = vreinterpretq_u16_u8(pairs_u8x16[parity * 4 + half * 2]);
+                uint16x8_t const second_u16x8 = vreinterpretq_u16_u8(pairs_u8x16[parity * 4 + half * 2 + 1]);
+                quads_u16x8[parity * 4 + half] = vtrn1q_u16(first_u16x8, second_u16x8);
+                quads_u16x8[parity * 4 + half + 2] = vtrn2q_u16(first_u16x8, second_u16x8);
+            }
+        uint8x16_t rows_u8x16[8];
+        for (sz_size_t offset = 0; offset != 4; ++offset) {
+            sz_size_t const parity = offset & 1, pair = offset >> 1;
+            uint32x4_t const lower_u32x4 = vreinterpretq_u32_u16(quads_u16x8[parity * 4 + pair * 2]);
+            uint32x4_t const upper_u32x4 = vreinterpretq_u32_u16(quads_u16x8[parity * 4 + pair * 2 + 1]);
+            rows_u8x16[offset] = vreinterpretq_u8_u32(vtrn1q_u32(lower_u32x4, upper_u32x4));
+            rows_u8x16[offset + 4] = vreinterpretq_u8_u32(vtrn2q_u32(lower_u32x4, upper_u32x4));
+        }
+        // A last chunk past `positions` stores only the rows the buffer holds.
+        sz_size_t const rows = sz_min_of_two(positions - position, (sz_size_t)16);
+        for (sz_size_t row = 0; row != rows; ++row)
+            vst1_u8(classes + (position + row) * 8,
+                    row < 8 ? vget_low_u8(rows_u8x16[row]) : vget_high_u8(rows_u8x16[row - 8]));
     }
-    for (; position != filled; ++position)
-        for (sz_size_t candidate = 0; candidate != 8; ++candidate)
-            classes[position * 8 + candidate] = cursors[candidate] < byte_counts[candidate]
-                                                    ? byte_to_class[(sz_u8_t)texts[candidate][cursors[candidate]++]]
-                                                    : 0;
+    for (sz_size_t candidate = 0; candidate != 8; ++candidate)
+        cursors[candidate] += sz_min_of_two(filled, (sz_size_t)byte_counts[candidate] - cursors[candidate]);
     return filled;
 }
 
-/** The byte transpose for eight candidates, two per register across four registers: eight
- *  positions per eight loads and three rounds of @c vtrn while every candidate has eight bytes
- *  left, one byte at a time after that; emits the @c sz_u8_t class of every byte. */
+/** The byte transpose for eight candidates, two per register across four registers: sixteen
+ *  positions per eight loads, each clamped to its own candidate's end, classed by four table
+ *  lookups and transposed by three rounds of @c TRN; emits the @c sz_u8_t class of every byte. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon(sz_levenshtein_query_t const *query,
                                                                 sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                                 sz_size_t candidates, sz_size_t *cursors,
