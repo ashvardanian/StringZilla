@@ -692,7 +692,8 @@ if (STRINGZILLA_BUILD_SWIFT)
         if (NOT STRINGZILLA_SWIFT_TRIPLES)
             message(FATAL_ERROR "STRINGZILLA_BUILD_SWIFT needs STRINGZILLA_SWIFT_TRIPLES on ${CMAKE_SYSTEM_NAME}")
         endif ()
-        set(stringzilla_swift_target_ -D "STRINGZILLA_SWIFT_TRIPLES=$<JOIN:${STRINGZILLA_SWIFT_TRIPLES},,>" -D
+        list(JOIN STRINGZILLA_SWIFT_TRIPLES "," stringzilla_swift_triples_)
+        set(stringzilla_swift_target_ -D "STRINGZILLA_SWIFT_TRIPLES=${stringzilla_swift_triples_}" -D
                                       "STRINGZILLA_SWIFT_VERSION=${PROJECT_VERSION}"
         )
     endif ()

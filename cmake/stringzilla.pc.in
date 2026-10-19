@@ -6,6 +6,6 @@ includedir=@stringzilla_pc_includedir_@
 Name: StringZilla
 Description: @PROJECT_DESCRIPTION@
 URL: https://github.com/ashvardanian/StringZilla
-Version: @PROJECT_VERSION@
+Version: @stringzilla_version_line_@
 Cflags: -I${includedir}
 Libs: -L${libdir} -lstringzilla_shared
