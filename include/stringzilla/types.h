@@ -2499,6 +2499,42 @@ STRINGZILLA_INLINE sz_size_t sz_strings_get_block_(sz_strings_view_t const *stri
     return count;
 }
 
+/** The indices of the @p count keys leading the @b [3 × count] @p scratch, ascending and stable: a
+ *  least significant digit radix over only the bytes that differ across the keys, so keys under 256
+ *  cost one counting pass and one scatter. */
+STRINGZILLA_INLINE sz_size_t const *sz_keys_order_(sz_size_t *scratch, sz_size_t count) {
+    sz_size_t const *const keys = scratch;
+    sz_size_t *source = scratch + count, *target = source + count;
+    sz_size_t all_ones = ~(sz_size_t)0, any_ones = 0;
+    for (sz_size_t rank = 0; rank != count; ++rank) source[rank] = rank, all_ones &= keys[rank], any_ones |= keys[rank];
+    sz_size_t const varying = all_ones ^ any_ones;
+    for (sz_size_t shift = 0; shift != sizeof(sz_size_t) * 8; shift += 8) {
+        if (((varying >> shift) & 0xFF) == 0) continue;
+        sz_size_t offsets[256] = {0};
+        for (sz_size_t rank = 0; rank != count; ++rank) ++offsets[(keys[source[rank]] >> shift) & 0xFF];
+        for (sz_size_t digit = 0, running = 0; digit != 256; ++digit) {
+            sz_size_t const bucket = offsets[digit];
+            offsets[digit] = running, running += bucket;
+        }
+        for (sz_size_t rank = 0; rank != count; ++rank)
+            target[offsets[(keys[source[rank]] >> shift) & 0xFF]++] = source[rank];
+        sz_size_t *const sorted = target;
+        target = source, source = sorted;
+    }
+    return source;
+}
+
+/** The indices of @p strings ascending by length, stably, in the @b [3 × count] @p scratch. */
+STRINGZILLA_INLINE sz_size_t const *sz_strings_order_by_length_(sz_strings_view_t const *strings, sz_size_t *scratch) {
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < strings->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(strings, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position)
+            scratch[block_start + position] = views[position].length;
+    }
+    return sz_keys_order_(scratch, strings->count);
+}
+
 /** Offset @p index of the tape @p strings views, which is never an accessor. */
 STRINGZILLA_INLINE sz_size_t sz_strings_view_offset_(sz_strings_view_t const *strings, sz_size_t index) {
     return strings->layout == sz_strings_u64_tape_k ? (sz_size_t)strings->data.u64_tape.offsets[index]

@@ -16,6 +16,7 @@
 #include "stringzilla/types.h"
 #include "stringzilla/levenshtein/serial.h"
 #include "stringzilla/levenshtein/skylake.h"
+#include "stringzilla/utf8_runes/icelake.h" // `sz_utf8_decode_icelake_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,17 +26,18 @@ extern "C" {
 #if STRINGZILLA_TARGET_ICELAKE
 #pragma region Ice Lake Implementation
 #if defined(__clang__) && STRINGZILLA_HAS_CLANG_EVEX512_
-#pragma clang attribute push(                                                                                        \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,evex512"))), \
+#pragma clang attribute push(                                                                                    \
+    __attribute__((                                                                                              \
+        target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt,evex512"))), \
     apply_to = function)
 #elif defined(__clang__)
-#pragma clang attribute push(                                                                                \
-    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt"))), \
+#pragma clang attribute push(                                                                                       \
+    __attribute__((target("avx,avx512f,avx512vl,avx512bw,avx512dq,avx512vbmi,avx512vbmi2,bmi,bmi2,lzcnt,popcnt"))), \
     apply_to = function)
 #elif defined(__GNUC__)
 #pragma GCC push_options
 #pragma GCC target("avx", "avx512f", "avx512vl", "avx512bw", "avx512dq", "avx512vbmi", "avx512vbmi2", "bmi", "bmi2", \
-                   "lzcnt")
+                   "lzcnt", "popcnt")
 #endif
 
 #pragma region Narrow Lanes
@@ -323,14 +325,14 @@ STRINGZILLA_INLINE void sz_levenshtein_u8x64_distances_icelake_(sz_levenshtein_q
                                                                 sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_u8x64_candidates_per_step_icelake_k };
     sz_ssize_t const radius = sz_levenshtein_radius_(bound);
-    for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
+    for (sz_size_t next_rank = 0; next_rank != candidates->count;) {
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
         sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, query, bound,
-                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 &next_rank, candidates_per_position_k, indices, texts,
                                                                  byte_counts, symbol_counts, distances);
-        if (!sweep_count) continue;
+        if (!sweep_count) break;
         sz_levenshtein_u8x64_sweep_icelake_(query, texts, byte_counts, sweep_count, radius, sweep_distances);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
             distances[indices[candidate]] = sz_levenshtein_bounded_(sweep_distances[candidate], bound);
@@ -592,17 +594,184 @@ STRINGZILLA_INLINE void sz_levenshtein_u16x32_distances_icelake_(sz_levenshtein_
                                                                  sz_size_t *distances) {
     enum { candidates_per_position_k = sz_levenshtein_u16x32_candidates_per_step_icelake_k };
     sz_ssize_t const radius = sz_levenshtein_radius_(bound);
-    for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
+    for (sz_size_t next_rank = 0; next_rank != candidates->count;) {
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
         sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, STRINGZILLA_NULL, order, query, bound,
-                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 &next_rank, candidates_per_position_k, indices, texts,
                                                                  byte_counts, symbol_counts, distances);
-        if (!sweep_count) continue;
+        if (!sweep_count) break;
         sz_levenshtein_u16x32_sweep_icelake_(query, texts, byte_counts, sweep_count, radius, sweep_distances);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
             distances[indices[candidate]] = sz_levenshtein_bounded_(sweep_distances[candidate], bound);
+    }
+}
+
+/** The lanes among the first @p lanes whose floor, their flushed @p scores less the symbols left
+ *  before their @p ends, has passed @p radius at @p position. */
+STRINGZILLA_INLINE sz_u64_t sz_levenshtein_flushed_frozen_icelake_(sz_size_t const *scores, sz_u64_t const *ends,
+                                                                   sz_size_t lanes, sz_size_t position,
+                                                                   sz_ssize_t radius) {
+    __m512i const position_u64x8 = _mm512_set1_epi64((long long)position);
+    __m512i const radius_i64x8 = _mm512_set1_epi64((long long)radius);
+    sz_u64_t frozen = 0;
+    for (sz_size_t first = 0; first != lanes; first += 8) {
+        __m512i const scores_u64x8 = _mm512_loadu_si512((void const *)(scores + first));
+        __m512i const ends_u64x8 = _mm512_loadu_si512((void const *)(ends + first));
+        __m512i const floor_i64x8 = _mm512_sub_epi64(_mm512_add_epi64(scores_u64x8, position_u64x8), ends_u64x8);
+        frozen |= (sz_u64_t)_mm512_cmpgt_epi64_mask(floor_i64x8, radius_i64x8) << first;
+    }
+    return frozen;
+}
+
+/** Streams every candidate through a prepared byte @p query in sixty-four recycling lanes: a
+ *  lane whose candidate ends or freezes past @p bound is reported and, at the next freeze test,
+ *  takes the next candidate in @p order. Every freeze test flushes, so the deltas never wrap. */
+STRINGZILLA_INLINE void sz_levenshtein_u8x64_recycled_icelake_(sz_levenshtein_query_t const *shared_query,
+                                                               sz_strings_view_t const *candidates,
+                                                               sz_size_t const *order, sz_size_t bound,
+                                                               sz_size_t *distances) {
+    enum { lanes_k = 64, block_k = sz_levenshtein_freeze_positions_k };
+    sz_levenshtein_query_t const local_query = *shared_query;
+    sz_levenshtein_u8x64_query_icelake_t packed;
+    sz_levenshtein_u8x64_pack_icelake_(&local_query, &packed);
+    sz_cptr_t texts[lanes_k] = {STRINGZILLA_NULL};
+    sz_u64_t byte_counts[lanes_k] = {0}, ends[lanes_k] = {0};
+    sz_size_t cursors[lanes_k] = {0}, slots[lanes_k] = {0}, scores[lanes_k] = {0};
+    sz_ssize_t const radius = sz_levenshtein_radius_(bound);
+    sz_u8_t transpose_classes[block_k][lanes_k];
+    sz_levenshtein_u8x64_state_icelake_t state;
+    sz_levenshtein_u8x64_vertical_icelake_t vertical;
+    sz_levenshtein_u8x64_init_icelake_(&state, &vertical);
+    sz_u64_t live = 0, idle = sz_u64_mask_until_(lanes_k);
+    sz_size_t next_rank = 0;
+    for (sz_size_t block_start = 0;; block_start += block_k) {
+        // Idle lanes take the next candidates in order from this block on, with no deltas pending.
+        if (idle && next_rank != candidates->count) {
+            sz_cptr_t fresh_texts[lanes_k];
+            sz_u64_t fresh_bytes[lanes_k], fresh_symbols[lanes_k];
+            sz_size_t fresh_slots[lanes_k];
+            sz_size_t const fresh_count = sz_levenshtein_sweep_seed_(
+                candidates, STRINGZILLA_NULL, order, &local_query, bound, &next_rank, (sz_size_t)_mm_popcnt_u64(idle),
+                fresh_slots, fresh_texts, fresh_bytes, fresh_symbols, distances);
+            sz_u64_t fresh = 0;
+            for (sz_size_t taken = 0; taken != fresh_count; ++taken) {
+                sz_size_t const lane = (sz_size_t)_tzcnt_u64(idle);
+                idle &= idle - 1, fresh |= (sz_u64_t)1 << lane;
+                texts[lane] = fresh_texts[taken], byte_counts[lane] = fresh_bytes[taken], cursors[lane] = 0;
+                slots[lane] = fresh_slots[taken], ends[lane] = block_start + fresh_symbols[taken];
+                scores[lane] = local_query.length;
+            }
+            vertical.positive_vec.zmm = _mm512_mask_set1_epi8(vertical.positive_vec.zmm, (__mmask64)fresh, -1);
+            vertical.negative_vec.zmm = _mm512_maskz_mov_epi8((__mmask64)~fresh, vertical.negative_vec.zmm);
+            live |= fresh;
+        }
+        if (!live) break;
+        for (sz_u64_t retired = idle; retired; retired &= retired - 1) {
+            sz_size_t const lane = (sz_size_t)_tzcnt_u64(retired);
+            texts[lane] = STRINGZILLA_NULL, byte_counts[lane] = 0, cursors[lane] = 0;
+        }
+        sz_levenshtein_u8x64_transpose_icelake_(&local_query, texts, byte_counts, lanes_k, cursors, STRINGZILLA_NULL,
+                                                block_start, block_k, &transpose_classes[0][0]);
+        sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(live, ends);
+        for (sz_size_t position = 0;;) {
+            sz_size_t const run_end = sz_min_of_two(deadline.position - block_start, (sz_size_t)block_k);
+            for (; position < run_end; ++position)
+                sz_levenshtein_u8x64_step_icelake_(
+                    &state, &vertical, &packed, sz_levenshtein_u8x64_classes_u8_icelake_(transpose_classes[position]));
+            if (deadline.position != block_start + position) break;
+            sz_levenshtein_u8x64_flush_icelake_(&state, scores);
+            for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
+                sz_size_t const lane = (sz_size_t)_tzcnt_u64(ending);
+                distances[slots[lane]] = sz_levenshtein_bounded_(scores[lane], bound);
+            }
+            live &= ~deadline.retiring, idle |= deadline.retiring;
+            if (!live) break;
+            deadline = sz_levenshtein_deadline_(live, ends);
+        }
+        // At every block's end a lane already past the bound reports it and frees its lane.
+        sz_levenshtein_u8x64_flush_icelake_(&state, scores);
+        sz_u64_t const frozen = live & sz_levenshtein_flushed_frozen_icelake_(scores, ends, lanes_k,
+                                                                              block_start + block_k, radius);
+        for (sz_u64_t ending = frozen; ending; ending &= ending - 1)
+            distances[slots[(sz_size_t)_tzcnt_u64(ending)]] = bound + 1;
+        live &= ~frozen, idle |= frozen;
+    }
+}
+
+/** Streams every candidate through a prepared byte @p query in thirty-two recycling lanes: a
+ *  lane whose candidate ends or freezes past @p bound is reported and, at the next freeze test,
+ *  takes the next candidate in @p order. Every freeze test flushes, so the deltas never wrap. */
+STRINGZILLA_INLINE void sz_levenshtein_u16x32_recycled_icelake_(sz_levenshtein_query_t const *shared_query,
+                                                                sz_strings_view_t const *candidates,
+                                                                sz_size_t const *order, sz_size_t bound,
+                                                                sz_size_t *distances) {
+    enum { lanes_k = 32, block_k = sz_levenshtein_freeze_positions_k };
+    sz_levenshtein_query_t const local_query = *shared_query;
+    sz_levenshtein_u16x32_query_icelake_t packed;
+    sz_levenshtein_u16x32_pack_icelake_(&local_query, &packed);
+    sz_cptr_t texts[lanes_k] = {STRINGZILLA_NULL};
+    sz_u64_t byte_counts[lanes_k] = {0}, ends[lanes_k] = {0};
+    sz_size_t cursors[lanes_k] = {0}, slots[lanes_k] = {0}, scores[lanes_k] = {0};
+    sz_ssize_t const radius = sz_levenshtein_radius_(bound);
+    sz_u8_t transpose_classes[block_k][lanes_k];
+    sz_levenshtein_u16x32_state_icelake_t state;
+    sz_levenshtein_u16x32_vertical_icelake_t vertical;
+    sz_levenshtein_u16x32_init_icelake_(&state, &vertical);
+    sz_u64_t live = 0, idle = sz_u64_mask_until_(lanes_k);
+    sz_size_t next_rank = 0;
+    for (sz_size_t block_start = 0;; block_start += block_k) {
+        // Idle lanes take the next candidates in order from this block on, with no deltas pending.
+        if (idle && next_rank != candidates->count) {
+            sz_cptr_t fresh_texts[lanes_k];
+            sz_u64_t fresh_bytes[lanes_k], fresh_symbols[lanes_k];
+            sz_size_t fresh_slots[lanes_k];
+            sz_size_t const fresh_count = sz_levenshtein_sweep_seed_(
+                candidates, STRINGZILLA_NULL, order, &local_query, bound, &next_rank, (sz_size_t)_mm_popcnt_u64(idle),
+                fresh_slots, fresh_texts, fresh_bytes, fresh_symbols, distances);
+            sz_u64_t fresh = 0;
+            for (sz_size_t taken = 0; taken != fresh_count; ++taken) {
+                sz_size_t const lane = (sz_size_t)_tzcnt_u64(idle);
+                idle &= idle - 1, fresh |= (sz_u64_t)1 << lane;
+                texts[lane] = fresh_texts[taken], byte_counts[lane] = fresh_bytes[taken], cursors[lane] = 0;
+                slots[lane] = fresh_slots[taken], ends[lane] = block_start + fresh_symbols[taken];
+                scores[lane] = local_query.length;
+            }
+            vertical.positive_vec.zmm = _mm512_mask_set1_epi16(vertical.positive_vec.zmm, (__mmask32)fresh, -1);
+            vertical.negative_vec.zmm = _mm512_maskz_mov_epi16((__mmask32)~fresh, vertical.negative_vec.zmm);
+            live |= fresh;
+        }
+        if (!live) break;
+        for (sz_u64_t retired = idle; retired; retired &= retired - 1) {
+            sz_size_t const lane = (sz_size_t)_tzcnt_u64(retired);
+            texts[lane] = STRINGZILLA_NULL, byte_counts[lane] = 0, cursors[lane] = 0;
+        }
+        sz_levenshtein_u16x32_transpose_icelake_(&local_query, texts, byte_counts, lanes_k, cursors, STRINGZILLA_NULL,
+                                                 block_start, block_k, &transpose_classes[0][0]);
+        sz_levenshtein_deadline_t deadline = sz_levenshtein_deadline_(live, ends);
+        for (sz_size_t position = 0;;) {
+            sz_size_t const run_end = sz_min_of_two(deadline.position - block_start, (sz_size_t)block_k);
+            for (; position < run_end; ++position)
+                sz_levenshtein_u16x32_step_icelake_(
+                    &state, &vertical, &packed, sz_levenshtein_u16x32_classes_u8_icelake_(transpose_classes[position]));
+            if (deadline.position != block_start + position) break;
+            sz_levenshtein_u16x32_flush_icelake_(&state, scores);
+            for (sz_u64_t ending = deadline.retiring; ending; ending &= ending - 1) {
+                sz_size_t const lane = (sz_size_t)_tzcnt_u64(ending);
+                distances[slots[lane]] = sz_levenshtein_bounded_(scores[lane], bound);
+            }
+            live &= ~deadline.retiring, idle |= deadline.retiring;
+            if (!live) break;
+            deadline = sz_levenshtein_deadline_(live, ends);
+        }
+        // At every block's end a lane already past the bound reports it and frees its lane.
+        sz_levenshtein_u16x32_flush_icelake_(&state, scores);
+        sz_u64_t const frozen = live & sz_levenshtein_flushed_frozen_icelake_(scores, ends, lanes_k,
+                                                                              block_start + block_k, radius);
+        for (sz_u64_t ending = frozen; ending; ending &= ending - 1)
+            distances[slots[(sz_size_t)_tzcnt_u64(ending)]] = bound + 1;
+        live &= ~frozen, idle |= frozen;
     }
 }
 
@@ -636,6 +805,29 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_icelake(sz_levenshtein_en
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_icelake_k, allocator, stream);
 }
 
+/** Scores every candidate of a round against @p engine 's byte query @p index in the narrowest
+ *  lanes its length fits. */
+STRINGZILLA_INLINE void sz_levenshtein_run_icelake_(sz_levenshtein_engine_t const *engine, sz_size_t index,
+                                                    sz_strings_view_t const *scored, sz_size_t const *symbol_counts,
+                                                    sz_size_t const *order, sz_size_t bound,
+                                                    sz_levenshtein_u64x8_vertical_skylake_t *verticals,
+                                                    sz_size_t *distances) {
+    sz_levenshtein_lanes_icelake_t const lanes = sz_levenshtein_lanes_icelake(engine->lengths[index]);
+    if (engine->lengths[index] == 0 || lanes == sz_levenshtein_lanes_u64x8_k) {
+        sz_levenshtein_run_skylake_(engine, index, scored, symbol_counts, order, bound, verticals, distances);
+        return;
+    }
+    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+    // A bounded run recycles lanes as their candidates pass the bound, as on Skylake.
+    if (lanes == sz_levenshtein_lanes_u8x64_k && bound != STRINGZILLA_SIZE_MAX)
+        sz_levenshtein_u8x64_recycled_icelake_(&query, scored, order, bound, distances);
+    else if (lanes == sz_levenshtein_lanes_u8x64_k)
+        sz_levenshtein_u8x64_distances_icelake_(&query, scored, order, bound, distances);
+    else if (bound != STRINGZILLA_SIZE_MAX)
+        sz_levenshtein_u16x32_recycled_icelake_(&query, scored, order, bound, distances);
+    else sz_levenshtein_u16x32_distances_icelake_(&query, scored, order, bound, distances);
+}
+
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engine_t *engine,
                                                              sz_strings_view_t const *candidates,
                                                              sz_size_t const *symbol_counts, sz_size_t const *order,
@@ -644,40 +836,24 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_icelake(sz_levenshtein_engi
     sz_assert_(stream == STRINGZILLA_NULL);
     sz_assert_((engine->capability & sz_cap_cpus_k) != 0 &&
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
-    enum { registers_k = sz_levenshtein_u64x8_registers_per_position_skylake_k };
     // The narrow lanes read one word of one class row, so a rune batch is Skylake's whole and not
     // one query at a time.
     if (engine->symbol != sz_levenshtein_bytes_k)
         return sz_levenshtein_distances_skylake_(engine, candidates, symbol_counts, order, bound, distances,
-                                                 distances_stride);
+                                                 distances_stride, sz_utf8_decode_icelake_);
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     // Queries up to 16 symbols use 8-bit or 16-bit lanes; wider ones keep the Skylake verticals.
-    sz_size_t const verticals_bytes = sz_levenshtein_engine_verticals_bytes_(
-        registers_k, sz_levenshtein_engine_words_max_(engine), sizeof(sz_levenshtein_u64x8_vertical_skylake_t));
-    sz_status_t const grown = sz_levenshtein_engine_scratch_(
-        engine, sz_levenshtein_engine_round_bytes_(verticals_bytes, candidates->count, order));
-    if (grown != sz_success_k) return grown;
+    sz_strings_view_t scored;
+    sz_size_t const *candidate_order;
+    sz_status_t const prepared = sz_levenshtein_engine_round_(
+        engine, candidates, order, sz_levenshtein_verticals_bytes_skylake_(engine), sz_utf8_decode_icelake_, &scored,
+        &symbol_counts, &candidate_order);
+    if (prepared != sz_success_k) return prepared;
     sz_levenshtein_u64x8_vertical_skylake_t *const verticals =
         (sz_levenshtein_u64x8_vertical_skylake_t *)sz_levenshtein_engine_verticals_(engine);
-    sz_size_t const *const candidate_order = sz_levenshtein_engine_order_(engine, verticals_bytes, candidates, order);
-
-    for (sz_size_t index = 0; index != engine->count; ++index) {
-        sz_size_t *const row = distances + index * distances_stride;
-        if (engine->lengths[index] == 0) {
-            sz_levenshtein_engine_empty_row_(engine, candidates, symbol_counts, bound, row);
-            continue;
-        }
-        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        sz_levenshtein_lanes_icelake_t const lanes = sz_levenshtein_lanes_icelake(query.length);
-        if (lanes == sz_levenshtein_lanes_u8x64_k)
-            sz_levenshtein_u8x64_distances_icelake_(&query, candidates, candidate_order, bound, row);
-        else if (lanes == sz_levenshtein_lanes_u16x32_k)
-            sz_levenshtein_u16x32_distances_icelake_(&query, candidates, candidate_order, bound, row);
-        else
-            sz_levenshtein_u64x8_distances_skylake_(&query, candidates, symbol_counts, candidate_order,
-                                                    sz_levenshtein_u8x8_transpose_skylake_, sz_levenshtein_classes_u8_k,
-                                                    bound, verticals, row);
-    }
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        sz_levenshtein_run_icelake_(engine, index, &scored, symbol_counts, candidate_order, bound, verticals,
+                                    distances + index * distances_stride);
     return sz_success_k;
 }
 

@@ -34,6 +34,11 @@ typedef struct sz_levenshtein_query_t {
     /** Bytes only: the mask row each of the 256 byte values reads. */
     sz_u8_t const *byte_to_class;
 
+    /** Bytes only, or null: when the query's present bytes differ in their low nibbles, the byte
+     *  each low-nibble slot holds, then each slot's class, then the absent class, sixteen, sixteen
+     *  and one entries, so two nibble shuffles class any byte. */
+    sz_u8_t const *byte_slots;
+
     /** UTF-8 only: class row per 256-rune page, zero for a page the query lacks. */
     sz_u16_t const *page_rows;
 
@@ -147,6 +152,7 @@ STRINGZILLA_CONSTEXPR sz_status_t sz_levenshtein_query_prepare_(sz_cptr_t text, 
             (sz_u64_t)1 << (position & 63);
     query->masks = masks;
     query->byte_to_class = byte_to_class;
+    query->byte_slots = STRINGZILLA_NULL;
     query->page_rows = STRINGZILLA_NULL;
     query->class_rows = STRINGZILLA_NULL;
     query->classes = (capability & sz_cap_cpus_k) != 0 ? stride : classes;
@@ -263,6 +269,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
     }
     query->masks = masks;
     query->byte_to_class = STRINGZILLA_NULL;
+    query->byte_slots = STRINGZILLA_NULL;
     query->stride = stride;
     query->length = count;
     return sz_success_k;
@@ -379,6 +386,41 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_utf8(sz_levenshtein_query_
                                                            void *transpose_classes) {
     return sz_levenshtein_transpose_utf8_(query, texts, byte_counts, candidates, cursors, symbol_counts,
                                           transpose_start, positions, transpose_classes);
+}
+
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_runes_(sz_levenshtein_query_t const *query,
+                                                             sz_cptr_t const *texts, sz_u64_t const *byte_counts,
+                                                             sz_size_t candidates, sz_size_t *cursors,
+                                                             sz_u64_t *symbol_counts, sz_size_t transpose_start,
+                                                             sz_size_t positions, void *transpose_classes) {
+    sz_unused_(symbol_counts), sz_unused_(transpose_start);
+    sz_u32_t *const classes = (sz_u32_t *)transpose_classes;
+    sz_size_t filled = 0;
+    for (sz_size_t candidate = 0; candidate != candidates; ++candidate)
+        filled = sz_max_of_two(
+            filled,
+            sz_min_of_two(positions, (sz_size_t)(byte_counts[candidate] - cursors[candidate]) / sizeof(sz_rune_t)));
+    for (sz_size_t candidate = 0; candidate != candidates; ++candidate) {
+        sz_rune_t const *const runes = (sz_rune_t const *)(texts[candidate] + cursors[candidate]);
+        sz_size_t const taken = sz_min_of_two(
+            filled, (sz_size_t)(byte_counts[candidate] - cursors[candidate]) / sizeof(sz_rune_t));
+        for (sz_size_t position = 0; position != taken; ++position)
+            classes[position * candidates + candidate] = sz_levenshtein_utf8_class(query, runes[position]);
+        for (sz_size_t position = taken; position != filled; ++position) classes[position * candidates + candidate] = 0;
+        cursors[candidate] += taken * sizeof(sz_rune_t);
+    }
+    return filled;
+}
+
+/** The decoded-rune transpose: every text is runes already decoded, its byte count four per rune,
+ *  and every rune takes the class the query gave it. */
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_runes(sz_levenshtein_query_t const *query, sz_cptr_t const *texts,
+                                                            sz_u64_t const *byte_counts, sz_size_t candidates,
+                                                            sz_size_t *cursors, sz_u64_t *symbol_counts,
+                                                            sz_size_t transpose_start, sz_size_t positions,
+                                                            void *transpose_classes) {
+    return sz_levenshtein_transpose_runes_(query, texts, byte_counts, candidates, cursors, symbol_counts,
+                                           transpose_start, positions, transpose_classes);
 }
 
 /** Symbols one side of a tile of the device wavefront spans. */
@@ -502,27 +544,21 @@ STRINGZILLA_INLINE sz_u64_t sz_levenshtein_octet_classes_(sz_u8_t const *byte_to
     return classes;
 }
 
-/** Every candidate's distance to an empty byte query is its byte count. */
-STRINGZILLA_CONSTEXPR void sz_levenshtein_byte_counts_as_distances_(sz_strings_view_t const *candidates,
-                                                                    sz_size_t *distances) {
-    sz_string_view_t views[64];
-    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
-        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
-        for (sz_size_t position = 0; position != block_count; ++position)
-            distances[block_start + position] = views[position].length;
+/** The eight bytes of a @p length -byte @p text from @p cursor on, zeros past its end, never read
+ *  outside it: a text of eight bytes or more loads the eight that end at its own end once the
+ *  cursor nears it, and shifts the ones already passed out. */
+STRINGZILLA_INLINE sz_u64_t sz_levenshtein_octet_(sz_cptr_t text, sz_size_t length, sz_size_t cursor) {
+    if (length < 8) {
+        sz_u64_t octet = 0;
+        for (sz_size_t byte = cursor; byte < length; ++byte)
+            octet |= (sz_u64_t)(sz_u8_t)text[byte] << ((byte - cursor) * 8);
+        return octet;
     }
-}
-
-/** Every candidate's distance to an empty UTF-8 query is its rune count. */
-STRINGZILLA_CONSTEXPR void sz_levenshtein_rune_counts_as_distances_(sz_strings_view_t const *candidates,
-                                                                    sz_size_t *distances) {
-    sz_string_view_t views[64];
-    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
-        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
-        for (sz_size_t position = 0; position != block_count; ++position)
-            distances[block_start + position] = sz_levenshtein_utf8_runes_(views[position].start,
-                                                                           views[position].length);
-    }
+    sz_size_t const start = sz_min_of_two(cursor, length - 8);
+    sz_size_t const passed = sz_min_of_two(cursor, length) - start;
+    // Two half shifts, as eight bytes passed shift a whole word out.
+    sz_u64_t const octet = sz_u64_load(text + start).u64;
+    return (octet >> (passed * 4)) >> (passed * 4);
 }
 
 #pragma endregion Generic Internal Helpers
@@ -622,7 +658,8 @@ typedef struct sz_levenshtein_engine_layout_t {
  *  arithmetic, no storage. */
 STRINGZILLA_CONSTEXPR sz_levenshtein_query_t sz_levenshtein_engine_row_(sz_levenshtein_engine_t const *engine,
                                                                         sz_size_t index) {
-    sz_levenshtein_query_t row = {STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
+    sz_levenshtein_query_t row = {
+        STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
     row.masks = engine->masks + engine->masks_offsets[index];
     row.length = engine->lengths[index];
     // A host plane holds a table per query word, a device plane a row per class.
@@ -652,19 +689,20 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_engine_words_max_(sz_levenshtein_
     return words;
 }
 
-/** Every candidate's distance to an empty query, which is its own symbol count in the batch's
- *  alphabet, the caller's @p symbol_counts when it has them, under @p bound. */
-STRINGZILLA_CONSTEXPR void sz_levenshtein_engine_empty_row_(sz_levenshtein_engine_t const *engine,
-                                                            sz_strings_view_t const *candidates,
-                                                            sz_size_t const *symbol_counts, sz_size_t bound,
-                                                            sz_size_t *row) {
-    if (symbol_counts)
-        for (sz_size_t candidate = 0; candidate != candidates->count; ++candidate)
-            row[candidate] = symbol_counts[candidate];
-    else if (engine->symbol == sz_levenshtein_bytes_k) sz_levenshtein_byte_counts_as_distances_(candidates, row);
-    else sz_levenshtein_rune_counts_as_distances_(candidates, row);
-    for (sz_size_t candidate = 0; candidate != candidates->count; ++candidate)
-        row[candidate] = sz_levenshtein_bounded_(row[candidate], bound);
+/** Every candidate's distance to an empty query: its symbol count, the caller's @p symbol_counts
+ *  when it has them and the byte count otherwise, under @p bound. */
+STRINGZILLA_INLINE void sz_levenshtein_engine_empty_(sz_strings_view_t const *candidates,
+                                                     sz_size_t const *symbol_counts, sz_size_t bound,
+                                                     sz_size_t *distances) {
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position) {
+            sz_size_t const candidate = block_start + position;
+            sz_size_t const length = symbol_counts ? symbol_counts[candidate] : views[position].length;
+            distances[candidate] = sz_levenshtein_bounded_(length, bound);
+        }
+    }
 }
 
 /** Bytes one round's verticals take: a cache line to align on, then one set per
@@ -689,41 +727,14 @@ STRINGZILLA_INLINE void *sz_levenshtein_engine_verticals_(sz_levenshtein_engine_
 }
 
 /** The caller's @p order, or @p candidates ascending by byte length in the round's scratch past
- *  its verticals: a stable LSD radix visiting only the bytes of the lengths that differ across the
- *  round, so lengths under 256 cost one counting pass and one scatter. */
+ *  its verticals. */
 STRINGZILLA_INLINE sz_size_t const *sz_levenshtein_engine_order_(sz_levenshtein_engine_t const *engine,
                                                                  sz_size_t verticals_bytes,
                                                                  sz_strings_view_t const *candidates,
                                                                  sz_size_t const *order) {
     if (order) return order;
-    sz_size_t const count = candidates->count;
-    sz_size_t *const lengths = (sz_size_t *)((sz_ptr_t)engine->scratch + sz_levenshtein_align64_(verticals_bytes));
-    sz_size_t *source = lengths + count, *target = source + count;
-    sz_size_t all_ones = ~(sz_size_t)0, any_ones = 0;
-    sz_string_view_t views[64];
-    for (sz_size_t block_start = 0; block_start < count; block_start += 64) {
-        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
-        for (sz_size_t position = 0; position != block_count; ++position) {
-            sz_size_t const length = views[position].length;
-            lengths[block_start + position] = length, source[block_start + position] = block_start + position;
-            all_ones &= length, any_ones |= length;
-        }
-    }
-    sz_size_t const varying = all_ones ^ any_ones;
-    for (sz_size_t shift = 0; shift != sizeof(sz_size_t) * 8; shift += 8) {
-        if (((varying >> shift) & 0xFF) == 0) continue;
-        sz_size_t offsets[256] = {0};
-        for (sz_size_t rank = 0; rank != count; ++rank) ++offsets[(lengths[source[rank]] >> shift) & 0xFF];
-        for (sz_size_t digit = 0, running = 0; digit != 256; ++digit) {
-            sz_size_t const bucket = offsets[digit];
-            offsets[digit] = running, running += bucket;
-        }
-        for (sz_size_t rank = 0; rank != count; ++rank)
-            target[offsets[(lengths[source[rank]] >> shift) & 0xFF]++] = source[rank];
-        sz_size_t *const sorted = target;
-        target = source, source = sorted;
-    }
-    return source;
+    return sz_strings_order_by_length_(
+        candidates, (sz_size_t *)((sz_ptr_t)engine->scratch + sz_levenshtein_align64_(verticals_bytes)));
 }
 
 /** Grows @p engine 's round block to @p bytes, which a round does once and never undoes. */
@@ -734,6 +745,81 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_scratch_(sz_levenshtein_eng
     if (engine->scratch)
         engine->allocator.free(engine->scratch, engine->scratch_bytes, engine->allocator.handle, STRINGZILLA_NULL);
     engine->scratch = grown, engine->scratch_bytes = bytes;
+    return sz_success_k;
+}
+
+/** Signature of the UTF-8 decoders a rune round decodes its candidates with, such as
+ *  @c sz_utf8_decode_serial_ : up to @p capacity runes of @p text, answering where they stop. */
+typedef sz_cptr_t (*sz_levenshtein_decode_t_)(sz_cptr_t text, sz_size_t length, sz_rune_t *runes, sz_size_t capacity,
+                                              sz_size_t *runes_count);
+
+/** Bytes a rune round's candidates take decoded, past the rest of its scratch: the offsets of a
+ *  tape over their runes and their rune counts, then a rune per byte of @p candidates at most. */
+STRINGZILLA_INLINE sz_size_t sz_levenshtein_engine_decoded_bytes_(sz_strings_view_t const *candidates) {
+    sz_size_t bytes = 0;
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < candidates->count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position) bytes += views[position].length;
+    }
+    return (2 * candidates->count + 1) * sizeof(sz_u64_t) + bytes * sizeof(sz_rune_t);
+}
+
+/** Decodes every candidate once by @p decode into @p area, which
+ *  @ref sz_levenshtein_engine_decoded_bytes_ sized, and views the runes as @p decoded, a tape whose
+ *  every text is its candidate's runes, four bytes each, answering their rune counts. */
+STRINGZILLA_INLINE sz_size_t const *sz_levenshtein_engine_decode_(sz_strings_view_t const *candidates,
+                                                                  sz_levenshtein_decode_t_ decode, void *area,
+                                                                  sz_strings_view_t *decoded) {
+    sz_size_t const count = candidates->count;
+    sz_u64_t *const offsets = (sz_u64_t *)area;
+    sz_size_t *const rune_counts = (sz_size_t *)(offsets + count + 1);
+    sz_rune_t *const runes = (sz_rune_t *)(rune_counts + count);
+    sz_size_t written = 0;
+    sz_string_view_t views[64];
+    for (sz_size_t block_start = 0; block_start < count; block_start += 64) {
+        sz_size_t const block_count = sz_strings_get_block_(candidates, block_start, views);
+        for (sz_size_t position = 0; position != block_count; ++position) {
+            sz_size_t runes_count = 0;
+            decode(views[position].start, views[position].length, runes + written, views[position].length,
+                   &runes_count);
+            offsets[block_start + position] = written * sizeof(sz_rune_t);
+            rune_counts[block_start + position] = runes_count;
+            written += runes_count;
+        }
+    }
+    offsets[count] = written * sizeof(sz_rune_t);
+    decoded->layout = sz_strings_u64_tape_k, decoded->count = count;
+    decoded->data.u64_tape.data = (sz_cptr_t)runes, decoded->data.u64_tape.offsets = offsets;
+    return rune_counts;
+}
+
+/**
+ *  @brief Grows @p engine 's round block and lays the round out: its verticals, its visiting order,
+ *      and on a rune engine its candidates decoded once by @p decode, so every query of the batch
+ *      and every sweep reads runes rather than decoding them again.
+ *  @param[out] scored The candidates the sweeps read: @p candidates on a byte engine, their decoded
+ *      runes on a rune engine.
+ *  @param[inout] symbol_counts The caller's counts, which a rune engine replaces by the exact
+ *      rune counts it decoded.
+ *  @param[out] candidate_order The caller's @p order, or the round's own by length.
+ */
+STRINGZILLA_INLINE sz_status_t sz_levenshtein_engine_round_(sz_levenshtein_engine_t *engine,
+                                                            sz_strings_view_t const *candidates, sz_size_t const *order,
+                                                            sz_size_t verticals_bytes, sz_levenshtein_decode_t_ decode,
+                                                            sz_strings_view_t *scored, sz_size_t const **symbol_counts,
+                                                            sz_size_t const **candidate_order) {
+    sz_size_t const round_bytes = sz_levenshtein_engine_round_bytes_(verticals_bytes, candidates->count, order);
+    sz_size_t const decoded_bytes = engine->symbol == sz_levenshtein_runes_k
+                                        ? sz_levenshtein_engine_decoded_bytes_(candidates)
+                                        : 0;
+    sz_status_t const grown = sz_levenshtein_engine_scratch_(engine, round_bytes + decoded_bytes);
+    if (grown != sz_success_k) return grown;
+    *scored = *candidates;
+    if (engine->symbol == sz_levenshtein_runes_k)
+        *symbol_counts = sz_levenshtein_engine_decode_(candidates, decode, (sz_ptr_t)engine->scratch + round_bytes,
+                                                       scored);
+    *candidate_order = sz_levenshtein_engine_order_(engine, verticals_bytes, scored, order);
     return sz_success_k;
 }
 
@@ -927,7 +1013,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_fill_(sz_levenshtein_engine_t *eng
             sz_size_t const bytes = views[position].length;
             sz_u64_t *const plane = masks + engine->masks_offsets[index];
             sz_levenshtein_query_t prepared = {
-                STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
+                STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, 0, 0};
             if (engine->symbol == sz_levenshtein_bytes_k) {
                 sz_u8_t *const byte_to_class = (sz_u8_t *)engine->symbol_to_class +
                                                index * sz_levenshtein_byte_classes_k;
@@ -1200,37 +1286,46 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_sweep_serial_(sz_levenshtein_query_
     }
 }
 
-/** Seeds one sweep from the next @p capacity candidates in @p order from @p candidates past
- *  @p sweep_first, answering how many it holds: their texts, their byte counts, and their symbol
+/** Seeds one sweep with up to @p capacity of @p candidates, taken in @p order from @p next_rank on
+ *  and advancing it, answering how many it holds: their texts, their byte counts, and their symbol
  *  counts, the caller's when it has them and the byte counts otherwise. A candidate whose length
- *  alone puts it past @p bound from @p query reports @p bound + 1 into @p distances instead. */
+ *  alone puts it past @p bound from @p query reports @p bound + 1 into @p distances instead, and
+ *  the next one in order takes its lane, so only the last sweep runs short. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_sweep_seed_(sz_strings_view_t const *candidates,
                                                         sz_size_t const *symbol_counts, sz_size_t const *order,
                                                         sz_levenshtein_query_t const *query, sz_size_t bound,
-                                                        sz_size_t sweep_first, sz_size_t capacity, sz_size_t *indices,
+                                                        sz_size_t *next_rank, sz_size_t capacity, sz_size_t *indices,
                                                         sz_cptr_t *texts, sz_u64_t *byte_counts,
                                                         sz_u64_t *sweep_symbol_counts, sz_size_t *distances) {
-    sz_size_t const offered = sz_min_of_two(capacity, candidates->count - sweep_first);
     sz_levenshtein_symbol_t const symbol = query->page_rows ? sz_levenshtein_runes_k : sz_levenshtein_bytes_k;
+    sz_size_t const count = candidates->count;
     sz_size_t offered_indices[64];
     sz_string_view_t views[64];
-    for (sz_size_t candidate = 0; candidate != offered; ++candidate)
-        offered_indices[candidate] = order ? order[sweep_first + candidate] : sweep_first + candidate;
-    sz_strings_get_(candidates, offered_indices, offered, views);
     sz_size_t sweep_count = 0;
-    for (sz_size_t candidate = 0; candidate != offered; ++candidate) {
-        sz_size_t const index = offered_indices[candidate];
-        if (sz_levenshtein_length_gap(symbol, query->length, views[candidate].length) > bound) {
-            distances[index] = bound + 1;
-            continue;
+    while (sweep_count != capacity && *next_rank != count) {
+        sz_size_t const offered = sz_min_of_two(capacity - sweep_count, count - *next_rank);
+        for (sz_size_t lane = 0; lane != offered; ++lane)
+            offered_indices[lane] = order ? order[*next_rank + lane] : *next_rank + lane;
+        sz_strings_get_(candidates, offered_indices, offered, views);
+        *next_rank += offered;
+        for (sz_size_t lane = 0; lane != offered; ++lane) {
+            sz_size_t const candidate = offered_indices[lane];
+            sz_size_t const gap = symbol_counts ? (symbol_counts[candidate] > query->length
+                                                       ? symbol_counts[candidate] - query->length
+                                                       : query->length - symbol_counts[candidate])
+                                                : sz_levenshtein_length_gap(symbol, query->length, views[lane].length);
+            if (gap > bound) {
+                distances[candidate] = bound + 1;
+                continue;
+            }
+            indices[sweep_count] = candidate, texts[sweep_count] = views[lane].start;
+            byte_counts[sweep_count] = views[lane].length;
+            sweep_symbol_counts[sweep_count] = symbol_counts ? symbol_counts[candidate] : views[lane].length;
+            ++sweep_count;
         }
-        indices[sweep_count] = index, texts[sweep_count] = views[candidate].start;
-        byte_counts[sweep_count] = views[candidate].length;
-        sweep_symbol_counts[sweep_count] = symbol_counts ? symbol_counts[index] : views[candidate].length;
-        ++sweep_count;
     }
-    for (sz_size_t candidate = sweep_count; candidate != capacity; ++candidate)
-        texts[candidate] = STRINGZILLA_NULL, byte_counts[candidate] = 0, sweep_symbol_counts[candidate] = 0;
+    for (sz_size_t lane = sweep_count; lane != capacity; ++lane)
+        texts[lane] = STRINGZILLA_NULL, byte_counts[lane] = 0, sweep_symbol_counts[lane] = 0;
     return sweep_count;
 }
 
@@ -1250,14 +1345,14 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x1_distances_serial_(sz_levenshtein_qu
     sz_size_t const words = sz_levenshtein_query_words(query->length);
     sz_ssize_t const radius = sz_levenshtein_radius_(bound);
     sz_levenshtein_u64x1_vertical_serial_t resident_verticals[candidates_per_position_k * 2];
-    for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
+    for (sz_size_t next_rank = 0; next_rank != candidates->count;) {
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k] = {0};
         sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
-                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 &next_rank, candidates_per_position_k, indices, texts,
                                                                  byte_counts, sweep_symbol_counts, distances);
-        if (!sweep_count) continue;
+        if (!sweep_count) break;
         if (words == 1)
             sz_levenshtein_u64x1_sweep_serial_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
                                                radius, resident_verticals, 1, sweep_distances);
@@ -1281,6 +1376,25 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_serial(sz_levenshtein_eng
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_serial_k, allocator, stream);
 }
 
+/** Scores every candidate of a round against @p engine 's query @p index on the serial tier, an
+ *  empty query reading every candidate's own length. */
+STRINGZILLA_INLINE void sz_levenshtein_run_serial_(sz_levenshtein_engine_t const *engine, sz_size_t index,
+                                                   sz_strings_view_t const *scored, sz_size_t const *symbol_counts,
+                                                   sz_size_t const *order, sz_size_t bound,
+                                                   sz_levenshtein_u64x1_vertical_serial_t *verticals,
+                                                   sz_size_t *distances) {
+    if (engine->lengths[index] == 0) {
+        sz_levenshtein_engine_empty_(scored, symbol_counts, bound, distances);
+        return;
+    }
+    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+    sz_levenshtein_transpose_t_ const transpose = engine->symbol == sz_levenshtein_bytes_k
+                                                      ? sz_levenshtein_transpose_
+                                                      : sz_levenshtein_transpose_runes_;
+    sz_levenshtein_u64x1_distances_serial_(&query, scored, symbol_counts, order, transpose, bound, verticals,
+                                           distances);
+}
+
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engine_t *engine,
                                                             sz_strings_view_t const *candidates,
                                                             sz_size_t const *symbol_counts, sz_size_t const *order,
@@ -1291,28 +1405,18 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_serial(sz_levenshtein_engin
                "A host tier never scores a device-prepared engine, whose head only its GPU tier reads");
     enum { registers_k = sz_levenshtein_u64x1_registers_per_position_serial_k };
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
-    sz_levenshtein_transpose_t_ const transpose = engine->symbol == sz_levenshtein_bytes_k
-                                                      ? sz_levenshtein_transpose_
-                                                      : sz_levenshtein_transpose_utf8_;
     sz_size_t const verticals_bytes = sz_levenshtein_engine_verticals_bytes_(
         registers_k, sz_levenshtein_engine_words_max_(engine), sizeof(sz_levenshtein_u64x1_vertical_serial_t));
-    sz_status_t const grown = sz_levenshtein_engine_scratch_(
-        engine, sz_levenshtein_engine_round_bytes_(verticals_bytes, candidates->count, order));
-    if (grown != sz_success_k) return grown;
+    sz_strings_view_t scored;
+    sz_size_t const *candidate_order;
+    sz_status_t const prepared = sz_levenshtein_engine_round_(
+        engine, candidates, order, verticals_bytes, sz_utf8_decode_serial_, &scored, &symbol_counts, &candidate_order);
+    if (prepared != sz_success_k) return prepared;
     sz_levenshtein_u64x1_vertical_serial_t *const verticals =
         (sz_levenshtein_u64x1_vertical_serial_t *)sz_levenshtein_engine_verticals_(engine);
-    sz_size_t const *const candidate_order = sz_levenshtein_engine_order_(engine, verticals_bytes, candidates, order);
-
-    for (sz_size_t index = 0; index != engine->count; ++index) {
-        sz_size_t *const row = distances + index * distances_stride;
-        if (engine->lengths[index] == 0) {
-            sz_levenshtein_engine_empty_row_(engine, candidates, symbol_counts, bound, row);
-            continue;
-        }
-        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        sz_levenshtein_u64x1_distances_serial_(&query, candidates, symbol_counts, candidate_order, transpose, bound,
-                                               verticals, row);
-    }
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        sz_levenshtein_run_serial_(engine, index, &scored, symbol_counts, candidate_order, bound, verticals,
+                                   distances + index * distances_stride);
     return sz_success_k;
 }
 

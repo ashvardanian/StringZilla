@@ -8,6 +8,7 @@
 #define STRINGZILLA_LEVENSHTEIN_NEON_H_
 #include "stringzilla/types.h"
 #include "stringzilla/levenshtein/serial.h"
+#include "stringzilla/utf8_runes/neon.h" // `sz_utf8_decode_neon_`
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -222,16 +223,17 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_u8x8_transpose_neon(sz_levenshtein_q
 
 enum { sz_levenshtein_u64x2_candidates_per_step_neon_k = 2, sz_levenshtein_u64x2_registers_per_position_neon_k = 4 };
 
-/** Sweeps eight candidates, two per register, through every transpose; @p words is a constant,
- *  keeping short queries' verticals in registers. Each transpose is consumed in runs that step the
- *  registers holding unread candidates from one event to the next: a candidate's text ending, where
- *  its score is read and the stepped registers may shrink, or a freeze test, which ends the sweep
- *  once every unread candidate is past @p radius, after which the unread ones read their running
- *  scores where they stand. */
+/** Sweeps eight candidates, two per register, through every transpose; @p words and @p width are
+ *  constants, keeping short queries' verticals in registers and the class loads unbranched. Each
+ *  transpose is consumed in runs that step the registers holding unread candidates from one event
+ *  to the next: a candidate's text ending, where its score is read and the stepped registers may
+ *  shrink, or a freeze test, which ends the sweep once every unread candidate is past @p radius,
+ *  after which the unread ones read their running scores where they stand. */
 STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t const *shared_query,
                                                          sz_cptr_t const *texts, sz_u64_t const *byte_counts,
                                                          sz_u64_t *symbol_counts, sz_size_t sweep_count,
-                                                         sz_levenshtein_transpose_t_ transpose, sz_ssize_t radius,
+                                                         sz_levenshtein_transpose_t_ transpose,
+                                                         sz_levenshtein_classes_width_t width, sz_ssize_t radius,
                                                          sz_levenshtein_u64x2_vertical_neon_t *verticals,
                                                          sz_size_t words, sz_size_t *distances) {
     enum {
@@ -249,6 +251,7 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t 
     for (sz_size_t reg = 0; reg != registers_k; ++reg)
         sz_levenshtein_u64x2_init_neon_(&states[reg], verticals + reg * words, words, query);
     sz_u32_t transpose_classes[positions_per_transpose_k][candidates_per_position_k];
+    sz_u8_t const *const transpose_bytes = (sz_u8_t const *)&transpose_classes[0][0];
     sz_size_t freeze_position = sz_levenshtein_freeze_start_(radius);
     for (sz_size_t transpose_start = 0, filled = positions_per_transpose_k; filled == positions_per_transpose_k;
          transpose_start += filled) {
@@ -264,7 +267,10 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t 
             for (; position != run_end; ++position) {
                 sz_u64_t const *rows[candidates_per_position_k];
                 for (sz_size_t candidate = 0; candidate != registers * 2; ++candidate)
-                    rows[candidate] = query->masks + transpose_classes[position][candidate];
+                    rows[candidate] = query->masks +
+                                      (width == sz_levenshtein_classes_u8_k
+                                           ? transpose_bytes[position * candidates_per_position_k + candidate]
+                                           : transpose_classes[position][candidate]);
                 sz_levenshtein_u64x2_steps_neon_(states, verticals, words, query, rows, registers);
             }
             if (position == filled) break;
@@ -302,35 +308,33 @@ STRINGZILLA_INLINE void sz_levenshtein_u64x2_sweep_neon_(sz_levenshtein_query_t 
 }
 
 /** Streams every candidate through a prepared @p query, eight at a time in @p order, with
- *  @p transpose emitting their classes, each distance under @p bound; @p verticals holds enough
- *  for a runtime word count. */
-STRINGZILLA_INLINE void sz_levenshtein_u64x2_distances_neon_(sz_levenshtein_query_t const *query,
-                                                             sz_strings_view_t const *candidates,
-                                                             sz_size_t const *symbol_counts, sz_size_t const *order,
-                                                             sz_levenshtein_transpose_t_ transpose, sz_size_t bound,
-                                                             sz_levenshtein_u64x2_vertical_neon_t *verticals,
-                                                             sz_size_t *distances) {
+ *  @p transpose emitting their classes at @p width, each distance under @p bound; @p verticals
+ *  holds enough for a runtime word count. */
+STRINGZILLA_INLINE void sz_levenshtein_u64x2_distances_neon_(
+    sz_levenshtein_query_t const *query, sz_strings_view_t const *candidates, sz_size_t const *symbol_counts,
+    sz_size_t const *order, sz_levenshtein_transpose_t_ transpose, sz_levenshtein_classes_width_t width,
+    sz_size_t bound, sz_levenshtein_u64x2_vertical_neon_t *verticals, sz_size_t *distances) {
     enum { candidates_per_position_k = 2 * sz_levenshtein_u64x2_registers_per_position_neon_k };
     sz_size_t const words = sz_levenshtein_query_words(query->length);
     sz_ssize_t const radius = sz_levenshtein_radius_(bound);
     sz_levenshtein_u64x2_vertical_neon_t resident_verticals[sz_levenshtein_u64x2_registers_per_position_neon_k * 2];
-    for (sz_size_t sweep_first = 0; sweep_first < candidates->count; sweep_first += candidates_per_position_k) {
+    for (sz_size_t next_rank = 0; next_rank != candidates->count;) {
         sz_cptr_t texts[candidates_per_position_k];
         sz_u64_t byte_counts[candidates_per_position_k], sweep_symbol_counts[candidates_per_position_k];
         sz_size_t indices[candidates_per_position_k], sweep_distances[candidates_per_position_k];
         sz_size_t const sweep_count = sz_levenshtein_sweep_seed_(candidates, symbol_counts, order, query, bound,
-                                                                 sweep_first, candidates_per_position_k, indices, texts,
+                                                                 &next_rank, candidates_per_position_k, indices, texts,
                                                                  byte_counts, sweep_symbol_counts, distances);
-        if (!sweep_count) continue;
+        if (!sweep_count) break;
         if (words == 1)
             sz_levenshtein_u64x2_sweep_neon_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
-                                             radius, resident_verticals, 1, sweep_distances);
+                                             width, radius, resident_verticals, 1, sweep_distances);
         else if (words == 2)
             sz_levenshtein_u64x2_sweep_neon_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
-                                             radius, resident_verticals, 2, sweep_distances);
+                                             width, radius, resident_verticals, 2, sweep_distances);
         else
             sz_levenshtein_u64x2_sweep_neon_(query, texts, byte_counts, sweep_symbol_counts, sweep_count, transpose,
-                                             radius, verticals, words, sweep_distances);
+                                             width, radius, verticals, words, sweep_distances);
         for (sz_size_t candidate = 0; candidate != sweep_count; ++candidate)
             distances[indices[candidate]] = sz_levenshtein_bounded_(sweep_distances[candidate], bound);
     }
@@ -345,6 +349,26 @@ STRINGZILLA_API sz_status_t sz_levenshtein_engine_init_neon(sz_levenshtein_engin
     return sz_levenshtein_engine_init_cpu_(engine, queries, symbol, sz_cap_neon_k, allocator, stream);
 }
 
+/** Scores every candidate of a round against @p engine 's query @p index on NEON. */
+STRINGZILLA_INLINE void sz_levenshtein_run_neon_(sz_levenshtein_engine_t const *engine, sz_size_t index,
+                                                 sz_strings_view_t const *scored, sz_size_t const *symbol_counts,
+                                                 sz_size_t const *order, sz_size_t bound,
+                                                 sz_levenshtein_u64x2_vertical_neon_t *verticals,
+                                                 sz_size_t *distances) {
+    if (engine->lengths[index] == 0) {
+        sz_levenshtein_engine_empty_(scored, symbol_counts, bound, distances);
+        return;
+    }
+    sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
+    // Each alphabet passes its transpose and class width as literals, which the sweeps fold.
+    if (engine->symbol == sz_levenshtein_bytes_k)
+        sz_levenshtein_u64x2_distances_neon_(&query, scored, symbol_counts, order, sz_levenshtein_u8x8_transpose_neon_,
+                                             sz_levenshtein_classes_u8_k, bound, verticals, distances);
+    else
+        sz_levenshtein_u64x2_distances_neon_(&query, scored, symbol_counts, order, sz_levenshtein_transpose_runes_,
+                                             sz_levenshtein_classes_u32_k, bound, verticals, distances);
+}
+
 STRINGZILLA_API sz_status_t sz_levenshtein_distances_neon(sz_levenshtein_engine_t *engine,
                                                           sz_strings_view_t const *candidates,
                                                           sz_size_t const *symbol_counts, sz_size_t const *order,
@@ -357,28 +381,16 @@ STRINGZILLA_API sz_status_t sz_levenshtein_distances_neon(sz_levenshtein_engine_
     if (distances_stride < candidates->count) return sz_unexpected_dimensions_k;
     sz_size_t const verticals_bytes = sz_levenshtein_engine_verticals_bytes_(
         registers_k, sz_levenshtein_engine_words_max_(engine), sizeof(sz_levenshtein_u64x2_vertical_neon_t));
-    sz_status_t const grown = sz_levenshtein_engine_scratch_(
-        engine, sz_levenshtein_engine_round_bytes_(verticals_bytes, candidates->count, order));
-    if (grown != sz_success_k) return grown;
+    sz_strings_view_t scored;
+    sz_size_t const *candidate_order;
+    sz_status_t const prepared = sz_levenshtein_engine_round_(
+        engine, candidates, order, verticals_bytes, sz_utf8_decode_neon_, &scored, &symbol_counts, &candidate_order);
+    if (prepared != sz_success_k) return prepared;
     sz_levenshtein_u64x2_vertical_neon_t *const verticals =
         (sz_levenshtein_u64x2_vertical_neon_t *)sz_levenshtein_engine_verticals_(engine);
-    sz_size_t const *const candidate_order = sz_levenshtein_engine_order_(engine, verticals_bytes, candidates, order);
-
-    for (sz_size_t index = 0; index != engine->count; ++index) {
-        sz_size_t *const row = distances + index * distances_stride;
-        if (engine->lengths[index] == 0) {
-            sz_levenshtein_engine_empty_row_(engine, candidates, symbol_counts, bound, row);
-            continue;
-        }
-        sz_levenshtein_query_t const query = sz_levenshtein_engine_row_(engine, index);
-        // Each alphabet passes its transpose as a literal, which the sweeps fold.
-        if (engine->symbol == sz_levenshtein_bytes_k)
-            sz_levenshtein_u64x2_distances_neon_(&query, candidates, symbol_counts, candidate_order,
-                                                 sz_levenshtein_transpose_, bound, verticals, row);
-        else
-            sz_levenshtein_u64x2_distances_neon_(&query, candidates, symbol_counts, candidate_order,
-                                                 sz_levenshtein_transpose_utf8_, bound, verticals, row);
-    }
+    for (sz_size_t index = 0; index != engine->count; ++index)
+        sz_levenshtein_run_neon_(engine, index, &scored, symbol_counts, candidate_order, bound, verticals,
+                                 distances + index * distances_stride);
     return sz_success_k;
 }
 
