@@ -65,7 +65,7 @@ SZ_DEVICE_INLINE void update_min_count_(count_type_ &min_count, value_type_ &rol
                                         value_type_ value) noexcept {
     min_count *= value >= rolling_minimum; // ? Discard `min_count` to 0 for new extremums
     min_count += value <= rolling_minimum; // ? Increments by 1 for new & old minimums
-    rolling_minimum = (std::min)(rolling_minimum, value);
+    rolling_minimum = min_of_two(rolling_minimum, value);
 }
 
 #pragma endregion CUDA Device Helpers
@@ -153,7 +153,7 @@ __global__ void basic_rolling_hashers_kernel_(                                  
         for (auto &rolling_count : rolling_counts) rolling_count = 0;
 
         // Until we reach the maximum window length, use a branching code version
-        size_t const prefix_length = std::min<size_t>(task.text_length, max_window_width);
+        size_t const prefix_length = min_of_two<size_t>(task.text_length, max_window_width);
         size_t new_char_offset = 0;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             auto const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
@@ -167,7 +167,7 @@ __global__ void basic_rolling_hashers_kernel_(                                  
                 if (new_char_offset < hasher.window_width()) {
                     last_state = hasher.push(last_state, new_char);
                     if (hasher.window_width() == (new_char_offset + 1)) {
-                        rolling_minimum = (std::min)(rolling_minimum, hasher.digest(last_state));
+                        rolling_minimum = min_of_two(rolling_minimum, hasher.digest(last_state));
                         min_count = 1; // First occurrence of this hash
                     }
                     continue;
@@ -288,7 +288,7 @@ __global__ void floating_rolling_hashers_per_cuda_warp_(                      //
         for (auto &rolling_count : rolling_counts) rolling_count = 0;
 
         // Until we reach the `window_width`, we don't need to discard any symbols and can keep the code simpler
-        size_t const prefix_length = std::min<size_t>(task.text_length, window_width);
+        size_t const prefix_length = min_of_two<size_t>(task.text_length, window_width);
         size_t new_char_offset = 0;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = task.text_ptr[new_char_offset]; // ? Hardware may auto-broadcast this
@@ -457,11 +457,10 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
                   "Dimensions per launch must divide the aligned dimensions");
 
   private:
-    using allocator_traits_t = std::allocator_traits<allocator_t>;
-    using hasher_allocator_t = typename allocator_traits_t::template rebind_alloc<hasher_t>;
-    using rolling_states_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_state_t>;
-    using rolling_hashes_allocator_t = typename allocator_traits_t::template rebind_alloc<rolling_hash_t>;
-    using min_counts_allocator_t = typename allocator_traits_t::template rebind_alloc<min_count_t>;
+    using hasher_allocator_t = rebound_allocator<allocator_t, hasher_t>;
+    using rolling_states_allocator_t = rebound_allocator<allocator_t, rolling_state_t>;
+    using rolling_hashes_allocator_t = rebound_allocator<allocator_t, rolling_hash_t>;
+    using min_counts_allocator_t = rebound_allocator<allocator_t, min_count_t>;
 
     allocator_t allocator_;
     hashers_t hashers_;
@@ -572,7 +571,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         auto const new_window_width = hasher.window_width();
         if (hashers_.try_push_back(std::move(hasher)) != status_t::success_k) return status_t::bad_alloc_k;
 
-        max_window_width_ = (std::max)(new_window_width, max_window_width_);
+        max_window_width_ = max_of_two(new_window_width, max_window_width_);
         return status_t::success_k;
     }
 
@@ -667,7 +666,7 @@ struct basic_rolling_hashers<hasher_type_, min_hash_type_, min_count_type_, unif
         for (size_t tile = 0; tile < tiles_count; ++tile) {
             size_t const output_dimension_offset = tile * static_cast<size_t>(dimensions_per_launch_k);
             auto const *hashers_ptr = hashers_.data() + output_dimension_offset;
-            auto const hashers_size = (std::min)(static_cast<size_t>(dimensions_per_launch_k),
+            auto const hashers_size = min_of_two(static_cast<size_t>(dimensions_per_launch_k),
                                                  total_hashers - output_dimension_offset);
 
             void *warp_level_kernel_args[6];
@@ -866,7 +865,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         auto const *tasks_ptr = tasks.data();
         auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
-        auto const hashers_size = (std::min)(dimensions_k, hashers_.size());
+        auto const hashers_size = min_of_two(dimensions_k, hashers_.size());
         warp_level_kernel_args[0] = (void *)(&tasks_ptr);
         warp_level_kernel_args[1] = (void *)(&tasks_size);
         warp_level_kernel_args[2] = (void *)(&hashers_ptr);
@@ -954,7 +953,7 @@ struct floating_rolling_hashers<sz_cap_cuda_k, dimensions_> {
         auto const *tasks_ptr = tasks.data();
         auto const tasks_size = tasks.size();
         auto const *hashers_ptr = hashers_.data();
-        auto const hashers_size = (std::min)(dimensions_k, hashers_.size());
+        auto const hashers_size = min_of_two(dimensions_k, hashers_.size());
         warp_level_kernel_args[0] = (void *)(&tasks_ptr);
         warp_level_kernel_args[1] = (void *)(&tasks_size);
         warp_level_kernel_args[2] = (void *)(&hashers_ptr);

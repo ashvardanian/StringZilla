@@ -288,7 +288,7 @@ struct floating_rolling_hashers<sz_cap_skylake_k, dimensions_, void> {
         inverse_modulos_vec.zmm_pd = _mm512_loadu_pd(&inverse_modulos_[first_dim]);
 
         // Until we reach the `window_width_`, we don't need to discard any symbols and can keep the code simpler
-        size_t const prefix_length = (std::min)(text_chunk.size(), window_width_);
+        size_t const prefix_length = min_of_two(text_chunk.size(), window_width_);
         size_t new_char_offset = passed_progress;
         for (; new_char_offset < prefix_length; ++new_char_offset) {
             byte_t const new_char = text_chunk[new_char_offset];

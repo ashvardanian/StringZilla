@@ -776,7 +776,7 @@ If StringZilla helps your research or product, please cite it:
 @software{Vardanian_StringZilla,
   author = {Vardanian, Ash},
   title = {{StringZilla: Fast SIMD, SWAR, and GPGPU String Processing}},
-  doi = {10.5281/zenodo.21472333},
+  doi = {10.5281/zenodo.21472332},
   url = {https://github.com/ashvardanian/StringZilla},
   license = {Apache-2.0}
 }
