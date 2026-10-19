@@ -814,7 +814,9 @@ void bench_intersect_kernels(environment_t &env, std::string_view kit) {
 struct dataset_copy_t {
     std::vector<char> storage;
 
-    explicit dataset_copy_t(corpus_t const &corpus) : storage(4096 + corpus.dataset.size()) {
+    explicit dataset_copy_t(corpus_t const &corpus) {
+        if (corpus.dataset.size() > storage.max_size() - 4096) throw std::bad_alloc();
+        storage.resize(4096 + corpus.dataset.size());
         std::memcpy(data(), corpus.dataset.data(), corpus.dataset.size());
     }
     dataset_copy_t(dataset_copy_t const &) = delete;
