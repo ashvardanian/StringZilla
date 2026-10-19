@@ -213,7 +213,7 @@ void test_find_kernel_unit() {
             else verify(status == missing && !kernel && !capability);
             owners += status == sz_success_k;
         }
-        verify(owners == (expected == sz_success_k));
+        verify(owners == static_cast<std::size_t>(expected == sz_success_k));
     }
 }
 

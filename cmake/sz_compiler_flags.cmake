@@ -155,8 +155,8 @@ function (stringzilla_set_compiler_flags target_ cpp_standard_ target_arch_)
         endif ()
     endif ()
 
-    # Use the `/Zc:__cplusplus` flag to correctly define the `__cplusplus` macro in MSVC
-    target_compile_options(${target_} PRIVATE "$<${stringzilla_msvc_}:/Zc:__cplusplus>")
+    # Report the selected C++ standard and preprocess raw strings in test assertions correctly on MSVC.
+    target_compile_options(${target_} PRIVATE "$<${stringzilla_msvc_}:/Zc:__cplusplus;/Zc:preprocessor>")
 
     # Make sure CUDA C++ allows calling `constexpr` from device code
     target_compile_options(${target_} PRIVATE "$<${stringzilla_nvcc_}:--expt-relaxed-constexpr>")
