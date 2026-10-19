@@ -39,8 +39,8 @@ extern "C" {
                    "lzcnt")
 #endif
 
-STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                      sz_byteset_t const *filter) {
+STRINGZILLA_C_INLINE_ sz_cptr_t sz_find_byteset_icelake_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_byteset_t const *filter) {
 
     // Before initializing the AVX-512 vectors, we may want to run the sequential code for the first few bytes.
     // In practice, that only hurts, even when we have matches every 5-ish bytes.

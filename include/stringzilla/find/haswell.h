@@ -138,8 +138,8 @@ STRINGZILLA_INLINE sz_cptr_t sz_rfind_haswell_(sz_cptr_t haystack, sz_size_t hay
     return sz_rfind_serial_(haystack, haystack_length, needle, needle_length);
 }
 
-STRINGZILLA_INLINE sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
-                                                      sz_byteset_t const *filter) {
+STRINGZILLA_C_INLINE_ sz_cptr_t sz_find_byteset_haswell_(sz_cptr_t haystack, sz_size_t haystack_length,
+                                                         sz_byteset_t const *filter) {
 
     // Let's unzip even and odd elements and replicate them into both lanes of the YMM register.
     // That way when we invoke `_mm256_shuffle_epi8` we can use the same mask for both lanes.
