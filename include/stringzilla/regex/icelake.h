@@ -105,8 +105,8 @@ STRINGZILLA_INLINE __m512i sz_regex_lookup_icelake_(__m512i const *table, __m512
  *  The two tables narrow to bytes, each byte's entry one permutation of its low seven bits per half
  *  and a blend on its top bit; the entries widen back to look bits on the store.
  */
-STRINGZILLA_INLINE void sz_regex_fill_looks_icelake_(sz_cptr_t text, sz_size_t length, sz_u32_t const *looks_bytes,
-                                                     sz_u32_t flipped, sz_u32_t *looks) {
+STRINGZILLA_C_INLINE_ void sz_regex_fill_looks_icelake_(sz_cptr_t text, sz_size_t length, sz_u32_t const *looks_bytes,
+                                                        sz_u32_t flipped, sz_u32_t *looks) {
     sz_u8_t const *const bytes = (sz_u8_t const *)text;
     sz_u32_t const *const after = looks_bytes + 1, *const before = after + 256;
     __m512i const flipped_u8x64 = _mm512_set1_epi8((char)(flipped / sz_regex_look_lookaround_k));
