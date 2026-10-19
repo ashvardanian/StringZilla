@@ -653,7 +653,7 @@ jobs:
   test_cross_qemu:
     name: QEMU Tests ${{ matrix.target_arch }}${{ matrix.variant }}
     needs: test_cross_linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -662,43 +662,44 @@ jobs:
           # (`sve=off`, else dynamic dispatch always prefers SVE2 and NEON is never exercised) plus SVE at
           # 128/256/512-bit (`sve-max-vq` = VL/128).
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve=off"
             variant: " @ neon"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=1"
             variant: " @ sve=128"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=2"
             variant: " @ sve=256"
           - target_arch: aarch64
-            qemu: qemu-aarch64-static
+            qemu: qemu-aarch64
             qemu_cpu: "max,sve-max-vq=4"
             variant: " @ sve=512"
           - target_arch: x86-64
-            qemu: qemu-x86_64-static
+            qemu: qemu-x86_64
             qemu_cpu: max
             variant: ""
+          # The linked Ubuntu 26.04 system libraries need scalar extensions that rv64 leaves disabled.
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
-            qemu_cpu: "rv64,v=true,vlen=128"
+            qemu: qemu-riscv64
+            qemu_cpu: "max,v=true,vlen=128"
             variant: " @ vlen=128"
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
-            qemu_cpu: "rv64,v=true,vlen=256"
+            qemu: qemu-riscv64
+            qemu_cpu: "max,v=true,vlen=256"
             variant: " @ vlen=256"
           - target_arch: riscv64
-            qemu: qemu-riscv64-static
-            qemu_cpu: "rv64,v=true,vlen=512"
+            qemu: qemu-riscv64
+            qemu_cpu: "max,v=true,vlen=512"
             variant: " @ vlen=512"
           - target_arch: loongarch64
-            qemu: qemu-loongarch64-static
+            qemu: qemu-loongarch64
             qemu_cpu: la464
             variant: ""
           - target_arch: ppc64le
-            qemu: qemu-ppc64le-static
+            qemu: qemu-ppc64le
             qemu_cpu: power9
             variant: ""
 
@@ -706,7 +707,8 @@ jobs:
       - name: Install QEMU user-mode
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static
+          sudo apt-get install -y qemu-user
+          qemu-x86_64 --version
 
       - name: Download ${{ matrix.target_arch }} test binaries
         uses: actions/download-artifact@v8
