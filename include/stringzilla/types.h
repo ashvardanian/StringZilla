@@ -972,7 +972,7 @@ typedef enum sz_levenshtein_symbol_t {
     /** Every byte is its own symbol, and a distance counts bytes. */
     sz_levenshtein_bytes_k = 0,
 
-    /** Every UTF-8 rune is one symbol, an ill-formed byte decoding to U+FFFD. */
+    /** Every UTF-8 rune is one symbol, each maximal ill-formed subpart decoding to one U+FFFD. */
     sz_levenshtein_runes_k = 1,
 } sz_levenshtein_symbol_t;
 

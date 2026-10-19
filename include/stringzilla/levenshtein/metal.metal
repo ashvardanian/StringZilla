@@ -74,13 +74,24 @@ inline sz_levenshtein_query_metal_t sz_levenshtein_row_metal_(device uchar *engi
     return query;
 }
 
-/** The rune at @p position, advancing it, as @c sz_utf8_next_rune_ decodes: one @c U+FFFD per
- *  ill-formed byte. */
+/** The rune at @p position, advancing it, as @c sz_levenshtein_next_rune_ decodes: one @c U+FFFD
+ *  per maximal ill-formed subpart, a lead and whichever continuations still fit a rune. */
 inline uint sz_levenshtein_next_rune_metal_(device uchar const *text, ulong length, thread ulong &position) {
     uint rune;
     uint const consumed = sz_utf8_decode_rune_metal_(text, length, position, rune);
-    position += consumed ? consumed : 1;
-    return consumed ? rune : 0xFFFD;
+    if (consumed) {
+        position += consumed;
+        return rune;
+    }
+    uint const lead = text[position];
+    ulong const available = length - position;
+    uint const second = available > 1 ? text[position + 1] : 0;
+    bool const second_fits = (second & 0xC0) == 0x80 && !(lead == 0xE0 && second < 0xA0) &&
+                             !(lead == 0xED && second >= 0xA0) && !(lead == 0xF0 && second < 0x90) &&
+                             !(lead == 0xF4 && second >= 0x90);
+    bool const third_fits = available > 2 && (text[position + 2] & 0xC0) == 0x80;
+    position += lead < 0xE0 || lead > 0xF4 || !second_fits ? 1 : third_fits ? 3 : 2;
+    return 0xFFFD;
 }
 
 /** The class of @p rune under a rune query, zero for a rune the query lacks. */

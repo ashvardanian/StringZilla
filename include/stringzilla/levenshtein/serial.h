@@ -15,7 +15,7 @@
 
 #include "stringzilla/types.h"
 #include "stringzilla/capabilities.h"      // `sz_capability_t`, `sz_cap_cpus_k`
-#include "stringzilla/utf8_runes/serial.h" // `sz_utf8_next_rune_`
+#include "stringzilla/utf8_runes/serial.h" // `sz_rune_decode`, `sz_utf8_first_continuation_ok_`
 
 #ifdef __cplusplus
 extern "C" {
@@ -173,14 +173,34 @@ STRINGZILLA_CONSTEXPR sz_u32_t sz_levenshtein_utf8_class(sz_levenshtein_query_t 
     return query->class_rows[(sz_size_t)query->page_rows[rune >> 8] * 256 + (rune & 255)];
 }
 
+/** The rune at @p position of @p text, advancing it past the rune, or past the maximal ill-formed
+ *  subpart that reads as one @c U+FFFD, as every @c sz_utf8_decode backend splits a text. */
+STRINGZILLA_CONSTEXPR sz_rune_t sz_levenshtein_next_rune_(sz_cptr_t text, sz_size_t length, sz_size_t *position) {
+    if (*position >= length) return 0;
+    sz_rune_t rune;
+    sz_rune_length_t const consumed = sz_rune_decode(text + *position, text + length, &rune);
+    if (consumed != sz_rune_invalid_k) {
+        *position += consumed;
+        return rune;
+    }
+    // Two flags, not `sz_utf8_maximal_subpart_`, whose inlined branches slow the well-formed path.
+    sz_u8_t const lead = (sz_u8_t)text[*position];
+    sz_size_t const available = length - *position;
+    sz_size_t const second = available > 1 && lead >= 0xE0 && lead <= 0xF4 &&
+                             sz_utf8_first_continuation_ok_(lead, (sz_u8_t)text[*position + 1]);
+    sz_size_t const third = second && available > 2 && sz_utf8_is_continuation_((sz_u8_t)text[*position + 2]);
+    *position += 1 + second + third;
+    return (sz_rune_t)sz_rune_replacement_k;
+}
+
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_runes_(sz_cptr_t text, sz_size_t length) {
     sz_size_t runes = 0;
-    for (sz_size_t position = 0; position < length; ++runes) sz_utf8_next_rune_(text, length, &position);
+    for (sz_size_t position = 0; position < length; ++runes) sz_levenshtein_next_rune_(text, length, &position);
     return runes;
 }
 
-/** Runes in @p text under the decoding the family applies - one @c U+FFFD per ill-formed byte, the
- *  grid the segmenters use - which differs from @c sz_utf8_count on ill-formed input. */
+/** Runes in @p text under the decoding the family applies: one @c U+FFFD per maximal ill-formed
+ *  subpart, as @c sz_utf8_decode_serial emits them. */
 STRINGZILLA_INLINE sz_size_t sz_levenshtein_utf8_runes(sz_cptr_t text, sz_size_t length) {
     return sz_levenshtein_utf8_runes_(text, length);
 }
@@ -220,7 +240,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
     // First pass: a fresh row for every page first seen, a fresh class for every rune first seen.
     sz_size_t count = 0, rows = 1, classes = 1;
     for (sz_size_t position = 0; position < length; ++count) {
-        sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+        sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
         if (page_rows[rune >> 8] == 0) {
             page_rows[rune >> 8] = (sz_u16_t)rows++;
             for (sz_size_t entry = 0; entry != 256; ++entry) class_rows[page_rows[rune >> 8] * 256 + entry] = 0;
@@ -237,7 +257,7 @@ STRINGZILLA_INLINE sz_status_t sz_levenshtein_query_prepare_utf8_(sz_cptr_t text
     // Second pass: the plane's stride is known, so every rune sets its bit in its class's mask.
     sz_size_t rune_index = 0;
     for (sz_size_t position = 0; position < length; ++rune_index) {
-        sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+        sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
         masks[sz_levenshtein_plane_entry_(capability, stride, sz_levenshtein_utf8_class(query, rune),
                                           rune_index >> 6)] |= (sz_u64_t)1 << (rune_index & 63);
     }
@@ -338,7 +358,7 @@ STRINGZILLA_INLINE sz_size_t sz_levenshtein_transpose_utf8_(sz_levenshtein_query
         sz_size_t emitted = 0;
         for (; emitted != positions && cursors[candidate] < byte_counts[candidate]; ++emitted)
             classes[emitted * candidates + candidate] = sz_levenshtein_utf8_class(
-                query, sz_utf8_next_rune_(texts[candidate], byte_counts[candidate], cursors + candidate));
+                query, sz_levenshtein_next_rune_(texts[candidate], byte_counts[candidate], cursors + candidate));
         if (emitted != 0 && cursors[candidate] == byte_counts[candidate])
             symbol_counts[candidate] = transpose_start + emitted;
         // Pads rows below `filled` row by row, as compilers turn a padded column into scatters.
@@ -743,7 +763,7 @@ STRINGZILLA_INLINE void sz_levenshtein_engine_rune_classes_(sz_cptr_t text, sz_s
     for (sz_size_t entry = 0; entry != 256; ++entry) class_rows[entry] = 0;
     sz_size_t runes = 0, rows = 1, classes = 1;
     for (sz_size_t position = 0; position < length; ++runes) {
-        sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+        sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
         if (page_rows[rune >> 8] == 0) {
             page_rows[rune >> 8] = (sz_u16_t)rows++;
             for (sz_size_t entry = 0; entry != 256; ++entry) class_rows[page_rows[rune >> 8] * 256 + entry] = 0;
@@ -1027,28 +1047,18 @@ STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_init_serial(sz_levenshtein_u64x1
         verticals[word].positive = ~(sz_u64_t)0, verticals[word].negative = 0;
 }
 
-/**
- *  @brief Advances one candidate by one symbol through exactly @p words verticals, chaining the
- *      horizontal deltas from each word into the next; the score moves on the last word.
- *
- *  There is no candidate mask: a candidate past its text keeps stepping whatever class the
- *  transpose emits, and its score is read where its text ends.
- *
- *  @param[in] words Exactly `sz_levenshtein_query_words(query->length)`; a constant keeps
- *      verticals in registers.
- *  @param[in] class_id The candidate's class at this position, as the transpose emitted it.
- */
-STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
-                                                            sz_levenshtein_u64x1_vertical_serial_t *verticals,
-                                                            sz_size_t words, sz_levenshtein_query_t const *query,
-                                                            sz_u32_t class_id) {
-    sz_u64_t const *const masks = query->masks + class_id;
+/** The step of @ref sz_levenshtein_u64x1_step_serial over one class's @p masks, a word's mask
+ *  @p word_stride entries past the last: a host plane's stride, or one on a device's class rows. */
+STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_masks_serial_(sz_levenshtein_u64x1_state_serial_t *state,
+                                                                   sz_levenshtein_u64x1_vertical_serial_t *verticals,
+                                                                   sz_size_t words, sz_levenshtein_query_t const *query,
+                                                                   sz_u64_t const *masks, sz_size_t word_stride) {
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query->length);
     // The top boundary: the row above the first word is one edit higher than the cell to its left.
     sz_u64_t positive_carry = 1, negative_carry = 0;
     for (sz_size_t word = 0; word != words; ++word) {
         sz_levenshtein_u64x1_vertical_serial_t *const vertical = verticals + word;
-        sz_u64_t const equality = masks[word * query->stride];
+        sz_u64_t const equality = masks[word * word_stride];
         sz_u64_t const vertical_carry = equality | vertical->negative;
         sz_u64_t const matched = equality | negative_carry;
         sz_u64_t const diagonal = (((matched & vertical->positive) + vertical->positive) ^ vertical->positive) |
@@ -1067,6 +1077,25 @@ STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1
         vertical->positive = horizontal_negative | ~(vertical_carry | horizontal_positive);
         vertical->negative = horizontal_positive & vertical_carry;
     }
+}
+
+/**
+ *  @brief Advances one candidate by one symbol through exactly @p words verticals, chaining the
+ *      horizontal deltas from each word into the next; the score moves on the last word.
+ *
+ *  There is no candidate mask: a candidate past its text keeps stepping whatever class the
+ *  transpose emits, and its score is read where its text ends.
+ *
+ *  @param[in] words Exactly `sz_levenshtein_query_words(query->length)`; a constant keeps
+ *      verticals in registers.
+ *  @param[in] query A host tier's query, its word-major tables side by side.
+ *  @param[in] class_id The candidate's class at this position, as the transpose emitted it.
+ */
+STRINGZILLA_CONSTEXPR void sz_levenshtein_u64x1_step_serial(sz_levenshtein_u64x1_state_serial_t *state,
+                                                            sz_levenshtein_u64x1_vertical_serial_t *verticals,
+                                                            sz_size_t words, sz_levenshtein_query_t const *query,
+                                                            sz_u32_t class_id) {
+    sz_levenshtein_u64x1_step_masks_serial_(state, verticals, words, query, query->masks + class_id, query->stride);
 }
 
 /** Whether the candidate can still come under @p radius at @p position: its score falls by

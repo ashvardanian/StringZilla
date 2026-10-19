@@ -53,13 +53,17 @@ void test_levenshtein_unit() {
     verify(sz_levenshtein_query_words(STRINGZILLA_SIZE_MAX) == STRINGZILLA_SIZE_MAX / 64 + 1);
     sz_levenshtein_engine_shape_t shape {65, 3, 0};
     sz_levenshtein_engine_layout_t layout {};
-    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, 1, &layout));
-    verify(layout.head_bytes == 64 && layout.masks_offset == 64 && layout.offsets_offset == 832 &&
-           layout.lengths_offset == 896 && layout.classes_offset == 960 && layout.total_bytes == 1216);
-    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, STRINGZILLA_SIZE_MAX - 63, &layout));
-    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, STRINGZILLA_SIZE_MAX - 62, &layout));
+    // Two words of an eight-class table on the host, 128 bytes of masks after the head.
+    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 1, &layout));
+    verify(layout.head_bytes == 64 && layout.masks_offset == 64 && layout.offsets_offset == 192 &&
+           layout.lengths_offset == 256 && layout.classes_offset == 320 && layout.total_bytes == 576);
+    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, STRINGZILLA_SIZE_MAX - 63,
+                                          &layout));
+    verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, STRINGZILLA_SIZE_MAX - 62,
+                                          &layout));
     shape = {0xFFFFFFFFu, 256, 0};
-    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, &shape, 0, &layout) == (sizeof(sz_size_t) > 4));
+    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout) ==
+           (sizeof(sz_size_t) > 4));
     check_levenshtein_unit_(levenshtein_dispatched);
 }
 

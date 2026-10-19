@@ -3388,15 +3388,38 @@ std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_type_ con
     return previous[second.size()];
 }
 
+/** Whether the @p length bytes at @p bytes begin some well-formed rune: a completion by
+ *  continuation bytes, one from each range a lead constrains them to, decodes past them. */
+inline bool levenshtein_rune_prefix_(char const *bytes, std::size_t length) {
+    unsigned char const continuations[] = {0x80, 0x90, 0xA0, 0xBF};
+    for (std::size_t completion = 0; completion != 64; ++completion) {
+        char padded[4];
+        for (std::size_t index = 0; index != 4; ++index)
+            padded[index] = index < length ? bytes[index]
+                                           : static_cast<char>(continuations[(completion >> (2 * (index - 1))) & 3]);
+        sz_rune_t rune;
+        sz_rune_length_t const consumed = sz_rune_decode(padded, padded + 4, &rune);
+        if (consumed != sz_rune_invalid_k && static_cast<std::size_t>(consumed) > length) return true;
+    }
+    return false;
+}
+
 /** The rune sequence the UTF-8 entries score, decoded here on the rune codec alone so the oracle
- *  shares nothing with the kernel: an ill-formed byte is one @c U+FFFD. */
+ *  shares nothing with the kernel: a maximal ill-formed subpart, the longest run of bytes still
+ *  beginning some well-formed rune, is one @c U+FFFD. */
 inline std::u32string levenshtein_runes_(std::string const &text) {
     std::u32string runes;
     for (std::size_t position = 0; position < text.size();) {
         sz_rune_t rune;
         sz_rune_length_t const consumed = sz_rune_decode(text.data() + position, text.data() + text.size(), &rune);
-        if (consumed == sz_rune_invalid_k) runes.push_back(sz_rune_replacement_k), ++position;
-        else runes.push_back(rune), position += consumed;
+        if (consumed != sz_rune_invalid_k) {
+            runes.push_back(rune), position += consumed;
+            continue;
+        }
+        std::size_t subpart = 1;
+        while (position + subpart < text.size() && levenshtein_rune_prefix_(text.data() + position, subpart + 1))
+            ++subpart;
+        runes.push_back(sz_rune_replacement_k), position += subpart;
     }
     return runes;
 }
@@ -3531,12 +3554,21 @@ inline void check_levenshtein_unit_(levenshtein_backend_t const &backend) {
     check_levenshtein_known_(
         backend, std::string(65, 'a'),
         {{std::string(65, 'a'), 0, 0}, {std::string(64, 'a'), 1, 1}, {std::string(130, 'a'), 65, 65}});
-    // Multi-byte runes: one rune edit costs several byte edits, and an ill-formed byte is one rune.
+    // Multi-byte runes: one rune edit costs several byte edits, and a maximal ill-formed subpart is
+    // one rune, so a truncated sequence, a broken one and its lead alone all read as one U+FFFD.
     check_levenshtein_known_(backend, "héllo",
                              {{"hello", 2, 1}, {"héllo", 0, 0}, {"h\xC3llo", 1, 1}, {"hé", 3, 3}, {"日本語", 9, 5}});
     check_levenshtein_known_(backend, "日本語",
                              {{"日本", 3, 1}, {"日本語です", 6, 2}, {"本", 6, 2}, {"", 9, 3}, {"\xFF\xFE", 9, 3}});
-    check_levenshtein_known_(backend, "\xE2\x82", {{"€", 1, 2}, {"\xE2\x82\xAC", 1, 2}, {"ab", 2, 2}});
+    check_levenshtein_known_(backend, "\xE2\x82", {{"€", 1, 1}, {"\xE2\x82\xAC", 1, 1}, {"ab", 2, 2}});
+    check_levenshtein_known_(backend, "a\xE2\x82z",
+                             {{"a\xE2\x82z", 0, 0},
+                              {"a\xE2z", 1, 0},
+                              {"a€z", 1, 1},
+                              {"a\xF0\x9F\x98z", 3, 0},
+                              {"\xED\xA0\x80", 4, 2},
+                              {"a\xE0\x80z", 2, 1},
+                              {"\xE2\x82", 2, 2}});
 
     // Several queries in one batch, spanning the 8-, 16-, and 64-symbol lane rungs, and more than
     // 64 candidates of mixed lengths so the round's length-bucketing order runs and scatters back.
@@ -3622,6 +3654,18 @@ inline void check_levenshtein_equivalence_(test_context_t &context, levenshtein_
         for (std::size_t candidate_runes : {0, 1, 64, 65, 200, 256, 512, 513})
             candidates.push_back(random_string(generator, candidate_runes, rune_alphabet));
         std::string const query = random_string(generator, query_runes, rune_alphabet);
+        candidates.push_back(query);
+        check_levenshtein_case_(backend, {query}, candidates);
+    }
+    // Truncated, broken, surrogate and stray sequences among runes, past every decoder's window and
+    // across transposes, each maximal ill-formed subpart one rune.
+    std::vector<std::string> const broken_alphabet = {"a",        "é",        "€",    "\xE2\x82", "\xF0\x9F\x98",
+                                                      "\xED\xA0", "\xE0\x80", "\xC3", "\x80",     "\xFF"};
+    for (std::size_t query_pieces : {1, 40, 70, 300}) {
+        std::vector<std::string> candidates;
+        for (std::size_t candidate_pieces : {0, 1, 31, 64, 65, 100, 257, 600})
+            candidates.push_back(random_string(generator, candidate_pieces, broken_alphabet));
+        std::string const query = random_string(generator, query_pieces, broken_alphabet);
         candidates.push_back(query);
         check_levenshtein_case_(backend, {query}, candidates);
     }

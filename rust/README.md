@@ -705,7 +705,7 @@ fn distances<'scope>(&'scope mut self, scope: &'scope Scope<'scope, '_>,
     distances_stride: usize) -> Result<(), Status>;
 ```
 
-`LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, an ill-formed byte decoding to `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
+`LevenshteinSymbol::Bytes` counts bytes and `LevenshteinSymbol::Runes` counts UTF-8 runes, each maximal ill-formed subpart decoding to one `U+FFFD`; the two alphabets are one engine and one verb rather than two spellings.
 Costs are unit — one per substitution, insertion and deletion — and there are no gap costs and no substitution matrix.
 
 The output is a `[queries, candidates]` block the caller owns: query `q` against candidate `c` lands at `distances[q * distances_stride + c]`, the stride counting entries rather than bytes and being at least the candidate count.

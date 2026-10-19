@@ -132,14 +132,16 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_simt_(
         if (left >= 8) {
 #pragma unroll
             for (sz_size_t slot = 0; slot != 8; ++slot)
-                sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query,
-                                                 query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))]);
+                sz_levenshtein_u64x1_step_masks_serial_(
+                    &state, verticals, words, &query,
+                    query.masks + query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))] * query.stride, 1);
             left -= 8;
             continue;
         }
         for (sz_size_t slot = 0; slot != left; ++slot)
-            sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query,
-                                             query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))]);
+            sz_levenshtein_u64x1_step_masks_serial_(
+                &state, verticals, words, &query,
+                query.masks + query.byte_to_class[(sz_u8_t)(octet >> (slot * 8))] * query.stride, 1);
         left = 0;
     }
 }
@@ -510,7 +512,7 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
     for (sz_size_t step = 0;; ++step) {
         sz_u32_t decoded = 0;
         if (lane == 0 && cursor < length)
-            decoded = sz_levenshtein_utf8_class(&query, sz_utf8_next_rune_(text, length, &cursor)) + 1, ++runes;
+            decoded = sz_levenshtein_utf8_class(&query, sz_levenshtein_next_rune_(text, length, &cursor)) + 1, ++runes;
         unsigned received = 0;
         sz_u32_t inherited = 0;
         if (lanes != sz_levenshtein_group_thread_k)
@@ -852,8 +854,10 @@ STRINGZILLA_DEVICE void sz_levenshtein_sweep_utf8_simt_(
     sz_size_t position = 0;
     for (;;) {
         if (position < length && (sz_ssize_t)state.score - (sz_ssize_t)(length - position) <= radius) {
-            sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
-            sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, sz_levenshtein_utf8_class(&query, rune));
+            sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
+            sz_levenshtein_u64x1_step_masks_serial_(
+                &state, verticals, words, &query, query.masks + sz_levenshtein_utf8_class(&query, rune) * query.stride,
+                1);
             continue;
         }
         row[candidate] = sz_levenshtein_bounded_(sz_levenshtein_u64x1_score_serial(&state, candidate), bound);
@@ -1113,7 +1117,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, 
     if (lane == 0) {
         sz_u32_t rows = 1, classes = 1, runes = 0;
         for (position = 0; position < length; ++runes) {
-            sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+            sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
             if (page_rows[rune >> 8] == 0) {
                 page_rows[rune >> 8] = (sz_u16_t)rows;
                 for (entry = 0; entry != 256; ++entry) class_rows[rows * 256 + entry] = 0;
@@ -1132,7 +1136,7 @@ STRINGZILLA_DEVICE void sz_levenshtein_query_prepare_utf8_simt_(sz_cptr_t text, 
     __syncwarp();
     if (lane == 0)
         for (sz_size_t rune_index = position = 0; position < length; ++rune_index) {
-            sz_rune_t const rune = sz_utf8_next_rune_(text, length, &position);
+            sz_rune_t const rune = sz_levenshtein_next_rune_(text, length, &position);
             sz_u32_t const class_id = class_rows[(sz_size_t)page_rows[rune >> 8] * 256 + (rune & 255)];
             masks[class_id * stride + (rune_index >> 6)] |= (sz_u64_t)1 << (rune_index & 63);
         }
@@ -1629,7 +1633,7 @@ static __global__ void sz_levenshtein_long_simt_kernel_(sz_levenshtein_engine_t 
     if (!words) {
         if (engine.symbol == sz_levenshtein_bytes_k) score = length;
         else
-            for (sz_size_t cursor = 0; cursor < length; ++score) sz_utf8_next_rune_(text, length, &cursor);
+            for (sz_size_t cursor = 0; cursor < length; ++score) sz_levenshtein_next_rune_(text, length, &cursor);
     }
     else {
         sz_levenshtein_u64x1_vertical_serial_t *const verticals =
@@ -1640,8 +1644,9 @@ static __global__ void sz_levenshtein_long_simt_kernel_(sz_levenshtein_engine_t 
             sz_u32_t const class_id = engine.symbol == sz_levenshtein_bytes_k
                                           ? query.byte_to_class[(sz_u8_t)text[cursor++]]
                                           : sz_levenshtein_utf8_class(&query,
-                                                                      sz_utf8_next_rune_(text, length, &cursor));
-            sz_levenshtein_u64x1_step_serial(&state, verticals, words, &query, class_id);
+                                                                      sz_levenshtein_next_rune_(text, length, &cursor));
+            sz_levenshtein_u64x1_step_masks_serial_(&state, verticals, words, &query,
+                                                    query.masks + class_id * query.stride, 1);
         }
         score = sz_levenshtein_u64x1_score_serial(&state, 0);
     }
