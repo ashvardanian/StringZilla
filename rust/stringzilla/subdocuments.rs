@@ -79,7 +79,8 @@ pub enum SubdocumentsFormat {
 /// let mut engine = SubdocumentsEngine::new(&paths, SubdocumentsFormat::Json, &cpu).unwrap();
 ///
 /// let document = r#"{"store": {"book": [{"title": "A", "price": 8}, {"title": "B", "price": 12}]}}"#;
-/// let documents = StringsView::from_slices(&[document]);
+/// let texts = [document];
+/// let documents = StringsView::from_slices(&texts);
 /// let (mut matches, mut offsets, mut malformed_index) = ([Match::default(); 4], [0usize; 2], 0);
 /// cpu.scope(|scope| engine.find(scope, documents, &mut matches, &mut offsets, &mut malformed_index)).unwrap();
 /// assert_eq!(offsets[1], 1);
