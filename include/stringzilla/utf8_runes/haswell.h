@@ -915,9 +915,9 @@ STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_once_haswell_( //
  *  bit-exact with @ref sz_utf8_decode_serial. A pure-ASCII window widens with @c vpmovzxbd.
  *  Gather-free on the hot path: @c vbroadcasti128 and @c vpshufb window reads and BMI2 @c pext,
  *  @c tzcnt and @c blsr compaction, never a @c vpgatherdd. */
-STRINGZILLA_INLINE sz_cptr_t sz_utf8_decode_haswell_( //
-    sz_cptr_t text, sz_size_t length,                 //
-    sz_rune_t *runes, sz_size_t runes_capacity,       //
+STRINGZILLA_C_INLINE_ sz_cptr_t sz_utf8_decode_haswell_( //
+    sz_cptr_t text, sz_size_t length,                    //
+    sz_rune_t *runes, sz_size_t runes_capacity,          //
     sz_size_t *runes_count) {
 
     sz_cptr_t cursor = text;
