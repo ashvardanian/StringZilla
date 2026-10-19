@@ -2297,7 +2297,8 @@ STRINGZILLA_INLINE void sz_regex_builder_classify_(sz_regex_builder_t *builder) 
         if (nfa->links[link].low > 0) boundary[nfa->links[link].low - 1] = 1;
         boundary[nfa->links[link].high] = 1;
     }
-    if (nfa->looks & (sz_regex_look_line_start_k | sz_regex_look_line_end_k)) boundary['\n' - 1] = boundary['\n'] = 1;
+    if (nfa->looks & (sz_regex_look_line_start_k | sz_regex_look_line_end_k))
+        boundary['\n' - 1] = boundary[(sz_u8_t)'\n'] = 1;
     if (nfa->looks & (sz_regex_look_word_boundary_k | sz_regex_look_word_inside_k))
         for (sz_size_t byte = 0; byte != 255; ++byte)
             if (sz_regex_is_word_((sz_u32_t)byte) != sz_regex_is_word_((sz_u32_t)byte + 1)) boundary[byte] = 1;
