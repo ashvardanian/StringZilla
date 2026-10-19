@@ -1064,7 +1064,7 @@ mod tests {
                 let supported = detected(ordinal).unwrap();
                 assert_eq!(supported.bits() & Capabilities::CPUS.bits(), 0);
                 assert_eq!(enabled(ordinal).unwrap().bits(), supported.bits() & compiled().bits());
-                let stream = Stream::new(enabled(ordinal).unwrap(), ordinal).unwrap();
+                let stream = Stream::new(vendor.into(), ordinal).unwrap();
                 assert!(!stream.as_raw().is_null());
                 assert_eq!(stream.synchronize(), Ok(()));
             }
