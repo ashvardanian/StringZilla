@@ -842,8 +842,10 @@ jobs:
           echo "WASI_SDK_PATH=$HOME/wasi-sdk-${WASI_VERSION_FULL}-x86_64-linux" >> "$GITHUB_ENV"
 
       - name: Install Wasmtime
+        shell: bash
         run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
+          curl https://wasmtime.dev/install.sh -sSf | bash -s -- --version v49.0.3
+          "$HOME/.wasmtime/bin/wasmtime" --version
           echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
 
       - name: Set up Rust
