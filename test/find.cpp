@@ -263,6 +263,16 @@ void test_find_unit() {
     verify(sz::string_view(sz::ascii_printables(), sizeof(sz::ascii_printables())).find_first_of("~") !=
            sz::string_view::npos);
 
+    // Forward searches starting past the end find nothing, even for an empty needle
+    verify("abc"_sv.find("", 3) == 3);
+    verify("abc"_sv.find("", 4) == sz::string_view::npos);
+    verify("abc"_sv.find("b", 4) == sz::string_view::npos);
+    verify("abc"_sv.find('b', 4) == sz::string_view::npos);
+    verify("abc"_sv.find_first_of("b", 4) == sz::string_view::npos);
+    verify("abc"_sv.find_first_not_of("b", 4) == sz::string_view::npos);
+    verify("abc"_sv.find('b', sz::string_view::npos) == sz::string_view::npos); // Largest position
+    verify(sz::string_view().find("", 1) == sz::string_view::npos);             // Default view has no data
+
     verify("aabaa"_sv.remove_prefix("a") == "abaa");
     verify("aabaa"_sv.remove_suffix("a") == "aaba");
     verify("aabaa"_sv.lstrip("a"_bs) == "baa");
