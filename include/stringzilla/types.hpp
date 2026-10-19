@@ -606,6 +606,9 @@ struct strings_view_t {
     /** The C view every member reads. */
     sz_strings_view_t raw;
 
+    /** An empty column. */
+    strings_view_t() noexcept : raw {} {}
+
     /** Wraps a C view, like one over records or NUL-padded rows. */
     explicit strings_view_t(sz_strings_view_t raw) noexcept : raw(raw) {}
 
@@ -818,7 +821,11 @@ struct strings {
     iterator begin() const noexcept { return {*this, 0}; }
     iterator end() const noexcept { return {*this, size()}; }
 
-    strings_view_t view() const noexcept;
+    strings_view_t view() const noexcept {
+        strings_view_t result;
+        sz_strings_from_span(&raw, &result.raw);
+        return result;
+    }
 
     /**
      *  @brief Splits @p text at the bytes of @p delimiters into its parts, like `bytes.split`.

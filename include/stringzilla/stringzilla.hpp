@@ -4824,15 +4824,6 @@ inline string_view_t strings_view_t::operator[](std::size_t index) const noexcep
     return {string.start, string.length};
 }
 
-/** Defined once @c string_slice is complete: inside the class, nvcc's front end, emulating Clang,
- *  asserts resolving the @c strings_view_t span constructor against the incomplete slice. */
-template <typename allocator_type_>
-strings_view_t strings<allocator_type_>::view() const noexcept {
-    sz_strings_view_t strings;
-    sz_strings_from_span(&raw, &strings);
-    return strings_view_t(strings);
-}
-
 template <typename allocator_type_>
 string_view_t strings<allocator_type_>::operator[](std::size_t index) const noexcept {
     strings_view_t const strings = view();
