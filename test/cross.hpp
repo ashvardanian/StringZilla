@@ -3824,7 +3824,7 @@ inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<
                                   std::vector<sz_u32_t> const &exact) {
     std::vector<std::pair<sz_u64_t, sz_u64_t>> const misses = overlap_misses_(exact, queries, candidates, widths);
     std::vector<sz_f32_t> shares;
-    for (auto const [missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
+    for (auto const &[missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
     std::sort(shares.begin(), shares.end());
     for (sz_f32_t const radius :
          {0.0f, shares[shares.size() / 4], shares[shares.size() / 2], std::nextafter(shares.back(), 0.0f)}) {

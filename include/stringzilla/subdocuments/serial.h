@@ -2387,6 +2387,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
     sz_subdocuments_value_t values[sz_subdocuments_filter_depth_k];
     sz_size_t depth = 0, index;
     sz_status_t status = sz_success_k;
+    values[0].number = 0;
     for (index = filter->instructions_begin; index != filter->instructions_end && status == sz_success_k; ++index) {
         sz_subdocuments_instruction_t const *const instruction = &engine->instructions[index];
         sz_subdocuments_value_t *const top = &values[depth];
@@ -2459,11 +2460,11 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
  *      levels take the next ones.
  *  @param[inout] emitted Matches so far, or null for a filter's replay.
  */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
-                                                       sz_u64_t *stack, sz_size_t begin, sz_size_t end, sz_size_t spare,
-                                                       sz_ptr_t buffer, sz_size_t capacity, sz_size_t document_index,
-                                                       sz_match_t *matches, sz_size_t matches_capacity,
-                                                       sz_size_t *emitted) {
+STRINGZILLA_C_INLINE_ sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
+                                                          sz_u64_t *stack, sz_size_t begin, sz_size_t end,
+                                                          sz_size_t spare, sz_ptr_t buffer, sz_size_t capacity,
+                                                          sz_size_t document_index, sz_match_t *matches,
+                                                          sz_size_t matches_capacity, sz_size_t *emitted) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
     sz_size_t const frame_words = header_words + words_count;
     sz_u64_t *const results = stack + spare * frame_words;

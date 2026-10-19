@@ -1059,7 +1059,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_members_(sz_regex_builder_t *builder
     sz_status_t status = sz_success_k;
     if (builder->case_sensitivity == sz_cased_k) return sz_regex_add_range_(builder, first, last);
     for (sz_u32_t codepoint = first; status == sz_success_k; ++codepoint) {
-        sz_u8_t lead[4];
+        sz_u8_t lead[4] = {0};
         sz_rune_t folds[3];
         sz_u32_t run_last = codepoint;
         sz_size_t folds_count = 1;
@@ -3985,7 +3985,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_unit_before_(sz_regex_engine_t const *engi
                                                    sz_size_t *unit_class) {
     sz_u8_t const last = (sz_u8_t)haystack[end - 1];
     sz_size_t back = 2, low = 0, high = engine->positions_ranges_count;
-    sz_rune_t rune;
+    sz_rune_t rune = 0;
     if (last < 0x80) {
         *unit_class = engine->positions_ascii[last];
         return end - 1;
