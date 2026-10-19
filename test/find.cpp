@@ -49,6 +49,14 @@
 #include <cstdio>  // `std::printf`
 #include <cstring> // `std::memcpy`
 
+#if defined(_WIN32)
+#define NOMINMAX     // Keeps `std::numeric_limits<...>::max()` usable, as in `stringzilla.h`
+#include <windows.h> // `VirtualAlloc`, `VirtualProtect`, `VirtualFree`
+#else
+#include <sys/mman.h> // `mmap`, `mprotect`, `munmap`
+#include <unistd.h>   // `sysconf`
+#endif
+
 #include <algorithm>     // `std::transform`
 #include <iterator>      // `std::distance`
 #include <map>           // `std::map`
@@ -410,6 +418,100 @@ void test_compare_unit() {
     verify("a"_sv == "a"_sv);
     verify("a"_sv != "a\0"_sv);
     verify("a\0"_sv == "a\0"_sv);
+}
+
+/**
+ *  @brief Runs one forward byte-search kernel over haystacks that end right before an inaccessible page,
+ *         passing `memchr`-style lengths that run past the readable memory, up to `SZ_SIZE_MAX`.
+ */
+static void check_find_byte_safety_(sz_find_byte_t find_byte) {
+
+#if defined(_WIN32)
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+    std::size_t const page_size = system_info.dwPageSize;
+#else
+    std::size_t const page_size = (std::size_t)sysconf(_SC_PAGESIZE);
+#endif
+    std::size_t const readable_size = 2 * page_size;
+
+    // Map the readable pages followed by one inaccessible guard page.
+#if defined(_WIN32)
+    char *const region = (char *)VirtualAlloc(NULL, readable_size + page_size, MEM_RESERVE | MEM_COMMIT,
+                                              PAGE_READWRITE);
+    DWORD old_protection;
+    verify(region != NULL);
+    verify(VirtualProtect(region + readable_size, page_size, PAGE_NOACCESS, &old_protection));
+#else
+    char *const region = (char *)mmap(NULL, readable_size + page_size, PROT_READ | PROT_WRITE,
+                                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    verify(region != MAP_FAILED);
+    verify(mprotect(region + readable_size, page_size, PROT_NONE) == 0);
+#endif
+    char *const guard = region + readable_size;
+    std::memset(region, 'a', readable_size);
+
+    auto check_length = [&](std::size_t length) {
+        sz_cptr_t const haystack = guard - length;
+        sz_cptr_t const last = guard - 1;
+        std::size_t const overlong_lengths[] = {length, length + page_size, SZ_SIZE_MAX};
+
+        // The needle is the very last readable byte, so every overlong scan must stop on it.
+        *(char *)last = 'X';
+        for (std::size_t overlong_length : overlong_lengths) verify(find_byte(haystack, overlong_length, "X") == last);
+        *(char *)last = 'a';
+
+        // The same buffers with an exact length must still find the first byte and reject a missing one.
+        *(char *)haystack = 'X';
+        verify(find_byte(haystack, length, "X") == haystack);
+        *(char *)haystack = 'a';
+        verify(find_byte(haystack, length, "X") == SZ_NULL_CHAR);
+    };
+    for (std::size_t length = 1; length <= 256; ++length) check_length(length);
+    for (std::size_t length = page_size - 64; length <= page_size + 64; ++length) check_length(length);
+    check_length(readable_size);
+
+#if defined(_WIN32)
+    VirtualFree(region, 0, MEM_RELEASE);
+#else
+    munmap(region, readable_size + page_size);
+#endif
+}
+
+/** @brief Checks the dispatched and every compiled forward byte-search kernel against an inaccessible page. */
+void test_find_byte_safety() {
+    check_find_byte_safety_(sz_find_byte);        // Dispatched (automatic kernel)
+    check_find_byte_safety_(sz_find_byte_serial); // Manual: serial kernel
+#if SZ_USE_WESTMERE
+    check_find_byte_safety_(sz_find_byte_westmere);
+#endif
+#if SZ_USE_HASWELL
+    check_find_byte_safety_(sz_find_byte_haswell);
+#endif
+#if SZ_USE_SKYLAKE
+    check_find_byte_safety_(sz_find_byte_skylake);
+#endif
+#if SZ_USE_NEON
+    check_find_byte_safety_(sz_find_byte_neon);
+#endif
+#if SZ_USE_SVE
+    check_find_byte_safety_(sz_find_byte_sve);
+#endif
+#if SZ_USE_V128
+    check_find_byte_safety_(sz_find_byte_v128);
+#endif
+#if SZ_USE_V128RELAXED
+    check_find_byte_safety_(sz_find_byte_v128relaxed);
+#endif
+#if SZ_USE_RVV
+    check_find_byte_safety_(sz_find_byte_rvv);
+#endif
+#if SZ_USE_LASX
+    check_find_byte_safety_(sz_find_byte_lasx);
+#endif
+#if SZ_USE_POWERVSX
+    check_find_byte_safety_(sz_find_byte_powervsx);
+#endif
 }
 
 #pragma endregion // Unit
