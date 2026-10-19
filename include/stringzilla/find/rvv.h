@@ -27,8 +27,11 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_rvv(sz_cptr_t haystack, sz_size_t haystac
     sz_u8_t const *haystack_u8 = (sz_u8_t const *)haystack;
     sz_u8_t needle_byte = *(sz_u8_t const *)needle;
     while (haystack_length) {
+        // A full-length load may cross into a page past the first match, which `memchr`-style callers allow
+        // to be unmapped - see `sz_find_byte_serial`. Fault-only-first loads only fault on element zero, and
+        // otherwise shrink `vector_length` to the elements loaded before the fault.
         sz_size_t vector_length = __riscv_vsetvl_e8m8(haystack_length);
-        vuint8m8_t haystack_u8m8 = __riscv_vle8_v_u8m8(haystack_u8, vector_length);
+        vuint8m8_t haystack_u8m8 = __riscv_vle8ff_v_u8m8(haystack_u8, &vector_length, vector_length);
         vbool1_t eq_mask_b1 = __riscv_vmseq_vx_u8m8_b1(haystack_u8m8, needle_byte, vector_length);
         long match_index = __riscv_vfirst_m_b1(eq_mask_b1, vector_length);
         if (match_index >= 0) return (sz_cptr_t)(haystack_u8 + match_index);

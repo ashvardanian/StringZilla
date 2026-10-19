@@ -28,21 +28,23 @@ extern "C" {
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_sve(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     sz_u8_t const n_scalar = *needle;
-    // Determine the number of bytes in an SVE vector.
-    sz_size_t const vector_bytes = svcntb();
     sz_size_t progress = 0;
-    do {
+    // A full-width load may cross into a page past the first match, which `memchr`-style callers allow to be
+    // unmapped - see `sz_find_byte_serial`. First-faulting loads only fault on the first active lane, and
+    // otherwise truncate the First Fault Register at the faulting lane, so we only inspect the loaded lanes.
+    while (progress < haystack_length) {
         svbool_t progress_mask_b8x = svwhilelt_b8((sz_u64_t)progress, (sz_u64_t)haystack_length);
-        svuint8_t haystack_u8x = svld1(progress_mask_b8x, (sz_u8_t const *)(haystack + progress));
+        svsetffr();
+        svuint8_t haystack_u8x = svldff1(progress_mask_b8x, (sz_u8_t const *)(haystack + progress));
+        svbool_t loaded_mask_b8x = svrdffr_z(progress_mask_b8x);
         // Compare: generate a predicate marking lanes where haystack[i] == needle
-        svbool_t equal_b8x = svcmpeq_n_u8(progress_mask_b8x, haystack_u8x, n_scalar);
-        if (svptest_any(progress_mask_b8x, equal_b8x)) {
-            sz_size_t forward_offset_in_register = svcntp_b8(progress_mask_b8x,
-                                                             svbrkb_b_z(progress_mask_b8x, equal_b8x));
+        svbool_t equal_b8x = svcmpeq_n_u8(loaded_mask_b8x, haystack_u8x, n_scalar);
+        if (svptest_any(loaded_mask_b8x, equal_b8x)) {
+            sz_size_t forward_offset_in_register = svcntp_b8(loaded_mask_b8x, svbrkb_b_z(loaded_mask_b8x, equal_b8x));
             return haystack + progress + forward_offset_in_register;
         }
-        progress += vector_bytes;
-    } while (progress < haystack_length);
+        progress += svcntp_b8(progress_mask_b8x, loaded_mask_b8x);
+    }
     // No match found.
     return SZ_NULL_CHAR;
 }
