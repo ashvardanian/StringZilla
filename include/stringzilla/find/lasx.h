@@ -52,6 +52,27 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_lasx(sz_cptr_t haystack, sz_size_t haysta
     // `xvreplgr2vr_b(needle[0])` would otherwise spend two instructions on.
     needle_vec.lasx = __lasx_xvldrepl_b(needle, 0);
 
+    if (haystack_length < 32) return sz_find_byte_serial(haystack, haystack_length, needle);
+
+    // Every vector load below is aligned, so it can't cross into a page past the first match - see
+    // `sz_find_byte_serial`. The head up to the next boundary takes one unaligned load if that stays within
+    // the page, and a byte-level loop otherwise - not a call to the serial kernel, to keep this a leaf function.
+    sz_size_t const head_length = 32 - ((sz_size_t)haystack & 31);
+    if (((sz_size_t)haystack & 4095) <= 4096 - 32) {
+        haystack_vec.lasx = __lasx_xvld(haystack, 0);
+        matches_vec.lasx = __lasx_xvseq_b(haystack_vec.lasx, needle_vec.lasx);
+        if (__lasx_xbnz_v(matches_vec.lasx)) {
+            __m256i first_match_indices_u8x32 = __lasx_xvfrstpi_b(matches_vec.lasx, matches_vec.lasx, 0);
+            unsigned int low_lane_index = __lasx_xvpickve2gr_wu(first_match_indices_u8x32, 0) & 0xFF;
+            if (low_lane_index < 16) return haystack + low_lane_index;
+            return haystack + 16 + (__lasx_xvpickve2gr_wu(first_match_indices_u8x32, 4) & 0xFF);
+        }
+    }
+    else
+        for (sz_size_t head_offset = 0; head_offset != head_length; ++head_offset)
+            if (haystack[head_offset] == needle[0]) return haystack + head_offset;
+    haystack += head_length, haystack_length -= head_length;
+
     while (haystack_length >= 32) {
         haystack_vec.lasx = __lasx_xvld(haystack, 0);
         matches_vec.lasx = __lasx_xvseq_b(haystack_vec.lasx, needle_vec.lasx);

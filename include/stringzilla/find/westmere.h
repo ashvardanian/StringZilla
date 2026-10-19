@@ -33,8 +33,24 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_westmere(sz_cptr_t haystack, sz_size_t ha
     sz_u128_vec_t haystack_vec, needle_vec;
     needle_vec.xmm = _mm_set1_epi8(needle[0]);
 
-    while (haystack_length >= 16) {
+    if (haystack_length < 16) return sz_find_byte_serial(haystack, haystack_length, needle);
+
+    // Every vector load below is aligned, so it can't cross into a page past the first match - see
+    // `sz_find_byte_serial`. The head up to the next boundary takes one unaligned load if that stays within
+    // the page, and a byte-level loop otherwise - not a call to the serial kernel, to keep this a leaf function.
+    sz_size_t const head_length = 16 - ((sz_size_t)haystack & 15);
+    if (((sz_size_t)haystack & 4095) <= 4096 - 16) {
         haystack_vec.xmm = _mm_lddqu_si128((__m128i const *)haystack);
+        matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
+        if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
+    }
+    else
+        for (sz_size_t head_offset = 0; head_offset != head_length; ++head_offset)
+            if (haystack[head_offset] == needle[0]) return haystack + head_offset;
+    haystack += head_length, haystack_length -= head_length;
+
+    while (haystack_length >= 16) {
+        haystack_vec.xmm = _mm_load_si128((__m128i const *)haystack);
         matches_mask = _mm_movemask_epi8(_mm_cmpeq_epi8(haystack_vec.xmm, needle_vec.xmm));
         if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
         haystack += 16, haystack_length -= 16;

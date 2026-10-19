@@ -52,6 +52,21 @@ SZ_HELPER_INLINE sz_cptr_t sz_locate_last_v128_(v128_t match_u8x16, sz_cptr_t bl
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_v128(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     v128_t needle_u8x16 = wasm_i8x16_splat(*(sz_i8_t const *)needle);
 
+    if (haystack_length < 16) return sz_find_byte_serial(haystack, haystack_length, needle);
+
+    // Every vector load below is aligned, so it can't cross into a page past the first match - see
+    // `sz_find_byte_serial`. The head up to the next boundary takes one unaligned load if that stays within
+    // the page, and a byte-level loop otherwise - not a call to the serial kernel, to keep this a leaf function.
+    sz_size_t const head_length = 16 - ((sz_size_t)haystack & 15);
+    if (((sz_size_t)haystack & 4095) <= 4096 - 16) {
+        sz_cptr_t found = sz_locate_first_v128_(wasm_i8x16_eq(wasm_v128_load(haystack), needle_u8x16), haystack);
+        if (found) return found;
+    }
+    else
+        for (sz_size_t head_offset = 0; head_offset != head_length; ++head_offset)
+            if (haystack[head_offset] == needle[0]) return haystack + head_offset;
+    haystack += head_length, haystack_length -= head_length;
+
     // Scan 64 bytes per iteration: OR four equality masks and gate with a single `any_true`, only
     // descending into the per-block locate when one of the windows actually contains a match.
     while (haystack_length >= 64) {

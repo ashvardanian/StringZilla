@@ -37,8 +37,26 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_skylake(sz_cptr_t haystack, sz_size_t hay
     sz_u512_vec_t haystack_vec, needle_vec;
     needle_vec.zmm = _mm512_set1_epi8(needle[0]);
 
+    // Every full load below is aligned, so it can't cross into a page past the first match - see
+    // `sz_find_byte_serial`. The head up to the next boundary takes one unaligned load if that stays within
+    // the page, and a masked load otherwise, which doesn't fault on the masked-off lanes.
+    if (haystack_length >= 64) {
+        sz_size_t const head_length = 64 - ((sz_size_t)haystack & 63);
+        if (((sz_size_t)haystack & 4095) <= 4096 - 64) {
+            haystack_vec.zmm = _mm512_loadu_si512(haystack);
+            matches_mask_m64 = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, needle_vec.zmm);
+        }
+        else {
+            __mmask64 load_mask_m64 = sz_u64_mask_until_(head_length);
+            haystack_vec.zmm = _mm512_maskz_loadu_epi8(load_mask_m64, haystack);
+            matches_mask_m64 = _mm512_mask_cmpeq_epu8_mask(load_mask_m64, haystack_vec.zmm, needle_vec.zmm);
+        }
+        if (matches_mask_m64) return haystack + (int)_tzcnt_u64(matches_mask_m64);
+        haystack += head_length, haystack_length -= head_length;
+    }
+
     while (haystack_length >= 64) {
-        haystack_vec.zmm = _mm512_loadu_si512(haystack);
+        haystack_vec.zmm = _mm512_load_si512(haystack);
         matches_mask_m64 = _mm512_cmpeq_epi8_mask(haystack_vec.zmm, needle_vec.zmm);
         if (matches_mask_m64) return haystack + (int)_tzcnt_u64(matches_mask_m64);
         haystack += 64, haystack_length -= 64;
