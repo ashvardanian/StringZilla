@@ -33,10 +33,10 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 # Every binding reads its version from `VERSION`, which the release bumps.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STRINGZILLA_VERSION_ LIMIT_COUNT 1)
 # CMake versions are numeric, so the pre-release suffix of `VERSION` stays out of `PROJECT_VERSION`.
-string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_ "${STRINGZILLA_VERSION_}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_CORE_ "${STRINGZILLA_VERSION_}")
 project(
     stringzilla
-    VERSION ${STRINGZILLA_VERSION_}
+    VERSION ${STRINGZILLA_VERSION_CORE_}
     LANGUAGES C CXX
     DESCRIPTION "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
@@ -683,7 +683,8 @@ if (STRINGZILLA_BUILD_SWIFT)
         if (NOT STRINGZILLA_SWIFT_TRIPLES)
             message(FATAL_ERROR "STRINGZILLA_BUILD_SWIFT needs STRINGZILLA_SWIFT_TRIPLES on ${CMAKE_SYSTEM_NAME}")
         endif ()
-        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_TRIPLES=$<JOIN:${STRINGZILLA_SWIFT_TRIPLES},,>" -D
+        list(JOIN STRINGZILLA_SWIFT_TRIPLES "," STRINGZILLA_SWIFT_TRIPLES_)
+        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_TRIPLES=${STRINGZILLA_SWIFT_TRIPLES_}" -D
                                       "STRINGZILLA_SWIFT_VERSION=${PROJECT_VERSION}"
         )
     endif ()
