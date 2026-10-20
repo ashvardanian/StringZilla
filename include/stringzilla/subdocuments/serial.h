@@ -1714,7 +1714,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_serial_(sz_u
     line_feed_vec.u64 = 0x0A0A0A0A0A0A0A0Aull, carriage_return_vec.u64 = 0x0D0D0D0D0D0D0D0Dull;
     slash_vec.u64 = 0x2F2F2F2F2F2F2F2Full;
     for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        sz_u64_vec_t text_vec = sz_u64_load((sz_cptr_t)text + word_index * 8), folded_vec;
+        sz_u64_vec_t text_vec, folded_vec;
+        text_vec.u64 = sz_subdocuments_word_load_((sz_cptr_t)text + word_index * 8);
         sz_size_t const shift = word_index * 8;
         sz_u64_t const slash_bits = sz_u64_each_byte_equal_(text_vec, slash_vec).u64;
         // `[` and `]` differ from `{` and `}` only in the 0x20 bit, and no other byte folds there.
@@ -1771,7 +1772,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_skim_serial_(sz_u8_t 
     open_vec.u64 = 0x7B7B7B7B7B7B7B7Bull, close_vec.u64 = 0x7D7D7D7D7D7D7D7Dull;
     slash_vec.u64 = 0x2F2F2F2F2F2F2F2Full;
     for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        sz_u64_vec_t text_vec = sz_u64_load((sz_cptr_t)text + word_index * 8), folded_vec;
+        sz_u64_vec_t text_vec, folded_vec;
+        text_vec.u64 = sz_subdocuments_word_load_((sz_cptr_t)text + word_index * 8);
         sz_size_t const shift = word_index * 8;
         folded_vec.u64 = text_vec.u64 | 0x2020202020202020ull;
         quotes |= sz_subdocuments_gather_bytes_serial_(sz_u64_each_byte_equal_(text_vec, quote_vec).u64) << shift;
