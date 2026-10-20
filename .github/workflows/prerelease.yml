@@ -935,8 +935,13 @@ jobs:
       enable_android_sdk_checks: true
       needs_token: true
       linux_env_vars: STRINGZILLA_SWIFT_ARTIFACT=StringZillaC.artifactbundle.zip
-      android_sdk_pre_build_command: gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name swift-artifactbundle
+      android_sdk_pre_build_command: |
+        if [ ! -f StringZillaC.artifactbundle.zip ]; then
+          gh run download ${{ github.run_id }} --repo ${{ github.repository }} --name swift-artifactbundle
+        fi
       android_sdk_versions: '["6.4"]'
+      # Swift's importer needs its own Clang intrinsic headers, rather than the NDK's older ones.
+      swift_flags: -Xcc -resource-dir -Xcc "$(clang -print-resource-dir)"
 
   test_swift_wasm:
     name: Swift on WebAssembly WASI
