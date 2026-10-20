@@ -959,8 +959,11 @@ jobs:
           name: swift-artifactbundle
       - name: Install Swift SDK for WebAssembly and Wasmtime
         run: |
-          swift sdk install https://download.swift.org/swift-6.4.1-release/wasm-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_wasm.artifactbundle.tar.gz --checksum 783e6128d174d9f975b4eda68be02a5960681b723ef372e6876a7c2543a365d8
           apt-get update && apt-get install -y curl xz-utils
+          swift_sdk_archive="$RUNNER_TEMP/swift-6.4.1-RELEASE_wasm.artifactbundle.tar.gz"
+          curl -fsSL https://download.swift.org/swift-6.4.1-release/wasm-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_wasm.artifactbundle.tar.gz -o "$swift_sdk_archive"
+          echo "783e6128d174d9f975b4eda68be02a5960681b723ef372e6876a7c2543a365d8  $swift_sdk_archive" | sha256sum --check
+          swift sdk install "$swift_sdk_archive"
           curl -fsSL "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz" \
             | tar -xJ -C "$RUNNER_TEMP"
           mkdir -p "$HOME/.wasmtime/bin"
