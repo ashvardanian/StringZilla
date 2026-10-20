@@ -670,10 +670,15 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_walk_chunk_uncased_simt_(sz_substring
         if (image_index == image.length) {
             sz_size_t source_bytes;
             if (position >= length) break;
-            // An aligned word holding a haystack byte lies in a page the device may read whole.
-            sz_u8_t const *const word = (sz_u8_t const *)((sz_size_t)(haystack_bytes + position) & ~(sz_size_t)3);
-            if (word != loaded_word) loaded_word = word, loaded_quad = sz_substrings_load_quad_simt_(word);
-            sz_u8_t const lead = (sz_u8_t)(loaded_quad >> (((sz_size_t)(haystack_bytes + position) & 3u) * 8));
+            sz_size_t const alignment = (sz_size_t)(haystack_bytes + position) & 3u;
+            sz_u8_t lead;
+            // Only widen reads wholly inside the haystack; a tape need not carry padding.
+            if (position >= alignment && length - position >= 4 - alignment) {
+                sz_u8_t const *const word = haystack_bytes + position - alignment;
+                if (word != loaded_word) loaded_word = word, loaded_quad = sz_substrings_load_quad_simt_(word);
+                lead = (sz_u8_t)(loaded_quad >> (alignment * 8));
+            }
+            else lead = haystack_bytes[position];
             if (lead < 0x80)
                 image.bytes = sz_ascii_fold_(lead), image.length = 1, image.rune_ends = 1, source_bytes = 1;
             else source_bytes = sz_utf8_fold_next_simt_(haystack_bytes + position, haystack_bytes + length, &image);

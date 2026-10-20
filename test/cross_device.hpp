@@ -1228,6 +1228,23 @@ inline void check_policies_(auto const &backend, std::vector<std::string> const 
 
 /** The chunk-boundary cases a single-chain host walk cannot express. */
 inline void test_substrings_device_unit(auto const &backend) {
+    // Exact allocations expose word reads beyond a short tape's last byte under a memory checker.
+    device_vocabulary_t vocabulary(backend.runtime, {"a"});
+    substrings_device_engines_t engines(vocabulary, sz_uncased_k, sz_substrings_overlapping_k, backend);
+    for (sz_u32_t prefix = 0; prefix != 4; ++prefix)
+        for (sz_u32_t length = 1; length != 10; ++length) {
+            unified_vector<char> bytes(prefix + length, 'A',
+                                       unified_alloc<char>(backend.runtime.unified, backend.runtime.stream));
+            unified_vector<sz_u32_t> offsets({prefix, prefix + length},
+                                             unified_alloc<sz_u32_t>(backend.runtime.unified, backend.runtime.stream));
+            sz_strings_view_t tape {};
+            tape.layout = sz_strings_u32_tape_k, tape.count = 1;
+            tape.data.u32_tape.data = bytes.data(), tape.data.u32_tape.offsets = offsets.data();
+            auto const expected = substrings_device_matches_serial_(&engines.host, &tape);
+            auto const reported = device_matches_(backend, &engines.device, &tape);
+            verify(expected.size() == length && reported == expected);
+        }
+
     // The device walk is chunked and the host walk is not, so a match spanning a chunk boundary is
     // the one thing this can get wrong that the CPU suite cannot see.
     check_policies_(backend, {"ushers"}, {"he", "she", "his", "hers"}, sz_cased_k);

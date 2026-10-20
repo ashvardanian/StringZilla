@@ -295,8 +295,6 @@ sz_static_assert_((sz_size_t)sz_levenshtein_thread_words_max_simt_k >=
  *      every grouped scorer steps, chaining the horizontal deltas from each word into the next.
  *
  *  @param[in] masks The symbol's class row, from the lane's first word.
- *  @param[in] live_words The lane's words that hold query symbols; the rest read no mask and never
- *      carry into a live word, since the recurrence only carries upward.
  *  @param[in] score_word The lane's word holding the query's last symbol, out of range on every
  *      other lane, so the score moves only on the lane that owns it.
  *  @param[in] tracking Whether to move @p score at all; a literal false costs nothing per step.
@@ -305,10 +303,10 @@ sz_static_assert_((sz_size_t)sz_levenshtein_thread_words_max_simt_k >=
  *  @param[inout] negative_carry The negative delta, entering and leaving the same way.
  */
 STRINGZILLA_DEVICE void sz_levenshtein_group_step_simt_(sz_u64_t *positive, sz_u64_t *negative, sz_u64_t const *masks,
-                                                        sz_size_t words_per_lane, sz_size_t live_words,
-                                                        sz_size_t score_word, sz_u64_t last_symbol_bit,
-                                                        sz_bool_t tracking, sz_u64_t *positive_carry,
-                                                        sz_u64_t *negative_carry, sz_size_t *score) {
+                                                        sz_size_t words_per_lane, sz_size_t score_word,
+                                                        sz_u64_t last_symbol_bit, sz_bool_t tracking,
+                                                        sz_u64_t *positive_carry, sz_u64_t *negative_carry,
+                                                        sz_size_t *score) {
     sz_u64_t rose = 0, fell = 0;
 #pragma unroll
     for (sz_size_t word = 0; word != words_per_lane; ++word) {
@@ -412,11 +410,8 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
     sz_size_t const first_word = (sz_size_t)lane * words_per_lane;
     sz_size_t const score_lane = (words - 1) / words_per_lane;
     sz_bool_t const tracking = radius != STRINGZILLA_SSIZE_MAX ? sz_true_k : sz_false_k;
-    // A lone thread's word count is exact, so its score word and live words are literals too.
+    // A lone thread's word count is exact, so its score word is a literal too.
     sz_size_t const score_word = lanes == sz_levenshtein_group_thread_k ? words_per_lane - 1 : words - 1 - first_word;
-    sz_size_t const live_words = lanes == sz_levenshtein_group_thread_k ? words_per_lane
-                                 : first_word < words ? sz_min_of_two(words_per_lane, words - first_word)
-                                                      : 0;
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query.length);
     sz_u64_t const *const lane_masks = query.masks + first_word;
 
@@ -458,8 +453,8 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_simt_(
         // is lane zero's carry at every byte rather than anything a shuffle brings.
         sz_u64_t positive_carry = lane == 0 ? 1 : (sz_u64_t)(received & 1u);
         sz_u64_t negative_carry = lane == 0 ? 0 : (sz_u64_t)((received >> 1) & 1u);
-        sz_levenshtein_group_step_simt_(positive, negative, masks, words_per_lane, live_words, score_word,
-                                        last_symbol_bit, tracking, &positive_carry, &negative_carry, &score);
+        sz_levenshtein_group_step_simt_(positive, negative, masks, words_per_lane, score_word, last_symbol_bit,
+                                        tracking, &positive_carry, &negative_carry, &score);
         carry = (unsigned)positive_carry | ((unsigned)negative_carry << 1);
     }
     return sz_levenshtein_group_distance_simt_(positive, negative, words_per_lane, words, last_symbol_bit, length,
@@ -493,9 +488,6 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
     sz_size_t const score_lane = (words - 1) / words_per_lane;
     sz_bool_t const tracking = radius != STRINGZILLA_SSIZE_MAX ? sz_true_k : sz_false_k;
     sz_size_t const score_word = lanes == sz_levenshtein_group_thread_k ? words_per_lane - 1 : words - 1 - first_word;
-    sz_size_t const live_words = lanes == sz_levenshtein_group_thread_k ? words_per_lane
-                                 : first_word < words ? sz_min_of_two(words_per_lane, words - first_word)
-                                                      : 0;
     sz_u64_t const last_symbol_bit = sz_levenshtein_last_symbol_bit_(query.length);
     sz_u64_t const *const lane_masks = query.masks + first_word;
 
@@ -536,8 +528,8 @@ STRINGZILLA_DEVICE sz_ssize_t sz_levenshtein_group_score_utf8_simt_(
         // is lane zero's carry at every rune rather than anything a shuffle brings.
         sz_u64_t positive_carry = lane == 0 ? 1 : (sz_u64_t)(received & 1u);
         sz_u64_t negative_carry = lane == 0 ? 0 : (sz_u64_t)((received >> 1) & 1u);
-        sz_levenshtein_group_step_simt_(positive, negative, masks, words_per_lane, live_words, score_word,
-                                        last_symbol_bit, tracking, &positive_carry, &negative_carry, &score);
+        sz_levenshtein_group_step_simt_(positive, negative, masks, words_per_lane, score_word, last_symbol_bit,
+                                        tracking, &positive_carry, &negative_carry, &score);
         carry = (unsigned)positive_carry | ((unsigned)negative_carry << 1);
     }
     return sz_levenshtein_group_distance_simt_(positive, negative, words_per_lane, words, last_symbol_bit, runes, score,

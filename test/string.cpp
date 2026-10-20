@@ -216,7 +216,7 @@ void test_arithmetic_unit() {
 /** Validates @c sz_strings_view_t construction and the views @c sz_strings_get_ reads back. */
 void test_strings_view_unit() {
     auto string_at = [](sz_strings_view_t const &strings, sz_size_t index) {
-        sz_string_view_t view;
+        sz_string_view_t view {};
         sz_strings_get_(&strings, &index, 1, &view);
         return sz::string_view_t(view.start, view.length);
     };

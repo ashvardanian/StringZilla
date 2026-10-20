@@ -62,8 +62,8 @@ void test_levenshtein_unit() {
     verify(!sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, STRINGZILLA_SIZE_MAX - 62,
                                           &layout));
     shape = {0xFFFFFFFFu, 256, 0};
-    verify(sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout) ==
-           (sizeof(sz_size_t) > 4));
+    verify((sz_levenshtein_engine_layout_(1, sz_levenshtein_bytes_k, sz_cap_serial_k, &shape, 0, &layout) !=
+            sz_false_k) == (sizeof(sz_size_t) > 4));
     check_levenshtein_unit_(levenshtein_dispatched);
 }
 

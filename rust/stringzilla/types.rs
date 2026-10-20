@@ -1064,7 +1064,7 @@ mod tests {
                 let supported = detected(ordinal).unwrap();
                 assert_eq!(supported.bits() & Capabilities::CPUS.bits(), 0);
                 assert_eq!(enabled(ordinal).unwrap().bits(), supported.bits() & compiled().bits());
-                let stream = Stream::new(enabled(ordinal).unwrap(), ordinal).unwrap();
+                let stream = Stream::new(vendor.into(), ordinal).unwrap();
                 assert!(!stream.as_raw().is_null());
                 assert_eq!(stream.synchronize(), Ok(()));
             }
@@ -1083,8 +1083,10 @@ mod tests {
         assert_eq!(success.check(), Ok(()));
         assert_eq!(missing_kernel.check(), Err(Status::MissingKernel));
         assert_eq!(Status::MissingKernel.to_string(), "no kernel for these capabilities");
+        let invalid_syntax: sz_status_t = -22;
+        assert_eq!(invalid_syntax.check(), Err(Status::InvalidSyntax));
         // A code the header does not list, like a positive caveat, is a failure named as such.
-        let unlisted: [sz_status_t; 3] = [1, -11, -22];
+        let unlisted: [sz_status_t; 3] = [1, -11, i32::MIN];
         for code in unlisted {
             assert_eq!(code.check(), Err(Status::Unrecognized));
         }

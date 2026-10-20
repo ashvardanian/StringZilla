@@ -602,7 +602,7 @@ STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_guarded_chunk_sve2_(sz_cptr_t 
     return 64;
 }
 
-STRINGZILLA_INLINE sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
+STRINGZILLA_C_INLINE_ sz_size_t sz_utf8_uncased_fold_sve2_(sz_cptr_t source, sz_size_t source_length, sz_ptr_t target) {
     // Same 16-byte granularity as NEON at 128 bits, with slower predicate compares.
     if (svcntb() <= 16) return sz_utf8_uncased_fold_neon_(source, source_length, target);
 

@@ -33,10 +33,10 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 # Every binding reads its version from `VERSION`, which the release bumps.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STRINGZILLA_VERSION_ LIMIT_COUNT 1)
 # CMake versions are numeric, so the pre-release suffix of `VERSION` stays out of `PROJECT_VERSION`.
-string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_ "${STRINGZILLA_VERSION_}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_CORE_ "${STRINGZILLA_VERSION_}")
 project(
     stringzilla
-    VERSION ${STRINGZILLA_VERSION_}
+    VERSION ${STRINGZILLA_VERSION_CORE_}
     LANGUAGES C CXX
     DESCRIPTION "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
@@ -329,9 +329,15 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
 endif ()
 
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
+# MSVC tests use checked iterators, so fmt must compile with the same setting rather than link its unchecked library.
 function (define_gpu_suite target language source)
     add_library(${target} OBJECT ${source})
     set_compiler_flags(${target} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND source MATCHES "^test/")
+        target_compile_definitions(${target} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     set_target_properties(
         ${target}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
@@ -343,7 +349,7 @@ function (define_gpu_suite target language source)
     endif ()
     target_link_libraries(
         ${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                          stringzilla_static fmt::fmt
+                          stringzilla_static ${format_library_}
     )
 endfunction ()
 
@@ -353,12 +359,17 @@ endfunction ()
 function (define_cpu_launcher exec_name library verdicts)
     add_executable(${exec_name} ${ARGN})
     set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND exec_name MATCHES "_test$")
+        target_compile_definitions(${exec_name} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     if (verdicts STREQUAL "SERIAL")
         target_link_libraries(${exec_name} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
         set_architecture_simd_definitions(${exec_name})
     endif ()
-    target_link_libraries(${exec_name} PRIVATE ${library} fmt::fmt)
+    target_link_libraries(${exec_name} PRIVATE ${library} ${format_library_})
 endfunction ()
 
 # Tests and benchmarks link the precompiled libraries below.
@@ -683,7 +694,8 @@ if (STRINGZILLA_BUILD_SWIFT)
         if (NOT STRINGZILLA_SWIFT_TRIPLES)
             message(FATAL_ERROR "STRINGZILLA_BUILD_SWIFT needs STRINGZILLA_SWIFT_TRIPLES on ${CMAKE_SYSTEM_NAME}")
         endif ()
-        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_TRIPLES=$<JOIN:${STRINGZILLA_SWIFT_TRIPLES},,>" -D
+        list(JOIN STRINGZILLA_SWIFT_TRIPLES "," STRINGZILLA_SWIFT_TRIPLES_)
+        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_TRIPLES=${STRINGZILLA_SWIFT_TRIPLES_}" -D
                                       "STRINGZILLA_SWIFT_VERSION=${PROJECT_VERSION}"
         )
     endif ()

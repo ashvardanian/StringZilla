@@ -292,7 +292,7 @@ sz_status_t call_best(sz_capability_t capabilities, arguments_types_... argument
  *  this process enables: callable like them, and convertible to their function pointers. */
 template <auto best_>
 inline constexpr auto cpu_best =
-    [](auto... arguments) noexcept { return call_best<best_>(default_capabilities(), arguments...); };
+    [](auto... arguments) { return call_best<best_>(default_capabilities(), arguments...); };
 
 /** Calls @p kernel, a CPU capability kernel or a @c cpu_best, whose result is the out-parameter
  *  just before the stream; verifies that it succeeded and returns that result. */

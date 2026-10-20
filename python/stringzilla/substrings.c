@@ -204,8 +204,9 @@ static char const doc_SubstringsEngine_counts[] =                               
     "    A device engine enqueues there and returns, so `out` must be device-reachable\n"         //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"            //
     "Example:\n"                                                                                  //
+    "  >>> import struct\n"                                                                       //
     "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                             //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                            //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                         //
     "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                         //
     "  >>> out[0]\n"                                                                              //
     "  3";
@@ -291,9 +292,10 @@ static char const doc_SubstringsEngine_find[] =                                 
     "    A device engine enqueues there and returns, so both buffers must be device-reachable\n"       //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"                 //
     "Example:\n"                                                                                       //
+    "  >>> import struct\n"                                                                            //
     "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                                  //
-    "  >>> matches = memoryview(bytearray(3 * 4 * 8)).cast('Q', (3, 4))\n"                             //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                         //
+    "  >>> matches = memoryview(bytearray(3 * 4 * struct.calcsize('N'))).cast('N', (3, 4))\n"          //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                      //
     "  >>> engine.find(sz.Strings(['hershey']), matches, offsets)\n"                                   //
     "  >>> offsets[1]\n"                                                                               //
     "  3";
@@ -418,9 +420,10 @@ static char const doc_SubstringsEngine_replace[] =                              
     "    A device engine enqueues there and returns, so both buffers must be device-reachable\n"         //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"                   //
     "Example:\n"                                                                                         //
+    "  >>> import struct\n"                                                                              //
     "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']), overlap_policy='leftmost-longest')\n" //
     "  >>> target = memoryview(bytearray(16))\n"                                                         //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                           //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                        //
     "  >>> engine.replace(sz.Strings(['hershey']), sz.Strings(['HE', 'SHE']), target, offsets)\n"        //
     "  >>> bytes(target[offsets[0]:offsets[1]])\n"                                                       //
     "  b'HErSHEy'";
@@ -686,8 +689,9 @@ static char const doc_SubstringsEngine_report[] =                               
     "engine these are written by the device, so join the stream before reading them.\n"              //
     "\n"                                                                                             //
     "Example:\n"                                                                                     //
+    "  >>> import struct\n"                                                                          //
     "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']))\n"                                //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                               //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                            //
     "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                            //
     "  >>> engine.report['matches_emitted']\n"                                                       //
     "  3";
@@ -751,8 +755,9 @@ static char const doc_SubstringsEngine[] =                                      
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"     //
     "    for the default.\n"                                                                            //
     "Example:\n"                                                                                        //
+    "  >>> import struct\n"                                                                             //
     "  >>> engine = sz.SubstringsEngine(sz.Strings(['he', 'she']), case_sensitivity='cased')\n"         //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                                  //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                               //
     "  >>> engine.counts(sz.Strings(['hershey']), out)\n"                                               //
     "  >>> out[0]\n"                                                                                    //
     "  3";

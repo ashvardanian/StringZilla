@@ -333,7 +333,7 @@ STRINGZILLA_DEVICE sz_u32_t sz_regex_run_simt_(sz_regex_table_simt_t const *tabl
 #pragma unroll
     for (index = 0; index != sz_regex_run_bytes_simt_k; ++index)
         columns[index] = index < count ? table->classes[text[index]] + sz_regex_block_at_simt_(table, slot + index) : 0;
-#pragma unroll
+#pragma unroll sz_regex_run_bytes_simt_k
     for (index = 0; index != sz_regex_run_bytes_simt_k; ++index) {
         if (index == count) break;
         *state = sz_regex_move_simt_(table, *state, columns[index]);

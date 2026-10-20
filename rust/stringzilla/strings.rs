@@ -1687,6 +1687,9 @@ mod tests {
         let Ok(capabilities) = sz::Capabilities::metal_enabled(0) else {
             return;
         };
+        if !capabilities.contains(sz::Capability::Metal) {
+            return;
+        }
         let gpu = sz::Stream::new(capabilities, 0).unwrap();
         let cpu = cpu();
         let unified = sz::UnifiedAllocator::new(&gpu);
