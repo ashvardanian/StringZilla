@@ -128,8 +128,9 @@ static char const doc_RegexEngine_counts[] =                                    
     "  out (buffer): Writable 1-D buffer of pointer-width unsigned integers, one per haystack.\n" //
     "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"         //
     "Example:\n"                                                                                  //
+    "  >>> import struct\n"                                                                       //
     "  >>> engine = sz.RegexEngine(sz.Strings(['[0-9]+', '[a-z]+']))\n"                           //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                            //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                         //
     "  >>> engine.counts(sz.Strings(['abc 123 de']), out)\n"                                      //
     "  >>> out[0]\n"                                                                              //
     "  3";
@@ -212,9 +213,10 @@ static char const doc_RegexEngine_find[] =                                      
     "    len(haystacks) + 1 boundaries into `matches`, the last being the total.\n"                      //
     "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"                //
     "Example:\n"                                                                                         //
+    "  >>> import struct\n"                                                                              //
     "  >>> engine = sz.RegexEngine(sz.Strings(['[0-9]+']))\n"                                            //
-    "  >>> matches = memoryview(bytearray(2 * 4 * 8)).cast('Q', (2, 4))\n"                               //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                           //
+    "  >>> matches = memoryview(bytearray(2 * 4 * struct.calcsize('N'))).cast('N', (2, 4))\n"            //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                        //
     "  >>> engine.find(sz.Strings(['a 12 b 345']), matches, offsets)\n"                                  //
     "  >>> matches[1, 2], matches[1, 3]\n"                                                               //
     "  (7, 3)";
@@ -335,9 +337,10 @@ static char const doc_RegexEngine_replace[] =                                   
     "  offsets (buffer): Writable, contiguous 1-D buffer of pointer-width unsigned integers holding\n" //
     "    len(haystacks) + 1 rewritten boundaries, the last being the total.\n"                         //
     "Example:\n"                                                                                       //
+    "  >>> import struct\n"                                                                            //
     "  >>> engine = sz.RegexEngine(sz.Strings(['(\\\\w+)@(\\\\w+)']))\n"                               //
     "  >>> target = memoryview(bytearray(16))\n"                                                       //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                         //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                      //
     "  >>> engine.replace(sz.Strings(['bob@host']), sz.Strings(['$2/$1']), target, offsets)\n"         //
     "  >>> bytes(target[offsets[0]:offsets[1]])\n"                                                     //
     "  b'host/bob'";
@@ -457,9 +460,10 @@ static char const doc_RegexEngine_extract[] =                                   
     "    len(haystacks) + 1 boundaries into `groups`, the last being the total.\n"                         //
     "  stream (int, optional): A stream of the engine's device as an integer, or None.\n"                  //
     "Example:\n"                                                                                           //
+    "  >>> import struct\n"                                                                                //
     "  >>> engine = sz.RegexEngine(sz.Strings(['(\\\\d+)-(\\\\d+)']))\n"                                   //
-    "  >>> groups = memoryview(bytearray(3 * 4 * 8)).cast('Q', (3, 4))\n"                                  //
-    "  >>> offsets = memoryview(bytearray(3 * 8)).cast('Q')\n"                                             //
+    "  >>> groups = memoryview(bytearray(3 * 4 * struct.calcsize('N'))).cast('N', (3, 4))\n"               //
+    "  >>> offsets = memoryview(bytearray(3 * struct.calcsize('N'))).cast('N')\n"                          //
     "  >>> haystacks = sz.Strings(['a 12-34', 'none'])\n"                                                  //
     "  >>> engine.extract(haystacks, 0, groups, offsets)\n"                                                //
     "  >>> list(map(bytes, haystacks.matched(groups))), offsets[2]\n"                                      //
@@ -593,8 +597,9 @@ static char const doc_RegexEngine[] =                                           
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"    //
     "    for the default.\n"                                                                           //
     "Example:\n"                                                                                       //
+    "  >>> import struct\n"                                                                            //
     "  >>> engine = sz.RegexEngine(sz.Strings(['[0-9]+', '[a-z]+']))\n"                                //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                                 //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                              //
     "  >>> engine.counts(sz.Strings(['abc 123 de']), out)\n"                                           //
     "  >>> out[0]\n"                                                                                   //
     "  3";
