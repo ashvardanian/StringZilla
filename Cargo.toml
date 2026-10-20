@@ -16,7 +16,7 @@ include = [
   "/cmake/*",
   "/c/**",
   "/include/**",
-  "/probes/*.c",
+  "/probes/*",
   "/VERSION",
 ]
 keywords = ["simd", "search", "retrieval", "hash", "sort"]
