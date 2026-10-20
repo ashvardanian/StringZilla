@@ -1420,8 +1420,8 @@ ESCAPE_CORPUS = [
 def csv_field(text: str) -> str:
     """One field as `csv.writer` quotes it, written beside another so an empty one stays unquoted."""
     buffer = io.StringIO()
-    csv.writer(buffer, lineterminator="").writerow([text, ""])
-    return buffer.getvalue()[:-1]
+    csv.writer(buffer, lineterminator="\r\n").writerow([text, ""])
+    return buffer.getvalue()[:-3]
 
 
 def csv_unescaped(field: str) -> str:
@@ -1459,8 +1459,10 @@ DUMP_COLUMNS = {
 @pytest.mark.parametrize("kind", sorted(STDLIB_ESCAPERS))
 def test_strings_escape_matches_stdlib(kind: str):
     """`Strings.escape` writes the bytes the standard library's own writer does, for every kind that has one."""
-    escaped = Strings(ESCAPE_CORPUS).escape(kind)
-    assert [str(text) for text in escaped] == [STDLIB_ESCAPERS[kind](text) for text in ESCAPE_CORPUS]
+    # Python 3.10's CSV module rejects NUL; the round-trip checks below still cover it.
+    corpus = [text for text in ESCAPE_CORPUS if kind != "csv" or sys.version_info >= (3, 11) or "\0" not in text]
+    escaped = Strings(corpus).escape(kind)
+    assert [str(text) for text in escaped] == [STDLIB_ESCAPERS[kind](text) for text in corpus]
 
 
 @pytest.mark.parametrize("kind", ESCAPE_KINDS)
@@ -1471,7 +1473,9 @@ def test_strings_unescape_round_trips(kind: str):
     escaped = Strings(corpus).escape(kind=kind)
     assert [str(text) for text in escaped.unescape(kind)] == corpus
     if kind in STDLIB_UNESCAPERS:
-        assert [STDLIB_UNESCAPERS[kind](str(text)) for text in escaped] == corpus
+        # Python 3.10's CSV reader rejects NUL; StringZilla already round-tripped it above.
+        supported = [text for text in corpus if kind != "csv" or sys.version_info >= (3, 11) or "\0" not in text]
+        assert [STDLIB_UNESCAPERS[kind](str(text)) for text in Strings(supported).escape(kind)] == supported
     if kind != "json_ascii":
         ill_formed = b"ill-formed \xc3\x28 \xff"
         assert bytes(Strings([ill_formed]).escape(kind).unescape(kind)[0]) == ill_formed

@@ -211,7 +211,7 @@ def normalization_cases():
         pytest.skip("Unicode NormalizationTest data unavailable")
 
 
-@pytest.fixture(params=capability_sweep(), ids=lambda mask: mask.name.lower().replace("|", "+"))
+@pytest.fixture(params=capability_sweep(), ids=lambda mask: (mask.name or hex(mask)).lower().replace("|", "+"))
 def capabilities(request: pytest.FixtureRequest) -> sz.Capability:
     """One CPU mask from the differential correctness sweep, including serial fallback."""
     return request.param
