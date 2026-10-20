@@ -329,9 +329,15 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
 endif ()
 
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
+# MSVC tests use checked iterators, so fmt must compile with the same setting rather than link its unchecked library.
 function (define_gpu_suite target language source)
     add_library(${target} OBJECT ${source})
     set_compiler_flags(${target} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND source MATCHES "^test/")
+        target_compile_definitions(${target} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     set_target_properties(
         ${target}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
@@ -343,7 +349,7 @@ function (define_gpu_suite target language source)
     endif ()
     target_link_libraries(
         ${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                          stringzilla_static fmt::fmt
+                          stringzilla_static ${format_library_}
     )
 endfunction ()
 
@@ -353,12 +359,17 @@ endfunction ()
 function (define_cpu_launcher exec_name library verdicts)
     add_executable(${exec_name} ${ARGN})
     set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND exec_name MATCHES "_test$")
+        target_compile_definitions(${exec_name} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     if (verdicts STREQUAL "SERIAL")
         target_link_libraries(${exec_name} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
         set_architecture_simd_definitions(${exec_name})
     endif ()
-    target_link_libraries(${exec_name} PRIVATE ${library} fmt::fmt)
+    target_link_libraries(${exec_name} PRIVATE ${library} ${format_library_})
 endfunction ()
 
 # Tests and benchmarks link the precompiled libraries below.
