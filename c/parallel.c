@@ -53,7 +53,7 @@ typedef struct sz_tile_queue_t {
 static void sz_tile_queue_drain_(sz_tile_queue_t *queue, sz_size_t worker) {
     for (;;) {
 #if defined(_MSC_VER)
-        sz_size_t const tile_index = (sz_size_t)_InterlockedExchangeAdd64(&queue->next_tile, 1);
+        sz_size_t const tile_index = (sz_size_t)InterlockedExchangeAdd64(&queue->next_tile, 1);
 #else
         sz_size_t const tile_index = __atomic_fetch_add(&queue->next_tile, 1, __ATOMIC_RELAXED);
 #endif
@@ -86,7 +86,7 @@ static void CALLBACK sz_tile_worker_threadpool_(PTP_CALLBACK_INSTANCE instance, 
     sz_unused_(instance), sz_unused_(work);
     sz_tile_queue_t *queue = (sz_tile_queue_t *)context;
 #if defined(_MSC_VER)
-    sz_size_t const worker = (sz_size_t)_InterlockedIncrement64(&queue->next_worker);
+    sz_size_t const worker = (sz_size_t)InterlockedIncrement64(&queue->next_worker);
 #else
     sz_size_t const worker = (sz_size_t)__atomic_add_fetch(&queue->next_worker, 1, __ATOMIC_RELAXED);
 #endif
