@@ -329,9 +329,15 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
 endif ()
 
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
+# MSVC tests use checked iterators, so fmt must compile with the same setting rather than link its unchecked library.
 function (stringzilla_add_gpu_suite target_ language_ source_)
     add_library(${target_} OBJECT ${source_})
     stringzilla_set_compiler_flags(${target_} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND source_ MATCHES "^test/")
+        target_compile_definitions(${target_} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     set_target_properties(
         ${target_}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
@@ -343,7 +349,7 @@ function (stringzilla_add_gpu_suite target_ language_ source_)
     endif ()
     target_link_libraries(
         ${target_} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                           stringzilla_static fmt::fmt
+                           stringzilla_static ${format_library_}
     )
 endfunction ()
 
@@ -353,12 +359,17 @@ endfunction ()
 function (stringzilla_add_cpu_launcher executable_ library_ verdicts_)
     add_executable(${executable_} ${ARGN})
     stringzilla_set_compiler_flags(${executable_} 20 "${STRINGZILLA_TARGET_ARCH}")
+    set(format_library_ fmt::fmt)
+    if (MSVC AND executable_ MATCHES "_test$")
+        target_compile_definitions(${executable_} PRIVATE _ITERATOR_DEBUG_LEVEL=1)
+        set(format_library_ fmt::fmt-header-only)
+    endif ()
     if (verdicts_ STREQUAL "SERIAL")
         target_link_libraries(${executable_} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
         stringzilla_set_architecture_simd_definitions(${executable_})
     endif ()
-    target_link_libraries(${executable_} PRIVATE ${library_} fmt::fmt)
+    target_link_libraries(${executable_} PRIVATE ${library_} ${format_library_})
 endfunction ()
 
 # Tests and benchmarks link the precompiled libraries below.
