@@ -3389,12 +3389,13 @@ std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_type_ con
 }
 
 /** Whether the @p length bytes at @p bytes begin some well-formed rune: a completion by
- *  continuation bytes, one from each range a lead constrains them to, decodes past them. */
+ *  continuation bytes, one from each range a lead constrains them to, decodes past them.
+ *  The prefix is nonempty, so only positions after its first byte need completion. */
 inline bool levenshtein_rune_prefix_(char const *bytes, std::size_t length) {
     unsigned char const continuations[] = {0x80, 0x90, 0xA0, 0xBF};
     for (std::size_t completion = 0; completion != 64; ++completion) {
-        char padded[4];
-        for (std::size_t index = 0; index != 4; ++index)
+        char padded[4] = {bytes[0]};
+        for (std::size_t index = 1; index != 4; ++index)
             padded[index] = index < length ? bytes[index]
                                            : static_cast<char>(continuations[(completion >> (2 * (index - 1))) & 3]);
         sz_rune_t rune;
