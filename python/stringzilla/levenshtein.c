@@ -119,8 +119,9 @@ static char const doc_LevenshteinEngine_distances[] =                           
     "    default. A device engine enqueues there and returns, so `out` must be device-reachable\n"  //
     "    and read only after the caller joins the stream; a host engine ignores it.\n"              //
     "Example:\n"                                                                                    //
+    "  >>> import struct\n"                                                                         //
     "  >>> engine = sz.LevenshteinEngine(sz.Strings(['hello', 'world']))\n"                         //
-    "  >>> out = memoryview(bytearray(32)).cast('Q', (2, 2))\n"                                     //
+    "  >>> out = memoryview(bytearray(4 * struct.calcsize('N'))).cast('N', (2, 2))\n"               //
     "  >>> engine.distances(sz.Strings(['hallo', 'word']), out)\n"                                  //
     "  >>> out[0, 0]\n"                                                                             //
     "  1";
@@ -221,8 +222,9 @@ static char const doc_LevenshteinEngine[] =                                     
     "  stream (int, optional): A stream of that vendor as an integer, naming the device, or None\n"  //
     "    for the default.\n"                                                                         //
     "Example:\n"                                                                                     //
+    "  >>> import struct\n"                                                                          //
     "  >>> engine = sz.LevenshteinEngine(sz.Strings(['hello']), symbol='bytes')\n"                   //
-    "  >>> out = memoryview(bytearray(8)).cast('Q', (1, 1))\n"                                       //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N', (1, 1))\n"                    //
     "  >>> engine.distances(sz.Strings(['hallo']), out)\n"                                           //
     "  >>> out[0, 0]\n"                                                                              //
     "  1";

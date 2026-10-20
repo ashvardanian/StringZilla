@@ -34,6 +34,8 @@ from base import get_random_string, scale_iterations
 
 import stringzilla as sz
 
+SIZE_T_BYTES = ctypes.sizeof(ctypes.c_size_t)
+
 BASELINE_BY_MACHINE = {
     ("x86_64", "amd64", "x64"): sz.Capability.HASWELL,
     ("arm64", "aarch64"): sz.Capability.NEON,
@@ -141,7 +143,7 @@ def test_engine_capabilities_narrow_the_cpu():
     queries = sz.Strings(["kitten", "saturday"])
     everything = sz.cpu_capabilities_detected() | sz.cpu_capabilities_compiled()
     for capabilities in (sz.Capability.SERIAL, everything):
-        distances = memoryview(bytearray(4 * 8)).cast("Q", (2, 2))
+        distances = memoryview(bytearray(4 * SIZE_T_BYTES)).cast("N", (2, 2))
         sz.LevenshteinEngine(queries, capabilities=capabilities).distances(queries, distances)
         assert distances[0, 0] == distances[1, 1] == 0 and distances[0, 1] == distances[1, 0] == 7
     with pytest.raises(TypeError):
@@ -189,8 +191,8 @@ def test_cpu_copies_read_like_their_strings():
     tape = sz.Strings(texts).copy(capabilities)
     assert tape == sz.Strings(texts) and [str(text) for text in tape[1:]] == texts[1:]
     queries = sz.Strings(["kitten"])
-    from_strings = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
-    from_tape = memoryview(bytearray(len(texts) * 8)).cast("Q", (1, len(texts)))
+    from_strings = memoryview(bytearray(len(texts) * SIZE_T_BYTES)).cast("N", (1, len(texts)))
+    from_tape = memoryview(bytearray(len(texts) * SIZE_T_BYTES)).cast("N", (1, len(texts)))
     engine = sz.LevenshteinEngine(queries)
     engine.distances(sz.Strings(texts), from_strings)
     engine.distances(tape, from_tape)
@@ -206,7 +208,7 @@ def test_levenshtein_bound_clips_distances_past_it():
     candidates = sz.Strings(["kitten", "mitten", "mittens", "sitting"])
 
     def distances_for(**kwargs):
-        distances = memoryview(bytearray(len(candidates) * 8)).cast("Q", (1, len(candidates)))
+        distances = memoryview(bytearray(len(candidates) * SIZE_T_BYTES)).cast("N", (1, len(candidates)))
         engine.distances(candidates, distances, **kwargs)
         return distances.tolist()[0]
 
@@ -215,7 +217,7 @@ def test_levenshtein_bound_clips_distances_past_it():
     assert distances_for(bound=3) == exact and distances_for(bound=2) == exact
     assert distances_for(bound=1) == [0, 1, 2, 2]
     assert distances_for(bound=0) == [0, 1, 1, 1]
-    assert distances_for(bound=2**64 - 1) == exact
+    assert distances_for(bound=ctypes.c_size_t(-1).value) == exact
     with pytest.raises(TypeError):
         distances_for(bound="1")
     with pytest.raises(OverflowError):
@@ -254,7 +256,9 @@ def test_engine_calls_from_many_threads_agree():
     candidates = sz.Strings(["sitting", "sunday", "monday", "", "kitten"] * 64)
 
     def score(engine):
-        distances = memoryview(bytearray(len(queries) * len(candidates) * 8)).cast("Q", (len(queries), len(candidates)))
+        distances = memoryview(bytearray(len(queries) * len(candidates) * SIZE_T_BYTES)).cast(
+            "N", (len(queries), len(candidates))
+        )
         for _ in range(16):
             engine.distances(candidates, distances)
         return distances.tolist()
@@ -272,7 +276,9 @@ def test_engine_verbs_release_the_gil(rng):
     queries = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(64))])
     candidates = sz.Strings([get_random_string(rng, 60, alphabet="acgt") for _ in range(scale_iterations(8192))])
     engine = sz.LevenshteinEngine(queries)
-    distances = memoryview(bytearray(len(queries) * len(candidates) * 8)).cast("Q", (len(queries), len(candidates)))
+    distances = memoryview(bytearray(len(queries) * len(candidates) * SIZE_T_BYTES)).cast(
+        "N", (len(queries), len(candidates))
+    )
     ticks, stop = [0], threading.Event()
 
     def spin():
@@ -332,8 +338,8 @@ def test_gpu_engine_reads_gpu_tapes():
     assert candidates == sz.Strings(texts) and str(candidates[1]) == "sunday" and str(candidates[-1]) == "kitten"
 
     queries = sz.Strings(["kitten", "saturday"])
-    expected = memoryview(bytearray(len(queries) * len(texts) * 8)).cast("Q", (len(queries), len(texts)))
-    from_tape = memoryview(bytearray(len(queries) * len(texts) * 8)).cast("Q", (len(queries), len(texts)))
+    expected = memoryview(bytearray(len(queries) * len(texts) * SIZE_T_BYTES)).cast("N", (len(queries), len(texts)))
+    from_tape = memoryview(bytearray(len(queries) * len(texts) * SIZE_T_BYTES)).cast("N", (len(queries), len(texts)))
     sz.LevenshteinEngine(queries).distances(sz.Strings(texts), expected)
     sz.LevenshteinEngine(queries).distances(candidates, from_tape)
     assert from_tape.tolist() == expected.tolist()
