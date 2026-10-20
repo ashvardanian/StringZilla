@@ -322,7 +322,6 @@ jobs:
       - name: Build source distribution
         run: pip install build &&
           python -m build --sdist
-        env:
       - name: Upload source distribution
         uses: actions/upload-artifact@v7
         with:
@@ -392,7 +391,7 @@ jobs:
         with:
           ref: "main"
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
       - name: Test Rust
         run: cargo test --release
       - name: Publish to crates.io
