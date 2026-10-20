@@ -942,7 +942,7 @@ jobs:
     name: Swift on WebAssembly WASI
     needs: build_swift_artifacts
     runs-on: ubuntu-26.04
-    container: swift:6.4
+    container: swift:6.4.1
     env:
       STRINGZILLA_SWIFT_ARTIFACT: StringZillaC.artifactbundle.zip
     steps:
@@ -954,11 +954,15 @@ jobs:
           name: swift-artifactbundle
       - name: Install Swift SDK for WebAssembly and Wasmtime
         run: |
-          swift sdk install https://download.swift.org/swift-6.4.0-release/wasm-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_wasm.artifactbundle.tar.gz --checksum f07b7be3c586d92d7a07051fc6d303b87ebea67eadc40640ba59d5a8b79aa86d
+          swift sdk install https://download.swift.org/swift-6.4.1-release/wasm-sdk/swift-6.4.1-RELEASE/swift-6.4.1-RELEASE_wasm.artifactbundle.tar.gz --checksum 783e6128d174d9f975b4eda68be02a5960681b723ef372e6876a7c2543a365d8
           apt-get update && apt-get install -y curl xz-utils
-          curl -fsSL https://wasmtime.dev/install.sh | bash
+          curl -fsSL "https://github.com/bytecodealliance/wasmtime/releases/download/${WASMTIME_VERSION}/wasmtime-${WASMTIME_VERSION}-x86_64-linux.tar.xz" \
+            | tar -xJ -C "$RUNNER_TEMP"
+          mkdir -p "$HOME/.wasmtime/bin"
+          cp "$RUNNER_TEMP/wasmtime-${WASMTIME_VERSION}-x86_64-linux/wasmtime" "$HOME/.wasmtime/bin/"
       - name: Build Library and Tests
-        run: swift build --build-tests --swift-sdk swift-6.4.0-RELEASE_wasm
+        # The generated runner does not use Swift Regex; its implicit import is missing from the WASI build graph.
+        run: swift build --build-tests --swift-sdk swift-6.4.1-RELEASE_wasm -Xswiftc -disable-implicit-string-processing-module-import
       - name: Test under Wasmtime
         run: ~/.wasmtime/bin/wasmtime run -S inherit-env=y --dir / .build/debug/StringZillaTests-test-runner.wasm --testing-library swift-testing
 
