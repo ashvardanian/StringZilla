@@ -1232,9 +1232,10 @@ jobs:
           CIBW_BUILD: cp${{ matrix.python-version }}-*
           CIBW_ARCHS_LINUX: x86_64
 
-  # Emulated Linux wheels - one arch per runner so no runner pulls every image; fuzz depth thinned under QEMU.
+  # Emulated Linux wheels, one architecture and Python version per runner.
+  # Keep failures independent and long builds within the runner's time limit.
   build_wheels_emulated:
-    name: Build Python wheels for ${{ matrix.arch }}
+    name: Build Python ${{ matrix.python-version }} wheels for ${{ matrix.arch }}
     runs-on: ubuntu-26.04
     needs:
       [
@@ -1248,6 +1249,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [aarch64, ppc64le, s390x, i686, armv7l, riscv64]
+        python-version: ["310", "311", "312", "313", "314"]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -1262,7 +1264,7 @@ jobs:
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_BUILD: "cp${{ matrix.python-version }}-*"
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           # QEMU_CPU drops the SVE kits, whose emulation is flaky; STRINGZILLA_SCALE matches `test_cross_qemu`.
           CIBW_ENVIRONMENT_LINUX: >-
