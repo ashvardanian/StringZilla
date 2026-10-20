@@ -2417,7 +2417,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_dfa_intern_(sz_regex_builder_t *builder,
         slot = (slot + 1) & mask;
     }
     // Every id must stay a 32-bit row offset, the published automaton's one ceiling.
-    if (dfa->states_count == dfa->states_budget || (dfa->states_count + 1) * stride > 0xFFFFFFFFull)
+    if (dfa->states_count == dfa->states_budget || ((sz_u64_t)dfa->states_count + 1) * stride > 0xFFFFFFFFull)
         return sz_overflow_risk_k;
     {
         sz_u32_t *const keys = (sz_u32_t *)sz_regex_grow_(builder, dfa->keys, &dfa->keys_capacity,

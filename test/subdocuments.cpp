@@ -22,7 +22,7 @@
 #include "stringzilla/stringzilla.hpp" // `sz::default_capabilities`
 
 #include "cross.hpp"   // `subdocuments_tier_t`, `check_subdocuments_unit_`, `check_subdocuments_safety_`
-#include "harness.hpp" // `test_context_t`, `verify`
+#include "harness.hpp" // `refusing_allocator_`, `test_context_t`, `verify`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -58,6 +58,15 @@ void test_subdocuments_safety(test_context_t &) {
     verify(subdocuments_compile_status_(subdocuments_dispatched, {"$.a", "$[?@.b]", "$[?@.c || match(@.a, 'x[')]"},
                                         sz_subdocuments_json_k, malformed_index) == sz_invalid_syntax_k);
     verify(malformed_index == 2);
+
+    // Reject an oversized translated pattern before allocating or reading its text.
+    sz_subdocuments_instruction_t instruction {};
+    instruction.operation = sz_subdocuments_operation_match_k;
+    instruction.string_length = 0x40000000u;
+    sz_regex_engine_t regex {};
+    sz_allocator_t refusing = refusing_allocator_();
+    verify(sz_subdocuments_compile_patterns_(&regex, &instruction, 1, nullptr, 1, sz::default_capabilities(), &refusing,
+                                             nullptr, &malformed_index) == sz_overflow_risk_k);
 }
 
 /** Random paths over random documents through the dispatched verbs, against the serial ones. */
