@@ -50,7 +50,7 @@ Homepage = "https://github.com/ashvardanian/StringZilla"
 build.targets = ["stringzilla_python"]
 build-dir = "build_python/{wheel_tag}"
 install.components = ["stringzilla_python"]
-sdist.exclude = ["bench", "build*", "node_modules", "target", "test"]
+sdist.exclude = ["bench", "build*", "node_modules", "/target", "test"]
 wheel.packages = []
 
 [tool.scikit-build.cmake.define]
