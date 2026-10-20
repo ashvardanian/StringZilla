@@ -1057,7 +1057,7 @@ jobs:
         # C/C++
       - name: Build C/C++
         run: |
-          apk add --update cmake samurai g++ gcc
+          apk add --update cmake samurai make g++ gcc
           cmake --preset release
           cmake --build --preset release
       - name: Test C++
