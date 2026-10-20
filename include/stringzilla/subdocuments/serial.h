@@ -1360,7 +1360,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_compile_patterns_(sz_regex_engine
                                                                  sz_size_t patterns_count, sz_capability_t capabilities,
                                                                  sz_allocator_t *allocator, sz_stream_t stream,
                                                                  sz_size_t *malformed_pattern) {
-    sz_size_t bytes = (patterns_count + 1) * sizeof(sz_u32_t), written = 0, index;
+    sz_u64_t bytes = ((sz_u64_t)patterns_count + 1) * sizeof(sz_u32_t);
+    sz_size_t written = 0, index;
     sz_strings_view_t view;
     sz_u32_t *offsets;
     sz_ptr_t data;
@@ -1368,7 +1369,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_compile_patterns_(sz_regex_engine
     for (index = 0; index != instructions_count; ++index)
         if (instructions[index].operation == sz_subdocuments_operation_match_k ||
             instructions[index].operation == sz_subdocuments_operation_search_k)
-            bytes += 7 * instructions[index].string_length + 48;
+            bytes += 7ull * instructions[index].string_length + 48;
     if (bytes > 0xFFFFFFFFull) return sz_overflow_risk_k;
     offsets = (sz_u32_t *)allocator->allocate(bytes, allocator->handle, stream);
     if (!offsets) return sz_bad_alloc_k;
@@ -1464,10 +1465,12 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
             return status;
         }
     }
+#if STRINGZILLA_ARCH_64BIT_
     if (builder.steps_count > 0xFFFFFFFFull || builder.slices_count > 0xFFFFFFFFull ||
         builder.names_bytes > 0xFFFFFFFFull || builder.instructions_count > 0xFFFFFFFFull ||
         builder.strings_bytes > 0xFFFFFFFFull)
         return sz_overflow_risk_k;
+#endif
 
     names_bound = builder.name_selectors_count, steps_bound = builder.steps_count, slices_bound = builder.slices_count;
     filters_bound = builder.filters_count, instructions_bound = builder.instructions_count;
