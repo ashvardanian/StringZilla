@@ -426,8 +426,12 @@ jobs:
         uses: actions/checkout@v7
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
-      - name: Link Rust tests with CUDA
-        run: cargo test --features cuda --no-run
+      - name: Build and link the packaged Rust tests with CUDA
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          cargo package --locked --features cuda
+          cargo test --features cuda --no-run --manifest-path "$CARGO_TARGET_DIR"/package/stringzilla-*/Cargo.toml
 
   build_rust_rocm:
     name: Build Rust with ROCm
