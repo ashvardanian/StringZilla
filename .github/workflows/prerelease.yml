@@ -1260,6 +1260,12 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: 3.x
+      # Docker 29.4.2 blocks networking in the 32-bit package image.
+      - name: Set up Docker for i686
+        if: matrix.arch == 'i686'
+        uses: docker/setup-docker-action@v5
+        with:
+          version: v29.4.3
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
