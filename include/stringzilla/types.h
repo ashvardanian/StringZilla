@@ -258,7 +258,7 @@
  *  or buffers. For hash functions that use fixed-size state structures, this is unnecessary
  *  overhead (~10 cycles per call). This macro opts out of stack protection for such functions.
  */
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 11)
 #define STRINGZILLA_NO_STACK_PROTECTOR_ __attribute__((no_stack_protector))
 #else
 #define STRINGZILLA_NO_STACK_PROTECTOR_
