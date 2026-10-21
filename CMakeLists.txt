@@ -31,12 +31,12 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 # Every binding reads its version from `VERSION`, which the release bumps.
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" STRINGZILLA_VERSION_ LIMIT_COUNT 1)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" stringzilla_version_line_ LIMIT_COUNT 1)
 # CMake versions are numeric, so the pre-release suffix of `VERSION` stays out of `PROJECT_VERSION`.
-string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" STRINGZILLA_VERSION_ "${STRINGZILLA_VERSION_}")
+string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" stringzilla_version_ "${stringzilla_version_line_}")
 project(
     stringzilla
-    VERSION ${STRINGZILLA_VERSION_}
+    VERSION ${stringzilla_version_}
     LANGUAGES C CXX
     DESCRIPTION "Search, hash, sort, and fuzzy-match strings faster via SWAR, SIMD, and GPGPU"
     HOMEPAGE_URL "https://github.com/ashvardanian/StringZilla"
@@ -86,8 +86,8 @@ endif ()
 # On macOS `CMAKE_SYSTEM_PROCESSOR` names the host, while `CMAKE_OSX_ARCHITECTURES` names the slice `-arch` compiles,
 # as when an Apple Silicon runner builds the x86-64 wheels.
 if (APPLE AND CMAKE_OSX_ARCHITECTURES)
-    list(LENGTH CMAKE_OSX_ARCHITECTURES STRINGZILLA_OSX_ARCHITECTURES_COUNT_)
-    if (NOT STRINGZILLA_OSX_ARCHITECTURES_COUNT_ EQUAL 1)
+    list(LENGTH CMAKE_OSX_ARCHITECTURES stringzilla_osx_architectures_count_)
+    if (NOT stringzilla_osx_architectures_count_ EQUAL 1)
         message(
             FATAL_ERROR "CMAKE_OSX_ARCHITECTURES='${CMAKE_OSX_ARCHITECTURES}' holds several slices; build one per slice"
         )
@@ -97,27 +97,27 @@ endif ()
 
 # Detect target architecture from `CMAKE_SYSTEM_PROCESSOR`... safer for cross-compilation!
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|X86_64|AMD64|amd64")
-    set(STRINGZILLA_ARCH_X8664_ TRUE)
+    set(stringzilla_arch_x8664_ TRUE)
     message(STATUS "Platform: x86_64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|AARCH64|arm64|ARM64")
-    set(STRINGZILLA_ARCH_ARM64_ TRUE)
+    set(stringzilla_arch_arm64_ TRUE)
     message(STATUS "Platform: ARM64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "riscv64|RISCV64")
-    set(STRINGZILLA_ARCH_RISCV64_ TRUE)
+    set(stringzilla_arch_riscv64_ TRUE)
     message(STATUS "Platform: RISC-V 64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "loongarch64|LOONGARCH64|loong64|LOONG64")
     # "loongarch64" is the GNU triple and `uname -m` spelling; "loong64" is the Debian/dpkg port name.
-    set(STRINGZILLA_ARCH_LOONGARCH64_ TRUE)
+    set(stringzilla_arch_loongarch64_ TRUE)
     message(STATUS "Platform: LoongArch64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64|powerpc64|PPC64|POWERPC64")
     # Matches both endiannesses ("ppc64le" contains "ppc64"); the kernels handle big-endian explicitly
     # (`find/powervsx.h`) and `STRINGZILLA_ARCH_BIG_ENDIAN_` is derived from `CMAKE_C_BYTE_ORDER` separately.
-    set(STRINGZILLA_ARCH_PPC64_ TRUE)
+    set(stringzilla_arch_ppc64_ TRUE)
     message(STATUS "Platform: PowerPC64 (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^wasm(32|64)$")
     # A module's one SIMD capability is `STRINGZILLA_TARGET_ARCH`, which `types.h` reads back off the predefined
     # macros, so no probe verdict is set here.
-    set(STRINGZILLA_ARCH_WASM_ TRUE)
+    set(stringzilla_arch_wasm_ TRUE)
     message(STATUS "Platform: WebAssembly (CMAKE_SYSTEM_PROCESSOR=${CMAKE_SYSTEM_PROCESSOR})")
 else ()
     message(WARNING "Unknown CMAKE_SYSTEM_PROCESSOR: ${CMAKE_SYSTEM_PROCESSOR}")
@@ -125,9 +125,9 @@ endif ()
 
 # A `Generic` target, like Rust's `wasm32-unknown-unknown`, has no LibC for the libraries to reach.
 if (CMAKE_SYSTEM_NAME STREQUAL "Generic")
-    set(STRINGZILLA_WITH_LIBC_ 0)
+    set(stringzilla_with_libc_ 0)
 else ()
-    set(STRINGZILLA_WITH_LIBC_ 1)
+    set(stringzilla_with_libc_ 1)
 endif ()
 
 # One compile probe per capability under `probes/`, defining `STRINGZILLA_TARGET_<CAPABILITY>` as the toolchain
@@ -145,10 +145,10 @@ if (STRINGZILLA_IS_MAIN_PROJECT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND git config core.hooksPath .githooks
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        RESULT_VARIABLE STRINGZILLA_HOOKS_STATUS
+        RESULT_VARIABLE stringzilla_hooks_status_
         OUTPUT_QUIET ERROR_QUIET
     )
-    if (STRINGZILLA_HOOKS_STATUS EQUAL 0)
+    if (stringzilla_hooks_status_ EQUAL 0)
         message(STATUS "stringzilla: Git hooks enabled (core.hooksPath -> .githooks)")
     endif ()
 endif ()
@@ -183,7 +183,7 @@ set(STRINGZILLA_TARGET_ARCH
 
 # An engine validates a WebAssembly module whole, so every unit carries the module's one SIMD capability, whatever
 # flags a binding passes, and `types.h` reads it back off the predefined macros.
-if (STRINGZILLA_ARCH_WASM_)
+if (stringzilla_arch_wasm_)
     if (STRINGZILLA_TARGET_ARCH STREQUAL "v128relaxed")
         add_compile_options(-msimd128 -mrelaxed-simd)
     elseif (STRINGZILLA_TARGET_ARCH STREQUAL "v128")
@@ -212,22 +212,22 @@ if (STRINGZILLA_BUILD_CUDA)
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
     find_package(CUDAToolkit REQUIRED)
     include(cmake/sz_cuda_probes.cmake)
-    sz_cuda_probe_native_arch_()
+    stringzilla_probe_cuda_native_arch()
     # "native", "all" and "all-major" stand for the lists CMake resolved them to, which the capability rows read.
-    set(STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_)
+    set(stringzilla_cuda_resolved_architectures_)
     foreach (code_ IN LISTS STRINGZILLA_CUDA_ARCHITECTURES)
         if (code_ STREQUAL "native")
-            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_NATIVE})
+            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_NATIVE})
         elseif (code_ STREQUAL "all")
-            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_ALL})
+            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_ALL})
         elseif (code_ STREQUAL "all-major")
-            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR})
+            list(APPEND stringzilla_cuda_resolved_architectures_ ${CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR})
         else ()
-            list(APPEND STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_ ${code_})
+            list(APPEND stringzilla_cuda_resolved_architectures_ ${code_})
         endif ()
     endforeach ()
     # Clusters and their distributed shared memory: H100, H200, GH200, and every GPU since.
-    sz_gpu_capability_(
+    stringzilla_add_gpu_capability(
         hopper STRINGZILLA_TARGET_HOPPER
         CUDA_ARCHITECTURES
             90
@@ -250,7 +250,7 @@ if (STRINGZILLA_BUILD_CUDA)
     )
     # Cluster launch control, letting a block take over the tile of one not yet started: B200, B300, RTX 50, and every
     # GPU since.
-    sz_gpu_capability_(
+    stringzilla_add_gpu_capability(
         blackwell STRINGZILLA_TARGET_BLACKWELL
         CUDA_ARCHITECTURES
             100
@@ -296,8 +296,8 @@ endif ()
 # Configuration
 include(GNUInstallDirs)
 include(CheckCXXCompilerFlag)
-set(STRINGZILLA_INCLUDE_BUILD_DIR "${PROJECT_SOURCE_DIR}/include/")
-set(STRINGZILLA_INCLUDE_INSTALL_DIR "${CMAKE_INSTALL_INCLUDEDIR}")
+set(stringzilla_include_build_dir_ "${PROJECT_SOURCE_DIR}/include/")
+set(stringzilla_include_install_dir_ "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # CTest machinery only for top-level builds: a parent project decides its own testing story, and
 # `add_test` calls below are inert without `enable_testing()`.
@@ -307,8 +307,8 @@ if (STRINGZILLA_IS_MAIN_PROJECT)
 endif ()
 
 if (MSVC)
-    # Remove /RTC* from MSVC debug flags by default (it will be added back in the set_compiler_flags function) Because
-    # /RTC* cannot be used without the crt so it needs to be disabled for that specific target
+    # Remove /RTC* from MSVC debug flags by default (it will be added back in the stringzilla_set_compiler_flags
+    # function) Because /RTC* cannot be used without the crt so it needs to be disabled for that specific target
     string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
     string(REGEX REPLACE "/RTC[^ ]*" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif ()
@@ -329,36 +329,36 @@ if (STRINGZILLA_BUILD_TEST OR STRINGZILLA_BUILD_BENCH)
 endif ()
 
 # Native vendor sources remain separate objects so one C++ runner can link both CUDA and HIP.
-function (define_gpu_suite target language source)
-    add_library(${target} OBJECT ${source})
-    set_compiler_flags(${target} 20 "${STRINGZILLA_TARGET_ARCH}")
+function (stringzilla_add_gpu_suite target_ language_ source_)
+    add_library(${target_} OBJECT ${source_})
+    stringzilla_set_compiler_flags(${target_} 20 "${STRINGZILLA_TARGET_ARCH}")
     set_target_properties(
-        ${target}
+        ${target_}
         PROPERTIES CUDA_ARCHITECTURES "${STRINGZILLA_CUDA_ARCHITECTURES}"
                    HIP_ARCHITECTURES "${STRINGZILLA_ROCM_ARCHITECTURES}"
                    HIP_STANDARD 20
     )
-    if (MSVC AND language STREQUAL "CUDA")
-        target_compile_definitions(${target} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
+    if (MSVC AND language_ STREQUAL "CUDA")
+        target_compile_definitions(${target_} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:FMT_UNICODE=0>)
     endif ()
     target_link_libraries(
-        ${target} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
-                          stringzilla_static fmt::fmt
+        ${target_} PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
+                           stringzilla_static fmt::fmt
     )
 endfunction ()
 
-# One CPU test or benchmark linking `library`, whose capability `verdicts` declare every kernel the
+# One CPU test or benchmark linking `library_`, whose capability `verdicts_` declare every kernel the
 # toolchain builds (COMPILE), as the harnesses skip those this CPU lacks, or turn them all off, leaving
 # the dispatch points (SERIAL).
-function (define_cpu_launcher exec_name library verdicts)
-    add_executable(${exec_name} ${ARGN})
-    set_compiler_flags(${exec_name} 20 "${STRINGZILLA_TARGET_ARCH}")
-    if (verdicts STREQUAL "SERIAL")
-        target_link_libraries(${exec_name} PRIVATE stringzilla_cpu_capabilities_disabled_)
+function (stringzilla_add_cpu_launcher executable_ library_ verdicts_)
+    add_executable(${executable_} ${ARGN})
+    stringzilla_set_compiler_flags(${executable_} 20 "${STRINGZILLA_TARGET_ARCH}")
+    if (verdicts_ STREQUAL "SERIAL")
+        target_link_libraries(${executable_} PRIVATE stringzilla_cpu_capabilities_disabled_)
     else ()
-        set_architecture_simd_definitions(${exec_name})
+        stringzilla_set_architecture_simd_definitions(${executable_})
     endif ()
-    target_link_libraries(${exec_name} PRIVATE ${library} fmt::fmt)
+    target_link_libraries(${executable_} PRIVATE ${library_} fmt::fmt)
 endfunction ()
 
 # Tests and benchmarks link the precompiled libraries below.
@@ -371,25 +371,25 @@ add_library(stringzilla_header INTERFACE)
 add_library(${PROJECT_NAME}::header ALIAS stringzilla_header)
 set_target_properties(stringzilla_header PROPERTIES EXPORT_NAME header)
 target_include_directories(
-    stringzilla_header INTERFACE $<BUILD_INTERFACE:${STRINGZILLA_INCLUDE_BUILD_DIR}>
+    stringzilla_header INTERFACE $<BUILD_INTERFACE:${stringzilla_include_build_dir_}>
                                  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 # Consumers of the header target compile every kernel themselves, and link no dispatch points.
 target_compile_definitions(stringzilla_header INTERFACE STRINGZILLA_HEADER_ONLY=1)
 if (APPLE)
-    set(STRINGZILLA_EMBED_COMPILER_
+    set(stringzilla_embed_compiler_
         "$<AND:$<PLATFORM_ID:Darwin>,$<OR:$<COMPILE_LANG_AND_ID:C,Clang,AppleClang>,$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>>>"
     )
     if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
-        set(STRINGZILLA_EMBED_INSTALL_DIR_ "${CMAKE_INSTALL_INCLUDEDIR}")
+        set(stringzilla_embed_install_dir_ "${CMAKE_INSTALL_INCLUDEDIR}")
     else ()
-        set(STRINGZILLA_EMBED_INSTALL_DIR_ "$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}")
+        set(stringzilla_embed_install_dir_ "$<INSTALL_PREFIX>/${CMAKE_INSTALL_INCLUDEDIR}")
     endif ()
-    set(STRINGZILLA_EMBED_OPTIONS_
-        "$<${STRINGZILLA_EMBED_COMPILER_}:$<BUILD_INTERFACE:--embed-dir=${STRINGZILLA_INCLUDE_BUILD_DIR}>>"
-        "$<${STRINGZILLA_EMBED_COMPILER_}:$<INSTALL_INTERFACE:--embed-dir=${STRINGZILLA_EMBED_INSTALL_DIR_}>>"
+    set(stringzilla_embed_options_
+        "$<${stringzilla_embed_compiler_}:$<BUILD_INTERFACE:--embed-dir=${stringzilla_include_build_dir_}>>"
+        "$<${stringzilla_embed_compiler_}:$<INSTALL_INTERFACE:--embed-dir=${stringzilla_embed_install_dir_}>>"
     )
-    target_compile_options(stringzilla_header INTERFACE ${STRINGZILLA_EMBED_OPTIONS_})
+    target_compile_options(stringzilla_header INTERFACE ${stringzilla_embed_options_})
 endif ()
 
 # The compiled core: `c/stringzilla.c` owns the cross-family exports (versions, capabilities, the kernel finder), each
@@ -397,28 +397,32 @@ endif ()
 # lists, dispatch points and finder. Globbed, so a new unit needs no entry; the Metal unit joins below, with its own
 # frameworks, beside the CUDA and ROCm ones.
 file(
-    GLOB STRINGZILLA_LIBRARY_UNITS_ CONFIGURE_DEPENDS
+    GLOB stringzilla_globbed_units_ CONFIGURE_DEPENDS
     RELATIVE ${PROJECT_SOURCE_DIR}
     ${PROJECT_SOURCE_DIR}/c/target/*.c ${PROJECT_SOURCE_DIR}/c/dispatch/*.c
 )
-list(REMOVE_ITEM STRINGZILLA_LIBRARY_UNITS_ c/target/metal.c)
-set(STRINGZILLA_SHIM_SOURCES c/stringzilla.c ${STRINGZILLA_LIBRARY_UNITS_})
+set(stringzilla_shim_sources_ c/stringzilla.c)
+foreach (unit_ IN LISTS stringzilla_globbed_units_)
+    if (NOT unit_ STREQUAL "c/target/metal.c")
+        list(APPEND stringzilla_shim_sources_ ${unit_})
+    endif ()
+endforeach ()
 
 # Defines `stringzilla_shared` or `stringzilla_static` over the sources that follow.
-function (define_stringzilla_library target public_name library_type)
-    add_library(${target} ${library_type} ${ARGN})
+function (stringzilla_add_library target_ public_name_ library_type_)
+    add_library(${target_} ${library_type_} ${ARGN})
 
     # The library, unlike the headers, may use C11: `c/stringzilla.c` caches detection in a <stdatomic.h> atomic, which
     # MSVC gates behind a flag.
-    set_target_properties(${target} PROPERTIES C_STANDARD 11)
-    target_compile_options(${target} PRIVATE $<$<COMPILE_LANG_AND_ID:C,MSVC>:/experimental:c11atomics>)
+    set_target_properties(${target_} PROPERTIES C_STANDARD 11)
+    target_compile_options(${target_} PRIVATE $<$<COMPILE_LANG_AND_ID:C,MSVC>:/experimental:c11atomics>)
 
     # The dispatch units share the private `c/dispatch.h`.
-    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/c)
+    target_include_directories(${target_} PRIVATE ${PROJECT_SOURCE_DIR}/c)
 
     # Only `STRINGZILLA_API` functions leave the library; Windows exports every symbol, as it spells no `__declspec`.
     set_target_properties(
-        ${target}
+        ${target_}
         PROPERTIES C_VISIBILITY_PRESET hidden
                    CXX_VISIBILITY_PRESET hidden
                    CUDA_VISIBILITY_PRESET hidden
@@ -426,42 +430,42 @@ function (define_stringzilla_library target public_name library_type)
     )
 
     # `stringzilla_shared` is published as `stringzilla::shared`, in-tree and installed alike.
-    add_library(${PROJECT_NAME}::${public_name} ALIAS ${target})
-    set_target_properties(${target} PROPERTIES EXPORT_NAME ${public_name})
+    add_library(${PROJECT_NAME}::${public_name_} ALIAS ${target_})
+    set_target_properties(${target_} PROPERTIES EXPORT_NAME ${public_name_})
 
     # `SOVERSION` carries the major alone - the only break the C ABI admits - so it tracks the project rather than
     # sitting at a literal that stopped matching four majors ago.
     set_target_properties(
-        ${target}
+        ${target_}
         PROPERTIES VERSION ${PROJECT_VERSION}
                    SOVERSION ${PROJECT_VERSION_MAJOR}
                    POSITION_INDEPENDENT_CODE ON
     )
 
     # Set the baseline architecture; the dispatch points pick each SIMD capability by the mask each call passes.
-    set_baseline_architecture_flags(${target})
+    stringzilla_set_baseline_architecture_flags(${target_})
 
     # Enable every capability the toolchain can compile; `sz_capabilities_enabled_cpu` masks what the CPU lacks.
-    set_architecture_simd_definitions(${target})
+    stringzilla_set_architecture_simd_definitions(${target_})
 
 endfunction ()
 
 # The dispatch core as an archive, which the tests, the benchmarks, and the Go and Python bindings link - the
 # cross-compiled test runs are `-static` executables, which cannot take a `.so` at all - and as a shared library. A
 # parent project builds the archive only if it links it.
-define_stringzilla_library(stringzilla_static static STATIC ${STRINGZILLA_SHIM_SOURCES})
+stringzilla_add_library(stringzilla_static static STATIC ${stringzilla_shim_sources_})
 if (NOT STRINGZILLA_IS_MAIN_PROJECT)
     set_target_properties(stringzilla_static PROPERTIES EXCLUDE_FROM_ALL ON)
 endif ()
 if (STRINGZILLA_BUILD_SHARED)
-    define_stringzilla_library(stringzilla_shared shared SHARED ${STRINGZILLA_SHIM_SOURCES})
-    set(STRINGZILLA_LIBRARIES_ stringzilla_static stringzilla_shared)
+    stringzilla_add_library(stringzilla_shared shared SHARED ${stringzilla_shim_sources_})
+    set(stringzilla_libraries_ stringzilla_static stringzilla_shared)
 else ()
-    set(STRINGZILLA_LIBRARIES_ stringzilla_static)
+    set(stringzilla_libraries_ stringzilla_static)
 endif ()
 
-foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
-    target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${STRINGZILLA_WITH_LIBC_}")
+foreach (library_ IN LISTS stringzilla_libraries_)
+    target_compile_definitions(${library_} PRIVATE "STRINGZILLA_WITH_LIBC=${stringzilla_with_libc_}")
     target_include_directories(
         ${library_} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -479,21 +483,21 @@ foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
 
     # MSVC ARM64: <intrin.h> pulls in <winnt.h>, which needs `_ARM64_`, and the Visual Studio generator scikit-build-core
     # picks leaves it undefined for C targets. Public, so the binding units that include the headers see it too.
-    if (MSVC AND STRINGZILLA_ARCH_ARM64_)
+    if (MSVC AND stringzilla_arch_arm64_)
         target_compile_definitions(${library_} PUBLIC _ARM64_)
     endif ()
 endforeach ()
 
-# Adds one GPU unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled for `codes` alone,
+# Adds one GPU unit, like `c/target/cuda.cu`, to the archive and the shared library: compiled for `codes_` alone,
 # without the CPU capabilities and with the GPU ones the build's codes run, and linked with the runtime libraries that
-# follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition`,
+# follow. A unit without codes to compile is skipped. Both the unit and the libraries' host units see `definition_`,
 # so the dispatch lists name the unit's kernels.
-function (sz_add_gpu_unit_ source codes definition)
-    if (NOT codes)
+function (stringzilla_add_gpu_unit source_ codes_ definition_)
+    if (NOT codes_)
         return()
     endif ()
-    get_filename_component(unit_ "${source}" NAME_WE)
-    add_library(stringzilla_${unit_}_ OBJECT ${source})
+    get_filename_component(unit_ "${source_}" NAME_WE)
+    add_library(stringzilla_${unit_}_ OBJECT ${source_})
     target_include_directories(stringzilla_${unit_}_ PRIVATE ${PROJECT_SOURCE_DIR}/include ${PROJECT_SOURCE_DIR}/c)
     set_target_properties(
         stringzilla_${unit_}_
@@ -504,18 +508,18 @@ function (sz_add_gpu_unit_ source codes definition)
                    CUDA_STANDARD 20
                    HIP_STANDARD 20
                    CUDA_SEPARABLE_COMPILATION OFF
-                   CUDA_ARCHITECTURES "${codes}"
-                   HIP_ARCHITECTURES "${codes}"
+                   CUDA_ARCHITECTURES "${codes_}"
+                   HIP_ARCHITECTURES "${codes_}"
     )
-    set_compiler_flags(stringzilla_${unit_}_ "" "")
-    target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition}")
+    stringzilla_set_compiler_flags(stringzilla_${unit_}_ "" "")
+    target_compile_definitions(stringzilla_${unit_}_ PRIVATE "STRINGZILLA_WITH_LIBC=1" "${definition_}")
     target_link_libraries(
         stringzilla_${unit_}_ PRIVATE stringzilla_cpu_capabilities_disabled_ stringzilla_cuda_capabilities_compiled_
                                       ${ARGN}
     )
-    foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
+    foreach (library_ IN LISTS stringzilla_libraries_)
         target_sources(${library_} PRIVATE $<TARGET_OBJECTS:stringzilla_${unit_}_>)
-        target_compile_definitions(${library_} PRIVATE "${definition}")
+        target_compile_definitions(${library_} PRIVATE "${definition_}")
         target_link_libraries(
             ${library_}
             PRIVATE $<BUILD_INTERFACE:stringzilla_cuda_capabilities_compiled_>
@@ -526,31 +530,35 @@ endfunction ()
 
 if (STRINGZILLA_BUILD_CUDA)
     # One unit per tier, compiled only for the codes running it, so no cubin carries another tier's kernels.
-    sz_gpu_codes_(
-        "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "${sz_target_hopper_architectures}"
-        STRINGZILLA_HOPPER_UNIT_CODES_
+    stringzilla_select_gpu_codes(
+        stringzilla_hopper_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
+        "${sz_target_hopper_architectures}"
     )
-    sz_gpu_codes_(
-        "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "${sz_target_blackwell_architectures}"
-        STRINGZILLA_BLACKWELL_UNIT_CODES_
+    stringzilla_select_gpu_codes(
+        stringzilla_blackwell_unit_codes_ "${stringzilla_cuda_resolved_architectures_}"
+        "${sz_target_blackwell_architectures}"
     )
-    sz_add_gpu_unit_(
-        c/target/cuda.cu "${STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    stringzilla_add_gpu_unit(
+        c/target/cuda.cu "${stringzilla_cuda_resolved_architectures_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
-    sz_add_gpu_unit_(c/target/hopper.cu "${STRINGZILLA_HOPPER_UNIT_CODES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart)
-    sz_add_gpu_unit_(
-        c/target/blackwell.cu "${STRINGZILLA_BLACKWELL_UNIT_CODES_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    stringzilla_add_gpu_unit(
+        c/target/hopper.cu "${stringzilla_hopper_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
+    )
+    stringzilla_add_gpu_unit(
+        c/target/blackwell.cu "${stringzilla_blackwell_unit_codes_}" "STRINGZILLA_ARCH_CUDA_=1" CUDA::cudart
     )
 endif ()
 if (STRINGZILLA_BUILD_ROCM)
-    sz_add_gpu_unit_(c/target/rocm.hip "${STRINGZILLA_ROCM_ARCHITECTURES}" "STRINGZILLA_ARCH_ROCM_=1" hip::host)
+    stringzilla_add_gpu_unit(c/target/rocm.hip "${STRINGZILLA_ROCM_ARCHITECTURES}" "STRINGZILLA_ARCH_ROCM_=1" hip::host)
 endif ()
 if (STRINGZILLA_BUILD_METAL)
     # Metal compiles on the device, so its one code names the family the baseline needs.
-    sz_add_gpu_unit_(c/target/metal.c "apple7" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal" "-framework Foundation")
-    target_compile_options(stringzilla_metal_ PRIVATE ${STRINGZILLA_EMBED_OPTIONS_})
-    foreach (library_ IN LISTS STRINGZILLA_LIBRARIES_)
-        target_compile_options(${library_} PUBLIC ${STRINGZILLA_EMBED_OPTIONS_})
+    stringzilla_add_gpu_unit(
+        c/target/metal.c "apple7" "STRINGZILLA_ARCH_METAL_=1" "-framework Metal" "-framework Foundation"
+    )
+    target_compile_options(stringzilla_metal_ PRIVATE ${stringzilla_embed_options_})
+    foreach (library_ IN LISTS stringzilla_libraries_)
+        target_compile_options(${library_} PUBLIC ${stringzilla_embed_options_})
     endforeach ()
 endif ()
 
@@ -611,8 +619,9 @@ if (STRINGZILLA_BUILD_PYTHON)
     )
 endif ()
 
-# The `stringzilla.node` addon, which cmake-js builds from `package.json`. It stays off `set_compiler_flags`, whose output
-# directories would move the Windows addon and whose `-Werror` and sanitizers belong to the tests.
+# The `stringzilla.node` addon, which cmake-js builds from `package.json`. It stays off
+# `stringzilla_set_compiler_flags`, whose output directories would move the Windows addon and whose `-Werror` and
+# sanitizers belong to the tests.
 if (STRINGZILLA_BUILD_NODE)
     if (NOT CMAKE_JS_INC)
         message(FATAL_ERROR "The Node addon is built by cmake-js, which supplies the headers and import library")
@@ -646,44 +655,44 @@ if (STRINGZILLA_BUILD_SWIFT)
     )
     if (APPLE)
         # The SDK names the XCFramework library an archive joins, and Mac Catalyst builds with the macOS one.
-        get_filename_component(STRINGZILLA_SWIFT_SDK_ "${CMAKE_OSX_SYSROOT}" NAME)
-        string(TOLOWER "${STRINGZILLA_SWIFT_SDK_}" STRINGZILLA_SWIFT_SDK_)
-        string(REGEX REPLACE "[0-9.]*\\.sdk$" "" STRINGZILLA_SWIFT_SDK_ "${STRINGZILLA_SWIFT_SDK_}")
+        get_filename_component(stringzilla_swift_sysroot_name_ "${CMAKE_OSX_SYSROOT}" NAME)
+        string(TOLOWER "${stringzilla_swift_sysroot_name_}" stringzilla_swift_sysroot_lowercase_)
+        string(REGEX REPLACE "[0-9.]*\\.sdk$" "" stringzilla_swift_sdk_ "${stringzilla_swift_sysroot_lowercase_}")
         if (CMAKE_C_FLAGS MATCHES "-macabi")
-            set(STRINGZILLA_SWIFT_SDK_ maccatalyst)
-        elseif (NOT STRINGZILLA_SWIFT_SDK_)
-            set(STRINGZILLA_SWIFT_SDK_ macosx)
+            set(stringzilla_swift_sdk_ maccatalyst)
+        elseif (NOT stringzilla_swift_sdk_)
+            set(stringzilla_swift_sdk_ macosx)
         endif ()
-        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_SDK=${STRINGZILLA_SWIFT_SDK_}" -D
+        set(stringzilla_swift_target_ -D "STRINGZILLA_SWIFT_SDK=${stringzilla_swift_sdk_}" -D
                                       "STRINGZILLA_SWIFT_ARCHITECTURE=${CMAKE_SYSTEM_PROCESSOR}"
         )
     else ()
         # SwiftPM matches a variant by the exact triple it builds for, spelled as Swift spells it.
-        if (STRINGZILLA_ARCH_X8664_)
-            set(STRINGZILLA_SWIFT_ARCH_ x86_64)
-        elseif (STRINGZILLA_ARCH_ARM64_)
-            set(STRINGZILLA_SWIFT_ARCH_ aarch64)
+        if (stringzilla_arch_x8664_)
+            set(stringzilla_swift_arch_ x86_64)
+        elseif (stringzilla_arch_arm64_)
+            set(stringzilla_swift_arch_ aarch64)
         else ()
-            set(STRINGZILLA_SWIFT_ARCH_ "${CMAKE_SYSTEM_PROCESSOR}")
+            set(stringzilla_swift_arch_ "${CMAKE_SYSTEM_PROCESSOR}")
         endif ()
-        set(STRINGZILLA_SWIFT_TRIPLE_)
+        set(stringzilla_swift_triple_)
         if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            set(STRINGZILLA_SWIFT_TRIPLE_ "${STRINGZILLA_SWIFT_ARCH_}-unknown-linux-gnu")
+            set(stringzilla_swift_triple_ "${stringzilla_swift_arch_}-unknown-linux-gnu")
         elseif (CMAKE_SYSTEM_NAME STREQUAL "Android")
-            set(STRINGZILLA_SWIFT_TRIPLE_ "${STRINGZILLA_SWIFT_ARCH_}-unknown-linux-android${ANDROID_NATIVE_API_LEVEL}")
+            set(stringzilla_swift_triple_ "${stringzilla_swift_arch_}-unknown-linux-android${ANDROID_NATIVE_API_LEVEL}")
         elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-            set(STRINGZILLA_SWIFT_TRIPLE_ "${STRINGZILLA_SWIFT_ARCH_}-unknown-windows-msvc")
+            set(stringzilla_swift_triple_ "${stringzilla_swift_arch_}-unknown-windows-msvc")
         elseif (CMAKE_SYSTEM_NAME STREQUAL "WASI")
-            set(STRINGZILLA_SWIFT_TRIPLE_ "wasm32-unknown-wasip1")
+            set(stringzilla_swift_triple_ "wasm32-unknown-wasip1")
         endif ()
         set(STRINGZILLA_SWIFT_TRIPLES
-            "${STRINGZILLA_SWIFT_TRIPLE_}"
+            "${stringzilla_swift_triple_}"
             CACHE STRING "Swift target triples the artifact bundle serves"
         )
         if (NOT STRINGZILLA_SWIFT_TRIPLES)
             message(FATAL_ERROR "STRINGZILLA_BUILD_SWIFT needs STRINGZILLA_SWIFT_TRIPLES on ${CMAKE_SYSTEM_NAME}")
         endif ()
-        set(STRINGZILLA_SWIFT_TARGET_ -D "STRINGZILLA_SWIFT_TRIPLES=$<JOIN:${STRINGZILLA_SWIFT_TRIPLES},,>" -D
+        set(stringzilla_swift_target_ -D "STRINGZILLA_SWIFT_TRIPLES=$<JOIN:${STRINGZILLA_SWIFT_TRIPLES},,>" -D
                                       "STRINGZILLA_SWIFT_VERSION=${PROJECT_VERSION}"
         )
     endif ()
@@ -692,7 +701,7 @@ if (STRINGZILLA_BUILD_SWIFT)
         COMMAND
             "${CMAKE_COMMAND}" -D "STRINGZILLA_SWIFT_ARCHIVE=$<TARGET_FILE:stringzilla_static>" -D
             "STRINGZILLA_SWIFT_HEADERS=${PROJECT_SOURCE_DIR}/include" -D
-            "STRINGZILLA_SWIFT_DIRECTORY=${STRINGZILLA_SWIFT_DIRECTORY}" ${STRINGZILLA_SWIFT_TARGET_} -P
+            "STRINGZILLA_SWIFT_DIRECTORY=${STRINGZILLA_SWIFT_DIRECTORY}" ${stringzilla_swift_target_} -P
             "${PROJECT_SOURCE_DIR}/cmake/sz_swift_artifact.cmake"
         DEPENDS stringzilla_static
         VERBATIM
@@ -703,7 +712,7 @@ endif ()
 if (STRINGZILLA_BUILD_BENCH)
     # The family files time the dispatch points against the standard baselines, and each `cross_<arch>.cpp` times its
     # architecture's kernels by name, one section per capability, against the serial ones.
-    set(STRINGZILLA_CROSS_BENCH_SOURCES_
+    set(stringzilla_cross_bench_sources_
         bench/cross_serial.cpp
         bench/cross_x8664.cpp
         bench/cross_arm64.cpp
@@ -712,7 +721,7 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/cross_ppc64.cpp
         bench/cross_wasm.cpp
     )
-    set(STRINGZILLA_CPU_BENCH_SOURCES_
+    set(stringzilla_cpu_bench_sources_
         bench/main.cpp
         bench/find.cpp
         bench/token.cpp
@@ -730,13 +739,13 @@ if (STRINGZILLA_BUILD_BENCH)
         bench/utf8_segment.cpp
         bench/utf8_norm.cpp
         bench/utf8_uncased.cpp
-        ${STRINGZILLA_CROSS_BENCH_SOURCES_}
+        ${stringzilla_cross_bench_sources_}
     )
-    define_cpu_launcher(stringzilla_bench stringzilla_static COMPILE ${STRINGZILLA_CPU_BENCH_SOURCES_})
+    stringzilla_add_cpu_launcher(stringzilla_bench stringzilla_static COMPILE ${stringzilla_cpu_bench_sources_})
     # Header-only builds have no dispatch points to time, but their kernels compile inline, which also reaches the
     # private helpers the library keeps to itself, like the SIMD sorts of pgrams.
-    define_cpu_launcher(
-        stringzilla_cpu_header_bench stringzilla_header COMPILE bench/main.cpp ${STRINGZILLA_CROSS_BENCH_SOURCES_}
+    stringzilla_add_cpu_launcher(
+        stringzilla_cpu_header_bench stringzilla_header COMPILE bench/main.cpp ${stringzilla_cross_bench_sources_}
     )
 
 endif ()
@@ -744,7 +753,7 @@ endif ()
 if (STRINGZILLA_BUILD_TEST)
     # The family files test the dispatch points and `stringzilla.hpp`, and each `cross_<arch>.cpp` holds its
     # architecture's kernels to the serial ones, a section per capability, skipping those this CPU lacks.
-    set(STRINGZILLA_CROSS_TEST_SOURCES_
+    set(stringzilla_cross_test_sources_
         test/cross_serial.cpp
         test/cross_x8664.cpp
         test/cross_arm64.cpp
@@ -753,7 +762,7 @@ if (STRINGZILLA_BUILD_TEST)
         test/cross_ppc64.cpp
         test/cross_wasm.cpp
     )
-    set(STRINGZILLA_CPU_TEST_SOURCES_
+    set(stringzilla_cpu_test_sources_
         test/main_cpu.cpp
         test/hash.cpp
         test/cipher.cpp
@@ -773,56 +782,55 @@ if (STRINGZILLA_BUILD_TEST)
         test/utf8_linebreaks.cpp
         test/utf8_norm.cpp
         test/utf8_uncased.cpp
-        ${STRINGZILLA_CROSS_TEST_SOURCES_}
+        ${stringzilla_cross_test_sources_}
     )
 
-    define_cpu_launcher(stringzilla_test stringzilla_static COMPILE ${STRINGZILLA_CPU_TEST_SOURCES_})
+    stringzilla_add_cpu_launcher(stringzilla_test stringzilla_static COMPILE ${stringzilla_cpu_test_sources_})
     add_test(NAME stringzilla_test COMMAND stringzilla_test)
     # Cross builds link their executables statically, to run them under an emulator without the target's loader.
     if (TARGET stringzilla_shared AND NOT CMAKE_CROSSCOMPILING)
-        define_cpu_launcher(stringzilla_shared_test stringzilla_shared SERIAL ${STRINGZILLA_CPU_TEST_SOURCES_})
+        stringzilla_add_cpu_launcher(stringzilla_shared_test stringzilla_shared SERIAL ${stringzilla_cpu_test_sources_})
         add_test(NAME stringzilla_shared_test COMMAND stringzilla_shared_test)
     endif ()
     # The family files drive `stringzilla.hpp`, which always goes through the library, so the header-only test keeps
     # the kernel cross-checks and the dispatch-point stubs.
-    define_cpu_launcher(
-        stringzilla_cpu_header_test stringzilla_header COMPILE test/main_cpu.cpp ${STRINGZILLA_CROSS_TEST_SOURCES_}
+    stringzilla_add_cpu_launcher(
+        stringzilla_cpu_header_test stringzilla_header COMPILE test/main_cpu.cpp ${stringzilla_cross_test_sources_}
     )
     add_test(NAME stringzilla_cpu_header_test COMMAND stringzilla_cpu_header_test)
 
 endif ()
 
-foreach (suite bench test)
-    string(TOUPPER "${suite}" suite_upper_)
-    if (NOT STRINGZILLA_BUILD_${suite_upper_})
+foreach (suite_ bench test)
+    if (NOT TARGET stringzilla_${suite_})
         continue()
     endif ()
-    foreach (vendor cuda rocm metal)
+    foreach (vendor_ cuda rocm metal)
         set(language_ CXX)
-        if (vendor STREQUAL "cuda")
-            set(source_ "${suite}/cross_cuda.cu")
+        if (vendor_ STREQUAL "cuda")
+            set(source_ "${suite_}/cross_cuda.cu")
             if (STRINGZILLA_BUILD_CUDA)
                 set(language_ CUDA)
             else ()
                 set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
             endif ()
-        elseif (vendor STREQUAL "rocm")
-            set(source_ "${suite}/cross_rocm.hip")
+        elseif (vendor_ STREQUAL "rocm")
+            set(source_ "${suite_}/cross_rocm.hip")
             if (STRINGZILLA_BUILD_ROCM)
                 set(language_ HIP)
             else ()
                 set_source_files_properties(${source_} PROPERTIES LANGUAGE CXX)
             endif ()
         else ()
-            set(source_ "${suite}/cross_metal.cpp")
+            set(source_ "${suite_}/cross_metal.cpp")
         endif ()
-        set(unit_ "stringzilla_${vendor}_${suite}_")
-        define_gpu_suite(${unit_} ${language_} ${source_})
-        if (vendor STREQUAL "metal" AND STRINGZILLA_BUILD_METAL)
+        set(unit_ "stringzilla_${vendor_}_${suite_}_")
+        stringzilla_add_gpu_suite(${unit_} ${language_} ${source_})
+        if (vendor_ STREQUAL "metal" AND STRINGZILLA_BUILD_METAL)
             target_compile_definitions(${unit_} PRIVATE STRINGZILLA_ARCH_METAL_=1)
         endif ()
-        target_sources(stringzilla_${suite} PRIVATE $<TARGET_OBJECTS:${unit_}>)
-        if (suite STREQUAL "test" AND TARGET stringzilla_shared_test)
+        target_sources(stringzilla_${suite_} PRIVATE $<TARGET_OBJECTS:${unit_}>)
+        if (suite_ STREQUAL "test" AND TARGET stringzilla_shared_test)
             target_sources(stringzilla_shared_test PRIVATE $<TARGET_OBJECTS:${unit_}>)
         endif ()
     endforeach ()
@@ -863,8 +871,8 @@ if (STRINGZILLA_INSTALL)
     # SwiftPM reads `module.modulemap` from the XCFramework or artifact bundle `stringzilla_swift` packs. At an installed
     # include root it is a hazard: Clang treats whichever one it finds there as authoritative for the whole prefix.
     install(
-        DIRECTORY ${STRINGZILLA_INCLUDE_BUILD_DIR}
-        DESTINATION ${STRINGZILLA_INCLUDE_INSTALL_DIR}
+        DIRECTORY ${stringzilla_include_build_dir_}
+        DESTINATION ${stringzilla_include_install_dir_}
         PATTERN "module.modulemap" EXCLUDE
     )
     install(DIRECTORY c/ DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/src)
@@ -874,19 +882,21 @@ if (STRINGZILLA_INSTALL)
     # forced an absolute one, and only the former may follow a prefix. No `Libs.private`: the shared library is C and
     # links nothing but libc, so a static caller inherits no closure to name.
     if (TARGET stringzilla_shared)
-        file(RELATIVE_PATH STRINGZILLA_PC_PREFIX "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
-        string(REGEX REPLACE "/+$" "" STRINGZILLA_PC_PREFIX "${STRINGZILLA_PC_PREFIX}")
-        set(STRINGZILLA_PC_PREFIX "\${pcfiledir}/${STRINGZILLA_PC_PREFIX}")
+        file(RELATIVE_PATH stringzilla_pc_relative_prefix_ "${CMAKE_INSTALL_FULL_LIBDIR}/pkgconfig"
+             "${CMAKE_INSTALL_PREFIX}"
+        )
+        string(REGEX REPLACE "/+$" "" stringzilla_pc_trimmed_prefix_ "${stringzilla_pc_relative_prefix_}")
+        set(stringzilla_pc_prefix_ "\${pcfiledir}/${stringzilla_pc_trimmed_prefix_}")
 
         if (IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
-            set(STRINGZILLA_PC_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+            set(stringzilla_pc_libdir_ "${CMAKE_INSTALL_LIBDIR}")
         else ()
-            set(STRINGZILLA_PC_LIBDIR "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
+            set(stringzilla_pc_libdir_ "\${exec_prefix}/${CMAKE_INSTALL_LIBDIR}")
         endif ()
         if (IS_ABSOLUTE "${CMAKE_INSTALL_INCLUDEDIR}")
-            set(STRINGZILLA_PC_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}")
+            set(stringzilla_pc_includedir_ "${CMAKE_INSTALL_INCLUDEDIR}")
         else ()
-            set(STRINGZILLA_PC_INCLUDEDIR "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
+            set(stringzilla_pc_includedir_ "\${prefix}/${CMAKE_INSTALL_INCLUDEDIR}")
         endif ()
 
         configure_file(cmake/stringzilla.pc.in "${CMAKE_CURRENT_BINARY_DIR}/stringzilla.pc" @ONLY)

@@ -14,39 +14,39 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR riscv64)
 
-set(STRINGZILLA_TRIPLE riscv64-linux-gnu)
-set(STRINGZILLA_SYSROOT /usr/${STRINGZILLA_TRIPLE})
-set(STRINGZILLA_GCC_LIBDIR /usr/lib/gcc-cross/${STRINGZILLA_TRIPLE}/14)
+set(stringzilla_triple_ riscv64-linux-gnu)
+set(stringzilla_sysroot_ /usr/${stringzilla_triple_})
+set(stringzilla_gcc_library_directory_ /usr/lib/gcc-cross/${stringzilla_triple_}/14)
 
 set(CMAKE_C_COMPILER clang-23)
 set(CMAKE_CXX_COMPILER clang++-23)
 
-set(STRINGZILLA_TARGET_FLAGS
-    "--target=${STRINGZILLA_TRIPLE} --sysroot=${STRINGZILLA_SYSROOT} --gcc-toolchain=/usr -march=rv64gc"
+set(stringzilla_target_flags_
+    "--target=${stringzilla_triple_} --sysroot=${stringzilla_sysroot_} --gcc-toolchain=/usr -march=rv64gc"
 )
 
-set(CMAKE_C_FLAGS_INIT "${STRINGZILLA_TARGET_FLAGS}")
-set(CMAKE_CXX_FLAGS_INIT "${STRINGZILLA_TARGET_FLAGS} -stdlib=libstdc++")
+set(CMAKE_C_FLAGS_INIT "${stringzilla_target_flags_}")
+set(CMAKE_CXX_FLAGS_INIT "${stringzilla_target_flags_} -stdlib=libstdc++")
 
 # Static linking sidesteps qemu/dynamic-loader/sysroot headaches. We still must point clang at the cross libstdc++ and
 # pull it in explicitly, because clang drives the GNU linker directly and does not add `-lstdc++` on its own.
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -stdlib=libstdc++ -L${STRINGZILLA_GCC_LIBDIR} -lstdc++ -lm")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -stdlib=libstdc++ -L${stringzilla_gcc_library_directory_} -lstdc++ -lm")
 
 if (DEFINED ENV{RISCV_QEMU_CPU})
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "$ENV{RISCV_QEMU_CPU}")
+    set(stringzilla_qemu_cpu_default_ "$ENV{RISCV_QEMU_CPU}")
 else ()
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "max")
+    set(stringzilla_qemu_cpu_default_ "max")
 endif ()
 set(RISCV_QEMU_CPU
-    "${STRINGZILLA_QEMU_CPU_DEFAULT_}"
+    "${stringzilla_qemu_cpu_default_}"
     CACHE STRING "CPU model for `qemu-riscv64 -cpu`"
 )
 # Nested try-compile projects reread this file and inherit the environment, not the cache.
 set(ENV{RISCV_QEMU_CPU} "${RISCV_QEMU_CPU}")
-set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-riscv64-static;-cpu;${RISCV_QEMU_CPU};-L;${STRINGZILLA_SYSROOT}")
+set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-riscv64-static;-cpu;${RISCV_QEMU_CPU};-L;${stringzilla_sysroot_}")
 
 # Look for headers/libraries inside the target sysroot, host tools on the host.
-set(CMAKE_FIND_ROOT_PATH ${STRINGZILLA_SYSROOT})
+set(CMAKE_FIND_ROOT_PATH ${stringzilla_sysroot_})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

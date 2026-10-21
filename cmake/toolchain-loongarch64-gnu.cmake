@@ -15,30 +15,30 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR loongarch64)
 
-set(STRINGZILLA_TRIPLE loongarch64-linux-gnu)
-set(STRINGZILLA_SYSROOT /usr/${STRINGZILLA_TRIPLE})
+set(stringzilla_triple_ loongarch64-linux-gnu)
+set(stringzilla_sysroot_ /usr/${stringzilla_triple_})
 
-set(CMAKE_C_COMPILER ${STRINGZILLA_TRIPLE}-gcc-15)
-set(CMAKE_CXX_COMPILER ${STRINGZILLA_TRIPLE}-g++-15)
+set(CMAKE_C_COMPILER ${stringzilla_triple_}-gcc-15)
+set(CMAKE_CXX_COMPILER ${stringzilla_triple_}-g++-15)
 
 set(CMAKE_C_FLAGS_INIT "-march=loongarch64")
 set(CMAKE_CXX_FLAGS_INIT "-march=loongarch64")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
 
 if (DEFINED ENV{LOONGARCH_QEMU_CPU})
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "$ENV{LOONGARCH_QEMU_CPU}")
+    set(stringzilla_qemu_cpu_default_ "$ENV{LOONGARCH_QEMU_CPU}")
 else ()
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "la464")
+    set(stringzilla_qemu_cpu_default_ "la464")
 endif ()
 set(LOONGARCH_QEMU_CPU
-    "${STRINGZILLA_QEMU_CPU_DEFAULT_}"
+    "${stringzilla_qemu_cpu_default_}"
     CACHE STRING "CPU model for `qemu-loongarch64 -cpu`"
 )
 # Nested try-compile projects reread this file and inherit the environment, not the cache.
 set(ENV{LOONGARCH_QEMU_CPU} "${LOONGARCH_QEMU_CPU}")
-set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-loongarch64;-cpu;${LOONGARCH_QEMU_CPU};-L;${STRINGZILLA_SYSROOT}")
+set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-loongarch64;-cpu;${LOONGARCH_QEMU_CPU};-L;${stringzilla_sysroot_}")
 
-set(CMAKE_FIND_ROOT_PATH ${STRINGZILLA_SYSROOT})
+set(CMAKE_FIND_ROOT_PATH ${stringzilla_sysroot_})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

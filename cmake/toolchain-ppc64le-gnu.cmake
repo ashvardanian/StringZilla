@@ -13,30 +13,30 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR ppc64le)
 
-set(STRINGZILLA_TRIPLE powerpc64le-linux-gnu)
-set(STRINGZILLA_SYSROOT /usr/${STRINGZILLA_TRIPLE})
+set(stringzilla_triple_ powerpc64le-linux-gnu)
+set(stringzilla_sysroot_ /usr/${stringzilla_triple_})
 
-set(CMAKE_C_COMPILER ${STRINGZILLA_TRIPLE}-gcc-15)
-set(CMAKE_CXX_COMPILER ${STRINGZILLA_TRIPLE}-g++-15)
+set(CMAKE_C_COMPILER ${stringzilla_triple_}-gcc-15)
+set(CMAKE_CXX_COMPILER ${stringzilla_triple_}-g++-15)
 
 set(CMAKE_C_FLAGS_INIT "-mcpu=power8")
 set(CMAKE_CXX_FLAGS_INIT "-mcpu=power8")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
 
 if (DEFINED ENV{PPC_QEMU_CPU})
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "$ENV{PPC_QEMU_CPU}")
+    set(stringzilla_qemu_cpu_default_ "$ENV{PPC_QEMU_CPU}")
 else ()
-    set(STRINGZILLA_QEMU_CPU_DEFAULT_ "power10")
+    set(stringzilla_qemu_cpu_default_ "power10")
 endif ()
 set(PPC_QEMU_CPU
-    "${STRINGZILLA_QEMU_CPU_DEFAULT_}"
+    "${stringzilla_qemu_cpu_default_}"
     CACHE STRING "CPU model for `qemu-ppc64le -cpu`"
 )
 # Nested try-compile projects reread this file and inherit the environment, not the cache.
 set(ENV{PPC_QEMU_CPU} "${PPC_QEMU_CPU}")
-set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-ppc64le;-cpu;${PPC_QEMU_CPU};-L;${STRINGZILLA_SYSROOT}")
+set(CMAKE_CROSSCOMPILING_EMULATOR "qemu-ppc64le;-cpu;${PPC_QEMU_CPU};-L;${stringzilla_sysroot_}")
 
-set(CMAKE_FIND_ROOT_PATH ${STRINGZILLA_SYSROOT})
+set(CMAKE_FIND_ROOT_PATH ${stringzilla_sysroot_})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)

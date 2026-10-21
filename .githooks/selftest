@@ -1524,7 +1524,7 @@ FIXTURE
 # region Other Language Fixtures
 
 assert_rejects "CMake list mutation" "mutates a variable" CMakeLists.txt <<'FIXTURE'
-list(APPEND PROBE_SOURCES_ probe.c)
+list(APPEND probe_sources_ probe.c)
 FIXTURE
 
 assert_rejects "CMake manual RPATH" "builds an RPATH by hand" CMakeLists.txt <<'FIXTURE'
@@ -1533,7 +1533,7 @@ FIXTURE
 
 assert_accepts "CMake variable written once" CMakeLists.txt <<'FIXTURE'
 # A variable is written once; never list(APPEND ...) it.
-set(PROBE_SOURCES_ probe.c)
+set(probe_sources_ probe.c)
 FIXTURE
 
 assert_accepts "CMake foreach builds its list" CMakeLists.txt <<'FIXTURE'
@@ -1541,6 +1541,72 @@ set(probe_definitions_ "")
 foreach (probe_tier_ IN ITEMS haswell skylake)
     list(APPEND probe_definitions_ "PROBE_${probe_tier_}=1")
 endforeach ()
+FIXTURE
+
+assert_verbatim_rejects "CMake arguments parsed from ARGN" "other than through \`PARSE_ARGV" cmake/probe.cmake <<'FIXTURE'
+cmake_parse_arguments(probe "" "OUTPUT" "" ${ARGN})
+FIXTURE
+
+assert_verbatim_accepts "CMake arguments parsed through PARSE_ARGV" cmake/probe.cmake <<'FIXTURE'
+cmake_parse_arguments(
+    PARSE_ARGV 1 arg "" "OUTPUT" ""
+)
+FIXTURE
+
+assert_verbatim_rejects "CMake macro" "defines a \`macro()\`" cmake/probe.cmake <<'FIXTURE'
+macro(probe_sources)
+endmacro ()
+FIXTURE
+
+assert_verbatim_rejects "CMake function outside the project prefix" "names a function without" cmake/probe.cmake <<'FIXTURE'
+function(add_probe target_)
+endfunction ()
+FIXTURE
+
+assert_verbatim_accepts "CMake function under the project prefix, and prose naming a macro" cmake/probe.cmake <<FIXTURE
+# A macro() would leak its locals into the caller.
+function(${project_directory}_add_probe target_)
+endfunction ()
+FIXTURE
+
+assert_verbatim_rejects "CMake loop variable without its underscore" "names a loop variable" cmake/probe.cmake <<'FIXTURE'
+foreach (tier IN ITEMS haswell skylake)
+endforeach ()
+FIXTURE
+
+assert_verbatim_rejects "CMake lowercase local without its underscore" "sets a lowercase local" cmake/probe.cmake <<'FIXTURE'
+set(probe_sources probe.c)
+FIXTURE
+
+assert_verbatim_accepts "CMake lowercase cache entry" cmake/probe.cmake <<'FIXTURE'
+set(probe_target_haswell_compiles 1
+    CACHE INTERNAL "Whether the compiler targets Haswell"
+)
+FIXTURE
+
+assert_verbatim_rejects "CMake uppercase internal" "sets an uppercase name" cmake/probe.cmake <<'FIXTURE'
+set(PROBE_SOURCES probe.c)
+FIXTURE
+
+assert_verbatim_accepts "CMake variable of CMake's own and a sibling option" cmake/probe.cmake <<'FIXTURE'
+set(CMAKE_CXX_STANDARD 17)
+set(USEARCH_BUILD_TEST OFF)
+FIXTURE
+
+assert_verbatim_rejects "CMake forced cache entry" "forces a cache entry" cmake/probe.cmake <<'FIXTURE'
+set(PROBE_LEVEL 1 CACHE STRING "Probe level" FORCE)
+FIXTURE
+
+assert_verbatim_accepts "CMake cache entry written once" cmake/probe.cmake <<'FIXTURE'
+set(PROBE_LEVEL 1 CACHE STRING "Probe level")
+FIXTURE
+
+assert_verbatim_rejects "CMake double dereference" "reads a name through" cmake/probe.cmake <<'FIXTURE'
+set(probe_value_ "${${probe_name_}}")
+FIXTURE
+
+assert_verbatim_accepts "CMake result through an output parameter" cmake/probe.cmake <<'FIXTURE'
+set(${output_} "${probe_value_}" PARENT_SCOPE)
 FIXTURE
 
 assert_rejects "Go pseudo-heading" "pseudo-heading" golang/probe.go <<'FIXTURE'

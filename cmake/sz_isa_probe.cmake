@@ -1,7 +1,7 @@
 # cmake/sz_isa_probe.cmake — which CPU capabilities of the target architecture the toolchain compiles, and which GPU
 # capabilities the listed codes run
 #
-# One `sz_cpu_capability_` row per capability. Each probes `probes/<capability>.c` into the cached
+# One `stringzilla_add_cpu_capability` row per capability. Each probes `probes/<capability>.c` into the cached
 # `sz_target_<capability>_compiles`, caches the flags enabling the capability across a unit as
 # `sz_target_<capability>_flags`, and defines its `STRINGZILLA_TARGET_<CAPABILITY>` macro on the targets below.
 # `-D STRINGZILLA_TARGET_<CAPABILITY>=0` leaves a capability out.
@@ -24,12 +24,12 @@ add_library(stringzilla_cpu_capabilities_disabled_ INTERFACE)
 # `capability_macro_` from the verdict. `GCC_FLAGS`, or `MSVC_FLAGS` under MSVC, enable the capability across a whole
 # unit. The probe compiles without them, as the library does, the capability's target pragmas scoping it per
 # function; a capability this toolchain cannot scope that way stays off, and the serial kernels serve its calls.
-function (sz_cpu_capability_ capability_name_ capability_macro_)
-    cmake_parse_arguments(PARSE_ARGV 2 argument "" "" "GCC_FLAGS;MSVC_FLAGS")
+function (stringzilla_add_cpu_capability capability_name_ capability_macro_)
+    cmake_parse_arguments(PARSE_ARGV 2 arg "" "" "GCC_FLAGS;MSVC_FLAGS")
     if (MSVC)
-        set(unit_flags_ ${argument_MSVC_FLAGS})
+        set(unit_flags_ ${arg_MSVC_FLAGS})
     else ()
-        set(unit_flags_ ${argument_GCC_FLAGS})
+        set(unit_flags_ ${arg_GCC_FLAGS})
     endif ()
     set(sz_target_${capability_name_}_flags
         "${unit_flags_}"
@@ -57,15 +57,15 @@ endfunction ()
 # Flags are the union of each capability's target pragmas. LASX and POWER9 scope per function from GCC 15 on, which
 # opens `lasxintrin.h` and `altivec.h` inside their target regions; Clang never does, so its builds leave both off.
 # WebAssembly carries the one capability `STRINGZILLA_TARGET_ARCH` names, so it probes none.
-if (STRINGZILLA_ARCH_X8664_)
-    sz_cpu_capability_(westmere STRINGZILLA_TARGET_WESTMERE GCC_FLAGS -msse4.2 -maes -mpclmul -mbmi -mlzcnt)
-    sz_cpu_capability_(goldmont STRINGZILLA_TARGET_GOLDMONT GCC_FLAGS -msse3 -mssse3 -msse4.1 -msha)
-    sz_cpu_capability_(
+if (stringzilla_arch_x8664_)
+    stringzilla_add_cpu_capability(westmere STRINGZILLA_TARGET_WESTMERE GCC_FLAGS -msse4.2 -maes -mpclmul -mbmi -mlzcnt)
+    stringzilla_add_cpu_capability(goldmont STRINGZILLA_TARGET_GOLDMONT GCC_FLAGS -msse3 -mssse3 -msse4.1 -msha)
+    stringzilla_add_cpu_capability(
         haswell STRINGZILLA_TARGET_HASWELL
         GCC_FLAGS -mavx2 -mfma -mbmi -mbmi2 -mpopcnt -mlzcnt
         MSVC_FLAGS /arch:AVX2
     )
-    sz_cpu_capability_(
+    stringzilla_add_cpu_capability(
         skylake STRINGZILLA_TARGET_SKYLAKE
         GCC_FLAGS -mavx2
                   -mavx512f
@@ -79,7 +79,7 @@ if (STRINGZILLA_ARCH_X8664_)
                   -maes
         MSVC_FLAGS /arch:AVX512
     )
-    sz_cpu_capability_(
+    stringzilla_add_cpu_capability(
         icelake STRINGZILLA_TARGET_ICELAKE
         GCC_FLAGS -mavx2
                   -mavx512f
@@ -100,20 +100,22 @@ if (STRINGZILLA_ARCH_X8664_)
                   -msha
         MSVC_FLAGS /arch:AVX512
     )
-elseif (STRINGZILLA_ARCH_ARM64_)
-    sz_cpu_capability_(neon STRINGZILLA_TARGET_NEON GCC_FLAGS -march=armv8-a+simd)
-    sz_cpu_capability_(neonaes STRINGZILLA_TARGET_NEONAES GCC_FLAGS -march=armv8-a+simd+crypto+aes)
-    sz_cpu_capability_(neonsha STRINGZILLA_TARGET_NEONSHA GCC_FLAGS -march=armv8-a+simd+crypto+sha2)
-    sz_cpu_capability_(sve STRINGZILLA_TARGET_SVE GCC_FLAGS -march=armv8.2-a+sve)
-    sz_cpu_capability_(sve2 STRINGZILLA_TARGET_SVE2 GCC_FLAGS -march=armv8.2-a+sve+sve2)
-    sz_cpu_capability_(sve2aes STRINGZILLA_TARGET_SVE2AES GCC_FLAGS -march=armv8.2-a+sve+sve2+sve2-aes+crypto)
-elseif (STRINGZILLA_ARCH_RISCV64_)
-    sz_cpu_capability_(rvv STRINGZILLA_TARGET_RVV GCC_FLAGS -march=rv64gcv)
-    sz_cpu_capability_(rvvcrypto STRINGZILLA_TARGET_RVVCRYPTO GCC_FLAGS -march=rv64gcv_zvkned_zvknhb_zvkg)
-elseif (STRINGZILLA_ARCH_LOONGARCH64_)
-    sz_cpu_capability_(loongsonasx STRINGZILLA_TARGET_LOONGSONASX GCC_FLAGS -mlasx)
-elseif (STRINGZILLA_ARCH_PPC64_)
-    sz_cpu_capability_(powervsx STRINGZILLA_TARGET_POWERVSX GCC_FLAGS -mcpu=power9)
+elseif (stringzilla_arch_arm64_)
+    stringzilla_add_cpu_capability(neon STRINGZILLA_TARGET_NEON GCC_FLAGS -march=armv8-a+simd)
+    stringzilla_add_cpu_capability(neonaes STRINGZILLA_TARGET_NEONAES GCC_FLAGS -march=armv8-a+simd+crypto+aes)
+    stringzilla_add_cpu_capability(neonsha STRINGZILLA_TARGET_NEONSHA GCC_FLAGS -march=armv8-a+simd+crypto+sha2)
+    stringzilla_add_cpu_capability(sve STRINGZILLA_TARGET_SVE GCC_FLAGS -march=armv8.2-a+sve)
+    stringzilla_add_cpu_capability(sve2 STRINGZILLA_TARGET_SVE2 GCC_FLAGS -march=armv8.2-a+sve+sve2)
+    stringzilla_add_cpu_capability(
+        sve2aes STRINGZILLA_TARGET_SVE2AES GCC_FLAGS -march=armv8.2-a+sve+sve2+sve2-aes+crypto
+    )
+elseif (stringzilla_arch_riscv64_)
+    stringzilla_add_cpu_capability(rvv STRINGZILLA_TARGET_RVV GCC_FLAGS -march=rv64gcv)
+    stringzilla_add_cpu_capability(rvvcrypto STRINGZILLA_TARGET_RVVCRYPTO GCC_FLAGS -march=rv64gcv_zvkned_zvknhb_zvkg)
+elseif (stringzilla_arch_loongarch64_)
+    stringzilla_add_cpu_capability(loongsonasx STRINGZILLA_TARGET_LOONGSONASX GCC_FLAGS -mlasx)
+elseif (stringzilla_arch_ppc64_)
+    stringzilla_add_cpu_capability(powervsx STRINGZILLA_TARGET_POWERVSX GCC_FLAGS -mcpu=power9)
 endif ()
 
 # Linked by the GPU units, the libraries and the GPU suites: each CUDA capability's macro is 1 where some code the
@@ -122,17 +124,17 @@ add_library(stringzilla_cuda_capabilities_compiled_ INTERFACE)
 
 # One CUDA capability, named `capability_name_` in its cache variable: caches the `CUDA_ARCHITECTURES` running it as
 # `sz_target_<capability>_architectures`, the twin of a CPU capability's `sz_target_<capability>_flags`, and defines
-# `capability_macro_` from the codes in `STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_`.
-function (sz_gpu_capability_ capability_name_ capability_macro_)
-    cmake_parse_arguments(PARSE_ARGV 2 argument "" "" "CUDA_ARCHITECTURES")
+# `capability_macro_` from the codes in `stringzilla_cuda_resolved_architectures_`.
+function (stringzilla_add_gpu_capability capability_name_ capability_macro_)
+    cmake_parse_arguments(PARSE_ARGV 2 arg "" "" "CUDA_ARCHITECTURES")
     set(sz_target_${capability_name_}_architectures
-        "${argument_CUDA_ARCHITECTURES}"
+        "${arg_CUDA_ARCHITECTURES}"
         CACHE INTERNAL "Architectures running ${capability_macro_}"
     )
     set(capability_enabled_ FALSE)
-    foreach (code_ IN LISTS STRINGZILLA_CUDA_RESOLVED_ARCHITECTURES_)
+    foreach (code_ IN LISTS stringzilla_cuda_resolved_architectures_)
         string(REGEX REPLACE "-(real|virtual)$" "" architecture_ "${code_}")
-        if (architecture_ IN_LIST argument_CUDA_ARCHITECTURES)
+        if (architecture_ IN_LIST arg_CUDA_ARCHITECTURES)
             set(capability_enabled_ TRUE)
         endif ()
     endforeach ()
@@ -141,16 +143,17 @@ function (sz_gpu_capability_ capability_name_ capability_macro_)
     )
 endfunction ()
 
-# The entries of `codes` that `capability_codes` names, keeping CMake's "-real" and "-virtual" suffixes.
-function (sz_gpu_codes_ codes capability_codes output)
+# Sets `output_` to the entries of `codes_` that `capability_codes_` names, keeping CMake's "-real" and "-virtual"
+# suffixes.
+function (stringzilla_select_gpu_codes output_ codes_ capability_codes_)
     set(kept_)
-    foreach (code_ IN LISTS codes)
+    foreach (code_ IN LISTS codes_)
         string(REGEX REPLACE "-(real|virtual)$" "" architecture_ "${code_}")
-        if (architecture_ IN_LIST capability_codes)
+        if (architecture_ IN_LIST capability_codes_)
             list(APPEND kept_ "${code_}")
         endif ()
     endforeach ()
-    set(${output}
+    set(${output_}
         "${kept_}"
         PARENT_SCOPE
     )

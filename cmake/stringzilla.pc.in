@@ -1,7 +1,7 @@
-prefix=@STRINGZILLA_PC_PREFIX@
+prefix=@stringzilla_pc_prefix_@
 exec_prefix=${prefix}
-libdir=@STRINGZILLA_PC_LIBDIR@
-includedir=@STRINGZILLA_PC_INCLUDEDIR@
+libdir=@stringzilla_pc_libdir_@
+includedir=@stringzilla_pc_includedir_@
 
 Name: StringZilla
 Description: @PROJECT_DESCRIPTION@

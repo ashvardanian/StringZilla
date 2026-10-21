@@ -9,115 +9,115 @@
 #   STRINGZILLA_SWIFT_ARCHITECTURE  on Apple platforms, the archive's one architecture
 #   STRINGZILLA_SWIFT_TRIPLES       elsewhere, the comma-separated Swift triples the archive serves
 #   STRINGZILLA_SWIFT_VERSION       elsewhere, the library's version
-get_filename_component(archive_name "${STRINGZILLA_SWIFT_ARCHIVE}" NAME)
+get_filename_component(archive_name_ "${STRINGZILLA_SWIFT_ARCHIVE}" NAME)
 
 if (STRINGZILLA_SWIFT_SDK)
-    set(slices "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.slices")
-    file(MAKE_DIRECTORY "${slices}/${STRINGZILLA_SWIFT_SDK}/${STRINGZILLA_SWIFT_ARCHITECTURE}")
+    set(slices_ "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.slices")
+    file(MAKE_DIRECTORY "${slices_}/${STRINGZILLA_SWIFT_SDK}/${STRINGZILLA_SWIFT_ARCHITECTURE}")
     file(COPY_FILE "${STRINGZILLA_SWIFT_ARCHIVE}"
-         "${slices}/${STRINGZILLA_SWIFT_SDK}/${STRINGZILLA_SWIFT_ARCHITECTURE}/${archive_name}"
+         "${slices_}/${STRINGZILLA_SWIFT_SDK}/${STRINGZILLA_SWIFT_ARCHITECTURE}/${archive_name_}"
     )
 
-    set(libraries)
+    set(libraries_)
     file(
-        GLOB sdks
+        GLOB sdks_
         LIST_DIRECTORIES true
-        "${slices}/*"
+        "${slices_}/*"
     )
-    foreach (sdk IN LISTS sdks)
-        file(GLOB architectures "${sdk}/*/${archive_name}")
+    foreach (sdk_ IN LISTS sdks_)
+        file(GLOB architectures_ "${sdk_}/*/${archive_name_}")
         execute_process(
-            COMMAND lipo -create ${architectures} -output "${sdk}/${archive_name}" COMMAND_ERROR_IS_FATAL ANY
+            COMMAND lipo -create ${architectures_} -output "${sdk_}/${archive_name_}" COMMAND_ERROR_IS_FATAL ANY
         )
-        list(APPEND libraries -library "${sdk}/${archive_name}" -headers "${STRINGZILLA_SWIFT_HEADERS}")
+        list(APPEND libraries_ -library "${sdk_}/${archive_name_}" -headers "${STRINGZILLA_SWIFT_HEADERS}")
     endforeach ()
     file(REMOVE_RECURSE "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.xcframework")
     execute_process(
-        COMMAND xcodebuild -create-xcframework ${libraries} -output
+        COMMAND xcodebuild -create-xcframework ${libraries_} -output
                 "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.xcframework" COMMAND_ERROR_IS_FATAL ANY OUTPUT_QUIET
     )
     return()
 endif ()
 
 # One directory per variant, named by its first triple, beside one `include/` every variant shares.
-set(bundle "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.artifactbundle")
-string(REPLACE "," ";" triples "${STRINGZILLA_SWIFT_TRIPLES}")
-list(GET triples 0 variant)
-file(MAKE_DIRECTORY "${bundle}/${variant}")
-file(COPY_FILE "${STRINGZILLA_SWIFT_ARCHIVE}" "${bundle}/${variant}/${archive_name}")
-file(REMOVE_RECURSE "${bundle}/include")
-file(COPY "${STRINGZILLA_SWIFT_HEADERS}/" DESTINATION "${bundle}/include")
+set(bundle_ "${STRINGZILLA_SWIFT_DIRECTORY}/StringZillaC.artifactbundle")
+string(REPLACE "," ";" triples_ "${STRINGZILLA_SWIFT_TRIPLES}")
+list(GET triples_ 0 variant_)
+file(MAKE_DIRECTORY "${bundle_}/${variant_}")
+file(COPY_FILE "${STRINGZILLA_SWIFT_ARCHIVE}" "${bundle_}/${variant_}/${archive_name_}")
+file(REMOVE_RECURSE "${bundle_}/include")
+file(COPY "${STRINGZILLA_SWIFT_HEADERS}/" DESTINATION "${bundle_}/include")
 
-set(entry [[{"path": "", "supportedTriples": [], "staticLibraryMetadata": {"headerPaths": ["include"],
+set(entry_ [[{"path": "", "supportedTriples": [], "staticLibraryMetadata": {"headerPaths": ["include"],
     "moduleMapPath": "include/module.modulemap"}}]]
 )
-string(JSON entry SET "${entry}" path "\"${variant}/${archive_name}\"")
-foreach (triple IN LISTS triples)
-    string(JSON count LENGTH "${entry}" supportedTriples)
+string(JSON entry_ SET "${entry_}" path "\"${variant_}/${archive_name_}\"")
+foreach (triple_ IN LISTS triples_)
+    string(JSON count_ LENGTH "${entry_}" supportedTriples)
     string(
         JSON
-        entry
+        entry_
         SET
-        "${entry}"
+        "${entry_}"
         supportedTriples
-        ${count}
-        "\"${triple}\""
+        ${count_}
+        "\"${triple_}\""
     )
 endforeach ()
 
-if (EXISTS "${bundle}/info.json")
-    file(READ "${bundle}/info.json" info)
+if (EXISTS "${bundle_}/info.json")
+    file(READ "${bundle_}/info.json" info_)
 else ()
-    set(info [[{"schemaVersion": "1.0", "artifacts": {"StringZillaC": {"type": "staticLibrary", "variants": []}}}]])
+    set(info_ [[{"schemaVersion": "1.0", "artifacts": {"StringZillaC": {"type": "staticLibrary", "variants": []}}}]])
 endif ()
 string(
     JSON
-    info
+    info_
     SET
-    "${info}"
+    "${info_}"
     artifacts
     StringZillaC
     version
     "\"${STRINGZILLA_SWIFT_VERSION}\""
 )
 # A rebuild of the same variant replaces it.
-string(JSON count LENGTH "${info}" artifacts StringZillaC variants)
-while (count GREATER 0)
-    math(EXPR count "${count} - 1")
+string(JSON count_ LENGTH "${info_}" artifacts StringZillaC variants)
+while (count_ GREATER 0)
+    math(EXPR count_ "${count_} - 1")
     string(
         JSON
-        path
+        path_
         GET
-        "${info}"
+        "${info_}"
         artifacts
         StringZillaC
         variants
-        ${count}
+        ${count_}
         path
     )
-    if (path STREQUAL "${variant}/${archive_name}")
+    if (path_ STREQUAL "${variant_}/${archive_name_}")
         string(
             JSON
-            info
+            info_
             REMOVE
-            "${info}"
+            "${info_}"
             artifacts
             StringZillaC
             variants
-            ${count}
+            ${count_}
         )
     endif ()
 endwhile ()
-string(JSON count LENGTH "${info}" artifacts StringZillaC variants)
+string(JSON count_ LENGTH "${info_}" artifacts StringZillaC variants)
 string(
     JSON
-    info
+    info_
     SET
-    "${info}"
+    "${info_}"
     artifacts
     StringZillaC
     variants
-    ${count}
-    "${entry}"
+    ${count_}
+    "${entry_}"
 )
-file(WRITE "${bundle}/info.json" "${info}\n")
+file(WRITE "${bundle_}/info.json" "${info_}\n")
