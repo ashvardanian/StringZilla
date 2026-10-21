@@ -242,11 +242,25 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_powervsx(sz_cptr_t haystack, sz_size_t haysta
     return sz_rfind_serial(haystack, haystack_length, needle, needle_length);
 }
 
+/**
+ *  @brief Loads one 16-byte half of a `sz_byteset_t` for the `_u8s[c >> 3] & (1 << (c & 7))` lookup.
+ *
+ *  `sz_byteset_add_u8` sets bit `c & 63` of the native-endian word `_u64s[c >> 6]`, so that byte-wise
+ *  view only holds on little-endian. On big-endian, byte-reverse each 64-bit word once, outside the loop.
+ */
+SZ_HELPER_INLINE __vector unsigned char sz_byteset_load_powervsx_(sz_u8_t const *set_bytes) {
+    __vector unsigned char set_u8x16 = vec_xl(0, (unsigned char const *)set_bytes);
+#if SZ_IS_BIG_ENDIAN_
+    set_u8x16 = (__vector unsigned char)vec_revb((__vector unsigned long long)set_u8x16);
+#endif
+    return set_u8x16;
+}
+
 SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
                                                    sz_byteset_t const *set) {
     // Two halves of the 256-bit set, each 16 bytes, covering byte indices [0,16) and [16,32).
-    __vector unsigned char set_low_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[0]);
-    __vector unsigned char set_high_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[16]);
+    __vector unsigned char set_low_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[0]);
+    __vector unsigned char set_high_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[16]);
 
     for (; haystack_length >= 16; haystack += 16, haystack_length -= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
@@ -274,8 +288,8 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byteset_powervsx(sz_cptr_t haystack, sz_size_t
 
 SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_powervsx(sz_cptr_t haystack, sz_size_t haystack_length,
                                                     sz_byteset_t const *set) {
-    __vector unsigned char set_low_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[0]);
-    __vector unsigned char set_high_u8x16 = vec_xl(0, (unsigned char const *)&set->_u8s[16]);
+    __vector unsigned char set_low_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[0]);
+    __vector unsigned char set_high_u8x16 = sz_byteset_load_powervsx_(&set->_u8s[16]);
 
     for (; haystack_length >= 16; haystack_length -= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)(haystack + haystack_length - 16));
