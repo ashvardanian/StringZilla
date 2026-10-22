@@ -130,7 +130,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -162,7 +162,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -196,7 +196,7 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -229,7 +229,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -261,7 +261,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -293,7 +293,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -320,7 +320,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Build source distribution
-        run: pip install build &&
+        run: python -m pip install --upgrade "pip>=26.2.2" build &&
           python -m build --sdist
       - name: Upload source distribution
         uses: actions/upload-artifact@v7
@@ -434,7 +434,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "22.23.4"
       - name: Set up MSVC ARM64 cross-compiler
         if: matrix.platform == 'win32-arm64'
         shell: pwsh
@@ -492,7 +492,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           registry-url: "https://registry.npmjs.org"
       - name: Download platform artifact
         id: download
@@ -524,7 +524,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
         run: npm install
