@@ -179,11 +179,7 @@
  *
  *  @c STRINGZILLA_OUTLINED_ omits @c inline, as GCC ignores @c noinline on an @c inline function.
  */
-#if defined(__cplusplus)
-#define STRINGZILLA_C_INLINE_ inline
-#else
 #define STRINGZILLA_C_INLINE_ inline static
-#endif
 
 #if defined(__GNUC__) || defined(__clang__)
 #define STRINGZILLA_MAYBE_UNUSED_ __attribute__((unused))
