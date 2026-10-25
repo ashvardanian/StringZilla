@@ -6,11 +6,10 @@
 #ifndef STRINGZILLAS_TYPES_HPP_
 #define STRINGZILLAS_TYPES_HPP_
 
-#include <thread>   // `std::thread::hardware_concurrency`
+#include <cstdlib> // `std::malloc`, `std::free`
+
 #include <atomic>   // `std::atomic`, `std::memory_order`
 #include <concepts> // `std::convertible_to`, `std::same_as`
-#include <cstdlib>  // `std::malloc`, `std::free`
-#include <memory>   // `std::addressof`
 
 #include <forkunion.h> // `fu_pool_t`, `fu_topology_t`, capability-dispatched parallel loops
 
@@ -206,7 +205,7 @@ class forkunion_executor_t {
             [](fu_lambda_context_t context, size_t task, size_t thread, size_t) noexcept {
                 (*reinterpret_cast<function_t *>(context))(prong_t {task, thread});
             },
-            const_cast<function_t *>(std::addressof(function)));
+            const_cast<function_t *>(&function));
     }
 
     /**
@@ -222,7 +221,7 @@ class forkunion_executor_t {
             [](fu_lambda_context_t context, size_t task, size_t thread, size_t) noexcept {
                 (*reinterpret_cast<function_t *>(context))(prong_t {task, thread});
             },
-            const_cast<function_t *>(std::addressof(function)));
+            const_cast<function_t *>(&function));
     }
 
     /**
@@ -238,7 +237,7 @@ class forkunion_executor_t {
             [](fu_lambda_context_t context, size_t first, size_t count, size_t, size_t) noexcept {
                 (*reinterpret_cast<function_t *>(context))(first, first + count);
             },
-            const_cast<function_t *>(std::addressof(function)));
+            const_cast<function_t *>(&function));
     }
 
     /**
@@ -253,7 +252,7 @@ class forkunion_executor_t {
             [](fu_lambda_context_t context, size_t thread, size_t) noexcept {
                 (*reinterpret_cast<function_t *>(context))(thread);
             },
-            const_cast<function_t *>(std::addressof(function)));
+            const_cast<function_t *>(&function));
     }
 };
 
@@ -393,16 +392,19 @@ struct openmp_executor_t {
      */
     template <typename function_type_>
     inline void for_slices(size_t n, function_type_ &&function) const noexcept {
-        // OpenMP won't use more threads than the number of available cores
-        // and by using STL to query that number, we avoid the need to link
-        // against OpenMP libraries.
-        size_t const total_threads = std::thread::hardware_concurrency();
-        size_t const chunk_size = divide_round_up(n, total_threads);
-#pragma omp parallel for schedule(static, 1)
-        for (size_t i = 0; i < total_threads; ++i) {
-            size_t const start = i * chunk_size;
-            size_t const end = std::min(start + chunk_size, n);
-            function(start, end);
+        // ! Using the `omp_get_num_threads()` would force us to include the OpenMP headers
+        // ! and link to the right symbols, which is not always possible. Counting the team
+        // ! inside the region also sizes the slices to the threads that actually showed up.
+        std::atomic<size_t> atomic_thread_index = 0;
+#pragma omp parallel
+        {
+            size_t const thread_index = atomic_thread_index.fetch_add(1, std::memory_order_relaxed);
+#pragma omp barrier
+            size_t const total_threads = atomic_thread_index.load(std::memory_order_relaxed);
+            size_t const chunk_size = divide_round_up(n, total_threads);
+            size_t const start = min_of_two(thread_index * chunk_size, n);
+            size_t const end = min_of_two(start + chunk_size, n);
+            if (start < end) function(start, end);
         }
     }
 
@@ -495,11 +497,10 @@ class safe_vector {
     using size_type = std::size_t;
     using allocator_type = allocator_type_;
 
-    using allocator_traits = std::allocator_traits<allocator_type>;
-    using allocated_type = typename allocator_traits::value_type;
+    using allocated_type = typename allocator_type::value_type;
     static_assert(sizeof(value_type) == sizeof(allocated_type),
                   "Allocator value type must be the same size as the vector value type");
-    static_assert(allocator_traits::propagate_on_container_move_assignment::value,
+    static_assert(allocator_type::propagate_on_container_move_assignment::value,
                   "Allocator must propagate on move assignment, otherwise the move assignment won't be `noexcept`.");
 
   private:
@@ -584,7 +585,7 @@ class safe_vector {
 
         // Allocate exact needed capacity
         size_type new_cap = other.size();
-        allocated_type *raw = allocator_traits::allocate(alloc_, new_cap);
+        allocated_type *raw = alloc_.allocate(new_cap);
         if (!raw) return status_t::bad_alloc_k;
         data_ = reinterpret_cast<value_type *>(raw);
         capacity_ = new_cap;
@@ -600,7 +601,6 @@ class safe_vector {
 
     template <typename other_allocator_type_ = allocator_type>
     status_t try_assign(safe_vector<value_type, other_allocator_type_> const &other) noexcept {
-        if constexpr (allocator_traits::propagate_on_container_copy_assignment::value) alloc_ = other.alloc_;
         return try_assign(span<value_type>(other.data(), other.size()));
     }
 
