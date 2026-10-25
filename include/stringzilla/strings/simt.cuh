@@ -41,6 +41,9 @@ enum {
     /** Threads to a block, which the block scan and the staged lookup table assume. */
     sz_strings_threads_simt_k = 256,
 
+    /** Threads of the payload kernel, which moves a single offset. */
+    sz_strings_payload_threads_simt_k = 1,
+
     /** Lanes sharing a string in the copying kernels: a warp on NVIDIA, half a wavefront on AMD. */
     sz_strings_lanes_simt_k = 32,
 
@@ -463,8 +466,8 @@ STRINGZILLA_DEVICE void sz_strings_offset_set_simt_(sz_strings_span_t tape, sz_s
     else tape.data.u32_tape.offsets[index] = (sz_u32_t)offset;
 }
 
-static __global__ void sz_strings_scan_local_simt_kernel_(sz_u64_t *offsets, sz_u64_t const *lengths, sz_size_t count,
-                                                          sz_size_t *blocks) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_local_simt_kernel_(sz_u64_t *offsets, sz_u64_t const *lengths, sz_size_t count, sz_size_t *blocks) {
     __shared__ sz_size_t shared[sz_strings_threads_simt_k];
     sz_size_t const row = (sz_size_t)blockIdx.x * sz_strings_threads_simt_k + threadIdx.x;
     sz_size_t total = 0;
@@ -473,8 +476,9 @@ static __global__ void sz_strings_scan_local_simt_kernel_(sz_u64_t *offsets, sz_
     if (!threadIdx.x) blocks[blockIdx.x] = total;
 }
 
-static __global__ void sz_strings_scan_blocks_simt_kernel_(sz_size_t *blocks, sz_size_t block_count, sz_u64_t *offsets,
-                                                           sz_size_t count, sz_size_t target_offset) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_blocks_simt_kernel_(sz_size_t *blocks, sz_size_t block_count, sz_u64_t *offsets, sz_size_t count,
+                                        sz_size_t target_offset) {
     __shared__ sz_size_t shared[sz_strings_threads_simt_k];
     sz_size_t const chunk = block_count / sz_strings_threads_simt_k + (block_count % sz_strings_threads_simt_k != 0);
     sz_size_t const first = threadIdx.x * chunk, end = sz_min_of_two(first + chunk, block_count);
@@ -489,28 +493,30 @@ static __global__ void sz_strings_scan_blocks_simt_kernel_(sz_size_t *blocks, sz
     if (!threadIdx.x) offsets[count] = target_offset + total;
 }
 
-static __global__ void sz_strings_scan_offsets_simt_kernel_(sz_u64_t *offsets, sz_size_t count,
-                                                            sz_size_t const *blocks) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_scan_offsets_simt_kernel_(sz_u64_t *offsets, sz_size_t count, sz_size_t const *blocks) {
     sz_size_t const row = (sz_size_t)blockIdx.x * sz_strings_threads_simt_k + threadIdx.x;
     if (row < count) offsets[row] += blocks[blockIdx.x];
 }
 
 /** Puts the payload of the strings before the first malformed one right after that position. */
-static __global__ void sz_strings_payload_simt_kernel_(sz_u64_t *offsets, sz_size_t count) {
+static __global__ void __launch_bounds__(sz_strings_payload_threads_simt_k)
+    sz_strings_payload_simt_kernel_(sz_u64_t *offsets, sz_size_t count) {
     sz_u64_t const malformed = offsets[count + 1];
     offsets[count + 2] = offsets[malformed < count ? malformed : count];
 }
 
-static __global__ void sz_strings_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                       sz_size_t count, sz_u64_t *lengths) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                    sz_u64_t *lengths) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride)
         lengths[position] = sz_strings_length_simt_(strings, order ? order[position] : position);
 }
 
-static __global__ void sz_strings_escape_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                              sz_size_t count, sz_escape_kind_t kind,
-                                                              sz_u64_t *lengths) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_escape_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                           sz_escape_kind_t kind, sz_u64_t *lengths) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {
         sz_size_t const index = order ? order[position] : position;
@@ -520,9 +526,9 @@ static __global__ void sz_strings_escape_lengths_simt_kernel_(sz_strings_view_t 
 }
 
 /** Measures unescaped strings, taking a malformed one as empty and keeping the earliest. */
-static __global__ void sz_strings_unescape_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                                sz_size_t count, sz_escape_kind_t kind,
-                                                                sz_u64_t *lengths) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_unescape_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                             sz_escape_kind_t kind, sz_u64_t *lengths) {
     unsigned long long *const malformed = (unsigned long long *)(lengths + count + 1);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {
@@ -534,9 +540,9 @@ static __global__ void sz_strings_unescape_lengths_simt_kernel_(sz_strings_view_
     }
 }
 
-static __global__ void sz_strings_escape_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                      sz_size_t count, sz_escape_kind_t kind, sz_u64_t const *offsets,
-                                                      sz_strings_span_t tape) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_escape_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                   sz_escape_kind_t kind, sz_u64_t const *offsets, sz_strings_span_t tape) {
     sz_ptr_t const payload = sz_strings_payload_simt_(tape);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {
@@ -547,9 +553,9 @@ static __global__ void sz_strings_escape_simt_kernel_(sz_strings_view_t strings,
     }
 }
 
-static __global__ void sz_strings_unescape_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                        sz_size_t count, sz_escape_kind_t kind, sz_u64_t const *offsets,
-                                                        sz_strings_span_t tape) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_unescape_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                     sz_escape_kind_t kind, sz_u64_t const *offsets, sz_strings_span_t tape) {
     sz_ptr_t const payload = sz_strings_payload_simt_(tape);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {
@@ -561,9 +567,9 @@ static __global__ void sz_strings_unescape_simt_kernel_(sz_strings_view_t string
 }
 
 /** Copies every string through @p lut, a warp to a string, where @p offsets places it. */
-static __global__ void sz_strings_gather_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                      sz_size_t count, sz_strings_lut_simt_t lut,
-                                                      sz_u64_t const *offsets, sz_strings_span_t tape) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_gather_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                   sz_strings_lut_simt_t lut, sz_u64_t const *offsets, sz_strings_span_t tape) {
     __shared__ sz_u8_t table[sz_strings_threads_simt_k];
     table[threadIdx.x] = lut.bytes[threadIdx.x];
     __syncthreads();
@@ -583,8 +589,9 @@ static __global__ void sz_strings_gather_simt_kernel_(sz_strings_view_t strings,
 }
 
 /** Maps one run of bytes through @p lut, where @p target may be @p source itself. */
-static __global__ void sz_strings_lookup_simt_kernel_(sz_u8_t const *source, sz_size_t length,
-                                                      sz_strings_lut_simt_t lut, sz_u8_t *target) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_lookup_simt_kernel_(sz_u8_t const *source, sz_size_t length, sz_strings_lut_simt_t lut,
+                                   sz_u8_t *target) {
     __shared__ sz_u8_t table[sz_strings_threads_simt_k];
     table[threadIdx.x] = lut.bytes[threadIdx.x];
     __syncthreads();
@@ -594,8 +601,8 @@ static __global__ void sz_strings_lookup_simt_kernel_(sz_u8_t const *source, sz_
 }
 
 /** Writes the offsets of @p strings into @p tape, moved down so the first one is zero. */
-static __global__ void sz_strings_rebase_simt_kernel_(sz_strings_view_t strings, sz_size_t count,
-                                                      sz_strings_span_t tape) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_rebase_simt_kernel_(sz_strings_view_t strings, sz_size_t count, sz_strings_span_t tape) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position <= count; position += stride)
         sz_strings_offset_set_simt_(
@@ -604,8 +611,9 @@ static __global__ void sz_strings_rebase_simt_kernel_(sz_strings_view_t strings,
 }
 
 /** Writes every string into its NUL-padded row, a warp to a row, raising @p longest to fit it. */
-static __global__ void sz_strings_to_rows_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                       sz_size_t count, sz_strings_rows_t rows, sz_size_t *longest) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_to_rows_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                    sz_strings_rows_t rows, sz_size_t *longest) {
     unsigned long long *const longest_slot = (unsigned long long *)longest;
     sz_size_t const lane = threadIdx.x % sz_strings_lanes_simt_k;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x / sz_strings_lanes_simt_k;
@@ -624,9 +632,9 @@ static __global__ void sz_strings_to_rows_simt_kernel_(sz_strings_view_t strings
 
 #if STRINGZILLA_TARGET_CUDA || STRINGZILLA_TARGET_ROCM
 
-static __global__ void sz_strings_normalize_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                                 sz_size_t count, sz_normal_form_t form,
-                                                                 sz_u64_t *lengths) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_normalize_lengths_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                              sz_normal_form_t form, sz_u64_t *lengths) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {
         sz_size_t const index = order ? order[position] : position;
@@ -636,9 +644,9 @@ static __global__ void sz_strings_normalize_lengths_simt_kernel_(sz_strings_view
     }
 }
 
-static __global__ void sz_strings_normalize_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order,
-                                                         sz_size_t count, sz_normal_form_t form,
-                                                         sz_u64_t const *offsets, sz_strings_span_t tape) {
+static __global__ void __launch_bounds__(sz_strings_threads_simt_k)
+    sz_strings_normalize_simt_kernel_(sz_strings_view_t strings, sz_size_t const *order, sz_size_t count,
+                                      sz_normal_form_t form, sz_u64_t const *offsets, sz_strings_span_t tape) {
     sz_u8_t *const payload = (sz_u8_t *)sz_strings_payload_simt_(tape);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     for (sz_size_t position = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x; position < count; position += stride) {

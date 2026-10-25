@@ -39,15 +39,16 @@ extern "C" {
 enum { sz_regex_blocks_per_multiprocessor_cuda_k = 8 };
 
 /** The warp walk of the links that outlived their first thread, with CUDA's cross-lane steps. */
-static __global__ void sz_regex_continue_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                      sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_continue_simt_(&engine, haystacks, &round, sz_false_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
                             sz_lanes_any_cuda_);
 }
 
 /** The warp walk of folded links that outlived their first thread, with CUDA's cross-lane steps. */
-static __global__ void sz_regex_continue_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                             sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_folded_cuda_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                          sz_regex_round_simt_t round) {
     sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_cuda_, sz_lanes_broadcast_cuda_,
                             sz_lanes_any_cuda_);
 }
@@ -768,9 +769,10 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_cuda_(sz_regex_engine_t const *en
         if (status == sz_success_k)
             status = sz_regex_launch_cuda_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
         if (status == sz_success_k) {
-            dim3 one;
+            dim3 one, block;
             one.x = 1, one.y = 1, one.z = 1;
-            status = sz_launch_cuda_((void const *)sz_regex_carry_simt_kernel_, one, one, chain_arguments, 0, stream);
+            block.x = sz_regex_carry_threads_per_block_simt_k, block.y = 1, block.z = 1;
+            status = sz_launch_cuda_((void const *)sz_regex_carry_simt_kernel_, one, block, chain_arguments, 0, stream);
         }
     }
     return status;

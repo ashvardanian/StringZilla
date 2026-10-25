@@ -61,8 +61,8 @@ extern "C" {
 
 #pragma region Shapes
 
-/** Threads every kernel here launches with. */
-enum { sz_regex_threads_per_block_simt_k = 256 };
+/** Threads every kernel here launches with but the carry, which runs on one. */
+enum { sz_regex_threads_per_block_simt_k = 256, sz_regex_carry_threads_per_block_simt_k = 1 };
 
 /** Slots one chunk spans, one word of start bits. */
 enum { sz_regex_chunk_slots_simt_k = 64 };
@@ -1623,8 +1623,9 @@ STRINGZILLA_DEVICE sz_u64_t *sz_regex_body_walk_simt_(sz_regex_engine_t const *e
 /** Scans one ticket's own tile of @p values in place, as @c sz_substrings_scan_tile_simt_ does,
  *  seeded by the totals the tiles before it publish in @p states, so one launch makes a whole scan;
  *  it clears @p stale, the states the next scan takes. */
-static __global__ void sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile,
-                                                  sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t elements_per_tile, sz_size_t *chain,
+                               sz_u64_t *states, sz_u64_t *stale) {
     __shared__ sz_size_t shared[sz_regex_threads_per_block_simt_k];
     sz_size_t const tiles = sz_size_divide_round_up(count, elements_per_tile);
     sz_size_t tile, begin, end, running = 0, first;
@@ -1897,14 +1898,15 @@ STRINGZILLA_DEVICE void sz_regex_bound_simt_(sz_regex_engine_t const *engine, sz
 }
 
 /** @ref sz_regex_bound_simt_ over the pass's NFA or positions. */
-static __global__ void sz_regex_bound_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                   sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_bound_simt_(&engine, haystacks, &round, sz_false_k);
 }
 
 /** @ref sz_regex_bound_simt_ over a body's DFA. */
-static __global__ void sz_regex_bound_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                       sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
     sz_regex_bound_simt_(&engine, haystacks, &round, sz_true_k);
 }
 
@@ -1995,14 +1997,16 @@ STRINGZILLA_DEVICE void sz_regex_bound_pieces_simt_(sz_regex_engine_t const *eng
 }
 
 /** @ref sz_regex_bound_pieces_simt_ over the pass's NFA or positions. */
-static __global__ void sz_regex_bound_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                          sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
     sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_false_k);
 }
 
 /** @ref sz_regex_bound_pieces_simt_ over a body's DFA. */
-static __global__ void sz_regex_bound_pieces_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                              sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_bound_pieces_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                           sz_regex_round_simt_t round) {
     sz_regex_bound_pieces_simt_(&engine, haystacks, &round, sz_true_k);
 }
 
@@ -2067,14 +2071,15 @@ STRINGZILLA_DEVICE void sz_regex_affine_simt_(sz_regex_engine_t const *engine, s
 }
 
 /** @ref sz_regex_affine_simt_ over the pass's NFA or positions. */
-static __global__ void sz_regex_affine_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                    sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_affine_simt_(&engine, haystacks, &round, sz_false_k);
 }
 
 /** @ref sz_regex_affine_simt_ over a body's DFA. */
-static __global__ void sz_regex_affine_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                        sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                     sz_regex_round_simt_t round) {
     sz_regex_affine_simt_(&engine, haystacks, &round, sz_true_k);
 }
 
@@ -2085,7 +2090,8 @@ static __global__ void sz_regex_affine_dfa_simt_kernel_(sz_regex_engine_t engine
  *  The last round adds the answer to the chunk's handoff and keeps the handoff of the segment's
  *  last chunk downstream for the segment beyond.
  */
-static __global__ void sz_regex_affine_double_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_affine_double_simt_kernel_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0), last = (sz_bool_t)(round.round + 1 == round.rounds);
     sz_bool_t const backward = (sz_bool_t)(round.flow != sz_regex_flow_behind_simt_k);
     sz_regex_affine_simt_t const *source = even ? round.affines : round.affines_next;
@@ -2167,14 +2173,15 @@ STRINGZILLA_DEVICE void sz_regex_looks_simt_(sz_regex_engine_t const *engine, sz
 }
 
 /** @ref sz_regex_looks_simt_ over the pass's NFA or positions. */
-static __global__ void sz_regex_looks_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                   sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_looks_simt_(&engine, haystacks, &round, sz_false_k);
 }
 
 /** @ref sz_regex_looks_simt_ over a body's DFA. */
-static __global__ void sz_regex_looks_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                       sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_looks_dfa_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
     sz_regex_looks_simt_(&engine, haystacks, &round, sz_true_k);
 }
 
@@ -2186,8 +2193,8 @@ static __global__ void sz_regex_looks_dfa_simt_kernel_(sz_regex_engine_t engine,
  *  Each block takes a run of slots a tile at a time, its first thread galloping to the haystack of
  *  the tile's first slot from the last tile's, and the threads past that haystack on from it.
  */
-static __global__ void sz_regex_singles_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                     sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_singles_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     __shared__ sz_u32_t tables[512];
     __shared__ sz_size_t tile_index;
     __shared__ sz_regex_haystack_simt_t tile_haystack;
@@ -2241,8 +2248,8 @@ static __global__ void sz_regex_singles_simt_kernel_(sz_regex_engine_t engine, s
  *  A folded walk's chunk edges move to the next unit boundary, where it steps the
  *  folds of whole units.
  */
-static __global__ void sz_regex_prime_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                   sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
     sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
@@ -2318,8 +2325,9 @@ STRINGZILLA_DEVICE sz_size_t sz_regex_prime_edge_simt_(sz_bool_t folded, sz_rege
  *  to the run's leftmost wide one, and the frontiers between them compose onto those entries as
  *  onto any settled chunk's.
  */
-static __global__ void sz_regex_prime_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                          sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_prime_pieces_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -2372,8 +2380,8 @@ static __global__ void sz_regex_prime_pieces_simt_kernel_(sz_regex_engine_t engi
 
 /** Points every unsettled chunk at what settles it, as @c sz_regex_compose_metal_kernel_ does; the
  *  last chunk's right neighbour is the next segment's first, whose entry its edge holds. */
-static __global__ void sz_regex_compose_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                     sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
     sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
@@ -2413,7 +2421,8 @@ static __global__ void sz_regex_compose_simt_kernel_(sz_regex_engine_t engine, s
 }
 
 /** One round of pointer doubling over the unsettled chunks; the last round writes the entry. */
-static __global__ void sz_regex_compose_double_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_compose_double_simt_kernel_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_regex_composition_simt_t const *source = even ? round.compositions : round.compositions_next;
     sz_regex_composition_simt_t *target = even ? round.compositions_next : round.compositions;
@@ -2451,8 +2460,8 @@ static __global__ void sz_regex_compose_double_simt_kernel_(sz_regex_round_simt_
 
 /** Marks every slot of one chunk where a match starts, one thread per chunk, as the Metal kernel
  *  does, each block first staging its tile's text, which its threads read a chunk apart. */
-static __global__ void sz_regex_mark_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                  sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     extern __shared__ sz_u8_t sz_regex_staged_simt_[];
     __shared__ sz_size_t tile_haystack;
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
@@ -2536,8 +2545,9 @@ enum {
  *  haystack of its first slot from the last tile's last, and the slots past that haystack on from
  *  it. A haystack's last slot, past its bytes, is never marked, as no match is empty.
  */
-static __global__ void sz_regex_mark_prefixes_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                           sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_prefixes_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                        sz_regex_round_simt_t round) {
     __shared__ sz_u8_t buckets[sz_regex_prefixes_depth_k][256];
     __shared__ sz_u64_t words[sz_regex_prefix_chunks_simt_k];
     __shared__ sz_size_t indices[sz_regex_prefix_chunks_simt_k];
@@ -2607,8 +2617,9 @@ static __global__ void sz_regex_mark_prefixes_simt_kernel_(sz_regex_engine_t eng
  *  @c sz_regex_mark_folded_ snaps it, so the walk begins past the unit holding the chunk's last
  *  slot, where priming left its entry.
  */
-static __global__ void sz_regex_mark_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                         sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.reverse_rows, round.reverse_cells);
     sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_u32_t const accepts = engine.reverse_accepts_begin;
@@ -2713,21 +2724,23 @@ STRINGZILLA_DEVICE void sz_regex_mark_positions_simt_(sz_regex_engine_t const *e
 }
 
 /** @ref sz_regex_mark_positions_simt_ over bytes. */
-static __global__ void sz_regex_mark_positions_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                            sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                         sz_regex_round_simt_t round) {
     sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_false_k);
 }
 
 /** @ref sz_regex_mark_positions_simt_ over folded runes. */
-static __global__ void sz_regex_mark_positions_folded_simt_kernel_(sz_regex_engine_t engine,
-                                                                   sz_strings_view_t haystacks,
-                                                                   sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_mark_positions_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                                sz_regex_round_simt_t round) {
     sz_regex_mark_positions_simt_(&engine, haystacks, &round, sz_true_k);
 }
 
 /** Lists the candidates of one chunk in slot order, one thread per chunk, for the end walks taking
  *  one candidate per thread. */
-static __global__ void sz_regex_list_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_list_simt_kernel_(sz_regex_round_simt_t round) {
     sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     for (; chunk < round.chunks_count; chunk += stride) {
@@ -2744,8 +2757,9 @@ static __global__ void sz_regex_list_simt_kernel_(sz_regex_round_simt_t round) {
 
 /** Walks every candidate to its end with a PikeVM in each thread's share of the
  *  walks, linking nothing. */
-static __global__ void sz_regex_ends_pike_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                       sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_pike_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_regex_round_simt_t round) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const count = round.chunk_offsets[round.chunks_count];
     sz_regex_pike_simt_t pike;
@@ -2824,8 +2838,8 @@ STRINGZILLA_DEVICE sz_size_t sz_regex_advance_simt_(sz_regex_table_simt_t const 
  *  A folded walk starts at the first rune its unit folds to, and once the links settle
  *  @ref sz_regex_retry_folded_simt_kernel_ tries the others.
  */
-static __global__ void sz_regex_ends_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                  sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_ends_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
     sz_size_t const width = (sz_size_t)1 << round.chunk_shift, stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t const begin = round.segment_begin;
@@ -2992,8 +3006,8 @@ STRINGZILLA_DEVICE void sz_regex_link_walk_simt_(sz_regex_engine_t const *engine
 
 /** Walks every link on from its chunk's edge, at the first unit boundary past it for a folded walk,
  *  as @ref sz_regex_link_walk_simt_ walks it. */
-static __global__ void sz_regex_links_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                   sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
     sz_size_t const begin = round.segment_begin, end = round.segment_end;
     sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
@@ -3013,8 +3027,8 @@ static __global__ void sz_regex_links_simt_kernel_(sz_regex_engine_t engine, sz_
 
 /** Walks every group the last slide made on from where its walks paused, as the links kernel walks
  *  links, the window having moved two segments on from its end there. */
-static __global__ void sz_regex_resume_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                    sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_resume_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
     sz_size_t const paused = round.looks.begin;
     sz_bool_t const folded = (sz_bool_t)(engine.case_sensitivity != sz_cased_k);
@@ -3195,7 +3209,8 @@ STRINGZILLA_DEVICE sz_regex_result_simt_t sz_regex_hops_simt_(sz_regex_result_si
 }
 
 /** One round of pointer doubling over the links, each taking the deepest match its hops reach. */
-static __global__ void sz_regex_links_double_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_links_double_simt_kernel_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_regex_result_simt_t const *source = even ? round.links : round.links_next;
     sz_regex_result_simt_t *target = even ? round.links_next : round.links;
@@ -3214,7 +3229,8 @@ static __global__ void sz_regex_links_double_simt_kernel_(sz_regex_round_simt_t 
  *  The first walk to take its state's leader allocates the group and publishes it there, and one
  *  past the groups' capacity raises the refusal instead.
  */
-static __global__ void sz_regex_group_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_group_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
     sz_regex_continuation_simt_t const *const continuations = (sz_regex_continuation_simt_t const *)round.links_next;
     sz_size_t const columns = sz_regex_stride_(engine.classes_count, engine.lookarounds_count);
     sz_u32_t const count = round.counters[sz_regex_handed_counter_simt_k];
@@ -3237,7 +3253,8 @@ static __global__ void sz_regex_group_simt_kernel_(sz_regex_engine_t engine, sz_
 
 /** Points every walk paused at the end of the lookaround table's window at its state's group, which
  *  a link or a group of the window's last end then follows as the link whose match wins. */
-static __global__ void sz_regex_point_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_point_simt_kernel_(sz_regex_engine_t engine, sz_regex_round_simt_t round) {
     sz_regex_continuation_simt_t const *const continuations = (sz_regex_continuation_simt_t const *)round.links_next;
     sz_size_t const columns = sz_regex_stride_(engine.classes_count, engine.lookarounds_count);
     sz_u32_t const count = round.counters[sz_regex_handed_counter_simt_k];
@@ -3253,7 +3270,8 @@ static __global__ void sz_regex_point_simt_kernel_(sz_regex_engine_t engine, sz_
 
 /** One round of pointer doubling over the groups, as over the links, each taking the deepest match
  *  a round's hops ahead among the groups of later window ends. */
-static __global__ void sz_regex_groups_double_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_groups_double_simt_kernel_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_regex_result_simt_t const *source = even ? round.groups : round.groups_next;
     sz_regex_result_simt_t *target = even ? round.groups_next : round.groups;
@@ -3264,7 +3282,8 @@ static __global__ void sz_regex_groups_double_simt_kernel_(sz_regex_round_simt_t
 
 /** Gives every link that paused at the end of the lookaround table's window its settled group's
  *  match, when it has one, and unlinks it, so the links double as though it never paused. */
-static __global__ void sz_regex_take_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_take_simt_kernel_(sz_regex_round_simt_t round) {
     sz_u32_t const links_count = round.counters[sz_regex_links_counter_simt_k];
     sz_u32_t item = blockIdx.x * blockDim.x + threadIdx.x;
     for (; item < links_count; item += gridDim.x * blockDim.x) {
@@ -3284,8 +3303,9 @@ static __global__ void sz_regex_take_simt_kernel_(sz_regex_round_simt_t round) {
  *  It takes one thread per candidate, each walked to its end without links, raising the refusal
  *  rather than reading the lookaround table past its window.
  */
-static __global__ void sz_regex_retry_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                          sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_retry_folded_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                       sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_stage_simt_(&engine, &round, engine.forward_rows, round.forward_cells);
     sz_size_t const count = round.chunk_offsets[round.chunks_count], stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t item = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -3316,7 +3336,8 @@ static __global__ void sz_regex_retry_folded_simt_kernel_(sz_regex_engine_t engi
 
 /** Follows the search through one chunk from every candidate as an entry, right to left, one thread
  *  per chunk, and seeds each haystack's chain, as @c sz_regex_chain_metal_kernel_ does. */
-static __global__ void sz_regex_chain_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_chain_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_size_t const begin = round.segment_begin, cursor = round.carry->cursor;
     sz_bool_t const refusing = (sz_bool_t)(round.carry->refusing != 0);
     sz_u32_t const count = (sz_u32_t)round.chunk_offsets[round.chunks_count];
@@ -3385,7 +3406,8 @@ static __global__ void sz_regex_chain_simt_kernel_(sz_strings_view_t haystacks, 
 
 /** One round of pointer doubling over the chunk exits: every kept candidate keeps those its next
  *  hops reach, and jumps that far again; a round after one that left nothing to follow retires. */
-static __global__ void sz_regex_double_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_double_simt_kernel_(sz_regex_round_simt_t round) {
     sz_bool_t const even = (sz_bool_t)(round.round % 2 == 0);
     sz_u32_t const *source = even ? round.exits : round.exits_next;
     sz_u32_t *target = even ? round.exits_next : round.exits;
@@ -3413,7 +3435,8 @@ static __global__ void sz_regex_double_simt_kernel_(sz_regex_round_simt_t round)
  *  It counts what it keeps, flagging each kept candidate and counting those of the extracted
  *  pattern, or, once the counts are scanned, stores what the call asks.
  */
-static __global__ void sz_regex_sweep_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_sweep_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -3465,7 +3488,8 @@ static __global__ void sz_regex_sweep_simt_kernel_(sz_strings_view_t haystacks, 
 
 /** Hands the next segment its carry, launched on one thread, as the Metal kernel does, and the last
  *  boundary of whatever the call writes. */
-static __global__ void sz_regex_carry_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_carry_threads_per_block_simt_k)
+    sz_regex_carry_simt_kernel_(sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_carry_simt_t *const carry = round.carry;
     sz_size_t const kept = round.chunk_kept[round.chunks_count];
     if (round.segment_end < round.slots_count) {
@@ -3490,8 +3514,9 @@ static __global__ void sz_regex_carry_simt_kernel_(sz_strings_view_t haystacks, 
 }
 
 /** Saves the total each thread's range of counts follows, before the differences overwrite it. */
-static __global__ void sz_regex_counts_edges_simt_kernel_(sz_size_t const *counts, sz_size_t counts_stride,
-                                                          sz_size_t count, sz_size_t *edges) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_edges_simt_kernel_(sz_size_t const *counts, sz_size_t counts_stride, sz_size_t count,
+                                       sz_size_t *edges) {
     sz_size_t const threads = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = sz_min_of_two(thread * sz_size_divide_round_up(count, threads), count);
@@ -3500,8 +3525,8 @@ static __global__ void sz_regex_counts_edges_simt_kernel_(sz_size_t const *count
 
 /** Turns the running totals the sweep left in @p counts into each haystack's own count, every
  *  thread over its own range right to left, so it reads each total before overwriting it. */
-static __global__ void sz_regex_counts_simt_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count,
-                                                    sz_size_t const *edges) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_counts_simt_kernel_(sz_size_t *counts, sz_size_t counts_stride, sz_size_t count, sz_size_t const *edges) {
     sz_size_t const threads = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const per_thread = sz_size_divide_round_up(count, threads);
@@ -3517,8 +3542,8 @@ static __global__ void sz_regex_counts_simt_kernel_(sz_size_t *counts, sz_size_t
 
 /** Measures every kept match's replacement, one thread per candidate in each thread's share of the
  *  walks, leaving how far it moves what follows. */
-static __global__ void sz_regex_expand_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                    sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_expand_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const count = round.chunk_offsets[round.chunks_count];
@@ -3548,7 +3573,8 @@ static __global__ void sz_regex_expand_simt_kernel_(sz_regex_engine_t engine, sz
 
 /** Sums the drift of every chunk's kept matches, one thread per chunk, and tells the chunks the
  *  last of them reaches into that they start covered. */
-static __global__ void sz_regex_drift_simt_kernel_(sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_drift_simt_kernel_(sz_regex_round_simt_t round) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t chunk = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (chunk == 0) round.chunk_sums[round.chunks_count] = 0;
@@ -3572,8 +3598,8 @@ static __global__ void sz_regex_drift_simt_kernel_(sz_regex_round_simt_t round) 
  *  Byte @c b of haystack @c h, in slot @c s, lands at `s - h - 1` plus the drift of the kept
  *  matches before it, and a match starting in slot @c s at `s - h` plus the same.
  */
-static __global__ void sz_regex_rewrite_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                     sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rewrite_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;
@@ -3618,8 +3644,8 @@ static __global__ void sz_regex_rewrite_simt_kernel_(sz_regex_engine_t engine, s
 /** Finds every haystack's first kept match of the extracted pattern and counts its rows, one thread
  *  per chunk in each thread's share of the walks: a match is the first when as many kept matches of
  *  the pattern precede it as precede its haystack. */
-static __global__ void sz_regex_firsts_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                    sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_firsts_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin;
@@ -3660,8 +3686,8 @@ static __global__ void sz_regex_firsts_simt_kernel_(sz_regex_engine_t engine, sz
 
 /** Writes the rows the firsts kernel counted and where each haystack starting in a chunk begins
  *  among them, one thread per chunk in each thread's share of the walks. */
-static __global__ void sz_regex_rows_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                  sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_rows_simt_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_table_simt_t const table = sz_regex_direct_simt_(&engine, &round);
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_size_t const begin = round.segment_begin, width = (sz_size_t)1 << round.chunk_shift;

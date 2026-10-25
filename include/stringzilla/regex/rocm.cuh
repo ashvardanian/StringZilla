@@ -39,16 +39,17 @@ enum { sz_regex_blocks_per_multiprocessor_rocm_k = 8 };
 
 /** The 32-lane walk of the links that outlived their first thread, with ROCm's cross-lane steps,
  *  each 64-wide wavefront running two side by side. */
-static __global__ void sz_regex_continue_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                      sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks, sz_regex_round_simt_t round) {
     sz_regex_continue_simt_(&engine, haystacks, &round, sz_false_k, sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_,
                             sz_lanes_any_rocm_);
 }
 
 /** The 32-lane walk of the folded links that outlived their first thread, with ROCm's cross-lane
  *  steps, each 64-wide wavefront running two side by side. */
-static __global__ void sz_regex_continue_folded_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
-                                                             sz_regex_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_regex_threads_per_block_simt_k)
+    sz_regex_continue_folded_rocm_kernel_(sz_regex_engine_t engine, sz_strings_view_t haystacks,
+                                          sz_regex_round_simt_t round) {
     sz_regex_continue_simt_(&engine, haystacks, &round, sz_true_k, sz_shuffle_down_rocm_, sz_lanes_broadcast_rocm_,
                             sz_lanes_any_rocm_);
 }
@@ -769,9 +770,10 @@ STRINGZILLA_INLINE sz_status_t sz_regex_rounds_rocm_(sz_regex_engine_t const *en
         if (status == sz_success_k)
             status = sz_regex_launch_rocm_((void const *)sz_regex_sweep_simt_kernel_, grid, chain_arguments, 0, stream);
         if (status == sz_success_k) {
-            dim3 one;
+            dim3 one, block;
             one.x = 1, one.y = 1, one.z = 1;
-            status = sz_launch_rocm_((void const *)sz_regex_carry_simt_kernel_, one, one, chain_arguments, 0, stream);
+            block.x = sz_regex_carry_threads_per_block_simt_k, block.y = 1, block.z = 1;
+            status = sz_launch_rocm_((void const *)sz_regex_carry_simt_kernel_, one, block, chain_arguments, 0, stream);
         }
     }
     return status;

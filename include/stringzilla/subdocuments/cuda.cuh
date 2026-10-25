@@ -33,9 +33,9 @@ extern "C" {
 #pragma region Warp Walks
 
 /** @ref sz_subdocuments_walk_documents_simt_ with a warp walking each JSON document. */
-static __global__ void sz_subdocuments_warp_walk_cuda_kernel_(sz_subdocuments_engine_t engine,
-                                                              sz_strings_view_t documents,
-                                                              sz_subdocuments_round_simt_t round) {
+static __global__ void __launch_bounds__(sz_subdocuments_threads_per_block_simt_k)
+    sz_subdocuments_warp_walk_cuda_kernel_(sz_subdocuments_engine_t engine, sz_strings_view_t documents,
+                                           sz_subdocuments_round_simt_t round) {
     sz_size_t const thread = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     sz_subdocuments_warp_simt_t const warp = {sz_lanes_ballot_cuda_, sz_shuffle_index_cuda_, sz_shuffle_up_cuda_};
     sz_subdocuments_walk_documents_simt_(&engine, &documents, &round, thread / 32, thread & 31, 32, &warp);

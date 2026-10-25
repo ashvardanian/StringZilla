@@ -85,7 +85,11 @@ STRINGZILLA_DEVICE void sz_sha256_load_block_simt_(sz_u8_t const *bytes, sz_u32_
 
 #pragma region Kernels
 
-static __global__ void sz_sha256_multistate_update_simt_kernel_(sz_sha256_state_t *states, sz_strings_view_t texts) {
+/** Threads per block; one per message, so occupancy is all a launch needs. */
+enum { sz_sha256_threads_per_block_simt_k = 256 };
+
+static __global__ void __launch_bounds__(sz_sha256_threads_per_block_simt_k)
+    sz_sha256_multistate_update_simt_kernel_(sz_sha256_state_t *states, sz_strings_view_t texts) {
     sz_size_t const lane = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (lane >= texts.count) return;
     sz_sha256_state_t *state = states + lane;
@@ -118,8 +122,8 @@ static __global__ void sz_sha256_multistate_update_simt_kernel_(sz_sha256_state_
     for (int index = 0; index != 8; ++index) state->hash[index] = hash[index];
 }
 
-static __global__ void sz_sha256_multistate_digest_simt_kernel_(sz_sha256_state_t const *states, sz_size_t count,
-                                                                sz_u8_t *digests) {
+static __global__ void __launch_bounds__(sz_sha256_threads_per_block_simt_k)
+    sz_sha256_multistate_digest_simt_kernel_(sz_sha256_state_t const *states, sz_size_t count, sz_u8_t *digests) {
     sz_size_t const lane = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (lane >= count) return;
     sz_sha256_state_t const *state = states + lane;
@@ -149,9 +153,6 @@ static __global__ void sz_sha256_multistate_digest_simt_kernel_(sz_sha256_state_
 }
 
 #pragma endregion Kernels
-
-/** Threads per block; one per message, so occupancy is all a launch needs. */
-enum { sz_sha256_threads_per_block_simt_k = 256 };
 
 #ifdef __cplusplus
 }

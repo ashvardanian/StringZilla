@@ -359,9 +359,9 @@ STRINGZILLA_DEVICE sz_bool_t sz_substrings_scan_tile_simt_(sz_size_t *values, sz
     return tile + 1 == tiles ? sz_true_k : sz_false_k;
 }
 
-static __global__ void sz_substrings_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
-                                                       sz_size_t elements_per_tile, sz_size_t *chain, sz_u64_t *states,
-                                                       sz_u64_t *stale) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_scan_simt_kernel_(sz_size_t *values, sz_size_t count, sz_size_t const *live,
+                                    sz_size_t elements_per_tile, sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale) {
     sz_substrings_scan_tile_simt_(values, count, live, elements_per_tile, chain, states, stale);
 }
 
@@ -373,11 +373,11 @@ static __global__ void sz_substrings_scan_simt_kernel_(sz_size_t *values, sz_siz
  *  @param[in] emitting Whether the round reads the matches themselves, since a count that never
  *      does cannot overrun a match budget however many matches the corpus holds.
  */
-static __global__ void sz_substrings_scan_sized_simt_kernel_(sz_size_t *chunk_slots, sz_size_t count,
-                                                             sz_size_t const *chunks_count, sz_size_t elements_per_tile,
-                                                             sz_size_t *chain, sz_u64_t *states, sz_u64_t *stale,
-                                                             sz_size_t matches_budget, sz_bool_t emitting,
-                                                             sz_substrings_report_t *report) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_scan_sized_simt_kernel_(sz_size_t *chunk_slots, sz_size_t count, sz_size_t const *chunks_count,
+                                          sz_size_t elements_per_tile, sz_size_t *chain, sz_u64_t *states,
+                                          sz_u64_t *stale, sz_size_t matches_budget, sz_bool_t emitting,
+                                          sz_substrings_report_t *report) {
     sz_size_t emitted;
     if (!sz_substrings_scan_tile_simt_(chunk_slots, count, chunks_count, elements_per_tile, chain, states, stale) ||
         threadIdx.x != 0)
@@ -413,8 +413,9 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_chunk_bytes_simt_(sz_substrings_engin
 
 /** Writes how many chunks each haystack is cut into, which the scan then turns into
  *  its chunk range. */
-static __global__ void sz_substrings_chunk_counts_simt_kernel_(sz_substrings_engine_t engine,
-                                                               sz_strings_view_t haystacks, sz_size_t *chunk_offsets) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_chunk_counts_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                            sz_size_t *chunk_offsets) {
     sz_size_t const chunk_bytes = sz_substrings_chunk_bytes_simt_(&engine, haystacks);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -785,52 +786,54 @@ STRINGZILLA_DEVICE void sz_substrings_walk_chunks_simt_(sz_substrings_engine_t c
  *  the residency of a walk that does not fold, and so are a walk that only counts and one that also
  *  keeps, so a count never pays for the registers keeping takes. */
 
-static __global__ void sz_substrings_walk_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                             sz_strings_view_t haystacks,
-                                                             sz_size_t const *chunk_offsets, sz_size_t *chunk_slots) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_walk_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                          sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                          sz_size_t *chunk_slots) {
     sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, staged_count, haystacks, chunk_offsets, chunk_slots, 0,
                                     STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, STRINGZILLA_NULL);
 }
 
-static __global__ void sz_substrings_walk_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                               sz_strings_view_t haystacks,
-                                                               sz_size_t const *chunk_offsets, sz_size_t *chunk_slots) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_walk_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                            sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                            sz_size_t *chunk_slots) {
     sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, staged_count, haystacks, chunk_offsets, chunk_slots, 0,
                                     STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, STRINGZILLA_NULL);
 }
 
-static __global__ void sz_substrings_keep_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                             sz_strings_view_t haystacks,
-                                                             sz_size_t const *chunk_offsets, sz_size_t *chunk_slots,
-                                                             sz_size_t slots_count, sz_u32_t *kept,
-                                                             sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
-                                                             sz_size_t spills_capacity) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_keep_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                          sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                          sz_size_t *chunk_slots, sz_size_t slots_count, sz_u32_t *kept,
+                                          sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
+                                          sz_size_t spills_capacity) {
     sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, staged_count, haystacks, chunk_offsets, chunk_slots,
                                     slots_count, kept, spills, spilled, spills_capacity, STRINGZILLA_NULL);
 }
 
-static __global__ void sz_substrings_keep_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                               sz_strings_view_t haystacks,
-                                                               sz_size_t const *chunk_offsets, sz_size_t *chunk_slots,
-                                                               sz_size_t slots_count, sz_u32_t *kept,
-                                                               sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
-                                                               sz_size_t spills_capacity) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_keep_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                            sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                            sz_size_t *chunk_slots, sz_size_t slots_count, sz_u32_t *kept,
+                                            sz_substrings_spill_simt_t *spills, sz_size_t *spilled,
+                                            sz_size_t spills_capacity) {
     sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, staged_count, haystacks, chunk_offsets, chunk_slots,
                                     slots_count, kept, spills, spilled, spills_capacity, STRINGZILLA_NULL);
 }
 
-static __global__ void sz_substrings_pairs_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                              sz_strings_view_t haystacks,
-                                                              sz_size_t const *chunk_offsets,
-                                                              sz_substrings_pairs_simt_t pairs) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_pairs_cased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                           sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                           sz_substrings_pairs_simt_t pairs) {
     sz_substrings_walk_chunks_simt_(&engine, sz_cased_k, staged_count, haystacks, chunk_offsets, STRINGZILLA_NULL, 0,
                                     STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, &pairs);
 }
 
-static __global__ void sz_substrings_pairs_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
-                                                                sz_strings_view_t haystacks,
-                                                                sz_size_t const *chunk_offsets,
-                                                                sz_substrings_pairs_simt_t pairs) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_pairs_uncased_simt_kernel_(sz_substrings_engine_t engine, sz_u32_t staged_count,
+                                             sz_strings_view_t haystacks, sz_size_t const *chunk_offsets,
+                                             sz_substrings_pairs_simt_t pairs) {
     sz_substrings_walk_chunks_simt_(&engine, sz_uncased_k, staged_count, haystacks, chunk_offsets, STRINGZILLA_NULL, 0,
                                     STRINGZILLA_NULL, STRINGZILLA_NULL, STRINGZILLA_NULL, 0, &pairs);
 }
@@ -841,12 +844,12 @@ static __global__ void sz_substrings_pairs_uncased_simt_kernel_(sz_substrings_en
  *
  *  Every chunk owns a private, non-overlapping output range, so a write needs no atomic.
  */
-static __global__ void sz_substrings_gather_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
-                                                         sz_size_t const *chunk_offsets,
-                                                         sz_substrings_report_t const *report,
-                                                         sz_size_t const *chunk_slots, sz_size_t slots_count,
-                                                         sz_u32_t const *kept, sz_substrings_spill_simt_t const *spills,
-                                                         sz_size_t const *spilled, sz_match_t *matches) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_gather_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_size_t const *chunk_offsets, sz_substrings_report_t const *report,
+                                      sz_size_t const *chunk_slots, sz_size_t slots_count, sz_u32_t const *kept,
+                                      sz_substrings_spill_simt_t const *spills, sz_size_t const *spilled,
+                                      sz_match_t *matches) {
     sz_size_t const chunk_count = chunk_offsets[haystacks.count];
     sz_size_t const chunk_bytes = sz_substrings_chunk_bytes_simt_(&engine, haystacks);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -1072,11 +1075,10 @@ STRINGZILLA_DEVICE void sz_substrings_bm25_pair_term_simt_(sz_substrings_pairs_s
 
 /** Adds the term of every seated pair into its haystack's fixed-point word of @p sums, zeroing the
  *  table behind it, so the next scoring round finds it clear. */
-static __global__ void sz_substrings_bm25_pairs_simt_kernel_(sz_substrings_pairs_simt_t pairs,
-                                                             sz_strings_view_t haystacks,
-                                                             sz_f32_t const *document_lengths,
-                                                             sz_substrings_bm25_t parameters,
-                                                             sz_f32_t const *needle_weights, unsigned long long *sums) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_bm25_pairs_simt_kernel_(sz_substrings_pairs_simt_t pairs, sz_strings_view_t haystacks,
+                                          sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                          sz_f32_t const *needle_weights, unsigned long long *sums) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t first;
     sz_u32_t lane;
@@ -1132,13 +1134,12 @@ STRINGZILLA_DEVICE sz_bool_t sz_substrings_bm25_finish_simt_(sz_strings_view_t h
  *  A block whose haystacks the table held whole stages nothing. Where a batch holds too few
  *  haystacks to fill the device, Hopper's tier walks each missed one with a cluster of blocks.
  */
-static __global__ void sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
-                                                       sz_f32_t const *document_lengths,
-                                                       sz_substrings_bm25_t parameters, sz_f32_t const *needle_weights,
-                                                       sz_u32_t *overflow_rows, sz_f32_t *scores,
-                                                       sz_size_t scores_stride, sz_u32_t staged_accepts_words,
-                                                       sz_u32_t staged_count, unsigned long long const *sums,
-                                                       sz_size_t const *overflowed) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_bm25_simt_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                    sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                    sz_f32_t const *needle_weights, sz_u32_t *overflow_rows, sz_f32_t *scores,
+                                    sz_size_t scores_stride, sz_u32_t staged_accepts_words, sz_u32_t staged_count,
+                                    unsigned long long const *sums, sz_size_t const *overflowed) {
     sz_size_t const table_slots = sz_substrings_tally_slots_for_simt_(engine.needles_count);
     sz_size_t haystack_index;
     if (!sz_substrings_bm25_finish_simt_(haystacks, scores, scores_stride, sums, overflowed, blockIdx.x, gridDim.x))
@@ -1198,9 +1199,9 @@ STRINGZILLA_DEVICE sz_size_t sz_substrings_successor_simt_(sz_match_t const *mat
  *  @p longest bytes before its end, so a successor's search window is bounded by the vocabulary,
  *  never by the text.
  */
-static __global__ void sz_substrings_link_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t const *report,
-                                                       sz_size_t longest, sz_substrings_overlap_policy_t policy,
-                                                       sz_size_t *jumps, sz_size_t *keep) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_link_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t const *report, sz_size_t longest,
+                                    sz_substrings_overlap_policy_t policy, sz_size_t *jumps, sz_size_t *keep) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1223,8 +1224,9 @@ enum { sz_substrings_round_hops_simt_k = 8 };
 
 /** One doubling round: every marked match marks the matches its first hops reach, and jumps as far
  *  as all of them next round. */
-static __global__ void sz_substrings_double_simt_kernel_(sz_substrings_report_t const *report, sz_size_t const *jumps,
-                                                         sz_size_t *doubled, sz_size_t *keep) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_double_simt_kernel_(sz_substrings_report_t const *report, sz_size_t const *jumps, sz_size_t *doubled,
+                                      sz_size_t *keep) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1250,8 +1252,9 @@ static __global__ void sz_substrings_double_simt_kernel_(sz_substrings_report_t 
  *  The scan overwrote the flags it summed, so survival is read back out of it: a match was kept
  *  exactly when the scan steps across it.
  */
-static __global__ void sz_substrings_compact_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t *report,
-                                                          sz_size_t const *keep_offsets, sz_match_t *survivors) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_compact_simt_kernel_(sz_match_t const *matches, sz_substrings_report_t *report,
+                                       sz_size_t const *keep_offsets, sz_match_t *survivors) {
     sz_size_t const count = report->matches_emitted;
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1262,11 +1265,10 @@ static __global__ void sz_substrings_compact_simt_kernel_(sz_match_t const *matc
 }
 
 /** Maps each haystack's match range onto the boundaries its reported matches occupy. */
-static __global__ void sz_substrings_haystack_offsets_simt_kernel_(sz_size_t const *chunk_offsets,
-                                                                   sz_size_t const *chunk_slots,
-                                                                   sz_size_t const *keep_offsets,
-                                                                   sz_substrings_report_t const *report,
-                                                                   sz_size_t *haystack_offsets, sz_size_t count) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_haystack_offsets_simt_kernel_(sz_size_t const *chunk_offsets, sz_size_t const *chunk_slots,
+                                                sz_size_t const *keep_offsets, sz_substrings_report_t const *report,
+                                                sz_size_t *haystack_offsets, sz_size_t count) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     if (report->shortfall) return;
@@ -1277,8 +1279,9 @@ static __global__ void sz_substrings_haystack_offsets_simt_kernel_(sz_size_t con
 }
 
 /** Writes how many matches each haystack owns, as the gap between its two boundaries. */
-static __global__ void sz_substrings_counts_simt_kernel_(sz_size_t const *haystack_offsets, sz_size_t *counts,
-                                                         sz_size_t counts_stride, sz_size_t count) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_counts_simt_kernel_(sz_size_t const *haystack_offsets, sz_size_t *counts, sz_size_t counts_stride,
+                                      sz_size_t count) {
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
     sz_size_t index = (sz_size_t)blockIdx.x * blockDim.x + threadIdx.x;
     for (; index < count; index += stride)
@@ -1293,9 +1296,9 @@ static __global__ void sz_substrings_counts_simt_kernel_(sz_size_t const *haysta
  *  clip; one grid-strided kernel can, and @ref sz_substrings_stored_simt_kernel_ publishes what it
  *  stored once no block is left reading the report.
  */
-static __global__ void sz_substrings_store_matches_simt_kernel_(sz_match_t const *reported,
-                                                                sz_substrings_report_t const *report,
-                                                                sz_match_t *matches, sz_size_t matches_capacity) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_store_matches_simt_kernel_(sz_match_t const *reported, sz_substrings_report_t const *report,
+                                             sz_match_t *matches, sz_size_t matches_capacity) {
     sz_size_t const kept = report->shortfall ? 0 : report->matches_stored;
     sz_size_t const fitting = sz_min_of_two(kept, matches_capacity);
     sz_size_t const stride = (sz_size_t)gridDim.x * blockDim.x;
@@ -1305,7 +1308,8 @@ static __global__ void sz_substrings_store_matches_simt_kernel_(sz_match_t const
 
 /** Publishes what the store kept, a launch of its own, since a block of the store still reading the
  *  report would otherwise see its shortfall change and copy nothing. */
-static __global__ void sz_substrings_stored_simt_kernel_(sz_substrings_report_t *report, sz_size_t matches_capacity) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_stored_simt_kernel_(sz_substrings_report_t *report, sz_size_t matches_capacity) {
     sz_size_t kept;
     if (blockIdx.x || threadIdx.x) return;
     kept = report->shortfall ? 0 : report->matches_stored;
@@ -1329,9 +1333,11 @@ static __global__ void sz_substrings_stored_simt_kernel_(sz_substrings_report_t 
  *  Offsets are relative to the haystack's own start, because the base is only known after the scan
  *  across haystacks that this kernel feeds.
  */
-static __global__ void sz_substrings_rewrite_offsets_simt_kernel_(
-    sz_strings_view_t haystacks, sz_strings_view_t replacements, sz_size_t const *haystack_offsets,
-    sz_match_t const *matches, sz_substrings_report_t const *report, sz_size_t *gap_offsets, sz_size_t *output_sizes) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_rewrite_offsets_simt_kernel_(sz_strings_view_t haystacks, sz_strings_view_t replacements,
+                                               sz_size_t const *haystack_offsets, sz_match_t const *matches,
+                                               sz_substrings_report_t const *report, sz_size_t *gap_offsets,
+                                               sz_size_t *output_sizes) {
     __shared__ sz_size_t shared[sz_substrings_threads_per_block_simt_k];
     __shared__ sz_size_t drift_carry;
     sz_size_t haystack_index;
@@ -1391,12 +1397,11 @@ STRINGZILLA_DEVICE void sz_substrings_copy_clipped_simt_(sz_ptr_t output, sz_siz
  *  prose has stretches of tens of bytes and striding a whole block across one of them would
  *  leave most lanes idle.
  */
-static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_strings_view_t haystacks,
-                                                               sz_strings_view_t replacements,
-                                                               sz_size_t const *haystack_offsets,
-                                                               sz_match_t const *matches, sz_size_t const *gap_offsets,
-                                                               sz_size_t const *output_offsets,
-                                                               sz_substrings_report_t const *report, sz_ptr_t output) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_rewrite_copy_simt_kernel_(sz_strings_view_t haystacks, sz_strings_view_t replacements,
+                                            sz_size_t const *haystack_offsets, sz_match_t const *matches,
+                                            sz_size_t const *gap_offsets, sz_size_t const *output_offsets,
+                                            sz_substrings_report_t const *report, sz_ptr_t output) {
     sz_size_t const output_bytes_total = output_offsets[haystacks.count];
     sz_size_t const tile_count = sz_size_divide_round_up(output_bytes_total, sz_substrings_gpu_rewrite_tile_bytes_k);
     unsigned const warp_index = threadIdx.x / 32u, warps_per_block = blockDim.x / 32u, lane = threadIdx.x % 32u;
@@ -1452,8 +1457,9 @@ static __global__ void sz_substrings_rewrite_copy_simt_kernel_(sz_strings_view_t
  *  @brief Publishes the bytes the rewrite needs, and whether the target could hold them.
  *  @param[in] target_ceiling Bytes the caller's target holds.
  */
-static __global__ void sz_substrings_target_simt_kernel_(sz_size_t const *rewritten_at, sz_size_t target_ceiling,
-                                                         sz_substrings_report_t *report) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_target_simt_kernel_(sz_size_t const *rewritten_at, sz_size_t target_ceiling,
+                                      sz_substrings_report_t *report) {
     sz_size_t const rewritten = *rewritten_at;
     if (blockIdx.x || threadIdx.x) return;
     report->target_length = rewritten;

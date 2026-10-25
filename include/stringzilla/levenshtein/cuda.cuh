@@ -37,10 +37,6 @@ extern "C" {
  *  about to launch instead. */
 enum { sz_levenshtein_candidates_per_block_cuda_k = 128 };
 
-/** Widest block the launcher considers: past this a block schedules too coarsely for
- *  what residency returns. */
-enum { sz_levenshtein_candidates_per_block_max_cuda_k = 256 };
-
 /** Rounds of candidates one block's tile holds on the rungs where every thread sweeps its own, so a
  *  thread done early draws more instead of idling; a warped rung's tile holds one, its grid as wide
  *  as the batch, as the device then balances whole warps across its multiprocessors. */
@@ -61,130 +57,146 @@ STRINGZILLA_CONSTEXPR sz_size_t sz_levenshtein_warp_words_per_lane_cuda_(sz_size
 #if STRINGZILLA_TARGET_CUDA
 
 /*  Warped byte rung: one entry point per words-per-lane. */
-static __global__ void sz_levenshtein_distances_k1_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k1_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 1,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k2_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k2_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 2,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k3_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k3_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 3,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k4_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k4_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 4,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k5_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k5_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 5,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k6_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k6_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 6,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k7_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k7_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 7,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_k8_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_k8_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_simt_(engine, order, candidates, distances, distances_stride, bound, 8,
                                     sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_, sz_lanes_broadcast_cuda_,
                                     sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
 /*  Warped rune rung: one entry point per words-per-lane. */
-static __global__ void sz_levenshtein_distances_utf8_k1_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k1_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 1,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k2_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k2_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 2,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k3_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k3_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 3,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k4_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k4_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 4,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k5_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k5_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 5,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k6_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k6_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 6,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k7_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k7_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 7,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
 }
 
-static __global__ void sz_levenshtein_distances_utf8_k8_cuda_kernel_( //
-    sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
-    sz_size_t distances_stride, sz_size_t bound) {
+static __global__ void __launch_bounds__(sz_levenshtein_candidates_per_block_max_simt_k)
+    sz_levenshtein_distances_utf8_k8_cuda_kernel_( //
+        sz_levenshtein_engine_t engine, sz_u32_t const *order, sz_strings_view_t candidates, sz_size_t *distances,
+        sz_size_t distances_stride, sz_size_t bound) {
     sz_levenshtein_warp_sweep_utf8_simt_(engine, order, candidates, distances, distances_stride, bound, 8,
                                          sz_group_shuffle_up_cuda_, sz_group_shuffle_index_cuda_,
                                          sz_lanes_broadcast_cuda_, sz_tile_queue_open_simt_, sz_tile_queue_draw_simt_);
@@ -268,12 +280,12 @@ typedef struct sz_levenshtein_entry_points_cuda_t {
  *
  *  Register pressure moves the residency ceiling from one word count to the next, so the block
  *  landing the most warps per multiprocessor is the device's answer and not a constant's. The walk
- *  stops at @c sz_levenshtein_candidates_per_block_max_cuda_k rather than at what the entry point
+ *  stops at @c sz_levenshtein_candidates_per_block_max_simt_k rather than at what the entry point
  *  allows, since past it a block schedules too coarsely for what its residency returns; ties below
  *  it go to the wider block.
  */
 static sz_size_t sz_levenshtein_per_block_cuda_(void const *entry_point) {
-    return sz_block_size_cuda_(entry_point, 0, sz_levenshtein_candidates_per_block_max_cuda_k,
+    return sz_block_size_cuda_(entry_point, 0, sz_levenshtein_candidates_per_block_max_simt_k,
                                sz_levenshtein_candidates_per_block_cuda_k);
 }
 
@@ -430,10 +442,6 @@ static void sz_levenshtein_bind_head_cuda_(sz_levenshtein_engine_t *engine, sz_s
                                             sz_levenshtein_entry_point_cuda_(entry_points, engine->symbol, bucket));
 }
 
-/** Threads the mask builder runs: one per byte value, so a thread owns one class flag for
- *  the whole build. */
-enum { sz_levenshtein_masks_threads_cuda_k = sz_levenshtein_byte_classes_k };
-
 /**
  *  @brief Stages the batch's query texts where the device reads them and builds every
  *      byte plane there.
@@ -479,7 +487,7 @@ static sz_status_t sz_levenshtein_build_masks_cuda_(sz_levenshtein_engine_t *eng
         dim3 grid, block;
         grid.x = 1, grid.z = 1;
         grid.y = (unsigned)sz_min_of_two(queries->count - first, (sz_size_t)sz_levenshtein_gpu_grid_rows_max_k);
-        block.x = sz_levenshtein_masks_threads_cuda_k, block.y = 1, block.z = 1;
+        block.x = sz_levenshtein_masks_threads_simt_k, block.y = 1, block.z = 1;
         status = sz_launch_cuda_((void const *)sz_levenshtein_masks_simt_kernel_, grid, block, arguments, 0, stream);
     }
     // The staging is the host's, so it outlives the builder only as long as the join below takes.
@@ -640,9 +648,10 @@ static sz_status_t sz_levenshtein_enqueue_long_cuda_(sz_levenshtein_engine_t eng
         for (sz_size_t bucket = 0; bucket != sz_levenshtein_length_buckets_k; ++bucket)
             buckets.offsets[bucket] = candidate_buckets[bucket].offset;
         void *arguments[] = {&candidates, &buckets, &candidate_storage, &candidate_order};
-        sz_size_t const blocks = sz_min_of_two(sz_size_divide_round_up(candidates.count, 128), resident * 4);
+        sz_size_t const blocks = sz_min_of_two(
+            sz_size_divide_round_up(candidates.count, sz_levenshtein_long_threads_simt_k), resident * 4);
         status = sz_launch_cuda_((void const *)sz_levenshtein_order_simt_kernel_, dim3((unsigned)blocks, 1, 1),
-                                 dim3(128, 1, 1), arguments, 0, stream);
+                                 dim3(sz_levenshtein_long_threads_simt_k, 1, 1), arguments, 0, stream);
         if (status != sz_success_k) return status;
     }
     sz_levenshtein_long_arguments_simt_t batch = {};
@@ -688,9 +697,11 @@ static sz_status_t sz_levenshtein_enqueue_long_cuda_(sz_levenshtein_engine_t eng
                                                      arguments, 0, stream);
                     }
                     else {
-                        sz_size_t const blocks = sz_size_divide_round_up(batch.pair_count, 128);
+                        sz_size_t const blocks = sz_size_divide_round_up(batch.pair_count,
+                                                                         sz_levenshtein_long_threads_simt_k);
                         status = sz_launch_cuda_((void const *)sz_levenshtein_long_simt_kernel_,
-                                                 dim3((unsigned)blocks, 1, 1), dim3(128, 1, 1), arguments, 0, stream);
+                                                 dim3((unsigned)blocks, 1, 1),
+                                                 dim3(sz_levenshtein_long_threads_simt_k, 1, 1), arguments, 0, stream);
                     }
                     if (status != sz_success_k) return status;
                     candidate += batch.candidate_count;
@@ -746,7 +757,8 @@ static sz_status_t sz_levenshtein_long_cuda_(sz_levenshtein_engine_t *engine, sz
     sz_size_t const multiprocessors = sz_device_multiprocessors_cuda_();
     void const *const entry_point = has_tiled ? (void const *)sz_levenshtein_tiled_batch_cuda_kernel_
                                               : (void const *)sz_levenshtein_long_simt_kernel_;
-    sz_size_t const per_block = has_tiled ? sz_levenshtein_tiled_threads_per_block_cuda_k : 128;
+    sz_size_t const per_block = has_tiled ? (sz_size_t)sz_levenshtein_tiled_threads_per_block_cuda_k
+                                          : (sz_size_t)sz_levenshtein_long_threads_simt_k;
     sz_size_t const resident = multiprocessors * sz_resident_blocks_cuda_(entry_point, per_block, 0);
     if (!resident) return sz_device_code_mismatch_k;
     sz_bool_t const cooperative = has_tiled && sz_device_attribute_cuda_(cudaDevAttrCooperativeLaunch) ? sz_true_k

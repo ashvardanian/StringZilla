@@ -2002,6 +2002,32 @@ check_thread_local() {
         "$staged_path declares a thread_local - hand the state to an object that owns it:"
 }
 
+# Rejects `std::filesystem` in the library and its bindings, because it throws, allocates paths behind the
+# caller's back, and is missing or partial on several targets the bindings ship to; only the test, benchmark
+# and tool harnesses may include `<filesystem>`.
+check_filesystem_in_harnesses_only() {
+    local reached
+    reached=$(printf '%s\n' "$staged_added_text" |
+        grep -vE "$added_comment_line_pattern" |
+        grep -E '\bstd::filesystem\b|#[[:space:]]*include[[:space:]]*<filesystem>' || true)
+    [ -z "$reached" ] || reject_with_reason "$reached" \
+        "$staged_path uses std::filesystem in library code - it is allowed only in test/, bench/ and tools/ harnesses:"
+}
+
+# Rejects the standard containers, `std::pair` and `std::tuple` in the library and its bindings, because the
+# containers allocate through the global heap behind the caller's back and throw when it runs out, and a pair
+# or a tuple hides what each member means behind `first` and `get<1>`; only the harnesses may use them.
+check_std_collections_in_harnesses_only() {
+    local reached
+    reached=$(printf '%s\n' "$staged_added_text" |
+        grep -vE "$added_comment_line_pattern" |
+        grep -E '\bstd::(vector|pair|tuple|deque|list|forward_list|map|multimap|set|multiset|unordered_map|unordered_multimap|unordered_set|unordered_multiset|queue|priority_queue|stack|valarray)\b|#[[:space:]]*include[[:space:]]*<(vector|deque|list|forward_list|map|set|unordered_map|unordered_set|queue|stack|valarray)>' ||
+        true)
+    [ -z "$reached" ] || reject_with_reason "$reached" \
+        "$staged_path uses a standard container, std::pair or std::tuple in library code - name a struct, take" \
+        "            the caller's buffer or allocator, or move the code to a test/, bench/ or tools/ harness:"
+}
+
 # `_t` marks a materialized type. A concept names a requirement rather than a type, and a class
 # template names a family rather than one member of it, so neither wears the suffix - the alias that
 # instantiates the template is what carries it.
@@ -2744,6 +2770,16 @@ run_shared_checks() {
     *.hpp | *.cpp | *.cc) check_memcpy_qualified ;;
     esac
     case "$staged_path" in
+    include/* | c/* | python/* | javascript/* | swift/* | golang/* | java/* | csharp/*)
+        case "$staged_path" in
+        *.c | *.h | *.cpp | *.hpp | *.cu | *.cuh | *.hip | *.cc | *.cxx | *.mm)
+            check_filesystem_in_harnesses_only
+            check_std_collections_in_harnesses_only
+            ;;
+        esac
+        ;;
+    esac
+    case "$staged_path" in
     test/*.hpp | test/*.cuh | test/*.h | bench/*.hpp | bench/*.cuh | bench/*.h) check_harness_namespace_matches_directory ;;
     esac
     case "$staged_path" in
@@ -3004,6 +3040,28 @@ check_launches_report_status() {
     launches=$(added_code_text | grep -F '<<<' || true)
     [ -z "$launches" ] || reject_with_reason "$launches" \
         "$staged_path launches with <<< >>>, which loses the launch status; call the vendor's launch API:"
+}
+
+# Rejects a kernel without `__launch_bounds__`, or bounded by a literal or an expression, because an unbounded
+# kernel's register count, and so its widest launch, moves with the architecture and the optimization level; a
+# named width its launcher passes too makes a launch that is too wide fail on every device alike.
+check_kernels_bounded_by_named_widths() {
+    local unbounded
+    unbounded=$(blank_c_comments_preserving_columns < "$staged_text_path" | awk '
+        NR == FNR { added[$1 + 0]; next }
+        /(^|[^A-Za-z0-9_])__global__([^A-Za-z0-9_]|$)/ { start = FNR; touched = 0; declaration = "" }
+        start {
+            touched = touched || (FNR in added)
+            declaration = declaration " " $0
+            if ($0 !~ /[{;]/) next
+            gsub(/[[:space:]\\]+/, " ", declaration)
+            if (touched && declaration !~ /__launch_bounds__\( *[a-z][a-z0-9_#]*_k *(, *([a-z][a-z0-9_#]*_k|[0-9]+) *)?\)/)
+                print start ":" substr(declaration, 1, 160)
+            start = 0
+        }' "$staged_lines_path" -)
+    [ -z "$unbounded" ] || reject_with_reason "$unbounded" \
+        "$staged_path declares a kernel without a named launch width; write" \
+        "            \`static __global__ void __launch_bounds__(<family>_threads_<tier>_k)\`, the constant its launch passes:"
 }
 
 # Rejects `__CUDACC__`, `__HIP__` and `__HIP_DEVICE_COMPILE__` outside types.h, because types.h derives
@@ -3436,7 +3494,9 @@ run_project_checks() {
     include/stringzilla/*.cuh | include/stringzilla/*/*.cuh)
         check_cuda_headers_stay_c
         check_generations_split_into_tiers
+        check_kernels_bounded_by_named_widths
         ;;
+    c/*.cu | c/*.hip) check_kernels_bounded_by_named_widths ;;
     esac
     case "$staged_path" in
     include/stringzilla/*.h | include/stringzilla/*.cuh | include/stringzilla/*/*.cuh | include/stringzilla/*/metal.h | \

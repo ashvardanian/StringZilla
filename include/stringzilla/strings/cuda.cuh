@@ -84,8 +84,8 @@ STRINGZILLA_INLINE sz_status_t sz_strings_measured_cuda_(sz_u64_t *scratch, sz_s
             status = sz_launch_cuda_((void const *)&sz_strings_scan_offsets_simt_kernel_, grid, block,
                                      offsets_arguments, 0, stream);
         if (status == sz_success_k)
-            status = sz_launch_cuda_((void const *)&sz_strings_payload_simt_kernel_, single, single, payload_arguments,
-                                     0, stream);
+            status = sz_launch_cuda_((void const *)&sz_strings_payload_simt_kernel_, single,
+                                     dim3(sz_strings_payload_threads_simt_k), payload_arguments, 0, stream);
         if (status == sz_success_k) status = sz_copy_cuda_(report, scratch + count + 1, sizeof(report), stream);
     }
     // The host reads the sizes of the output's old blocks next, so the stream drains even for none.

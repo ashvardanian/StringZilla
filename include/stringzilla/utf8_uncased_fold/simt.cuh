@@ -159,8 +159,9 @@ STRINGZILLA_DEVICE sz_size_t sz_utf8_uncased_fold_span_simt_(sz_u8_t const *sour
 
 /** Folds one tile of @p source, @p tile_bytes wide, of the @p tiles a round cuts it into, measuring
  *  each thread's stretch first and writing it once the chain says where the tile begins. */
-static __global__ void sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes,
-                                                         sz_size_t tiles, sz_u8_t *target, sz_size_t *target_length) {
+static __global__ void __launch_bounds__(sz_utf8_uncased_fold_threads_simt_k)
+    sz_utf8_uncased_fold_simt_kernel_(sz_u8_t const *source, sz_size_t length, sz_size_t tile_bytes, sz_size_t tiles,
+                                      sz_u8_t *target, sz_size_t *target_length) {
     __shared__ sz_size_t shared[sz_utf8_uncased_fold_threads_simt_k];
     sz_size_t const ticket = sz_chain_ticket_simt_(target_length);
     sz_size_t const tile_begin = ticket * tile_bytes, tile_end = sz_min_of_two(tile_begin + tile_bytes, length);

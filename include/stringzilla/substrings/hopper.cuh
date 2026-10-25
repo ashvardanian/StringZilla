@@ -70,13 +70,12 @@ STRINGZILLA_DEVICE void sz_cluster_sync_hopper_(void) {
  *  dynamic shared memory @ref sz_substrings_bm25_prepare_simt_ lays out. A cluster whose haystacks
  *  the table held whole stages nothing.
  */
-static __global__ void sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
-                                                         sz_f32_t const *document_lengths,
-                                                         sz_substrings_bm25_t parameters,
-                                                         sz_f32_t const *needle_weights, sz_u32_t *overflow_rows,
-                                                         sz_f32_t *scores, sz_size_t scores_stride,
-                                                         sz_u32_t staged_accepts_words, sz_u32_t staged_count,
-                                                         unsigned long long const *sums, sz_size_t const *overflowed) {
+static __global__ void __launch_bounds__(sz_substrings_threads_per_block_simt_k)
+    sz_substrings_bm25_hopper_kernel_(sz_substrings_engine_t engine, sz_strings_view_t haystacks,
+                                      sz_f32_t const *document_lengths, sz_substrings_bm25_t parameters,
+                                      sz_f32_t const *needle_weights, sz_u32_t *overflow_rows, sz_f32_t *scores,
+                                      sz_size_t scores_stride, sz_u32_t staged_accepts_words, sz_u32_t staged_count,
+                                      unsigned long long const *sums, sz_size_t const *overflowed) {
     sz_u32_t const cluster_rank = sz_cluster_rank_hopper_(), cluster_blocks = sz_cluster_size_hopper_();
     // Every block of a cluster checks the same haystacks, so the cluster leaves or stays whole.
     if (!sz_substrings_bm25_finish_simt_(haystacks, scores, scores_stride, sums, overflowed,
