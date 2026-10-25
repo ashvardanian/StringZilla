@@ -130,7 +130,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -162,7 +162,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -196,7 +196,7 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -229,7 +229,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -261,7 +261,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
@@ -293,7 +293,7 @@ jobs:
         with:
           python-version: 3.x
       - name: Install cibuildwheel
-        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==3.4.1
+        run: python -m pip install --upgrade "pip>=26.2.2" cibuildwheel==4.3.4
       - name: Build wheels
         run: cibuildwheel --output-dir wheelhouse
         env:
