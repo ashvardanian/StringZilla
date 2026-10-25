@@ -1360,7 +1360,8 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_compile_patterns_(sz_regex_engine
                                                                  sz_size_t patterns_count, sz_capability_t capabilities,
                                                                  sz_allocator_t *allocator, sz_stream_t stream,
                                                                  sz_size_t *malformed_pattern) {
-    sz_size_t bytes = (patterns_count + 1) * sizeof(sz_u32_t), written = 0, index;
+    sz_u64_t bytes = ((sz_u64_t)patterns_count + 1) * sizeof(sz_u32_t);
+    sz_size_t written = 0, index;
     sz_strings_view_t view;
     sz_u32_t *offsets;
     sz_ptr_t data;
@@ -1368,7 +1369,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_compile_patterns_(sz_regex_engine
     for (index = 0; index != instructions_count; ++index)
         if (instructions[index].operation == sz_subdocuments_operation_match_k ||
             instructions[index].operation == sz_subdocuments_operation_search_k)
-            bytes += 7 * instructions[index].string_length + 48;
+            bytes += 7ull * instructions[index].string_length + 48;
     if (bytes > 0xFFFFFFFFull) return sz_overflow_risk_k;
     offsets = (sz_u32_t *)allocator->allocate(bytes, allocator->handle, stream);
     if (!offsets) return sz_bad_alloc_k;
@@ -1464,10 +1465,12 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_engine_compile_(sz_subdocuments_e
             return status;
         }
     }
+#if STRINGZILLA_ARCH_64BIT_
     if (builder.steps_count > 0xFFFFFFFFull || builder.slices_count > 0xFFFFFFFFull ||
         builder.names_bytes > 0xFFFFFFFFull || builder.instructions_count > 0xFFFFFFFFull ||
         builder.strings_bytes > 0xFFFFFFFFull)
         return sz_overflow_risk_k;
+#endif
 
     names_bound = builder.name_selectors_count, steps_bound = builder.steps_count, slices_bound = builder.slices_count;
     filters_bound = builder.filters_count, instructions_bound = builder.instructions_count;
@@ -1711,7 +1714,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_serial_(sz_u
     line_feed_vec.u64 = 0x0A0A0A0A0A0A0A0Aull, carriage_return_vec.u64 = 0x0D0D0D0D0D0D0D0Dull;
     slash_vec.u64 = 0x2F2F2F2F2F2F2F2Full;
     for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        sz_u64_vec_t text_vec = sz_u64_load((sz_cptr_t)text + word_index * 8), folded_vec;
+        sz_u64_vec_t text_vec, folded_vec;
+        text_vec.u64 = sz_subdocuments_word_load_((sz_cptr_t)text + word_index * 8);
         sz_size_t const shift = word_index * 8;
         sz_u64_t const slash_bits = sz_u64_each_byte_equal_(text_vec, slash_vec).u64;
         // `[` and `]` differ from `{` and `}` only in the 0x20 bit, and no other byte folds there.
@@ -1768,7 +1772,8 @@ STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_skim_serial_(sz_u8_t 
     open_vec.u64 = 0x7B7B7B7B7B7B7B7Bull, close_vec.u64 = 0x7D7D7D7D7D7D7D7Dull;
     slash_vec.u64 = 0x2F2F2F2F2F2F2F2Full;
     for (sz_size_t word_index = 0; word_index != 8; ++word_index) {
-        sz_u64_vec_t text_vec = sz_u64_load((sz_cptr_t)text + word_index * 8), folded_vec;
+        sz_u64_vec_t text_vec, folded_vec;
+        text_vec.u64 = sz_subdocuments_word_load_((sz_cptr_t)text + word_index * 8);
         sz_size_t const shift = word_index * 8;
         folded_vec.u64 = text_vec.u64 | 0x2020202020202020ull;
         quotes |= sz_subdocuments_gather_bytes_serial_(sz_u64_each_byte_equal_(text_vec, quote_vec).u64) << shift;
@@ -2387,6 +2392,7 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
     sz_subdocuments_value_t values[sz_subdocuments_filter_depth_k];
     sz_size_t depth = 0, index;
     sz_status_t status = sz_success_k;
+    values[0].number = 0;
     for (index = filter->instructions_begin; index != filter->instructions_end && status == sz_success_k; ++index) {
         sz_subdocuments_instruction_t const *const instruction = &engine->instructions[index];
         sz_subdocuments_value_t *const top = &values[depth];
@@ -2459,11 +2465,11 @@ STRINGZILLA_INLINE sz_status_t sz_subdocuments_filter_holds_(sz_subdocuments_eng
  *      levels take the next ones.
  *  @param[inout] emitted Matches so far, or null for a filter's replay.
  */
-STRINGZILLA_INLINE sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
-                                                       sz_u64_t *stack, sz_size_t begin, sz_size_t end, sz_size_t spare,
-                                                       sz_ptr_t buffer, sz_size_t capacity, sz_size_t document_index,
-                                                       sz_match_t *matches, sz_size_t matches_capacity,
-                                                       sz_size_t *emitted) {
+STRINGZILLA_C_INLINE_ sz_status_t sz_subdocuments_replay_(sz_subdocuments_engine_t *engine, sz_u8_t const *text,
+                                                          sz_u64_t *stack, sz_size_t begin, sz_size_t end,
+                                                          sz_size_t spare, sz_ptr_t buffer, sz_size_t capacity,
+                                                          sz_size_t document_index, sz_match_t *matches,
+                                                          sz_size_t matches_capacity, sz_size_t *emitted) {
     sz_size_t const header_words = sz_subdocuments_frame_header_words_(), words_count = engine->words_count;
     sz_size_t const frame_words = header_words + words_count;
     sz_u64_t *const results = stack + spare * frame_words;

@@ -1182,10 +1182,11 @@ static char const doc_Strings_matched[] =                                       
     "Raises:\n"                                                                                   //
     "  IndexError: When a row reaches outside this collection.\n"                                 //
     "Example:\n"                                                                                  //
+    "  >>> import struct\n"                                                                       //
     "  >>> documents = sz.Strings(['{\"a\": [1, \"x\"]}'])\n"                                     //
     "  >>> engine = sz.SubdocumentsEngine(sz.Strings(['$.a[*]']))\n"                              //
-    "  >>> matches = memoryview(bytearray(2 * 4 * 8)).cast('Q', (2, 4))\n"                        //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                    //
+    "  >>> matches = memoryview(bytearray(2 * 4 * struct.calcsize('N'))).cast('N', (2, 4))\n"     //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                 //
     "  >>> engine.find(documents, matches, offsets)\n"                                            //
     "  >>> list(map(bytes, documents.matched(matches)))\n"                                        //
     "  [b'1', b'\"x\"']";

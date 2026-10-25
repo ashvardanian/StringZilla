@@ -1059,7 +1059,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_add_members_(sz_regex_builder_t *builder
     sz_status_t status = sz_success_k;
     if (builder->case_sensitivity == sz_cased_k) return sz_regex_add_range_(builder, first, last);
     for (sz_u32_t codepoint = first; status == sz_success_k; ++codepoint) {
-        sz_u8_t lead[4];
+        sz_u8_t lead[4] = {0};
         sz_rune_t folds[3];
         sz_u32_t run_last = codepoint;
         sz_size_t folds_count = 1;
@@ -2297,7 +2297,8 @@ STRINGZILLA_INLINE void sz_regex_builder_classify_(sz_regex_builder_t *builder) 
         if (nfa->links[link].low > 0) boundary[nfa->links[link].low - 1] = 1;
         boundary[nfa->links[link].high] = 1;
     }
-    if (nfa->looks & (sz_regex_look_line_start_k | sz_regex_look_line_end_k)) boundary['\n' - 1] = boundary['\n'] = 1;
+    if (nfa->looks & (sz_regex_look_line_start_k | sz_regex_look_line_end_k))
+        boundary['\n' - 1] = boundary[(sz_u8_t)'\n'] = 1;
     if (nfa->looks & (sz_regex_look_word_boundary_k | sz_regex_look_word_inside_k))
         for (sz_size_t byte = 0; byte != 255; ++byte)
             if (sz_regex_is_word_((sz_u32_t)byte) != sz_regex_is_word_((sz_u32_t)byte + 1)) boundary[byte] = 1;
@@ -2416,7 +2417,7 @@ STRINGZILLA_INLINE sz_status_t sz_regex_dfa_intern_(sz_regex_builder_t *builder,
         slot = (slot + 1) & mask;
     }
     // Every id must stay a 32-bit row offset, the published automaton's one ceiling.
-    if (dfa->states_count == dfa->states_budget || (dfa->states_count + 1) * stride > 0xFFFFFFFFull)
+    if (dfa->states_count == dfa->states_budget || ((sz_u64_t)dfa->states_count + 1) * stride > 0xFFFFFFFFull)
         return sz_overflow_risk_k;
     {
         sz_u32_t *const keys = (sz_u32_t *)sz_regex_grow_(builder, dfa->keys, &dfa->keys_capacity,
@@ -3985,7 +3986,7 @@ STRINGZILLA_INLINE sz_size_t sz_regex_unit_before_(sz_regex_engine_t const *engi
                                                    sz_size_t *unit_class) {
     sz_u8_t const last = (sz_u8_t)haystack[end - 1];
     sz_size_t back = 2, low = 0, high = engine->positions_ranges_count;
-    sz_rune_t rune;
+    sz_rune_t rune = 0;
     if (last < 0x80) {
         *unit_class = engine->positions_ascii[last];
         return end - 1;
@@ -4102,10 +4103,10 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_prime_serial_(sz_regex_engine_t const *engi
     sz_u32_t const states_count = engine->reverse_states_count;
     sz_size_t const edge = walk->bounds[window];
     for (sz_size_t distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? edge + distance : length;
-        sz_size_t position = far, primed_count, record = walk->windows;
+        sz_size_t const far_edge = length - edge > distance ? edge + distance : length;
+        sz_size_t position = far_edge, primed_count, record = walk->windows;
         sz_u32_t *primed = walk->primed, *stepped = walk->stepped;
-        if (far == length) primed[0] = engine->reverse_starts[0], primed_count = 1;
+        if (far_edge == length) primed[0] = engine->reverse_starts[0], primed_count = 1;
         else {
             for (sz_u32_t state = 1; state != states_count; ++state) primed[state - 1] = state * stride;
             primed_count = states_count - 1;
@@ -4150,11 +4151,12 @@ STRINGZILLA_INLINE sz_u32_t sz_regex_prime_folded_(sz_regex_engine_t const *engi
     sz_u32_t const states_count = engine->reverse_states_count;
     sz_size_t const edge = walk->bounds[window];
     for (sz_size_t distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance) : length;
-        sz_size_t position = far, primed_count, record = walk->windows;
+        sz_size_t const far_edge = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance)
+                                                            : length;
+        sz_size_t position = far_edge, primed_count, record = walk->windows;
         sz_u32_t *primed = walk->primed, *stepped = walk->stepped, block;
         sz_regex_image_t image;
-        if (far == length) primed[0] = engine->reverse_starts[0], primed_count = 1;
+        if (far_edge == length) primed[0] = engine->reverse_starts[0], primed_count = 1;
         else {
             for (sz_u32_t state = 1; state != states_count; ++state) primed[state - 1] = state * stride;
             primed_count = states_count - 1;
@@ -4208,12 +4210,13 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_prime_positions_serial_(sz_regex_eng
     sz_u8_t const *const bytes = (sz_u8_t const *)haystack;
     sz_size_t const words = engine->positions_words, edge = walk->bounds[window];
     for (sz_size_t distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance) : length;
-        sz_size_t position = far, record = walk->windows,
-                  right_kind = far == length ? 0 : sz_regex_byte_kind_(bytes[far]);
+        sz_size_t const far_edge = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance)
+                                                            : length;
+        sz_size_t position = far_edge, record = walk->windows,
+                  right_kind = far_edge == length ? 0 : sz_regex_byte_kind_(bytes[far_edge]);
         sz_u64_t *lower = walk->sets + 2 * sz_regex_chains_serial_k * words, *upper = lower + words,
                  *next = upper + words;
-        sz_bool_t known = (sz_bool_t)(far == length);
+        sz_bool_t known = (sz_bool_t)(far_edge == length);
         memset(lower, 0, words * sizeof(sz_u64_t));
         lower[0] = 1;
         memcpy(upper, engine->positions_all, words * sizeof(sz_u64_t));
@@ -4244,14 +4247,15 @@ STRINGZILLA_INLINE sz_u64_t const *sz_regex_prime_positions_folded_(sz_regex_eng
                                                                     sz_regex_walk_t *walk) {
     sz_size_t const words = engine->positions_words, edge = walk->bounds[window];
     for (sz_size_t distance = 32;; distance *= 2) {
-        sz_size_t const far = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance) : length;
-        sz_size_t position = far, record = walk->windows, right_kind = 0;
+        sz_size_t const far_edge = length - edge > distance ? sz_regex_boundary_(haystack, length, edge + distance)
+                                                            : length;
+        sz_size_t position = far_edge, record = walk->windows, right_kind = 0;
         sz_u64_t *lower = walk->sets + 2 * sz_regex_chains_serial_k * words, *upper = lower + words,
                  *next = upper + words;
-        sz_bool_t known = (sz_bool_t)(far == length);
+        sz_bool_t known = (sz_bool_t)(far_edge == length);
         sz_regex_image_t image;
-        if (far != length) {
-            sz_regex_image_after_(haystack, length, far, &image);
+        if (far_edge != length) {
+            sz_regex_image_after_(haystack, length, far_edge, &image);
             right_kind = sz_regex_rune_kind_(image.runes[0]);
         }
         memset(lower, 0, words * sizeof(sz_u64_t));
@@ -4633,9 +4637,9 @@ STRINGZILLA_INLINE void sz_regex_mark_guesses_serial_(sz_regex_engine_t const *e
     sz_u32_t const *const rows = engine->reverse_rows;
     sz_size_t positions[sz_regex_chains_serial_k];
     for (sz_size_t chain = 0; chain != count; ++chain) {
-        sz_size_t const far = sz_min_of_two(bounds[chain + 1] + sz_regex_mark_warmup_k, length);
-        positions[chain] = far;
-        guesses[chain] = engine->reverse_starts[far == length ? 0 : sz_regex_byte_kind_(bytes[far])];
+        sz_size_t const far_edge = sz_min_of_two(bounds[chain + 1] + sz_regex_mark_warmup_k, length);
+        positions[chain] = far_edge;
+        guesses[chain] = engine->reverse_starts[far_edge == length ? 0 : sz_regex_byte_kind_(bytes[far_edge])];
     }
     for (sz_size_t step = 0; step != sz_regex_mark_warmup_k; ++step)
         for (sz_size_t chain = 0; chain != count; ++chain) {

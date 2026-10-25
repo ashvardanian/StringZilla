@@ -138,8 +138,9 @@ static char const doc_SubdocumentsEngine_counts[] =                             
     "Raises:\n"                                                                                   //
     "  ValueError: Naming the first malformed document.\n"                                        //
     "Example:\n"                                                                                  //
+    "  >>> import struct\n"                                                                       //
     "  >>> engine = sz.SubdocumentsEngine(sz.Strings(['$..name']))\n"                             //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                            //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                         //
     "  >>> engine.counts(sz.Strings(['{\"name\": \"a\", \"b\": {\"name\": \"c\"}}']), out)\n"     //
     "  >>> out[0]\n"                                                                              //
     "  2";
@@ -230,9 +231,10 @@ static char const doc_SubdocumentsEngine_find[] =                               
     "Raises:\n"                                                                                            //
     "  ValueError: Naming the first malformed document.\n"                                                 //
     "Example:\n"                                                                                           //
+    "  >>> import struct\n"                                                                                //
     "  >>> engine = sz.SubdocumentsEngine(sz.Strings(['/a/b/text()']), format='xml')\n"                    //
-    "  >>> matches = memoryview(bytearray(2 * 4 * 8)).cast('Q', (2, 4))\n"                                 //
-    "  >>> offsets = memoryview(bytearray(2 * 8)).cast('Q')\n"                                             //
+    "  >>> matches = memoryview(bytearray(2 * 4 * struct.calcsize('N'))).cast('N', (2, 4))\n"              //
+    "  >>> offsets = memoryview(bytearray(2 * struct.calcsize('N'))).cast('N')\n"                          //
     "  >>> engine.find(sz.Strings(['<a><b>x</b><b>y</b></a>']), matches, offsets)\n"                       //
     "  >>> offsets[1]\n"                                                                                   //
     "  2";
@@ -365,8 +367,9 @@ static char const doc_SubdocumentsEngine[] =                                    
     "Raises:\n"                                                                                       //
     "  ValueError: Naming the first path that breaks its grammar or leaves the supported subset.\n"   //
     "Example:\n"                                                                                      //
+    "  >>> import struct\n"                                                                           //
     "  >>> engine = sz.SubdocumentsEngine(sz.Strings(['$.a[?@ > 1]']))\n"                             //
-    "  >>> out = memoryview(bytearray(8)).cast('Q')\n"                                                //
+    "  >>> out = memoryview(bytearray(struct.calcsize('N'))).cast('N')\n"                             //
     "  >>> engine.counts(sz.Strings(['{\"a\": [1, 2, 3]}']), out)\n"                                  //
     "  >>> out[0]\n"                                                                                  //
     "  2";

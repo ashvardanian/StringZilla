@@ -47,8 +47,8 @@ STRINGZILLA_INLINE svuint64_t sz_subdocuments_place_sve2_(svbool_t bytes_b8x, sv
 
 /** Classifies a block one vector at a time, so the loop runs once at 512 bits or more; lanes past
  *  the block load nothing, and their shifts past 63 place nothing. */
-STRINGZILLA_INLINE sz_subdocuments_block_t sz_subdocuments_classify_sve2_(sz_u8_t const *text,
-                                                                          sz_subdocuments_carry_t *carry) {
+STRINGZILLA_OUTLINED_ sz_subdocuments_block_t sz_subdocuments_classify_sve2_(sz_u8_t const *text,
+                                                                             sz_subdocuments_carry_t *carry) {
     svbool_t const all_b64x = svptrue_b64();
     // MATCH tests each byte against its 128-bit segment's set, so short sets repeat to fill one.
     // `/` joins both the separators and the blanks, as the class tables give it both bits.

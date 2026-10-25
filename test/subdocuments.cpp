@@ -15,14 +15,15 @@
 #endif
 #define STRINGZILLA_DEBUG 1 // ! Enforce aggressive logging in this translation unit
 
-#include <string> // Baseline
+#include <array>  // `std::array`
+#include <string> // `std::string`
 #include <vector> // `std::vector`
 
 #include "stringzilla/stringzilla.h"   // Primary C API
 #include "stringzilla/stringzilla.hpp" // `sz::default_capabilities`
 
 #include "cross.hpp"   // `subdocuments_tier_t`, `check_subdocuments_unit_`, `check_subdocuments_safety_`
-#include "harness.hpp" // `test_context_t`, `verify`
+#include "harness.hpp" // `refusing_allocator_`, `test_context_t`, `verify`
 
 namespace ashvardanian::stringzilla::test {
 
@@ -47,7 +48,21 @@ static subdocuments_tier_t const subdocuments_dispatched {subdocuments_engine_in
 #pragma region Unit Cases
 
 /** RFC 9535's bookstore and examples, XPath over an XML bookstore, refused paths and capacities. */
-void test_subdocuments_unit() { check_subdocuments_unit_(subdocuments_dispatched); }
+void test_subdocuments_unit() {
+    check_subdocuments_unit_(subdocuments_dispatched);
+
+    // Each mask bit names its byte's position in memory, on either byte order.
+    std::array<sz_u8_t, 64> text;
+    text.fill(' ');
+    for (std::size_t position = 0; position != text.size(); ++position) {
+        text[position] = '{';
+        sz_subdocuments_carry_t carry {};
+        verify(sz_subdocuments_classify_serial_(text.data(), &carry).opens == (sz_u64_t(1) << position));
+        carry = {};
+        verify(sz_subdocuments_skim_serial_(text.data(), &carry).opens == (sz_u64_t(1) << position));
+        text[position] = ' ';
+    }
+}
 
 /** What the verbs refuse, which is as much of the contract as what they accept. */
 void test_subdocuments_safety(test_context_t &) {
@@ -58,6 +73,15 @@ void test_subdocuments_safety(test_context_t &) {
     verify(subdocuments_compile_status_(subdocuments_dispatched, {"$.a", "$[?@.b]", "$[?@.c || match(@.a, 'x[')]"},
                                         sz_subdocuments_json_k, malformed_index) == sz_invalid_syntax_k);
     verify(malformed_index == 2);
+
+    // Reject an oversized translated pattern before allocating or reading its text.
+    sz_subdocuments_instruction_t instruction {};
+    instruction.operation = sz_subdocuments_operation_match_k;
+    instruction.string_length = 0x40000000u;
+    sz_regex_engine_t regex {};
+    sz_allocator_t refusing = refusing_allocator_();
+    verify(sz_subdocuments_compile_patterns_(&regex, &instruction, 1, nullptr, 1, sz::default_capabilities(), &refusing,
+                                             nullptr, &malformed_index) == sz_overflow_risk_k);
 }
 
 /** Random paths over random documents through the dispatched verbs, against the serial ones. */

@@ -20,7 +20,9 @@ std::size_t test_cross_metal(environment_t const &env, std::size_t ordinal) {
         sz_size_t devices = 0;
         sz_capability_t reported = 0;
         verify(sz_device_count_metal(&devices) == sz_success_k && devices != 0);
-        verify(sz_capabilities_detected_metal(ordinal, &reported) == sz_success_k && reported == sz_cap_metal_k);
+        verify(sz_capabilities_detected_metal(ordinal, &reported) == sz_success_k);
+        // A listed Metal device may fall below the Apple7 baseline and report no supported kernels.
+        verify((reported & ~sz_cap_metal_k) == 0);
         verify(sz_capabilities_detected_metal(devices, &reported) == sz_missing_gpu_k);
     });
     auto const selected = sz::device_t::make(sz::device_kind_t::metal_k, ordinal);

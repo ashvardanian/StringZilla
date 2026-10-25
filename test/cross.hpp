@@ -1494,9 +1494,9 @@ inline void check_strings_rows_gaps_(strings_backend_t const &backend) {
  *  an allocator refusing everything leave a zeroed span empty. */
 inline void check_strings_arena_refusals_(strings_backend_t const &backend) {
     for (strings_verb_t const verb : strings_verbs_()) {
-        std::vector<std::string> const small = strings_input_for_(backend, verb, {"ab"});
+        std::vector<std::string> const small_input = strings_input_for_(backend, verb, {"ab"});
         std::vector<std::string> const large = strings_input_for_(backend, verb, {std::string(1024, '"')});
-        strings_layouts_t const small_layouts(small), large_layouts(large);
+        strings_layouts_t const small_layouts(small_input), large_layouts(large);
         alignas(64) char buffer[512];
         sz_allocator_t arena;
         verify(sz_allocator_init_arena(&arena, buffer, sizeof(buffer), 8) == sz_success_k);
@@ -3389,12 +3389,13 @@ std::size_t levenshtein_reference_(symbols_type_ const &first, symbols_type_ con
 }
 
 /** Whether the @p length bytes at @p bytes begin some well-formed rune: a completion by
- *  continuation bytes, one from each range a lead constrains them to, decodes past them. */
+ *  continuation bytes, one from each range a lead constrains them to, decodes past them.
+ *  The prefix is nonempty, so only positions after its first byte need completion. */
 inline bool levenshtein_rune_prefix_(char const *bytes, std::size_t length) {
     unsigned char const continuations[] = {0x80, 0x90, 0xA0, 0xBF};
     for (std::size_t completion = 0; completion != 64; ++completion) {
-        char padded[4];
-        for (std::size_t index = 0; index != 4; ++index)
+        char padded[4] = {bytes[0]};
+        for (std::size_t index = 1; index != 4; ++index)
             padded[index] = index < length ? bytes[index]
                                            : static_cast<char>(continuations[(completion >> (2 * (index - 1))) & 3]);
         sz_rune_t rune;
@@ -3824,7 +3825,7 @@ inline void check_overlap_bounds_(overlap_backend_t const &backend, std::vector<
                                   std::vector<sz_u32_t> const &exact) {
     std::vector<std::pair<sz_u64_t, sz_u64_t>> const misses = overlap_misses_(exact, queries, candidates, widths);
     std::vector<sz_f32_t> shares;
-    for (auto const [missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
+    for (auto const &[missed, longer] : misses) shares.push_back(longer ? (sz_f32_t)missed / (sz_f32_t)longer : 0.0f);
     std::sort(shares.begin(), shares.end());
     for (sz_f32_t const radius :
          {0.0f, shares[shares.size() / 4], shares[shares.size() / 2], std::nextafter(shares.back(), 0.0f)}) {
