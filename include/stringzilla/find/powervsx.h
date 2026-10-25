@@ -47,6 +47,26 @@ SZ_HELPER_INLINE sz_u64_t sz_movemask_powervsx_(__vector unsigned char cmp_u8x16
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_powervsx(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
     __vector unsigned char needle_u8x16 = vec_splats(*(unsigned char const *)needle);
+    if (haystack_length < 16) return sz_find_byte_serial(haystack, haystack_length, needle);
+
+    // The head stays within its page and later loads are aligned, see `sz_find_byte_serial`
+    sz_size_t const head_length = 16 - ((sz_size_t)haystack & 15);
+    if (((sz_size_t)haystack & 4095) <= 4096 - 16) {
+        __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
+#if defined(_ARCH_PWR10)
+        unsigned int match_index = vec_first_match_index(haystack_u8x16, needle_u8x16);
+        if (match_index != 16) return haystack + match_index;
+#else
+        __vector unsigned char cmp_u8x16 = (__vector unsigned char)vec_cmpeq(haystack_u8x16, needle_u8x16);
+        sz_u64_t matches = sz_movemask_powervsx_(cmp_u8x16);
+        if (matches) return haystack + sz_u64_ctz(matches);
+#endif
+    }
+    else
+        for (sz_size_t head_offset = 0; head_offset != head_length; ++head_offset)
+            if (haystack[head_offset] == needle[0]) return haystack + head_offset;
+    haystack += head_length, haystack_length -= head_length;
+
     while (haystack_length >= 16) {
         __vector unsigned char haystack_u8x16 = vec_xl(0, (unsigned char const *)haystack);
         // On Power10 `vec_first_match_index` returns the (little-endian) index of the first equal

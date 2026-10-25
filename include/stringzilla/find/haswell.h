@@ -31,8 +31,22 @@ SZ_API_COMPTIME sz_cptr_t sz_find_byte_haswell(sz_cptr_t haystack, sz_size_t hay
     sz_u256_vec_t haystack_vec, needle_vec;
     needle_vec.ymm = _mm256_set1_epi8(needle[0]);
 
-    while (haystack_length >= 32) {
+    if (haystack_length < 32) return sz_find_byte_serial(haystack, haystack_length, needle);
+
+    // The head stays within its page and later loads are aligned, see `sz_find_byte_serial`
+    sz_size_t const head_length = 32 - ((sz_size_t)haystack & 31);
+    if (((sz_size_t)haystack & 4095) <= 4096 - 32) {
         haystack_vec.ymm = _mm256_lddqu_si256((__m256i const *)haystack);
+        matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
+        if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
+    }
+    else
+        for (sz_size_t head_offset = 0; head_offset != head_length; ++head_offset)
+            if (haystack[head_offset] == needle[0]) return haystack + head_offset;
+    haystack += head_length, haystack_length -= head_length;
+
+    while (haystack_length >= 32) {
+        haystack_vec.ymm = _mm256_load_si256((__m256i const *)haystack);
         matches_mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(haystack_vec.ymm, needle_vec.ymm));
         if (matches_mask) return haystack + (int)_tzcnt_u32(matches_mask);
         haystack += 32, haystack_length -= 32;

@@ -736,6 +736,7 @@ void test_string_updates_unit(std::size_t repetitions = 1024);
 
 void test_compare_unit();
 void test_find_unit();
+void test_find_byte_safety();
 void test_find_all();
 void test_find_misaligned_all();
 void test_lookup_all(std::size_t lookup_tables_to_try = 32, std::size_t slices_per_table = 16);

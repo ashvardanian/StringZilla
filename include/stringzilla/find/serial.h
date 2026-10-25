@@ -126,33 +126,40 @@ SZ_API_COMPTIME sz_cptr_t sz_rfind_byteset_serial(sz_cptr_t text, sz_size_t leng
 
 SZ_API_COMPTIME sz_cptr_t sz_find_byte_serial(sz_cptr_t haystack, sz_size_t haystack_length, sz_cptr_t needle) {
 
-    if (!haystack_length) return SZ_NULL_CHAR;
     // Reinterpret as unsigned bytes so the SWAR broadcast below cannot sign-extend
     // on platforms where `char` is signed (e.g. `-fsigned-char`). See issue #306.
     sz_u8_t const *haystack_cursor = (sz_u8_t const *)haystack;
     sz_u8_t const *const needle_u8 = (sz_u8_t const *)needle;
-    sz_u8_t const *const haystack_end = haystack_cursor + haystack_length;
 
-#if !SZ_IS_BIG_ENDIAN_       // Use SWAR only on little-endian platforms for brevity.
-#if !SZ_USE_MISALIGNED_LOADS // Process the misaligned head, to void UB on unaligned 64-bit loads.
-    for (; ((sz_size_t)haystack_cursor & 7ull) && haystack_cursor < haystack_end; ++haystack_cursor)
-        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
-#endif
-
+    // Our `memchr` override may get any length, even `SZ_SIZE_MAX`, if the needle occurs first, so no load may
+    // cross into a page past the match and the length counts down instead of forming an overflowing end pointer.
+#if !SZ_IS_BIG_ENDIAN_ // Use SWAR only on little-endian platforms for brevity.
     // Broadcast the needle into every byte of a 64-bit integer to use SWAR
     // techniques and process eight characters at a time.
     sz_u64_vec_t haystack_vec, needle_vec, match_vec;
-    match_vec.u64 = 0;
     needle_vec.u64 = (sz_u64_t)*needle_u8 * 0x0101010101010101ull;
-    for (; haystack_cursor + 8 <= haystack_end; haystack_cursor += 8) {
+
+#if SZ_USE_MISALIGNED_LOADS // A misaligned word load covers the head, if it stays within the page.
+    if (haystack_length >= 8 && ((sz_size_t)haystack_cursor & 4095ull) <= 4096 - 8) {
+        sz_size_t const head_length = 8 - ((sz_size_t)haystack_cursor & 7ull);
+        haystack_vec.u64 = *(sz_u64_t const *)haystack_cursor;
+        match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
+        if (match_vec.u64) return (sz_cptr_t)(haystack_cursor + sz_u64_ctz(match_vec.u64) / 8);
+        haystack_cursor += head_length, haystack_length -= head_length;
+    }
+#endif
+    for (; ((sz_size_t)haystack_cursor & 7ull) && haystack_length; ++haystack_cursor, --haystack_length)
+        if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
+
+    for (; haystack_length >= 8; haystack_cursor += 8, haystack_length -= 8) {
         haystack_vec.u64 = *(sz_u64_t const *)haystack_cursor;
         match_vec = sz_u64_each_byte_equal_(haystack_vec, needle_vec);
         if (match_vec.u64) return (sz_cptr_t)(haystack_cursor + sz_u64_ctz(match_vec.u64) / 8);
     }
 #endif
 
-    // Handle the misaligned tail.
-    for (; haystack_cursor < haystack_end; ++haystack_cursor)
+    // Handle the tail.
+    for (; haystack_length; ++haystack_cursor, --haystack_length)
         if (*haystack_cursor == *needle_u8) return (sz_cptr_t)haystack_cursor;
     return SZ_NULL_CHAR;
 }

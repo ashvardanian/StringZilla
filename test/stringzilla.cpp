@@ -175,6 +175,7 @@ int main(int argc, char const **argv) {
 
     failures += run_test("test_compare_unit", test_compare_unit);
     failures += run_test("test_find_unit", test_find_unit);
+    failures += run_test("test_find_byte_safety", test_find_byte_safety);
     failures += run_test("test_find_all", test_find_all);
     failures += run_test("test_lookup_all", [] { test_lookup_all(); }); // ! Defaulted args
 #if SZ_IS_CPP17_ && defined(__cpp_lib_string_view)
